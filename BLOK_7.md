@@ -28,7 +28,7 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `app/src/main/res/values-ru/strings.xml` (5 baris)
 - `app/src/main/res/values/themes.xml` (7 baris)
 - `app/src/main/res/xml/file_paths.xml` (7 baris)
-- `app/src/main/res/xml/network_security_config.xml` (8 baris)
+- `app/src/main/res/xml/network_security_config.xml` (13 baris)
 - `app/src/main/res/drawable/ic_launcher_background.xml` (13 baris)
 - `app/src/main/res/drawable/ic_launcher_foreground.xml` (13 baris)
 - `app/src/main/res/drawable/ic_notification.xml` (10 baris)
@@ -376,16 +376,21 @@ dependencies {
 
 ---
 
-## 15. `app/src/main/res/xml/network_security_config.xml` (8 baris)
+## 15. `app/src/main/res/xml/network_security_config.xml` (13 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- HTTPS everywhere; plain HTTP only for the on-device loopback (gateways, dev-server preview). -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>
 ```
 

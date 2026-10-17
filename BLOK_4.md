@@ -25,7 +25,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
 - `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
-- `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
+- `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 - `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 - `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
 
@@ -1854,7 +1854,7 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
             return HttpResult(
                 0,
                 "",
-                "Plain http:// is only allowed for local network addresses. Use https:// for this server.",
+                "Plain http:// is only allowed for localhost. Use https:// for this server.",
             )
         }
         return runCatching {
@@ -2057,7 +2057,7 @@ object ModelResponseParser {
 }
 ```
 
-## 8. `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
@@ -2103,9 +2103,15 @@ object LocalNetwork {
         val host = uri.host?.takeIf(String::isNotBlank) ?: return false
         return when (scheme) {
             "https" -> true
-            "http" -> isLocalHost(host)
+            "http" -> isLoopbackHost(host)
             else -> false
         }
+    }
+
+    /** Matches the hosts the network security config allows over cleartext. */
+    fun isLoopbackHost(rawHost: String): Boolean {
+        val host = rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
+        return host == "localhost" || host == "127.0.0.1"
     }
 
     fun isLocalHost(rawHost: String): Boolean {

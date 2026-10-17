@@ -1131,7 +1131,7 @@ internal class LocalFormatGateway(
             "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         }
         if (!isPlainHttpAllowedEndpoint(endpoint)) {
-            return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses")
+            return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for localhost")
         }
         val currentKey = activeApiKey
         val connection = URL(endpoint).openConnection() as HttpURLConnection
@@ -1195,7 +1195,7 @@ internal class LocalFormatGateway(
         val rawBase = profile.resolvedBaseUrl.trim().trimEnd('/')
         val endpoint = "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         if (!isPlainHttpAllowedEndpoint(endpoint)) {
-            writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses"))
+            writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for localhost"))
             return
         }
         val body = toOpenAi(anthropic).put("stream", true)
@@ -1663,7 +1663,7 @@ internal class OpenRouterRoutingGateway(
                 .removeSuffix("/v1")
             val endpoint = if (isChatCompletions) "$normalizedBase/v1/chat/completions" else "$normalizedBase/v1/messages"
             if (!isPlainHttpAllowedEndpoint(endpoint)) {
-                writeJson(output, 400, errorJson("Plain http:// is only allowed for local network addresses"))
+                writeJson(output, 400, errorJson("Plain http:// is only allowed for localhost"))
                 return
             }
             if (!forwardUpstream(endpoint, headers, routedBody, output, allowRetry = true)) {

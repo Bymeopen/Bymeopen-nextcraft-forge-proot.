@@ -5548,7 +5548,7 @@ internal class LocalFormatGateway(
             "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         }
         if (!isPlainHttpAllowedEndpoint(endpoint)) {
-            return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses")
+            return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for localhost")
         }
         val currentKey = activeApiKey
         val connection = URL(endpoint).openConnection() as HttpURLConnection
@@ -5612,7 +5612,7 @@ internal class LocalFormatGateway(
         val rawBase = profile.resolvedBaseUrl.trim().trimEnd('/')
         val endpoint = "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         if (!isPlainHttpAllowedEndpoint(endpoint)) {
-            writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses"))
+            writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for localhost"))
             return
         }
         val body = toOpenAi(anthropic).put("stream", true)
@@ -6080,7 +6080,7 @@ internal class OpenRouterRoutingGateway(
                 .removeSuffix("/v1")
             val endpoint = if (isChatCompletions) "$normalizedBase/v1/chat/completions" else "$normalizedBase/v1/messages"
             if (!isPlainHttpAllowedEndpoint(endpoint)) {
-                writeJson(output, 400, errorJson("Plain http:// is only allowed for local network addresses"))
+                writeJson(output, 400, errorJson("Plain http:// is only allowed for localhost"))
                 return
             }
             if (!forwardUpstream(endpoint, headers, routedBody, output, allowRetry = true)) {
@@ -7027,7 +7027,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
@@ -7035,7 +7035,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7107,7 +7107,6 @@ class AgentRegistry(drivers: List<AgentDriver>) {
                         AgentCapability.PROVIDER_PICKER,
                         AgentCapability.MODEL_PICKER,
                         AgentCapability.RESUME,
-                        AgentCapability.INTERACTIVE_APPROVALS,
                     ),
                 ),
                 BuiltInAgentDriver(
@@ -9429,7 +9428,7 @@ class DshRuntimeBridge(
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        // Headless SDK runs with danger-full-access inside Chroot.
+        // No approval answerer is wired for dsh; DSH_PERMISSION_MODE is not read by the upstream dsh packages (unverified for the bundled build).
     }
 
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {
@@ -10068,7 +10067,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
 - `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
-- `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
+- `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 - `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 - `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
 
@@ -11897,7 +11896,7 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
             return HttpResult(
                 0,
                 "",
-                "Plain http:// is only allowed for local network addresses. Use https:// for this server.",
+                "Plain http:// is only allowed for localhost. Use https:// for this server.",
             )
         }
         return runCatching {
@@ -12100,7 +12099,7 @@ object ModelResponseParser {
 }
 ```
 
-## 8. `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
@@ -12146,9 +12145,15 @@ object LocalNetwork {
         val host = uri.host?.takeIf(String::isNotBlank) ?: return false
         return when (scheme) {
             "https" -> true
-            "http" -> isLocalHost(host)
+            "http" -> isLoopbackHost(host)
             else -> false
         }
+    }
+
+    /** Matches the hosts the network security config allows over cleartext. */
+    fun isLoopbackHost(rawHost: String): Boolean {
+        val host = rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
+        return host == "localhost" || host == "127.0.0.1"
     }
 
     fun isLocalHost(rawHost: String): Boolean {

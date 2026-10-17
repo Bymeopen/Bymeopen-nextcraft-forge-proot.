@@ -18,7 +18,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
@@ -26,7 +26,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -98,7 +98,6 @@ class AgentRegistry(drivers: List<AgentDriver>) {
                         AgentCapability.PROVIDER_PICKER,
                         AgentCapability.MODEL_PICKER,
                         AgentCapability.RESUME,
-                        AgentCapability.INTERACTIVE_APPROVALS,
                     ),
                 ),
                 BuiltInAgentDriver(
@@ -2420,7 +2419,7 @@ class DshRuntimeBridge(
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        // Headless SDK runs with danger-full-access inside Chroot.
+        // No approval answerer is wired for dsh; DSH_PERMISSION_MODE is not read by the upstream dsh packages (unverified for the bundled build).
     }
 
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {

@@ -25,7 +25,7 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (685 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (490 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (507 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
@@ -1400,7 +1400,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 
 ---
 
-## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (490 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (507 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -1550,6 +1550,8 @@ fun FilesAndDiffScreen(
                 },
                 onRevertFile = viewModel::revertSingleFile,
                 onRevertAll = viewModel::revertAllChanges,
+                onKeepFile = viewModel::keepSingleFile,
+                onKeepAll = viewModel::keepAllChanges,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -1731,6 +1733,8 @@ private fun WorkspaceDiffReviewList(
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
+    onKeepFile: (String) -> Unit,
+    onKeepAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (changes.isEmpty()) {
@@ -1760,10 +1764,13 @@ private fun WorkspaceDiffReviewList(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            OutlinedButton(onClick = onRevertAll) {
-                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Undo All")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onKeepAll) { Text("Keep All") }
+                OutlinedButton(onClick = onRevertAll) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Undo All")
+                }
             }
         }
 
@@ -1810,6 +1817,16 @@ private fun WorkspaceDiffReviewList(
                                 fontSize = 12.sp,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { onKeepFile(item.path) },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Keep file",
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
                                 modifier = Modifier.size(28.dp),

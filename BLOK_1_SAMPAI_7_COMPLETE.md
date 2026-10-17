@@ -5551,7 +5551,7 @@ internal class LocalFormatGateway(
             "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         }
         if (!isPlainHttpAllowedEndpoint(endpoint)) {
-            return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses")
+            return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for localhost")
         }
         val currentKey = activeApiKey
         val connection = URL(endpoint).openConnection() as HttpURLConnection
@@ -5615,7 +5615,7 @@ internal class LocalFormatGateway(
         val rawBase = profile.resolvedBaseUrl.trim().trimEnd('/')
         val endpoint = "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         if (!isPlainHttpAllowedEndpoint(endpoint)) {
-            writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses"))
+            writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for localhost"))
             return
         }
         val body = toOpenAi(anthropic).put("stream", true)
@@ -6083,7 +6083,7 @@ internal class OpenRouterRoutingGateway(
                 .removeSuffix("/v1")
             val endpoint = if (isChatCompletions) "$normalizedBase/v1/chat/completions" else "$normalizedBase/v1/messages"
             if (!isPlainHttpAllowedEndpoint(endpoint)) {
-                writeJson(output, 400, errorJson("Plain http:// is only allowed for local network addresses"))
+                writeJson(output, 400, errorJson("Plain http:// is only allowed for localhost"))
                 return
             }
             if (!forwardUpstream(endpoint, headers, routedBody, output, allowRetry = true)) {
@@ -7030,7 +7030,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
@@ -7038,7 +7038,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7110,7 +7110,6 @@ class AgentRegistry(drivers: List<AgentDriver>) {
                         AgentCapability.PROVIDER_PICKER,
                         AgentCapability.MODEL_PICKER,
                         AgentCapability.RESUME,
-                        AgentCapability.INTERACTIVE_APPROVALS,
                     ),
                 ),
                 BuiltInAgentDriver(
@@ -9432,7 +9431,7 @@ class DshRuntimeBridge(
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        // Headless SDK runs with danger-full-access inside Chroot.
+        // No approval answerer is wired for dsh; DSH_PERMISSION_MODE is not read by the upstream dsh packages (unverified for the bundled build).
     }
 
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {
@@ -10071,7 +10070,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
 - `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
-- `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
+- `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 - `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 - `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
 
@@ -11900,7 +11899,7 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
             return HttpResult(
                 0,
                 "",
-                "Plain http:// is only allowed for local network addresses. Use https:// for this server.",
+                "Plain http:// is only allowed for localhost. Use https:// for this server.",
             )
         }
         return runCatching {
@@ -12103,7 +12102,7 @@ object ModelResponseParser {
 }
 ```
 
-## 8. `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
@@ -12149,9 +12148,15 @@ object LocalNetwork {
         val host = uri.host?.takeIf(String::isNotBlank) ?: return false
         return when (scheme) {
             "https" -> true
-            "http" -> isLocalHost(host)
+            "http" -> isLoopbackHost(host)
             else -> false
         }
+    }
+
+    /** Matches the hosts the network security config allows over cleartext. */
+    fun isLoopbackHost(rawHost: String): Boolean {
+        val host = rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
+        return host == "localhost" || host == "127.0.0.1"
     }
 
     fun isLocalHost(rawHost: String): Boolean {
@@ -12691,7 +12696,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1782 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1821 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (82 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (90 baris)
@@ -12798,7 +12803,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1782 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1821 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13712,6 +13717,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun revertSingleFile(path: String) {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -13725,7 +13731,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun keepSingleFile(path: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val ws = checkpoints.ensureWorkspace(project.id)
+                checkpoints.acceptFile(project.id, ws, path)
+            }
+            refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
+    fun keepAllChanges() {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { checkpoints.acceptAll(project.id) }
+            refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
     fun revertAllChanges() {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -13762,6 +13790,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearTerminal() {
         _state.update { it.copy(terminalOutput = "") }
+    }
+
+    /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
+    private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
+        check(installer.isInstalled() && isRootAccessAvailable()) {
+            "Root access and the installed Linux runtime are required to run this."
+        }
+        val installed = installer.installedRuntime()
+        val uid = android.os.Process.myUid().toString()
+        val bridge = RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath
+        return ProcessBuilder(
+            "su",
+            "-mm",
+            "-c",
+            "sh '${installed.chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' " +
+                "'/workspace/$projectSlug' '$bridge' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
+        ).redirectErrorStream(true).start()
     }
 
     private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
@@ -13876,10 +13921,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val cmd = androidGradleCommand(androidRoot, task)
                 withContext(Dispatchers.IO) {
-                    val process = ProcessBuilder("sh", "-c", cmd)
-                        .directory(androidRoot)
-                        .redirectErrorStream(true)
-                        .start()
+                    val relativeRoot = androidRoot.relativeTo(ws).invariantSeparatorsPath
+                    val guestCommand = if (relativeRoot.isEmpty()) cmd else "cd ${shellSingleQuote(relativeRoot)} && $cmd"
+                    val process = startChrootProcess(project.slug, ws, guestCommand)
                     activeBuildProcess = process
                     val logBuilder = StringBuilder()
                     process.inputStream.bufferedReader().useLines { lines ->
@@ -15418,7 +15462,7 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (685 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (490 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (507 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
@@ -16793,7 +16837,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 
 ---
 
-## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (490 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (507 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -16943,6 +16987,8 @@ fun FilesAndDiffScreen(
                 },
                 onRevertFile = viewModel::revertSingleFile,
                 onRevertAll = viewModel::revertAllChanges,
+                onKeepFile = viewModel::keepSingleFile,
+                onKeepAll = viewModel::keepAllChanges,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -17124,6 +17170,8 @@ private fun WorkspaceDiffReviewList(
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
+    onKeepFile: (String) -> Unit,
+    onKeepAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (changes.isEmpty()) {
@@ -17153,10 +17201,13 @@ private fun WorkspaceDiffReviewList(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            OutlinedButton(onClick = onRevertAll) {
-                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Undo All")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onKeepAll) { Text("Keep All") }
+                OutlinedButton(onClick = onRevertAll) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Undo All")
+                }
             }
         }
 
@@ -17203,6 +17254,16 @@ private fun WorkspaceDiffReviewList(
                                 fontSize = 12.sp,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { onKeepFile(item.path) },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Keep file",
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
                                 modifier = Modifier.size(28.dp),
@@ -18824,7 +18885,7 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `app/src/main/res/values-ru/strings.xml` (5 baris)
 - `app/src/main/res/values/themes.xml` (7 baris)
 - `app/src/main/res/xml/file_paths.xml` (7 baris)
-- `app/src/main/res/xml/network_security_config.xml` (8 baris)
+- `app/src/main/res/xml/network_security_config.xml` (13 baris)
 - `app/src/main/res/drawable/ic_launcher_background.xml` (13 baris)
 - `app/src/main/res/drawable/ic_launcher_foreground.xml` (13 baris)
 - `app/src/main/res/drawable/ic_notification.xml` (10 baris)
@@ -19172,16 +19233,21 @@ dependencies {
 
 ---
 
-## 15. `app/src/main/res/xml/network_security_config.xml` (8 baris)
+## 15. `app/src/main/res/xml/network_security_config.xml` (13 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- HTTPS everywhere; plain HTTP only for the on-device loopback (gateways, dev-server preview). -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>
 ```
 
