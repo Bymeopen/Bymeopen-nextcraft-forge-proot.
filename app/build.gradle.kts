@@ -24,13 +24,29 @@ android {
         buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"\"")
     }
 
+    // Release signing comes from the environment so no key material lives in the repo.
+    val releaseKeystore = System.getenv("FORGE_KEYSTORE_FILE")
+    if (!releaseKeystore.isNullOrBlank()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("FORGE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("FORGE_KEY_ALIAS")
+                keyPassword = System.getenv("FORGE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             buildConfigField("String", "APP_VARIANT", "\"release\"")
         }
     }
@@ -93,9 +109,9 @@ dependencies {
     implementation("androidx.compose.material:material")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material3:material3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
-    implementation("org.apache.commons:commons-compress:1.21")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.apache.commons:commons-compress:1.26.2")
     // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
     implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")

@@ -1243,6 +1243,15 @@ fun main() {
         check(classifyToolRisk("Bash", "dd if=/dev/zero of=/dev/null") == RiskLevel.HIGH)
         check(classifyToolRisk("Bash", "mkfs.ext4 /dev/loop0") == RiskLevel.HIGH)
         check(classifyToolRisk("Bash", "chown -R /workspace") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "rm -r -f build") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "python3 -c 'import os'") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "ls && rm --recursive x") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "echo ${'$'}(id)") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "echo x > /etc/passwd") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "git status") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Bash", "git add . && git commit -m x") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Edit", "", listOf("/opt/pocket/permission-hook.sh")) == RiskLevel.HIGH)
+        check(classifyToolRisk("Write", "", listOf("/workspace/p/a.txt")) == RiskLevel.REVIEW)
 
         kotlinx.coroutines.runBlocking {
             val unsafeField = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe").apply { isAccessible = true }
@@ -1258,7 +1267,7 @@ fun main() {
                 writeText("""{"tool_name":"Bash","tool_input":{"command":"rm -rf build","description":"Clean build"}}""")
             }
             claudeInteractive.processPermissionRequestFile("sess-1", reqFile)
-            val respFile = File(bridgeDir, "req-1.response")
+            val respFile = File(tmp, "runtime-bridge-responses/req-1.response")
             check(!respFile.exists()) {
                 "UPGRADE-004: Interactive high-risk approval must wait for user response before writing .response file"
             }
@@ -1288,7 +1297,7 @@ fun main() {
                 nowElapsedRealtime = android.os.SystemClock.elapsedRealtime() + 60_000L,
                 timeoutMs = 40_000L,
             )
-            check(File(bridgeDir, "req-timeout.response").readText() == "deny") {
+            check(File(tmp, "runtime-bridge-responses/req-timeout.response").readText() == "deny") {
                 "UPGRADE-004: Timed-out high-risk tool request must auto-write 'deny'"
             }
         }

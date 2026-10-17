@@ -416,6 +416,19 @@ class ClaudeRuntimeBridge(
         }
     }
 
+    /**
+     * Responses live in a sibling directory that the chroot mounts read-only, so the guest can
+     * request a decision but cannot write its own approval next to the request.
+     */
+    private fun responseFile(request: File, approvalId: String): File {
+        val requestDir = request.parentFile ?: File(".")
+        val dir = File(requestDir.parentFile, requestDir.name + "-responses").apply { mkdirs() }
+        val cutoff = System.currentTimeMillis() - STALE_RESPONSE_MS
+        dir.listFiles { f -> f.name.endsWith(".response") && f.lastModified() < cutoff }.orEmpty()
+            .forEach { runCatching { it.delete() } }
+        return File(dir, "$approvalId.response")
+    }
+
     internal suspend fun expirePendingPermissions(
         sessionId: String,
         nowElapsedRealtime: Long = android.os.SystemClock.elapsedRealtime(),
@@ -444,8 +457,8 @@ class ClaudeRuntimeBridge(
                 .ifBlank { command.orEmpty() }
                 .ifBlank { "$toolName running in project" }
 
-            val risk = classifyRisk(toolName, command)
-            val response = File(file.parentFile, "$approvalId.response")
+            val risk = classifyRisk(toolName, command, paths)
+            val response = responseFile(file, approvalId)
             if (risk == RiskLevel.HIGH) {
                 if (interactiveHighRiskApprovals()) {
                     val toolRequest = ToolRequest(
@@ -480,7 +493,7 @@ class ClaudeRuntimeBridge(
                 eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, explanation))
             }
         }.onFailure {
-            File(file.parentFile, "$approvalId.response").writeText("deny")
+            runCatching { responseFile(file, approvalId).writeText("deny") }
             runCatching { file.delete() }
         }
     }
@@ -773,8 +786,8 @@ class ClaudeRuntimeBridge(
         checkpoints.configureProjectRoot(projectId, rootPath)
     }
 
-    private fun classifyRisk(tool: String, command: String?): RiskLevel =
-        classifyToolRisk(tool, command)
+    private fun classifyRisk(tool: String, command: String?, paths: List<String>): RiskLevel =
+        classifyToolRisk(tool, command, paths)
 
     private fun friendlyError(error: Throwable): String {
         val message = error.message.orEmpty()
@@ -844,33 +857,60 @@ class ClaudeRuntimeBridge(
     companion object {
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         private const val HIGH_RISK_APPROVAL_TIMEOUT_MS = 40_000L
+        private const val STALE_RESPONSE_MS = 600_000L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
     }
 }
 
-internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
+private val DANGEROUS_PATTERNS = listOf(
+    "git push", "git reset", "git clean", "git checkout --", "sudo", "curl ", "wget ", "chmod ", "chown ", "mkfs",
+    "/dev/", "/proc/", "umount", "| sh", "| bash", "pocketdev-bridge", "nextcraft-bridge", "pocket-bridge",
+    "/opt/pocket", ".claude", ".git-credentials",
+)
+
+// Commands whose first word is auto-approved; everything else (python, node, sh, find -exec ...) needs the user.
+private val SAFE_BASH_COMMANDS = setOf(
+    "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "rg", "sort", "uniq", "diff", "cd", "true", "false", "test",
+    "which", "stat", "file", "tree", "mkdir", "touch", "date", "printf", "basename", "dirname", "realpath",
+)
+private val SAFE_GIT_SUBCOMMANDS = setOf("status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "blame")
+private val SENSITIVE_PATH_PREFIXES = listOf(
+    "/opt/", "/etc/", "/proc/", "/sys/", "/dev/", "/usr/", "/bin", "/sbin", "/lib", "/var/",
+    "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge",
+)
+private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook")
+
+private fun isSensitivePath(path: String): Boolean =
+    SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
+
+private fun isSafeBashSegment(segment: String): Boolean {
+    val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
+        .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
+    val first = words.firstOrNull()?.substringAfterLast('/') ?: return false
+    if (first == "git") return words.getOrNull(1) in SAFE_GIT_SUBCOMMANDS
+    return first in SAFE_BASH_COMMANDS
+}
+
+/**
+ * Default-deny for Bash: only simple commands from [SAFE_BASH_COMMANDS] chained without
+ * substitution or redirection are auto-approved; anything else is HIGH (user prompt or deny).
+ */
+internal fun classifyToolRisk(tool: String, command: String?, paths: List<String> = emptyList()): RiskLevel {
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
-    val highRiskPatterns = listOf(
-        "rm -rf",
-        "rm -fr",
-        "rm -r ",
-        "git push",
-        "git reset",
-        "sudo",
-        "curl ",
-        "wget ",
-        "chmod 777",
-        "dd if=",
-        "mkfs",
-        "chown -r /",
-        "/dev/block",
-        "umount",
-        "| sh",
-        "| bash",
-    )
-    return when {
-        highRiskPatterns.any(preview::contains) -> RiskLevel.HIGH
-        tool in listOf("Write", "Edit", "NotebookEdit", "Bash") -> RiskLevel.REVIEW
+    if (DANGEROUS_PATTERNS.any(preview::contains)) return RiskLevel.HIGH
+    if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
+    return when (tool) {
+        "Bash" -> {
+            val text = command.orEmpty()
+            val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
+            val segments = text.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
+            if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {
+                RiskLevel.HIGH
+            } else {
+                RiskLevel.REVIEW
+            }
+        }
+        "Write", "Edit", "NotebookEdit" -> RiskLevel.REVIEW
         else -> RiskLevel.SAFE
     }
 }
