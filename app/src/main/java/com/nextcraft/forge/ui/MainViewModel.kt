@@ -909,6 +909,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun revertSingleFile(path: String) {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -922,7 +923,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun keepSingleFile(path: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val ws = checkpoints.ensureWorkspace(project.id)
+                checkpoints.acceptFile(project.id, ws, path)
+            }
+            refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
+    fun keepAllChanges() {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { checkpoints.acceptAll(project.id) }
+            refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
     fun revertAllChanges() {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -959,6 +982,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearTerminal() {
         _state.update { it.copy(terminalOutput = "") }
+    }
+
+    /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
+    private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
+        check(installer.isInstalled() && isRootAccessAvailable()) {
+            "Root access and the installed Linux runtime are required to run this."
+        }
+        val installed = installer.installedRuntime()
+        val uid = android.os.Process.myUid().toString()
+        val bridge = RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath
+        return ProcessBuilder(
+            "su",
+            "-mm",
+            "-c",
+            "sh '${installed.chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' " +
+                "'/workspace/$projectSlug' '$bridge' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
+        ).redirectErrorStream(true).start()
     }
 
     private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
@@ -1073,10 +1113,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val cmd = androidGradleCommand(androidRoot, task)
                 withContext(Dispatchers.IO) {
-                    val process = ProcessBuilder("sh", "-c", cmd)
-                        .directory(androidRoot)
-                        .redirectErrorStream(true)
-                        .start()
+                    val relativeRoot = androidRoot.relativeTo(ws).invariantSeparatorsPath
+                    val guestCommand = if (relativeRoot.isEmpty()) cmd else "cd ${shellSingleQuote(relativeRoot)} && $cmd"
+                    val process = startChrootProcess(project.slug, ws, guestCommand)
                     activeBuildProcess = process
                     val logBuilder = StringBuilder()
                     process.inputStream.bufferedReader().useLines { lines ->

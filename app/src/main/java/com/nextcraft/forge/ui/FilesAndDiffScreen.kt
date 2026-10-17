@@ -145,6 +145,8 @@ fun FilesAndDiffScreen(
                 },
                 onRevertFile = viewModel::revertSingleFile,
                 onRevertAll = viewModel::revertAllChanges,
+                onKeepFile = viewModel::keepSingleFile,
+                onKeepAll = viewModel::keepAllChanges,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -326,6 +328,8 @@ private fun WorkspaceDiffReviewList(
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
+    onKeepFile: (String) -> Unit,
+    onKeepAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (changes.isEmpty()) {
@@ -355,10 +359,13 @@ private fun WorkspaceDiffReviewList(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            OutlinedButton(onClick = onRevertAll) {
-                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Undo All")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onKeepAll) { Text("Keep All") }
+                OutlinedButton(onClick = onRevertAll) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Undo All")
+                }
             }
         }
 
@@ -405,6 +412,16 @@ private fun WorkspaceDiffReviewList(
                                 fontSize = 12.sp,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { onKeepFile(item.path) },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Keep file",
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
                                 modifier = Modifier.size(28.dp),
