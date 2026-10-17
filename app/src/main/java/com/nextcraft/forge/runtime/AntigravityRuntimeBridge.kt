@@ -182,8 +182,8 @@ class AntigravityRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finished = ConcurrentHashMap.newKeySet<String>()

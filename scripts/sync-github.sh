@@ -7,10 +7,10 @@ cd "$ROOT_DIR"
 COMMIT_MSG="${1:-Sync project changes to GitHub}"
 
 # 1. Keep BLOK_1.md .. BLOK_7.md, BLOK_1_SAMPAI_4_COMPLETE.md, and BLOK_1_SAMPAI_7_COMPLETE.md synchronized with source files
-python3 - <<'PY'
-import pathlib, re
+python3 - "$ROOT_DIR" <<'PY'
+import pathlib, re, sys
 
-root = pathlib.Path("/workspace/mobilebuilder")
+root = pathlib.Path(sys.argv[1])
 blok_files_1_4 = ["BLOK_1.md", "BLOK_2.md", "BLOK_3.md", "BLOK_4.md"]
 blok_files_all = ["BLOK_1.md", "BLOK_2.md", "BLOK_3.md", "BLOK_4.md", "BLOK_5.md", "BLOK_6.md", "BLOK_7.md"]
 

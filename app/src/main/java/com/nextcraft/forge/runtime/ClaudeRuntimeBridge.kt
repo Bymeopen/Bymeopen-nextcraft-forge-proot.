@@ -80,8 +80,8 @@ class ClaudeRuntimeBridge(
     private val installer by lazy { RuntimeInstaller(context) }
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir, context) }
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
@@ -185,8 +185,9 @@ class ClaudeRuntimeBridge(
                 add(launch.executable)
                 // Do not use --bare here: Claude Code bare mode ignores CLAUDE_CODE_OAUTH_TOKEN,
                 // which is how setup-token authenticates Claude subscriptions.
+                // Prompt goes through stdin: a single argv entry is capped at 128 KB by the kernel
+                // and the history budget is 160k chars; stdin also keeps it out of `ps`.
                 add("-p")
-                add(contextPrompt)
                 add("--output-format")
                 add("stream-json")
                 add("--include-partial-messages")
@@ -206,7 +207,10 @@ class ClaudeRuntimeBridge(
                 guestWorkspacePath = guestWorkspacePath,
             )
             activeProcess = process
-            runCatching { process.outputStream.close() }
+            runCatching {
+                process.outputStream.write(contextPrompt.toByteArray(Charsets.UTF_8))
+                process.outputStream.close()
+            }
             if (userStopRequested) process.destroy()
             coroutineScope {
                 val permissionWatcher = launch { watchPermissionRequests(sessionId) }
