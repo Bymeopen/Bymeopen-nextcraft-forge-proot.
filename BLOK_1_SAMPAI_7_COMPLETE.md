@@ -3,7 +3,7 @@
 > Dokumen ini menggabungkan secara utuh seluruh kode sumber aplikasi Android **NextCraft Forge (`com.nextcraft.forge`)** dari Blok 1 hingga Blok 7:
 > - `BLOK_1.md` (Core Models, Native PTY Spawn C/JNI, Rootfs Repair, Chroot Scripts, RuntimeInstaller)
 > - `BLOK_2.md` (WorkspaceCheckpoints, RuntimeBridge, LocalFormatGateway, OpenRouterRoutingGateway, ApiKeyVault, AppPreferences)
-> - `BLOK_3.md` (AgentDriver, ClaudeRuntimeBridge, AntigravityRuntimeBridge, AntigravityAuthController, DshRuntimeBridge)
+> - `BLOK_3.md` (ClaudeRuntimeBridge, AntigravityRuntimeBridge, AntigravityAuthController, DshRuntimeBridge)
 > - `BLOK_4.md` (Android Build & Install Pipeline, Foreground Services, Network Gateways, GitHub OAuth, AppUpdater)
 > - `BLOK_5.md` (MainActivity, MainViewModel State Orchestrator, Theme, Localization, ModelLabels, AndroidBuildText, MarkdownText)
 > - `BLOK_6.md` (Jetpack Compose IDE Screens: NextCraftForgeApp, AgentScreen, FilesAndDiffScreen, TerminalScreen, AndroidAndPreviewScreen, SettingsScreenModern)
@@ -7015,8 +7015,6 @@ class AppPreferences(private val context: Context) {
 Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam Root Chroot Ubuntu 24.04 beserta pengontrol autentikasi OAuth interaktifnya.
 
 ### Fungsi Utama Blok 3:
-1. **Abstraksi Penggerak Agen (`AgentDriver.kt`)**:
-   - Menyediakan antarmuka terpadu (`AgentDriver`, `ClaudeCodeDriver`, `AntigravityDriver`, `DeepSeekHarnessDriver`, `SwitchableAgentDriver`) sehingga UI atau ViewModel dapat berpindah agen secara dinamis tanpa mengubah alur pemanggilan sesi.
 2. **Bridge Claude Code (`ClaudeRuntimeBridge.kt`)**:
    - Menjalankan `@anthropic-ai/claude-code` dengan `--output-format stream-json --include-partial-messages --verbose`.
    - Mem-parsing stream event JSON (`content_block_start`, `content_block_delta`, `thinking_delta`, `text_delta`, `tool_use`, `tool_result`, `result`), menyensor API key dari log, menegakkan klasifikasi risiko (`classifyRisk`) pada permintaan izin tool melalui direktori jembatan `runtime-bridge`, serta memancarkan progres ke notifikasi foreground.
@@ -7030,103 +7028,12 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
 
 ---
-
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (85 baris)
-
-```kotlin
-package com.nextcraft.forge.runtime
-
-import com.nextcraft.forge.model.AgentKind
-
-/** Features exposed by an agent without teaching shared UI about a concrete CLI. */
-enum class AgentCapability {
-    API_KEY,
-    ACCOUNT_LOGIN,
-    PROVIDER_PICKER,
-    MODEL_PICKER,
-    REASONING_EFFORT,
-    RESUME,
-    INTERACTIVE_APPROVALS,
-}
-
-interface AgentDriver {
-    val kind: AgentKind
-    val runtime: RuntimeBridge
-    val capabilities: Set<AgentCapability>
-    fun isInstalled(installer: RuntimeInstaller): Boolean = installer.isAgentInstalled(kind)
-    suspend fun install(installer: RuntimeInstaller, onProgress: suspend (RuntimeInstallProgress) -> Unit) =
-        installer.ensureAgentInstalled(kind, onProgress)
-}
-
-private class BuiltInAgentDriver(
-    override val kind: AgentKind,
-    override val runtime: RuntimeBridge,
-    override val capabilities: Set<AgentCapability>,
-) : AgentDriver
-
-/** Single selection point for agent runtimes. Adding an agent does not change existing bridges. */
-class AgentRegistry(drivers: List<AgentDriver>) {
-    private val byId = drivers.associateBy { it.kind.stableId }
-
-    init {
-        require(byId.size == drivers.size) { "Duplicate agent id" }
-        require(AgentKind.entries.all { it.stableId in byId }) { "Every built-in agent must be registered" }
-    }
-
-    fun require(kind: AgentKind): AgentDriver =
-        byId[kind.stableId] ?: error("Agent '${kind.stableId}' is not registered")
-
-    companion object {
-        fun builtIns(
-            claude: RuntimeBridge,
-            deepSeek: RuntimeBridge,
-            antigravity: RuntimeBridge,
-        ) = AgentRegistry(
-            listOf(
-                BuiltInAgentDriver(
-                    AgentKind.CLAUDE_CODE,
-                    claude,
-                    setOf(
-                        AgentCapability.API_KEY,
-                        AgentCapability.ACCOUNT_LOGIN,
-                        AgentCapability.PROVIDER_PICKER,
-                        AgentCapability.MODEL_PICKER,
-                        AgentCapability.RESUME,
-                        AgentCapability.INTERACTIVE_APPROVALS,
-                    ),
-                ),
-                BuiltInAgentDriver(
-                    AgentKind.DEEPSEEK_HARNESS,
-                    deepSeek,
-                    setOf(
-                        AgentCapability.API_KEY,
-                        AgentCapability.PROVIDER_PICKER,
-                        AgentCapability.MODEL_PICKER,
-                        AgentCapability.RESUME,
-                    ),
-                ),
-                BuiltInAgentDriver(
-                    AgentKind.ANTIGRAVITY,
-                    antigravity,
-                    setOf(
-                        AgentCapability.ACCOUNT_LOGIN,
-                        AgentCapability.MODEL_PICKER,
-                        AgentCapability.REASONING_EFFORT,
-                        AgentCapability.RESUME,
-                    ),
-                ),
-            ),
-        )
-    }
-}
-```
 
 ## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 
