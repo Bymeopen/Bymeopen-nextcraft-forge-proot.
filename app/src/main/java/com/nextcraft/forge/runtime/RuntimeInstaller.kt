@@ -992,15 +992,9 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Downloading Composer…", fraction))
         downloads.mkdirs()
         val staged = File(downloads, "composer.phar")
-        val checksum = fetchText("https://getcomposer.org/download/latest-stable/composer.phar.sha256sum")
-            .lineSequence()
-            .firstOrNull()
-            ?.trim()
-            ?.substringBefore(' ')
-            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
-            ?: error("Composer checksum was not found")
+        val checksum = COMPOSER_SHA256
         downloadVerified(
-            "https://getcomposer.org/download/latest-stable/composer.phar",
+            "https://getcomposer.org/download/$COMPOSER_VERSION/composer.phar",
             staged,
             checksum,
         ) { _, _ -> }
@@ -1282,12 +1276,7 @@ class RuntimeInstaller(private val context: Context) {
         downloads.mkdirs()
         val nodeFileName = "node-$NODE_VERSION-linux-arm64.tar.gz"
         val nodeBaseUrl = "https://nodejs.org/dist/$NODE_VERSION"
-        val checksum = fetchText("$nodeBaseUrl/SHASUMS256.txt")
-            .lineSequence()
-            .map(String::trim)
-            .firstOrNull { it.endsWith("  $nodeFileName") }
-            ?.substringBefore(' ')
-            ?: error("Node.js checksum was not found")
+        val checksum = NODE_ARM64_SHA256
         val nodeArchive = File(downloads, nodeFileName)
         downloadVerified("$nodeBaseUrl/$nodeFileName", nodeArchive, checksum) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
@@ -1688,6 +1677,7 @@ class RuntimeInstaller(private val context: Context) {
             ensureWorkspaceTrust(guestWorkspacePath)
         }
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
+        File(context.filesDir, "runtime-bridge-responses").mkdirs()
         val appUid = AndroidProcess.myUid().toString()
 
         val guestEnv = buildMap {
@@ -1786,19 +1776,20 @@ class RuntimeInstaller(private val context: Context) {
         hook.writeText(
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
 ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
 if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
     i=0
     while [ "${'$'}i" -lt 600 ]; do
-        if [ -f "${'$'}BRIDGE/${'$'}ID.response" ]; then
-            [ "${'$'}(cat "${'$'}BRIDGE/${'$'}ID.response")" = "allow" ] && DECISION=allow
+        if [ -f "${'$'}RESP/${'$'}ID.response" ]; then
+            [ "${'$'}(cat "${'$'}RESP/${'$'}ID.response")" = "allow" ] && DECISION=allow
             break
         fi
         sleep 0.1
         i=${'$'}((i + 1))
     done
-    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.response"
+    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp"
 else
     cat > /dev/null
 fi
@@ -2187,6 +2178,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val ROOTFS_VERSION = "ubuntu-24.04.5-arm64"
         private const val LEGACY_ROOTFS_VERSION = "ubuntu-20.04.5-arm64"
         private const val NODE_VERSION = "v24.19.0"
+        private const val NODE_ARM64_SHA256 = "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f"
+        private const val COMPOSER_VERSION = "2.10.3"
+        private const val COMPOSER_SHA256 = "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
         private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
@@ -2337,7 +2331,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             }
 
-            mount -o remount,suid,exec /data 2>/dev/null || true
+            # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
+            if ! is_mounted "${'$'}ROOTFS"; then
+                mount -o bind "${'$'}ROOTFS" "${'$'}ROOTFS" 2>/dev/null || true
+            fi
+            mount -o remount,bind,suid,exec "${'$'}ROOTFS" 2>/dev/null || true
 
             mount_once "/dev" "${'$'}ROOTFS/dev" "bind" "rw"
             mount_once "/dev/pts" "${'$'}ROOTFS/dev/pts" "bind" "rw"
@@ -2359,6 +2357,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/nextcraft-bridge"
             mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/pocketdev-bridge"
             mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/pocket-bridge"
+            HOST_RESP="${'$'}HOST_BRIDGE-responses"
+            mkdir -p "${'$'}HOST_RESP"
+            chown "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_RESP" 2>/dev/null || true
+            mount_dynamic_bind "${'$'}HOST_RESP" "${'$'}ROOTFS/pocketdev-bridge-responses"
+            mount -o remount,bind,ro "${'$'}ROOTFS/pocketdev-bridge-responses" 2>/dev/null || true
 
             if [ ! -s "${'$'}ROOTFS/etc/resolv.conf" ]; then
                 mkdir -p "${'$'}ROOTFS/etc"
@@ -2401,6 +2404,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             export GLIBC_TUNABLES="glibc.pthread.rseq=0"
             export NEXTCRAFT_BRIDGE_DIR="/pocketdev-bridge"
             export POCKETDEV_BRIDGE_DIR="/pocketdev-bridge"
+            export NEXTCRAFT_RESPONSE_DIR="/pocketdev-bridge-responses"
             export PATH="${'$'}{PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
             case ":${'$'}PATH:" in
                 *:/root/.local/bin:*) ;;

@@ -148,7 +148,7 @@ class ApiKeyVault(context: Context) {
         preferences.edit()
             .putString("$storageId.iv", Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+            .commit()
     }
 
     fun contains(providerId: String): Boolean = get(providerId) != null
