@@ -5913,7 +5913,7 @@ internal class LocalFormatGateway(
             ?: headers["authorization"]?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
             ?: return false
         val presentedBytes = presented.toByteArray()
-        return MessageDigest.isEqual(presentedBytes, activeApiKey.toByteArray())
+        return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
     private fun readLine(input: BufferedInputStream): String? {
@@ -6160,7 +6160,7 @@ internal class OpenRouterRoutingGateway(
             ?: headers["authorization"]?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
             ?: return false
         val presentedBytes = presented.toByteArray()
-        return MessageDigest.isEqual(presentedBytes, activeApiKey.toByteArray())
+        return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
     private fun isPlainHttpAllowedEndpoint(url: String): Boolean =
@@ -7028,7 +7028,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (872 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
@@ -7126,7 +7126,7 @@ class AgentRegistry(drivers: List<AgentDriver>) {
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (872 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7211,8 +7211,8 @@ class ClaudeRuntimeBridge(
     private val installer by lazy { RuntimeInstaller(context) }
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir, context) }
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
@@ -7316,8 +7316,9 @@ class ClaudeRuntimeBridge(
                 add(launch.executable)
                 // Do not use --bare here: Claude Code bare mode ignores CLAUDE_CODE_OAUTH_TOKEN,
                 // which is how setup-token authenticates Claude subscriptions.
+                // Prompt goes through stdin: a single argv entry is capped at 128 KB by the kernel
+                // and the history budget is 160k chars; stdin also keeps it out of `ps`.
                 add("-p")
-                add(contextPrompt)
                 add("--output-format")
                 add("stream-json")
                 add("--include-partial-messages")
@@ -7337,7 +7338,10 @@ class ClaudeRuntimeBridge(
                 guestWorkspacePath = guestWorkspacePath,
             )
             activeProcess = process
-            runCatching { process.outputStream.close() }
+            runCatching {
+                process.outputStream.write(contextPrompt.toByteArray(Charsets.UTF_8))
+                process.outputStream.close()
+            }
             if (userStopRequested) process.destroy()
             coroutineScope {
                 val permissionWatcher = launch { watchPermissionRequests(sessionId) }
@@ -8190,8 +8194,8 @@ class AntigravityRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finished = ConcurrentHashMap.newKeySet<String>()
@@ -9103,8 +9107,8 @@ class DshRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
@@ -10057,7 +10061,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
    - `AppUpdater`: Memeriksa `update-manifest.json`, mengunduh APK pembaruan NextCraft Forge, dan mewajibkan verifikasi integritas SHA-256 sebelum menginstal update.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
@@ -10070,7 +10074,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10081,9 +10085,18 @@ import java.io.File
 import java.nio.file.Files
 
 object AndroidProjectTemplateGenerator {
+    private val JAVA_KEYWORDS = setOf(
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+        "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+        "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+        "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
+        "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
+        "volatile", "while", "true", "false", "null",
+    )
+
     fun packageName(name: String): String {
         val raw = projectSlug(name).replace('-', '_').take(40).ifBlank { "app" }
-        val suffix = if (raw.first().isLetter()) raw else "app_$raw"
+        val suffix = if (raw.first().isLetter() && raw !in JAVA_KEYWORDS) raw else "app_$raw"
         return "com.nextcraft.$suffix"
     }
 
@@ -10363,7 +10376,7 @@ object AndroidProjectTemplateGenerator {
     }
 
     private fun kotlinString(value: String): String =
-        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
+        "\"${value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
 
     private fun xmlEscape(value: String): String =
         value.replace("&", "&amp;")

@@ -18,7 +18,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
    - `AppUpdater`: Memeriksa `update-manifest.json`, mengunduh APK pembaruan NextCraft Forge, dan mewajibkan verifikasi integritas SHA-256 sebelum menginstal update.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
@@ -31,7 +31,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -42,9 +42,18 @@ import java.io.File
 import java.nio.file.Files
 
 object AndroidProjectTemplateGenerator {
+    private val JAVA_KEYWORDS = setOf(
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+        "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+        "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+        "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
+        "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
+        "volatile", "while", "true", "false", "null",
+    )
+
     fun packageName(name: String): String {
         val raw = projectSlug(name).replace('-', '_').take(40).ifBlank { "app" }
-        val suffix = if (raw.first().isLetter()) raw else "app_$raw"
+        val suffix = if (raw.first().isLetter() && raw !in JAVA_KEYWORDS) raw else "app_$raw"
         return "com.nextcraft.$suffix"
     }
 
@@ -324,7 +333,7 @@ object AndroidProjectTemplateGenerator {
     }
 
     private fun kotlinString(value: String): String =
-        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
+        "\"${value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
 
     private fun xmlEscape(value: String): String =
         value.replace("&", "&amp;")

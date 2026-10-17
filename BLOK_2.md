@@ -1496,7 +1496,7 @@ internal class LocalFormatGateway(
             ?: headers["authorization"]?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
             ?: return false
         val presentedBytes = presented.toByteArray()
-        return MessageDigest.isEqual(presentedBytes, activeApiKey.toByteArray())
+        return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
     private fun readLine(input: BufferedInputStream): String? {
@@ -1743,7 +1743,7 @@ internal class OpenRouterRoutingGateway(
             ?: headers["authorization"]?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
             ?: return false
         val presentedBytes = presented.toByteArray()
-        return MessageDigest.isEqual(presentedBytes, activeApiKey.toByteArray())
+        return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
     private fun isPlainHttpAllowedEndpoint(url: String): Boolean =

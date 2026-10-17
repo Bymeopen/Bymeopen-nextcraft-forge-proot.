@@ -5916,7 +5916,7 @@ internal class LocalFormatGateway(
             ?: headers["authorization"]?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
             ?: return false
         val presentedBytes = presented.toByteArray()
-        return MessageDigest.isEqual(presentedBytes, activeApiKey.toByteArray())
+        return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
     private fun readLine(input: BufferedInputStream): String? {
@@ -6163,7 +6163,7 @@ internal class OpenRouterRoutingGateway(
             ?: headers["authorization"]?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
             ?: return false
         val presentedBytes = presented.toByteArray()
-        return MessageDigest.isEqual(presentedBytes, activeApiKey.toByteArray())
+        return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
     private fun isPlainHttpAllowedEndpoint(url: String): Boolean =
@@ -7031,7 +7031,7 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (872 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
@@ -7129,7 +7129,7 @@ class AgentRegistry(drivers: List<AgentDriver>) {
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (872 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7214,8 +7214,8 @@ class ClaudeRuntimeBridge(
     private val installer by lazy { RuntimeInstaller(context) }
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir, context) }
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
@@ -7319,8 +7319,9 @@ class ClaudeRuntimeBridge(
                 add(launch.executable)
                 // Do not use --bare here: Claude Code bare mode ignores CLAUDE_CODE_OAUTH_TOKEN,
                 // which is how setup-token authenticates Claude subscriptions.
+                // Prompt goes through stdin: a single argv entry is capped at 128 KB by the kernel
+                // and the history budget is 160k chars; stdin also keeps it out of `ps`.
                 add("-p")
-                add(contextPrompt)
                 add("--output-format")
                 add("stream-json")
                 add("--include-partial-messages")
@@ -7340,7 +7341,10 @@ class ClaudeRuntimeBridge(
                 guestWorkspacePath = guestWorkspacePath,
             )
             activeProcess = process
-            runCatching { process.outputStream.close() }
+            runCatching {
+                process.outputStream.write(contextPrompt.toByteArray(Charsets.UTF_8))
+                process.outputStream.close()
+            }
             if (userStopRequested) process.destroy()
             coroutineScope {
                 val permissionWatcher = launch { watchPermissionRequests(sessionId) }
@@ -8193,8 +8197,8 @@ class AntigravityRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finished = ConcurrentHashMap.newKeySet<String>()
@@ -9106,8 +9110,8 @@ class DshRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        extraBufferCapacity = 1024,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.SUSPEND,
     )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
@@ -10060,7 +10064,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
    - `AppUpdater`: Memeriksa `update-manifest.json`, mengunduh APK pembaruan NextCraft Forge, dan mewajibkan verifikasi integritas SHA-256 sebelum menginstal update.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
@@ -10073,7 +10077,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10084,9 +10088,18 @@ import java.io.File
 import java.nio.file.Files
 
 object AndroidProjectTemplateGenerator {
+    private val JAVA_KEYWORDS = setOf(
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+        "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+        "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+        "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
+        "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
+        "volatile", "while", "true", "false", "null",
+    )
+
     fun packageName(name: String): String {
         val raw = projectSlug(name).replace('-', '_').take(40).ifBlank { "app" }
-        val suffix = if (raw.first().isLetter()) raw else "app_$raw"
+        val suffix = if (raw.first().isLetter() && raw !in JAVA_KEYWORDS) raw else "app_$raw"
         return "com.nextcraft.$suffix"
     }
 
@@ -10366,7 +10379,7 @@ object AndroidProjectTemplateGenerator {
     }
 
     private fun kotlinString(value: String): String =
-        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
+        "\"${value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
 
     private fun xmlEscape(value: String): String =
         value.replace("&", "&amp;")
@@ -12678,7 +12691,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (81 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1715 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1739 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (82 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (90 baris)
@@ -12776,7 +12789,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1715 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1739 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13214,6 +13227,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
+        // Switching mid-run would append streamed output to, and save over, another project's chat.
+        if (_state.value.sessionRunning && projectId != _state.value.activeProjectId) return
         val chats = preferences.loadProjectChats(project.id)
         val chatId = chats.firstOrNull()?.id ?: "main"
         val messages = preferences.loadMessages(project.id, chatId)
@@ -13634,7 +13649,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path")
             }
             refreshWorkspaceFilesAndChanges(project.id)
-            if (saved) {
+            if (saved && preferences.autoSyncGitHub) {
                 syncProjectWithGitHub(project.id, "Update $path")
             }
         }
@@ -13725,7 +13740,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         "su",
                         "-mm",
                         "-c",
-                        "sh '${chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' '/workspace/$projectSlug' '${installed.binDir.absolutePath}' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
+                        "sh '${chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' '/workspace/$projectSlug' '${RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath}' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
                     ).redirectErrorStream(true).start()
                 } else {
                     ProcessBuilder("sh", "-c", command).directory(workspaceDir).redirectErrorStream(true).start()
@@ -13734,6 +13749,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ProcessBuilder("sh", "-c", command).directory(workspaceDir).redirectErrorStream(true).start()
             }
             val buffer = StringBuilder()
+            // The read below blocks until the command closes its output, so the timeout needs its own watchdog.
+            val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+            val watchdog = Thread({
+                try {
+                    if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                        timedOut.set(true)
+                        process.destroyForcibly()
+                    }
+                } catch (_: InterruptedException) {
+                }
+            }, "forge-terminal-watchdog").apply { isDaemon = true; start() }
             process.inputStream.bufferedReader().use { reader ->
                 val chunk = CharArray(4096)
                 while (buffer.length < MAX_TERMINAL_CHARS) {
@@ -13742,10 +13768,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     buffer.append(chunk, 0, n)
                 }
             }
-            if (!process.waitFor(60, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                buffer.append("\n[Command timed out after 60s]")
-            }
+            if (process.isAlive && !timedOut.get()) process.destroyForcibly()
+            watchdog.interrupt()
+            if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
     }
@@ -14044,7 +14069,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanSecret = secret.trim()
         if (cleanSecret.isEmpty()) return
         val providerId = _state.value.providerProfile.kind.name
-        vault.add(providerId, label.trim().ifBlank { "Primary Key" }, cleanSecret)
+        runCatching { vault.add(providerId, label.trim().ifBlank { "Primary Key" }, cleanSecret) }
+            .onFailure { err ->
+                _state.update { it.copy(apiStatusMessage = err.message ?: "Could not save the API key.") }
+                return
+            }
         val keys = vault.list(providerId)
         val updatedProfile = _state.value.providerProfile.copy(hasSecret = keys.isNotEmpty())
         preferences.saveProvider(updatedProfile, _state.value.agentKind)
@@ -14154,7 +14183,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 when (poll) {
                     is GitHubTokenPoll.Success -> {
-                        vault.put("GITHUB_TOKEN", poll.accessToken)
+                        runCatching { vault.put("GITHUB_TOKEN", poll.accessToken) }.onFailure { err ->
+                            _state.update {
+                                it.copy(githubDeviceCode = null, githubStatusMessage = err.message ?: "Could not store the GitHub token.")
+                            }
+                            return@launch
+                        }
                         val account = withContext(Dispatchers.IO) {
                             runCatching { githubClient.account(poll.accessToken) }.getOrNull()
                         }
@@ -14208,7 +14242,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess { (account, repos) ->
-                vault.put("GITHUB_TOKEN", cleanToken)
+                runCatching { vault.put("GITHUB_TOKEN", cleanToken) }.onFailure { err ->
+                    _state.update { it.copy(githubStatusMessage = err.message ?: "Could not store the GitHub token.") }
+                    return@onSuccess
+                }
                 preferences.githubLogin = account.login
                 _state.update {
                     it.copy(
