@@ -2,29 +2,43 @@ package com.nextcraft.forge.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+val ForgeCyan = Color(0xFF38BDF8)
+val ForgeGreen = Color(0xFF34D399)
+val ForgeAmber = Color(0xFFFBBF24)
+val ForgePurple = Color(0xFFA78BFA)
+val ForgeRed = Color(0xFFF87171)
+val ForgeDarkBg = Color(0xFF0B0F17)
+val ForgeDarkSurface = Color(0xFF111827)
+val ForgeDarkElevated = Color(0xFF1E293B)
 
 private val ForgeDarkColorScheme = darkColorScheme(
-    primary = Color(0xFF38BDF8),
+    primary = ForgeCyan,
     onPrimary = Color(0xFF06202E),
     primaryContainer = Color(0xFF0E3A53),
     onPrimaryContainer = Color(0xFFBAE6FD),
-    secondary = Color(0xFF34D399),
+    secondary = ForgeGreen,
     onSecondary = Color(0xFF052E1E),
     secondaryContainer = Color(0xFF064E3B),
     onSecondaryContainer = Color(0xFFA7F3D0),
-    tertiary = Color(0xFFA78BFA),
+    tertiary = ForgePurple,
     onTertiary = Color(0xFF23134D),
-    background = Color(0xFF0B0F17),
+    background = ForgeDarkBg,
     onBackground = Color(0xFFE2E8F0),
-    surface = Color(0xFF111827),
+    surface = ForgeDarkSurface,
     onSurface = Color(0xFFE2E8F0),
-    surfaceVariant = Color(0xFF1E293B),
+    surfaceVariant = ForgeDarkElevated,
     onSurfaceVariant = Color(0xFF94A3B8),
-    error = Color(0xFFF87171),
+    error = ForgeRed,
     onError = Color(0xFF450A0A),
 )
 
@@ -49,6 +63,15 @@ private val ForgeLightColorScheme = lightColorScheme(
     onError = Color(0xFFFFFFFF),
 )
 
+val ForgeCodeTextStyle = TextStyle(
+    fontFamily = FontFamily.Monospace,
+    fontWeight = FontWeight.Normal,
+    fontSize = 13.sp,
+    lineHeight = 19.sp,
+)
+
+private val ForgeTypography = Typography()
+
 @Composable
 fun NextCraftForgeTheme(
     themeMode: String = "dark",
@@ -61,6 +84,7 @@ fun NextCraftForgeTheme(
     }
     MaterialTheme(
         colorScheme = if (useDark) ForgeDarkColorScheme else ForgeLightColorScheme,
+        typography = ForgeTypography,
         content = content,
     )
 }

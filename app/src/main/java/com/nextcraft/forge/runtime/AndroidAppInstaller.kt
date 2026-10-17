@@ -130,6 +130,7 @@ object AndroidAppInstaller {
             }.getOrElse {
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
             }
+            @Suppress("DEPRECATION")
             context.startActivity(
                 Intent(Intent.ACTION_INSTALL_PACKAGE, uri).apply {
                     setDataAndType(uri, "application/vnd.android.package-archive")

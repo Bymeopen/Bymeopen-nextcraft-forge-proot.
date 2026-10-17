@@ -1,0 +1,21 @@
+package com.nextcraft.forge.ui
+
+enum class AppLanguage(
+    val code: String,
+    val displayName: String,
+    val nativeName: String,
+) {
+    SYSTEM("system", "System Default", "Default"),
+    INDONESIAN("id", "Indonesian", "Bahasa Indonesia"),
+    ENGLISH("en", "English", "English"),
+    SPANISH("es", "Spanish", "Español"),
+    CHINESE("zh", "Chinese (Simplified)", "简体中文"),
+    ARABIC("ar", "Arabic", "العربية"),
+    HINDI("hi", "Hindi", "हिन्दी"),
+    RUSSIAN("ru", "Russian", "Русский");
+
+    companion object {
+        fun fromCode(code: String?): AppLanguage =
+            entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: SYSTEM
+    }
+}

@@ -35,8 +35,6 @@ import com.nextcraft.forge.network.LocalNetwork
 import com.nextcraft.forge.network.ModelDiscoveryResult
 import com.nextcraft.forge.network.ProviderApiClient
 import com.nextcraft.forge.runtime.AndroidAction
-import com.nextcraft.forge.runtime.AndroidAppInstallEvents
-import com.nextcraft.forge.runtime.AndroidAppInstallResult
 import com.nextcraft.forge.runtime.AndroidAppInstaller
 import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidBuildRecord
@@ -136,6 +134,11 @@ data class ForgeUiState(
     val githubDeviceCode: GitHubDeviceCode? = null,
     val githubRepos: List<GitHubRepository> = emptyList(),
     val githubStatusMessage: String? = null,
+    val languageCode: String = "system",
+    val interactiveHighRiskApprovals: Boolean = true,
+    val autoSyncGitHub: Boolean = false,
+    val antigravityModel: String = "gemini-2.5-pro",
+    val antigravityEffort: String = "high",
     val updateInfo: AppUpdateInfo? = null,
     val updateStatusMessage: String? = null,
     val bannerMessage: String? = null,
@@ -151,8 +154,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val checkpoints = WorkspaceCheckpoints(application.filesDir, application)
     private val providerApi = ProviderApiClient(application)
     private val githubClient = GitHubClient(application)
-    private val appInstaller = AndroidAppInstaller(application)
-    val antigravityAuth = AntigravityAuthController(application)
+    val antigravityAuth = AntigravityAuthController(
+        context = application,
+        initiallySignedIn = preferences.antigravitySignedIn,
+        initialAccountEmail = preferences.antigravityAccountEmail,
+        onSignedInChanged = { signedIn, email ->
+            preferences.antigravitySignedIn = signedIn
+            preferences.antigravityAccountEmail = email.orEmpty()
+        },
+    )
 
     private val claudeRuntime = ClaudeRuntimeBridge(
         context = application,
@@ -205,17 +215,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { dshRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { antigravityRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch {
-            AndroidAppInstallEvents.events.collect { event ->
-                if (event != null) {
-                    _state.update {
-                        it.copy(
-                            androidBuild = it.androidBuild.copy(
-                                message = event.message,
-                                stage = if (event.succeeded) AndroidBuildStage.COMPLETE else AndroidBuildStage.FAILED,
-                            ),
-                            bannerMessage = event.message,
-                        )
-                    }
+            AndroidAppInstaller.events.collect { event ->
+                val statusMsg = event.message ?: if (event.success) {
+                    val pkg = event.packageName ?: "APK"
+                    if (event.launched) "Installed & launched $pkg" else "Installed $pkg"
+                } else {
+                    "APK installation failed"
+                }
+                _state.update {
+                    it.copy(
+                        androidBuild = it.androidBuild.copy(
+                            message = statusMsg,
+                            stage = if (event.success) AndroidBuildStage.COMPLETE else AndroidBuildStage.FAILED,
+                        ),
+                        bannerMessage = statusMsg,
+                    )
                 }
             }
         }
@@ -268,6 +282,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     providerProfile = profile,
                     savedApiKeys = keys,
                     githubLogin = preferences.githubLogin,
+                    languageCode = AppStrings.languageCode(getApplication()),
+                    interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+                    autoSyncGitHub = preferences.autoSyncGitHub,
+                    antigravityModel = preferences.antigravityModel,
+                    antigravityEffort = preferences.antigravityEffort,
                 )
             }
             val savedGitHubToken = vault.get("GITHUB_TOKEN").orEmpty()
@@ -374,13 +393,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun repairRootfs() {
         viewModelScope.launch {
-            _state.update { it.copy(bannerMessage = "Repairing chroot mounts & dpkg state…") }
+            _state.update { it.copy(bannerMessage = "Repairing chroot mounts & runtime scripts…") }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val rootfs = File(getApplication<Application>().filesDir, "runtime/rootfs")
-                    RootfsRepair.unmountAllChrootMounts(rootfs)
-                    RootfsRepair.repairDpkgIfInterrupted(rootfs)
-                    "Chroot mount points and dpkg state verified."
+                    val rootfs = File(getApplication<Application>().filesDir, "runtime/ubuntu")
+                    installer.ensureChrootScripts()
+                    RootfsRepair.ensureUnmounted(rootfs)
+                    "Chroot mount points and supervisor scripts verified."
                 }.getOrElse { "Chroot repair note: ${it.message}" }
             }
             refreshRuntimeStatus()
@@ -476,6 +495,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteProject(projectId: String) {
+        val currentProjects = _state.value.projects
+        if (currentProjects.size <= 1) return
+        val updated = currentProjects.filterNot { it.id == projectId }
+        if (updated.size == currentProjects.size) return
+        preferences.saveProjects(updated)
+        preferences.deleteProjectChats(projectId)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                File(getApplication<Application>().filesDir, "workspaces/$projectId").deleteRecursively()
+                checkpoints.checkpointDir(projectId).deleteRecursively()
+            }
+        }
+        _state.update { it.copy(projects = updated) }
+        if (_state.value.activeProjectId == projectId) {
+            selectProject(updated.first().id)
+        }
+    }
+
+    fun selectChat(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.chats.none { it.id == chatId }) return
+        val messages = preferences.loadMessages(project.id, chatId)
+        _state.update {
+            it.copy(
+                activeChatId = chatId,
+                messages = messages,
+            )
+        }
+    }
+
+    fun createChat(title: String = "") {
+        val project = _state.value.activeProject ?: return
+        val nextIndex = _state.value.chats.size + 1
+        val chat = ProjectChat(
+            title = title.trim().ifBlank { "Chat $nextIndex" },
+        )
+        val updatedChats = _state.value.chats + chat
+        preferences.saveProjectChats(project.id, updatedChats)
+        preferences.saveMessages(project.id, chat.id, emptyList())
+        _state.update {
+            it.copy(
+                chats = updatedChats,
+                activeChatId = chat.id,
+                messages = emptyList(),
+            )
+        }
+    }
+
+    fun deleteChat(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        val currentChats = _state.value.chats
+        if (currentChats.size <= 1) return
+        val updatedChats = currentChats.filterNot { it.id == chatId }
+        if (updatedChats.size == currentChats.size) return
+        preferences.saveProjectChats(project.id, updatedChats)
+        runCatching {
+            File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
+        }
+        val nextChatId = if (_state.value.activeChatId == chatId) {
+            updatedChats.first().id
+        } else {
+            _state.value.activeChatId
+        }
+        val messages = preferences.loadMessages(project.id, nextChatId)
+        _state.update {
+            it.copy(
+                chats = updatedChats,
+                activeChatId = nextChatId,
+                messages = messages,
+            )
+        }
+    }
+
     fun sendPrompt(promptText: String) {
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() || _state.value.sessionRunning) return
@@ -543,7 +636,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val req = _state.value.pendingToolRequest ?: return
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            claudeRuntime.approveToolRequest(req.sessionId, req.approvalId, approved)
+            claudeRuntime.respondToApproval(req, approved)
         }
     }
 
@@ -666,10 +759,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (preferences.autoSyncGitHub) {
             syncProjectWithGitHub(projectId, "Sync agent changes from NextCraft Forge")
         }
-    }
-
-    fun setAutoSyncGitHub(enabled: Boolean) {
-        preferences.autoSyncGitHub = enabled
     }
 
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
@@ -1016,24 +1105,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
             }
-            val result = withContext(Dispatchers.IO) {
-                runCatching { appInstaller.install(apkFile) }
-                    .getOrElse { AndroidAppInstallResult.Failed(it.message ?: "APK installation failed") }
+            val errorMsg = withContext(Dispatchers.IO) {
+                runCatching {
+                    AndroidAppInstaller.install(
+                        context = getApplication(),
+                        apk = apkFile,
+                        launchAfterInstall = true,
+                    )
+                    null
+                }.getOrElse { err -> err.message ?: "APK installation failed" }
             }
-            val msg = when (result) {
-                is AndroidAppInstallResult.InstalledSilently -> {
-                    appInstaller.launch(result.packageName)
-                    "Installed silently via Root (${result.packageName}) & launched."
+            if (errorMsg != null) {
+                _state.update {
+                    it.copy(
+                        androidBuild = it.androidBuild.copy(
+                            stage = AndroidBuildStage.FAILED,
+                            message = errorMsg,
+                        ),
+                        bannerMessage = errorMsg,
+                    )
                 }
-                is AndroidAppInstallResult.AwaitingConfirmation -> "Confirmation prompt opened for ${result.packageName}."
-                is AndroidAppInstallResult.NeedsPermission -> "Enable 'Install unknown apps' permission for NextCraft Forge."
-                is AndroidAppInstallResult.Failed -> result.message
-            }
-            _state.update {
-                it.copy(
-                    androidBuild = it.androidBuild.copy(message = msg),
-                    bannerMessage = msg,
-                )
             }
         }
     }
@@ -1458,6 +1549,128 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     runCommandInChrootOrHost(project.slug, ws, syncCmd)
                 }
             }
+        }
+    }
+
+    fun pullProjectFromGitHub(projectId: String = _state.value.activeProjectId) {
+        val token = vault.get("GITHUB_TOKEN").orEmpty()
+        if (token.isBlank()) {
+            _state.update { it.copy(githubStatusMessage = "Connect GitHub first before pulling.") }
+            return
+        }
+        val project = _state.value.projects.firstOrNull { it.id == projectId } ?: _state.value.activeProject ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(githubStatusMessage = "Pulling latest changes from GitHub for ${project.name}…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
+                    val pullCmd = buildString {
+                        append("if git remote get-url origin >/dev/null 2>&1; then ")
+                        append("git fetch origin && git pull --rebase --autostash origin main; ")
+                        append("else echo 'No origin remote configured in workspace'; fi")
+                    }
+                    withGitHubCredentials(token, login) {
+                        runCommandInChrootOrHost(project.slug, ws, pullCmd)
+                    }
+                }
+            }
+            refreshWorkspaceFilesAndChanges(project.id)
+            _state.update {
+                it.copy(
+                    githubStatusMessage = result.fold(
+                        onSuccess = { out -> "Pulled from GitHub: ${out.lines().lastOrNull { l -> l.isNotBlank() } ?: "up to date"}" },
+                        onFailure = { err -> "GitHub pull failed: ${err.message}" },
+                    ),
+                )
+            }
+        }
+    }
+
+    fun cloneGitHubRepository(repo: GitHubRepository) {
+        val token = vault.get("GITHUB_TOKEN").orEmpty()
+        viewModelScope.launch {
+            _state.update { it.copy(githubStatusMessage = "Cloning ${repo.fullName}…") }
+            val clonedProject = withContext(Dispatchers.IO) {
+                runCatching {
+                    val cleanName = repo.fullName.substringAfterLast('/').ifBlank { repo.fullName }
+                    val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                    val baseSlug = projectSlug(cleanName)
+                    var slug = baseSlug
+                    var suffix = 2
+                    while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                    val project = Project(
+                        name = cleanName,
+                        description = repo.description.ifBlank { "Cloned from ${repo.fullName}" },
+                        language = "Git Repository",
+                        slug = slug,
+                    )
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    ws.listFiles()?.forEach { it.deleteRecursively() }
+                    val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
+                    val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
+                    if (token.isNotBlank()) {
+                        withGitHubCredentials(token, login) {
+                            runCommandInChrootOrHost(project.slug, ws, cloneCmd)
+                        }
+                    } else {
+                        runCommandInChrootOrHost(project.slug, ws, cloneCmd)
+                    }
+                    project
+                }
+            }
+            clonedProject.onSuccess { newProject ->
+                val updated = listOf(newProject) + _state.value.projects
+                preferences.saveProjects(updated)
+                configureAllProjectRoots(updated)
+                _state.update {
+                    it.copy(
+                        projects = updated,
+                        githubStatusMessage = "Cloned ${repo.fullName} into workspace '${newProject.name}'",
+                    )
+                }
+                selectProject(newProject.id)
+            }.onFailure { err ->
+                _state.update { it.copy(githubStatusMessage = "Clone failed: ${err.message}") }
+            }
+        }
+    }
+
+    fun setLanguageCode(code: String) {
+        val clean = code.trim().ifEmpty { "system" }
+        AppStrings.saveLanguageCode(getApplication(), clean)
+        _state.update { it.copy(languageCode = clean) }
+    }
+
+    fun setInteractiveHighRiskApprovals(enabled: Boolean) {
+        preferences.interactiveHighRiskApprovals = enabled
+        _state.update { it.copy(interactiveHighRiskApprovals = enabled) }
+    }
+
+    fun setAutoSyncGitHub(enabled: Boolean) {
+        preferences.autoSyncGitHub = enabled
+        _state.update { it.copy(autoSyncGitHub = enabled) }
+    }
+
+    fun setAntigravityConfig(model: String, effort: String) {
+        val cleanModel = model.trim().ifEmpty { "gemini-2.5-pro" }
+        val cleanEffort = effort.trim().ifEmpty { "high" }
+        preferences.antigravityModel = cleanModel
+        preferences.antigravityEffort = cleanEffort
+        _state.update {
+            it.copy(
+                antigravityModel = cleanModel,
+                antigravityEffort = cleanEffort,
+            )
+        }
+    }
+
+    fun releaseMemoryCaches() {
+        _state.update {
+            it.copy(
+                terminalOutput = it.terminalOutput.takeLast(16 * 1024),
+                androidLogcat = it.androidLogcat.copy(lines = it.androidLogcat.lines.takeLast(100)),
+            )
         }
     }
 

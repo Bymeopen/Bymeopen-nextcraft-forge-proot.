@@ -30,9 +30,9 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/model/Models.kt` (391 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/BoundedFileReads.kt` (195 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (185 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2387 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2456 baris)
 - `app/src/main/cpp/forge_spawn.c` (297 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
@@ -693,7 +693,7 @@ internal fun disablePhantomProcessKillerViaRoot() {
 }
 ```
 
-## 4. `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (185 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -727,9 +727,15 @@ internal object RootfsRepair {
 
     private fun moveDirectory(source: File, target: File): Boolean {
         if (source.renameTo(target)) return true
-        return runCatching {
-            source.copyRecursively(target, overwrite = true) && safeDeleteRecursively(source)
-        }.getOrDefault(false)
+        // Never copyRecursively a rootfs: it follows symlinks and drops ownership, modes and
+        // special files. A root `mv` preserves all of them (and is a plain rename on one fs).
+        if (target.exists()) return false
+        val exit = runRootCommand(
+            "su", "-c",
+            "mv -- ${shellSingleQuote(source.absolutePath)} ${shellSingleQuote(target.absolutePath)}",
+            timeoutSeconds = 120L,
+        )
+        return exit == 0 && target.exists() && !source.exists()
     }
 
     /**
@@ -1121,7 +1127,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2387 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2456 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -1159,6 +1165,7 @@ data class InstalledRuntime(
 ) {
     /** Compatibility alias for callers referencing the runtime launcher executable. */
     val proot: File get() = chrootExec
+    val binDir: File get() = chrootExec.parentFile ?: rootfs
 }
 
 data class RuntimeInstallProgress(
@@ -1498,6 +1505,52 @@ class RuntimeInstaller(private val context: Context) {
         githubCliMarker.writeText(GITHUB_CLI_VERSION)
         check(isGitHubCliInstalled()) { "GitHub CLI installation is incomplete" }
         onProgress(RuntimeInstallProgress("GitHub CLI is ready", 1f))
+    }
+
+    /** Provisions Git credential store and GitHub CLI hosts.yml inside the guest rootfs with 0600 permissions. */
+    fun configureGitHubAccess(token: String, login: String) {
+        val cleanToken = token.trim().replace("\r", "").replace("\n", "")
+        if (cleanToken.isEmpty()) return
+        val cleanLogin = login.trim().replace("\r", "").replace("\n", "").ifEmpty { "x-access-token" }
+        val rootHome = File(rootfs, "root").apply { mkdirs() }
+        val gitCredentials = File(rootHome, ".git-credentials")
+        gitCredentials.writeText("https://$cleanLogin:$cleanToken@github.com\n")
+        runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
+
+        val gitConfig = File(rootHome, ".gitconfig")
+        gitConfig.writeText(
+            buildString {
+                appendLine("[user]")
+                appendLine("    name = $cleanLogin")
+                appendLine("    email = $cleanLogin@users.noreply.github.com")
+                appendLine("[init]")
+                appendLine("    defaultBranch = main")
+                appendLine("[credential]")
+                appendLine("    helper = store")
+                appendLine("[safe]")
+                appendLine("    directory = *")
+            },
+        )
+        runCatching { Os.chmod(gitConfig.absolutePath, 384) } // 0600
+
+        val ghConfigDir = File(rootHome, ".config/gh").apply { mkdirs() }
+        val ghHosts = File(ghConfigDir, "hosts.yml")
+        ghHosts.writeText(
+            buildString {
+                appendLine("github.com:")
+                appendLine("    oauth_token: $cleanToken")
+                appendLine("    user: $cleanLogin")
+                appendLine("    git_protocol: https")
+            },
+        )
+        runCatching { Os.chmod(ghHosts.absolutePath, 384) } // 0600
+    }
+
+    /** Removes stored Git and GitHub CLI credentials from the guest rootfs. */
+    fun clearGitHubAccess() {
+        val rootHome = File(rootfs, "root")
+        File(rootHome, ".git-credentials").delete()
+        File(rootHome, ".config/gh/hosts.yml").delete()
     }
 
     /** Versions recorded after each real agent binary has been installed and verified. */
@@ -2799,6 +2852,11 @@ class RuntimeInstaller(private val context: Context) {
             mkdirs()
             runCatching { Os.chmod(absolutePath, 0b111000000) } // 0700
         }
+        // A launch that never reached `rm -f` (su denied, process killed) leaves API keys on
+        // disk. Purge anything old enough that it cannot belong to a launch in progress.
+        runtimeEnvDir.listFiles { f -> f.name.startsWith(".env-") }
+            ?.filter { System.currentTimeMillis() - it.lastModified() > 10 * 60 * 1_000L }
+            ?.forEach { it.delete() }
         val envFile = File(runtimeEnvDir, ".env-${java.util.UUID.randomUUID()}.sh")
         val envScript = buildString {
             for ((key, value) in guestEnv) {
@@ -2854,10 +2912,29 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
+        // Hands every permission request to the app through the shared bridge directory and
+        // waits for the user's/guardrail decision. The app classifies risk, auto-answers
+        // SAFE/REVIEW and prompts for HIGH. No answer within the timeout means deny.
         hook.writeText(
             """#!/bin/sh
-cat > /dev/null
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
+DECISION=deny
+if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
+    i=0
+    while [ "${'$'}i" -lt 600 ]; do
+        if [ -f "${'$'}BRIDGE/${'$'}ID.response" ]; then
+            [ "${'$'}(cat "${'$'}BRIDGE/${'$'}ID.response")" = "allow" ] && DECISION=allow
+            break
+        fi
+        sleep 0.1
+        i=${'$'}((i + 1))
+    done
+    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.response"
+else
+    cat > /dev/null
+fi
+printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
 """,
         )
         Os.chmod(hook.absolutePath, 0b111101101)
@@ -2914,11 +2991,9 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         stateFile.writeText(state.toString())
     }
 
+    // Only auto-allow read-only tools. Bash/Edit/Write/NotebookEdit go through the
+    // PermissionRequest hook so the app can classify and gate each command.
     private fun claudeWorkspaceToolRules() = JSONArray().apply {
-        put("Bash")
-        put("Edit")
-        put("Write")
-        put("NotebookEdit")
         put("Read")
         put("Glob")
         put("Grep")
@@ -4360,16 +4435,16 @@ Blok 2 menangani **keamanan penyimpanan kredensial**, **sistem snapshot/undo fil
    - `AppPreferences` menyimpan proyek (dengan validasi kanonik `rootPath`), riwayat percakapan, profil provider, dan pengaturan agen secara atomik (`AtomicFile` / temp-rename) dengan validasi ID penyimpanan (`safeStorageId`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (530 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (221 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (752 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (232 baris)
-- `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (230 baris)
-- `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (516 baris)
+- `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
+- `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (521 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (530 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -4478,10 +4553,15 @@ class WorkspaceCheckpoints(
                     val relative = source.relativeTo(workspace).invariantSeparatorsPath
                     activeRelatives.add(relative)
                     val destination = safeWorkspaceFile(backup, relative)
+                    // Fast path: identical size + mtime means the baseline is current. Only hash
+                    // when metadata differs, so large workspaces are not re-digested every prompt.
                     val upToDate = destination.isFile &&
                         !Files.isSymbolicLink(destination.toPath()) &&
                         destination.length() == source.length() &&
-                        digest(destination) == digest(source)
+                        (
+                            destination.lastModified() == source.lastModified() ||
+                                digest(destination) == digest(source)
+                            )
                     if (!upToDate) {
                         destination.parentFile?.mkdirs()
                         // Always copy bytes into a distinct inode so in-place O_TRUNC edits in
@@ -4632,13 +4712,14 @@ class WorkspaceCheckpoints(
         var parent = target.parentFile
         target.delete()
         while (parent != null) {
-            val parentCanonical = runCatching { parent.canonicalFile }.getOrDefault(parent)
-            if (parent == root || parentCanonical == rootCanonical || !parentCanonical.toPath().startsWith(rootCanonical.toPath())) {
+            val currentParent = parent
+            val parentCanonical = runCatching { currentParent.canonicalFile }.getOrDefault(currentParent)
+            if (currentParent == root || parentCanonical == rootCanonical || !parentCanonical.toPath().startsWith(rootCanonical.toPath())) {
                 break
             }
-            val children = parent.list()
-            if (children != null && children.isEmpty() && parent.delete()) {
-                parent = parent.parentFile
+            val children = currentParent.list()
+            if (children != null && children.isEmpty() && currentParent.delete()) {
+                parent = currentParent.parentFile
             } else {
                 break
             }
@@ -5486,7 +5567,7 @@ internal class LocalFormatGateway(
             }
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = connection.responseCode
-            if (allowRetry && code in setOf(401, 402, 429) && onRotateApiKey != null) {
+            if (allowRetry && code in setOf(402, 429) && onRotateApiKey != null) {
                 val shouldRetry = synchronized(rotationLock) {
                     if (activeApiKey == currentKey) {
                         val rotated = onRotateApiKey.invoke()?.takeIf { it.isNotBlank() && it != currentKey }
@@ -5549,7 +5630,7 @@ internal class LocalFormatGateway(
             }
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = connection.responseCode
-            if (allowRetry && code in setOf(401, 402, 429) && onRotateApiKey != null) {
+            if (allowRetry && code in setOf(402, 429) && onRotateApiKey != null) {
                 val shouldRetry = synchronized(rotationLock) {
                     if (activeApiKey == currentKey) {
                         val rotated = onRotateApiKey.invoke()?.takeIf { it.isNotBlank() && it != currentKey }
@@ -6032,7 +6113,7 @@ internal class OpenRouterRoutingGateway(
             connection.outputStream.use { it.write(routedBody) }
 
             val code = connection.responseCode
-            if (allowRetry && code in setOf(401, 402, 429) && onRotateApiKey != null) {
+            if (allowRetry && code in setOf(402, 429) && onRotateApiKey != null) {
                 val shouldRetry = synchronized(rotationLock) {
                     if (activeApiKey == currentKey) {
                         val rotated = onRotateApiKey.invoke()?.takeIf { it.isNotBlank() && it != currentKey }
@@ -6124,13 +6205,14 @@ internal class OpenRouterRoutingGateway(
 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (230 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
 
 ```kotlin
 package com.nextcraft.forge.data
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import org.json.JSONArray
@@ -6140,11 +6222,52 @@ import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 class ApiKeyVault(context: Context) {
     private val preferences = context.getSharedPreferences("nextcraft_secrets", Context.MODE_PRIVATE)
     private val alias = "nextcraft-provider-key"
+
+    init {
+        migrateAuthBoundKeyIfNeeded()
+    }
+
+    /**
+     * Earlier builds created the master key with setUserAuthenticationRequired(true) and a 300 s
+     * validity window, which made every decrypt fail (and self-destruct) a few minutes after each
+     * unlock. When such a key is still present, re-encrypt every secret under a fresh unbound key.
+     * Decryption of the old key only works shortly after an unlock, so this retries on each launch
+     * until it succeeds and never deletes anything on failure.
+     */
+    @Synchronized
+    private fun migrateAuthBoundKeyIfNeeded() {
+        runCatching {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (!keyStore.containsAlias(alias)) return
+            val oldKey = keyStore.getKey(alias, null) as? SecretKey ?: return
+            val info = SecretKeyFactory.getInstance(oldKey.algorithm, "AndroidKeyStore")
+                .getKeySpec(oldKey, KeyInfo::class.java) as KeyInfo
+            if (!info.isUserAuthenticationRequired) return
+
+            // Decrypt everything first; abort (without touching storage) if any entry fails.
+            val secretIds = preferences.all.keys
+                .filter { it.endsWith(".value") }
+                .map { it.removeSuffix(".value") }
+            val plaintexts = secretIds.associateWith { storageId ->
+                val iv = Base64.decode(preferences.getString("$storageId.iv", null) ?: return, Base64.NO_WRAP)
+                val encrypted = Base64.decode(preferences.getString("$storageId.value", null) ?: return, Base64.NO_WRAP)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, oldKey, GCMParameterSpec(128, iv))
+                cipher.doFinal(encrypted).toString(Charsets.UTF_8)
+            }
+            resetKeyStoreKey()
+            plaintexts.forEach { (storageId, secret) -> putEncrypted(storageId, secret) }
+            android.util.Log.i("ApiKeyVault", "Migrated ${plaintexts.size} secrets to an unbound keystore key")
+        }.onFailure { error ->
+            android.util.Log.w("ApiKeyVault", "Keystore migration deferred: ${error::class.simpleName}")
+        }
+    }
 
     @Synchronized
     fun put(providerId: String, secret: String) {
@@ -6226,13 +6349,12 @@ class ApiKeyVault(context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
             cipher.iv to cipher.doFinal(plaintext)
-        }.recoverCatching {
-            // Self-heal if AndroidKeyStore key was invalidated by lockscreen/OS change
-            resetKeyStoreKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-            cipher.iv to cipher.doFinal(plaintext)
-        }.getOrThrow()
+        }.getOrElse { error ->
+            // Never reset the master key here: that would make every other stored secret
+            // (all provider keys + GITHUB_TOKEN) unreadable. Surface the failure instead.
+            android.util.Log.w("ApiKeyVault", "Encrypt failed: ${error::class.simpleName}")
+            throw IllegalStateException("Could not encrypt the API key. Unlock the device and try again.", error)
+        }
         preferences.edit()
             .putString("$storageId.iv", Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
@@ -6267,9 +6389,13 @@ class ApiKeyVault(context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
             cleanSecret(cipher.doFinal(encrypted).toString(Charsets.UTF_8))
-        }.onFailure {
-            // Clean up unreadable/invalidated ciphertext so it does not fail silently forever
-            removeEncrypted(storageId)
+        }.onFailure { error ->
+            // Only drop ciphertext that is provably corrupt. Transient keystore failures
+            // (device locked, keystore daemon busy) must not destroy the user's secrets.
+            android.util.Log.w("ApiKeyVault", "Decrypt failed: ${error::class.simpleName}")
+            if (error is javax.crypto.AEADBadTagException || error is IllegalArgumentException) {
+                removeEncrypted(storageId)
+            }
         }.getOrNull()
     }
 
@@ -6328,27 +6454,21 @@ class ApiKeyVault(context: Context) {
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        runCatching { keyStore.getKey(alias, null) as? SecretKey }.getOrNull()?.let { return it }
-        resetKeyStoreKey()
+        if (keyStore.containsAlias(alias)) {
+            // An existing key that cannot be loaded right now is a transient keystore error.
+            // Do not delete it: that would orphan every ciphertext written with it.
+            return keyStore.getKey(alias, null) as? SecretKey
+                ?: throw IllegalStateException("AndroidKeyStore key '$alias' is unavailable")
+        }
+        // No user-authentication binding: the app never shows a BiometricPrompt/Keyguard, so an
+        // auth-bound key would throw UserNotAuthenticatedException minutes after each unlock.
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
-            runCatching {
-                @Suppress("DEPRECATION")
-                init(
-                    KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setUserAuthenticationRequired(true)
-                        .setUserAuthenticationValidityDurationSeconds(300)
-                        .build(),
-                )
-            }.recoverCatching {
-                init(
-                    KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .build(),
-                )
-            }.getOrThrow()
+            init(
+                KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .build(),
+            )
             generateKey()
         }
     }
@@ -6359,7 +6479,7 @@ data class ApiKeyInfo(val id: String, val name: String, val isActive: Boolean = 
 data class ApiKeyCredential(val id: String, val name: String, val secret: String, val isActive: Boolean)
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (516 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (521 baris)
 
 ```kotlin
 package com.nextcraft.forge.data
@@ -6433,6 +6553,11 @@ class AppPreferences(private val context: Context) {
     var githubLogin: String
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
+
+    /** Auto-commit and push the workspace to GitHub after every agent turn. Off by default. */
+    var autoSyncGitHub: Boolean
+        get() = preferences.getBoolean("auto_sync_github", false)
+        set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
 
     /** Whether high-risk tool executions prompt for interactive approval instead of immediate rejection. */
     var interactiveHighRiskApprovals: Boolean
@@ -6903,10 +7028,10 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AgentDriver.kt` (86 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (857 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (668 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (872 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (966 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
 
 ---
 
@@ -7001,7 +7126,7 @@ class AgentRegistry(drivers: List<AgentDriver>) {
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (857 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (872 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7038,15 +7163,21 @@ import org.json.JSONObject
 internal object ProviderRuntimeErrorDetector {
     fun detect(line: String): String? {
         val json = runCatching { JSONObject(line) }.getOrNull()
-        val combined = buildString {
-            append(line)
-            json?.let {
+        // Structured stream-json lines carry assistant text and tool output. Scanning those
+        // would abort the session whenever a file or answer merely mentions "quota" or
+        // "rate limit". Only error-bearing fields are inspected; raw (non-JSON) lines are
+        // runtime stderr and are scanned whole.
+        val combined = if (json == null) {
+            line.lowercase()
+        } else buildString {
+            append(json.optString("error"))
+            if (json.optString("type") == "error") {
                 append(' ')
-                append(it.optString("error"))
+                append(json.optString("message"))
+            }
+            if (json.optBoolean("is_error")) {
                 append(' ')
-                append(it.optString("message"))
-                append(' ')
-                append(it.optString("result"))
+                append(json.optString("result"))
             }
         }.lowercase()
         return when {
@@ -7079,7 +7210,10 @@ class ClaudeRuntimeBridge(
 ) : RuntimeBridge {
     private val installer by lazy { RuntimeInstaller(context) }
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir, context) }
-    private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
+    private val eventBus = MutableSharedFlow<RuntimeEvent>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
     private val toolNames = ConcurrentHashMap<String, String>()
@@ -7845,6 +7979,8 @@ internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
     val highRiskPatterns = listOf(
         "rm -rf",
+        "rm -fr",
+        "rm -r ",
         "git push",
         "git reset",
         "sudo",
@@ -7854,6 +7990,10 @@ internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
         "dd if=",
         "mkfs",
         "chown -r /",
+        "/dev/block",
+        "umount",
+        "| sh",
+        "| bash",
     )
     return when {
         highRiskPatterns.any(preview::contains) -> RiskLevel.HIGH
@@ -7863,7 +8003,7 @@ internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
 }
 ```
 
-## 3. `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (668 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -8049,7 +8189,10 @@ class AntigravityRuntimeBridge(
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
-    private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
+    private val eventBus = MutableSharedFlow<RuntimeEvent>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finished = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var activeProcess: Process? = null
@@ -8918,7 +9061,7 @@ private fun sanitizeTerminalOutput(text: String): String = text
     .filter { it == '\n' || it == '\r' || it == '\t' || it.code >= 0x20 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (966 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -8959,7 +9102,10 @@ class DshRuntimeBridge(
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
-    private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
+    private val eventBus = MutableSharedFlow<RuntimeEvent>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var activeProcess: Process? = null
@@ -9913,13 +10059,13 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (272 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
 - `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
 - `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
-- `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (171 baris)
+- `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 - `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
 
 ---
@@ -10571,7 +10717,7 @@ internal fun startPackageLogcatProcess(
 }
 ```
 
-## 3. `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (272 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10706,6 +10852,7 @@ object AndroidAppInstaller {
             }.getOrElse {
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
             }
+            @Suppress("DEPRECATION")
             context.startActivity(
                 Intent(Intent.ACTION_INSTALL_PACKAGE, uri).apply {
                     setDataAndType(uri, "application/vnd.android.package-archive")
@@ -12053,7 +12200,7 @@ object LocalNetwork {
 }
 ```
 
-## 9. `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (171 baris)
+## 9. `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
@@ -12092,10 +12239,18 @@ sealed interface GitHubTokenPoll {
 
 class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? = null) {
 
-    fun requestDeviceCode(clientId: String): GitHubDeviceCode {
+    fun requestDeviceCode(
+        clientId: String = DEFAULT_CLIENT_ID,
+        scope: String = DEFAULT_SCOPES,
+    ): GitHubDeviceCode {
+        val resolvedClientId = clientId.trim().ifEmpty { DEFAULT_CLIENT_ID }
+        val resolvedScope = scope.trim().ifEmpty { DEFAULT_SCOPES }
         val json = postForm(
             "https://github.com/login/device/code",
-            mapOf("client_id" to clientId),
+            mapOf(
+                "client_id" to resolvedClientId,
+                "scope" to resolvedScope,
+            ),
         )
         return GitHubDeviceCode(
             deviceCode = json.getString("device_code"),
@@ -12106,11 +12261,12 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         )
     }
 
-    fun pollDeviceToken(clientId: String, deviceCode: String): GitHubTokenPoll {
+    fun pollDeviceToken(clientId: String = DEFAULT_CLIENT_ID, deviceCode: String): GitHubTokenPoll {
+        val resolvedClientId = clientId.trim().ifEmpty { DEFAULT_CLIENT_ID }
         val json = postForm(
             "https://github.com/login/oauth/access_token",
             mapOf(
-                "client_id" to clientId,
+                "client_id" to resolvedClientId,
                 "device_code" to deviceCode,
                 "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
             ),
@@ -12133,6 +12289,32 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         val json = getJson("https://api.github.com/user", token) as? JSONObject
             ?: error("Unexpected GitHub user profile response")
         return GitHubAccount(json.getString("login"), json.optString("avatar_url"))
+    }
+
+    fun createRepository(
+        token: String,
+        name: String,
+        description: String = "",
+        private: Boolean = true,
+        autoInit: Boolean = false,
+    ): GitHubRepository {
+        val cleanName = name.trim()
+        require(cleanName.isNotEmpty()) { "Repository name must not be empty" }
+        val payload = JSONObject()
+            .put("name", cleanName)
+            .put("description", description.trim())
+            .put("private", private)
+            .put("auto_init", autoInit)
+        val item = postJson("https://api.github.com/user/repos", token, payload) as? JSONObject
+            ?: error("Unexpected GitHub create repository response")
+        return GitHubRepository(
+            fullName = item.getString("full_name"),
+            cloneUrl = item.getString("clone_url"),
+            private = item.optBoolean("private", private),
+            defaultBranch = item.optString("default_branch", "main").ifBlank { "main" },
+            description = item.optString("description"),
+            updatedAt = item.optString("updated_at"),
+        )
     }
 
     fun repositories(token: String): List<GitHubRepository> {
@@ -12185,6 +12367,27 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         }
     }
 
+    private fun postJson(endpoint: String, token: String, payload: JSONObject): Any {
+        val body = payload.toString().toByteArray(Charsets.UTF_8)
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        return try {
+            connection.outputStream.use { it.write(body) }
+            readResponse(connection)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun getJson(endpoint: String, token: String): Any {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -12222,9 +12425,11 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return if (text.trimStart().startsWith("[")) JSONArray(text) else JSONObject(text)
     }
 
-    private companion object {
-        const val USER_AGENT = "NextCraft-Forge-Android"
-        const val MAX_GITHUB_RESPONSE_CHARS = 4 * 1024 * 1024
+    companion object {
+        const val DEFAULT_CLIENT_ID = "178c6fc778ccc68e1d6a"
+        const val DEFAULT_SCOPES = "repo read:user user:email workflow"
+        private const val USER_AGENT = "NextCraft-Forge-Android"
+        private const val MAX_GITHUB_RESPONSE_CHARS = 4 * 1024 * 1024
     }
 }
 ```

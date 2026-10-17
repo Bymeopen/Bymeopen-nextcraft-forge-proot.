@@ -1298,7 +1298,7 @@ fun main() {
 EOF
 
 mkdir -p "$TMP_WORK/kt-classes"
-mapfile -t ALL_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -not -path "*/ui/*" -name "*.kt" | sort)
+mapfile -t ALL_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -not -path "*/ui/*" -not -name "MainActivity.kt" -name "*.kt" | sort)
 [[ "${#ALL_KT_FILES[@]}" -eq 27 ]] || fail "Expected 27 core Kotlin source files, found ${#ALL_KT_FILES[@]}"
 
 java -cp "$TMP_WORK/compiler-shims:$GRADLE_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
@@ -1313,7 +1313,7 @@ java -cp "$TMP_WORK/compiler-shims:$GRADLE_LIB/*" org.jetbrains.kotlin.cli.jvm.K
     "$TMP_WORK/AllBlocksTest.kt" \
     -d "$TMP_WORK/kt-classes"
 
-pass "All 27 Kotlin source files across Blocks 1, 2, 3, and 4 compiled cleanly with zero errors"
+pass "All 27 core Kotlin source files across Blocks 1, 2, 3, and 4 compiled cleanly with zero errors"
 
 java -cp "$TMP_WORK/kt-classes:$KOTLIN_STDLIB:$COROUTINES_JAR:$COMMONS_COMPRESS_JAR:$ANDROID_JAR" com.nextcraft.forge.runtime.AllBlocksTestKt
 pass "BUG-020: WorkspaceCheckpoints.safeWorkspaceFile blocks symlinked ancestor dirs & allows valid 'v1..v2.diff' filenames"
@@ -1326,6 +1326,29 @@ pass "Block 4: ProviderApiClient & ModelResponseParser build OpenRouter routing 
 pass "Audit C-1..C-3, H-1..H-6, M-1..M-18, L-1..L-12 runtime checks passed"
 pass "BUG-036..041: AgentKind.fromStored, OPENAI_RESPONSES + tool ordering, chroot PATH, UTF-8 tailer truncation, synchronized checkpoint pruning, and background APK installer verified"
 pass "UPGRADE-001..004: InotifyLogTailer bridge integration, real-time OpenAI->Anthropic SSE streaming, incremental SHA-256 checkpoint sync, and interactive high-risk tool approvals verified"
+
+# Compile all 41 Kotlin files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) with Compose IR plugin
+mapfile -t ALL_APP_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -name "*.kt" | sort)
+[[ "${#ALL_APP_KT_FILES[@]}" -eq 41 ]] || fail "Expected 41 total Kotlin source files across Blocks 1–6, found ${#ALL_APP_KT_FILES[@]}"
+
+mkdir -p "$TMP_WORK/aar-jars" "$TMP_WORK/full-app-classes"
+aar_idx=0
+while IFS= read -r aar_file; do
+    aar_idx=$((aar_idx + 1))
+    unzip -q -p "$aar_file" classes.jar > "$TMP_WORK/aar-jars/aar_${aar_idx}.jar" 2>/dev/null || rm -f "$TMP_WORK/aar-jars/aar_${aar_idx}.jar"
+done < <(find /root/maven/localMvnRepository -name "*.aar")
+
+FULL_CP="$ANDROID_JAR:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-stdlib/1.9.22/kotlin-stdlib-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar:/root/maven/localMvnRepository/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.6.4/kotlinx-coroutines-android-1.6.4.jar:$(find /root/maven/localMvnRepository -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'kotlin-compiler*' ! -path '*/2.1.20/*' ! -path '*coroutines*' | tr '\n' ':'):$(find "$TMP_WORK/aar-jars" -name '*.jar' | tr '\n' ':')"
+
+java -cp "/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-compiler-embeddable/1.9.22/kotlin-compiler-embeddable-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-stdlib/1.9.22/kotlin-stdlib-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-script-runtime/1.9.22/kotlin-script-runtime-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-reflect/1.6.10/kotlin-reflect-1.6.10.jar:/root/maven/localMvnRepository/org/jetbrains/intellij/deps/trove4j/1.0.20200330/trove4j-1.0.20200330.jar:/root/maven/localMvnRepository/org/jetbrains/annotations/13.0/annotations-13.0.jar" \
+    org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
+    -nowarn -no-stdlib -jvm-target 17 \
+    -Xplugin=/root/maven/localMvnRepository/androidx/compose/compiler/compiler/1.5.10/compiler-1.5.10.jar \
+    -cp "$FULL_CP" \
+    -d "$TMP_WORK/full-app-classes" \
+    "${ALL_APP_KT_FILES[@]}"
+
+pass "All 41 Kotlin source files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) compiled cleanly with Compose IR plugin"
 
 # Test BUG-019 awk exact match logic in RootfsRepair.kt and unmount-chroot.sh
 MOCK_MOUNTS="$TMP_WORK/mock_mounts"

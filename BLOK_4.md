@@ -20,13 +20,13 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (299 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (272 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
 - `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
 - `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (108 baris)
-- `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (171 baris)
+- `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 - `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
 
 ---
@@ -678,7 +678,7 @@ internal fun startPackageLogcatProcess(
 }
 ```
 
-## 3. `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (272 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -813,6 +813,7 @@ object AndroidAppInstaller {
             }.getOrElse {
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
             }
+            @Suppress("DEPRECATION")
             context.startActivity(
                 Intent(Intent.ACTION_INSTALL_PACKAGE, uri).apply {
                     setDataAndType(uri, "application/vnd.android.package-archive")
@@ -2160,7 +2161,7 @@ object LocalNetwork {
 }
 ```
 
-## 9. `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (171 baris)
+## 9. `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
@@ -2199,10 +2200,18 @@ sealed interface GitHubTokenPoll {
 
 class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? = null) {
 
-    fun requestDeviceCode(clientId: String): GitHubDeviceCode {
+    fun requestDeviceCode(
+        clientId: String = DEFAULT_CLIENT_ID,
+        scope: String = DEFAULT_SCOPES,
+    ): GitHubDeviceCode {
+        val resolvedClientId = clientId.trim().ifEmpty { DEFAULT_CLIENT_ID }
+        val resolvedScope = scope.trim().ifEmpty { DEFAULT_SCOPES }
         val json = postForm(
             "https://github.com/login/device/code",
-            mapOf("client_id" to clientId),
+            mapOf(
+                "client_id" to resolvedClientId,
+                "scope" to resolvedScope,
+            ),
         )
         return GitHubDeviceCode(
             deviceCode = json.getString("device_code"),
@@ -2213,11 +2222,12 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         )
     }
 
-    fun pollDeviceToken(clientId: String, deviceCode: String): GitHubTokenPoll {
+    fun pollDeviceToken(clientId: String = DEFAULT_CLIENT_ID, deviceCode: String): GitHubTokenPoll {
+        val resolvedClientId = clientId.trim().ifEmpty { DEFAULT_CLIENT_ID }
         val json = postForm(
             "https://github.com/login/oauth/access_token",
             mapOf(
-                "client_id" to clientId,
+                "client_id" to resolvedClientId,
                 "device_code" to deviceCode,
                 "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
             ),
@@ -2240,6 +2250,32 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         val json = getJson("https://api.github.com/user", token) as? JSONObject
             ?: error("Unexpected GitHub user profile response")
         return GitHubAccount(json.getString("login"), json.optString("avatar_url"))
+    }
+
+    fun createRepository(
+        token: String,
+        name: String,
+        description: String = "",
+        private: Boolean = true,
+        autoInit: Boolean = false,
+    ): GitHubRepository {
+        val cleanName = name.trim()
+        require(cleanName.isNotEmpty()) { "Repository name must not be empty" }
+        val payload = JSONObject()
+            .put("name", cleanName)
+            .put("description", description.trim())
+            .put("private", private)
+            .put("auto_init", autoInit)
+        val item = postJson("https://api.github.com/user/repos", token, payload) as? JSONObject
+            ?: error("Unexpected GitHub create repository response")
+        return GitHubRepository(
+            fullName = item.getString("full_name"),
+            cloneUrl = item.getString("clone_url"),
+            private = item.optBoolean("private", private),
+            defaultBranch = item.optString("default_branch", "main").ifBlank { "main" },
+            description = item.optString("description"),
+            updatedAt = item.optString("updated_at"),
+        )
     }
 
     fun repositories(token: String): List<GitHubRepository> {
@@ -2292,6 +2328,27 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         }
     }
 
+    private fun postJson(endpoint: String, token: String, payload: JSONObject): Any {
+        val body = payload.toString().toByteArray(Charsets.UTF_8)
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        return try {
+            connection.outputStream.use { it.write(body) }
+            readResponse(connection)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun getJson(endpoint: String, token: String): Any {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -2329,9 +2386,11 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return if (text.trimStart().startsWith("[")) JSONArray(text) else JSONObject(text)
     }
 
-    private companion object {
-        const val USER_AGENT = "NextCraft-Forge-Android"
-        const val MAX_GITHUB_RESPONSE_CHARS = 4 * 1024 * 1024
+    companion object {
+        const val DEFAULT_CLIENT_ID = "178c6fc778ccc68e1d6a"
+        const val DEFAULT_SCOPES = "repo read:user user:email workflow"
+        private const val USER_AGENT = "NextCraft-Forge-Android"
+        private const val MAX_GITHUB_RESPONSE_CHARS = 4 * 1024 * 1024
     }
 }
 ```

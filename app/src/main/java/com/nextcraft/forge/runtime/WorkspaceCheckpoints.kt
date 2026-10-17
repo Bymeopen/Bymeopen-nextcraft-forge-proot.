@@ -263,13 +263,14 @@ class WorkspaceCheckpoints(
         var parent = target.parentFile
         target.delete()
         while (parent != null) {
-            val parentCanonical = runCatching { parent.canonicalFile }.getOrDefault(parent)
-            if (parent == root || parentCanonical == rootCanonical || !parentCanonical.toPath().startsWith(rootCanonical.toPath())) {
+            val currentParent = parent
+            val parentCanonical = runCatching { currentParent.canonicalFile }.getOrDefault(currentParent)
+            if (currentParent == root || parentCanonical == rootCanonical || !parentCanonical.toPath().startsWith(rootCanonical.toPath())) {
                 break
             }
-            val children = parent.list()
-            if (children != null && children.isEmpty() && parent.delete()) {
-                parent = parent.parentFile
+            val children = currentParent.list()
+            if (children != null && children.isEmpty() && currentParent.delete()) {
+                parent = currentParent.parentFile
             } else {
                 break
             }

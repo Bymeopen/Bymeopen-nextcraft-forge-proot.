@@ -19,9 +19,9 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/model/Models.kt` (391 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/BoundedFileReads.kt` (195 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (185 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2387 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2456 baris)
 - `app/src/main/cpp/forge_spawn.c` (297 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
@@ -682,7 +682,7 @@ internal fun disablePhantomProcessKillerViaRoot() {
 }
 ```
 
-## 4. `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (185 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -716,9 +716,15 @@ internal object RootfsRepair {
 
     private fun moveDirectory(source: File, target: File): Boolean {
         if (source.renameTo(target)) return true
-        return runCatching {
-            source.copyRecursively(target, overwrite = true) && safeDeleteRecursively(source)
-        }.getOrDefault(false)
+        // Never copyRecursively a rootfs: it follows symlinks and drops ownership, modes and
+        // special files. A root `mv` preserves all of them (and is a plain rename on one fs).
+        if (target.exists()) return false
+        val exit = runRootCommand(
+            "su", "-c",
+            "mv -- ${shellSingleQuote(source.absolutePath)} ${shellSingleQuote(target.absolutePath)}",
+            timeoutSeconds = 120L,
+        )
+        return exit == 0 && target.exists() && !source.exists()
     }
 
     /**
@@ -1110,7 +1116,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2387 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2456 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -1148,6 +1154,7 @@ data class InstalledRuntime(
 ) {
     /** Compatibility alias for callers referencing the runtime launcher executable. */
     val proot: File get() = chrootExec
+    val binDir: File get() = chrootExec.parentFile ?: rootfs
 }
 
 data class RuntimeInstallProgress(
@@ -1487,6 +1494,52 @@ class RuntimeInstaller(private val context: Context) {
         githubCliMarker.writeText(GITHUB_CLI_VERSION)
         check(isGitHubCliInstalled()) { "GitHub CLI installation is incomplete" }
         onProgress(RuntimeInstallProgress("GitHub CLI is ready", 1f))
+    }
+
+    /** Provisions Git credential store and GitHub CLI hosts.yml inside the guest rootfs with 0600 permissions. */
+    fun configureGitHubAccess(token: String, login: String) {
+        val cleanToken = token.trim().replace("\r", "").replace("\n", "")
+        if (cleanToken.isEmpty()) return
+        val cleanLogin = login.trim().replace("\r", "").replace("\n", "").ifEmpty { "x-access-token" }
+        val rootHome = File(rootfs, "root").apply { mkdirs() }
+        val gitCredentials = File(rootHome, ".git-credentials")
+        gitCredentials.writeText("https://$cleanLogin:$cleanToken@github.com\n")
+        runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
+
+        val gitConfig = File(rootHome, ".gitconfig")
+        gitConfig.writeText(
+            buildString {
+                appendLine("[user]")
+                appendLine("    name = $cleanLogin")
+                appendLine("    email = $cleanLogin@users.noreply.github.com")
+                appendLine("[init]")
+                appendLine("    defaultBranch = main")
+                appendLine("[credential]")
+                appendLine("    helper = store")
+                appendLine("[safe]")
+                appendLine("    directory = *")
+            },
+        )
+        runCatching { Os.chmod(gitConfig.absolutePath, 384) } // 0600
+
+        val ghConfigDir = File(rootHome, ".config/gh").apply { mkdirs() }
+        val ghHosts = File(ghConfigDir, "hosts.yml")
+        ghHosts.writeText(
+            buildString {
+                appendLine("github.com:")
+                appendLine("    oauth_token: $cleanToken")
+                appendLine("    user: $cleanLogin")
+                appendLine("    git_protocol: https")
+            },
+        )
+        runCatching { Os.chmod(ghHosts.absolutePath, 384) } // 0600
+    }
+
+    /** Removes stored Git and GitHub CLI credentials from the guest rootfs. */
+    fun clearGitHubAccess() {
+        val rootHome = File(rootfs, "root")
+        File(rootHome, ".git-credentials").delete()
+        File(rootHome, ".config/gh/hosts.yml").delete()
     }
 
     /** Versions recorded after each real agent binary has been installed and verified. */
@@ -2788,6 +2841,11 @@ class RuntimeInstaller(private val context: Context) {
             mkdirs()
             runCatching { Os.chmod(absolutePath, 0b111000000) } // 0700
         }
+        // A launch that never reached `rm -f` (su denied, process killed) leaves API keys on
+        // disk. Purge anything old enough that it cannot belong to a launch in progress.
+        runtimeEnvDir.listFiles { f -> f.name.startsWith(".env-") }
+            ?.filter { System.currentTimeMillis() - it.lastModified() > 10 * 60 * 1_000L }
+            ?.forEach { it.delete() }
         val envFile = File(runtimeEnvDir, ".env-${java.util.UUID.randomUUID()}.sh")
         val envScript = buildString {
             for ((key, value) in guestEnv) {
@@ -2843,10 +2901,29 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
+        // Hands every permission request to the app through the shared bridge directory and
+        // waits for the user's/guardrail decision. The app classifies risk, auto-answers
+        // SAFE/REVIEW and prompts for HIGH. No answer within the timeout means deny.
         hook.writeText(
             """#!/bin/sh
-cat > /dev/null
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
+DECISION=deny
+if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
+    i=0
+    while [ "${'$'}i" -lt 600 ]; do
+        if [ -f "${'$'}BRIDGE/${'$'}ID.response" ]; then
+            [ "${'$'}(cat "${'$'}BRIDGE/${'$'}ID.response")" = "allow" ] && DECISION=allow
+            break
+        fi
+        sleep 0.1
+        i=${'$'}((i + 1))
+    done
+    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.response"
+else
+    cat > /dev/null
+fi
+printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
 """,
         )
         Os.chmod(hook.absolutePath, 0b111101101)
@@ -2903,11 +2980,9 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         stateFile.writeText(state.toString())
     }
 
+    // Only auto-allow read-only tools. Bash/Edit/Write/NotebookEdit go through the
+    // PermissionRequest hook so the app can classify and gate each command.
     private fun claudeWorkspaceToolRules() = JSONArray().apply {
-        put("Bash")
-        put("Edit")
-        put("Write")
-        put("NotebookEdit")
         put("Read")
         put("Glob")
         put("Grep")
