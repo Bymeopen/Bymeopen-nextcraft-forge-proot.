@@ -41,9 +41,15 @@ object LocalNetwork {
         val host = uri.host?.takeIf(String::isNotBlank) ?: return false
         return when (scheme) {
             "https" -> true
-            "http" -> isLocalHost(host)
+            "http" -> isLoopbackHost(host)
             else -> false
         }
+    }
+
+    /** Matches the hosts the network security config allows over cleartext. */
+    fun isLoopbackHost(rawHost: String): Boolean {
+        val host = rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
+        return host == "localhost" || host == "127.0.0.1"
     }
 
     fun isLocalHost(rawHost: String): Boolean {

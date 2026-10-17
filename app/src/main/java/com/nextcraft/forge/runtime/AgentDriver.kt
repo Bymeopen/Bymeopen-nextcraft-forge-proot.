@@ -67,7 +67,6 @@ class AgentRegistry(drivers: List<AgentDriver>) {
                         AgentCapability.PROVIDER_PICKER,
                         AgentCapability.MODEL_PICKER,
                         AgentCapability.RESUME,
-                        AgentCapability.INTERACTIVE_APPROVALS,
                     ),
                 ),
                 BuiltInAgentDriver(
