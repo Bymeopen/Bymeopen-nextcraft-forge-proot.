@@ -833,9 +833,10 @@ fun main() {
         // 6. Test Block 4: LocalNetwork scheme & host security + localhost port scanner
         check(LocalNetwork.isPlainHttpAllowed("https://api.openai.com/v1")) { "HTTPS should be allowed" }
         check(LocalNetwork.isPlainHttpAllowed("http://127.0.0.1:11434/v1")) { "Loopback HTTP should be allowed" }
-        check(LocalNetwork.isPlainHttpAllowed("http://192.168.1.25:8080/v1")) { "LAN HTTP should be allowed" }
-        check(LocalNetwork.isPlainHttpAllowed("http://100.90.1.2:8080/v1")) { "Tailscale HTTP should be allowed" }
-        check(LocalNetwork.isPlainHttpAllowed("http://[::1]:8080/v1")) { "IPv6 loopback HTTP should be allowed" }
+        check(LocalNetwork.isPlainHttpAllowed("http://localhost:11434/v1")) { "localhost HTTP should be allowed" }
+        check(LocalNetwork.isLocalHost("192.168.1.25")) { "LAN host should be recognized by isLocalHost" }
+        check(LocalNetwork.isLocalHost("100.90.1.2")) { "Tailscale host should be recognized by isLocalHost" }
+        check(LocalNetwork.isLocalHost("[::1]")) { "IPv6 loopback should be recognized by isLocalHost" }
         check(!LocalNetwork.isPlainHttpAllowed("http://api.openai.com/v1")) { "Public HTTP must be rejected" }
         check(!LocalNetwork.isPlainHttpAllowed("file:///etc/passwd")) { "file:// scheme must be rejected" }
         check(!LocalNetwork.isPlainHttpAllowed("ftp://127.0.0.1/test")) { "ftp:// scheme must be rejected" }
@@ -950,11 +951,11 @@ fun main() {
         }
 
         // 13. Test C-3, M-18, L-3, L-4, L-5, L-10, L-12
-        check(!LocalNetwork.isPlainHttpAllowed("http://arbitrarysinglelabel:8080/v1")) {
+        check(!LocalNetwork.isLocalHost("arbitrarysinglelabel")) {
             "L-10: Single-label non-.local hostname must not be treated as local"
         }
-        check(LocalNetwork.isPlainHttpAllowed("http://devbox.local:8080/v1")) {
-            "L-10: Explicit .local mDNS hostname should be allowed"
+        check(LocalNetwork.isLocalHost("devbox.local")) {
+            "L-10: Explicit .local mDNS hostname should be recognized by isLocalHost"
         }
         check(classifyToolRisk("Bash", "rm -rf /workspace") == RiskLevel.HIGH) {
             "C-3: Destructive rm -rf command must be classified as HIGH risk"
