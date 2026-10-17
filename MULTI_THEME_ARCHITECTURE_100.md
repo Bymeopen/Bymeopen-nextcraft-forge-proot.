@@ -349,7 +349,7 @@ private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
     onTertiary = Color(0xFF2E1065),
     background = Color(0xFF090D16),
     onBackground = Color(0xFFF8FAFC),
-    surface = Color(0xB3111827),
+    surface = Color(0xF0111827),          // 94% alpha untuk Popup/DropdownMenu/AlertDialog (Z=3) agar teks tidak tembus
     onSurface = Color(0xFFF8FAFC),
     surfaceVariant = Color(0x9E1E293B),
     onSurfaceVariant = Color(0xFFCBD5E1),
@@ -543,11 +543,11 @@ fun NextCraftForgeTheme(
     val mode = ForgeThemeMode.fromStored(themeMode)
     val (colorScheme, tokens) = buildTokensForMode(mode, systemDark)
 
-    // Perbaikan THEME-BUG-002: Sinkronisasi warna Status Bar & Navigation Bar beserta polaritas ikon
+    // Perbaikan THEME-BUG-002 & THEME-BUG-014: Unwrap ContextWrapper (LocalizedContext) sebelum mengambil Window
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val activity = view.context as? Activity ?: return@SideEffect
+            val activity = view.context.findActivity() ?: return@SideEffect
             val window = activity.window
             window.statusBarColor = tokens.topBarContainerColor.toArgb()
             window.navigationBarColor = if (tokens.isGlass) {
@@ -569,11 +569,26 @@ fun NextCraftForgeTheme(
         )
     }
 }
+
+private tailrec fun android.content.Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 ```
 
-### B. Kode Referensi `MainViewModel.kt` (Fungsi `setThemeMode` & `toggleThemeMode`)
+### B. Kode Referensi `MainViewModel.kt` (Inisialisasi Sinkron Tanpa Flash + `setThemeMode`)
 
 ```kotlin
+    // Perbaikan THEME-BUG-013: Inisialisasi themeMode & languageCode secara sinkron di awal StateFlow
+    // agar tidak berkedip dari "dark" ke "white"/"glass" saat bootstrap() menunggu su -c id di IO thread.
+    private val _state = MutableStateFlow(
+        ForgeUiState(
+            themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
+            languageCode = AppStrings.languageCode(application),
+        ),
+    )
+
     fun setThemeMode(mode: String) {
         val resolved = ForgeThemeMode.fromStored(mode).id
         preferences.themeMode = resolved
@@ -657,3 +672,23 @@ private fun ForgeBottomBar(
     }
 }
 ```
+
+---
+
+## 8. Hasil Deep Scan Tahap 2: 10 Bug Tambahan Lintas Siklus Hidup, ContextWrapper, Kartu Bersarang & WebView (`THEME-BUG-013` s/d `THEME-BUG-022`)
+
+Pemindaian lapis kedua (*deep architectural scan*) menemukan **10 bug tambahan** yang lebih tersembunyi pada interaksi antara `MainViewModel`, `LocaleHelper`, `WebView`, `Card` bersarang (*nested cards*), dan `Popup`/`Dialog`:
+
+| ID Bug | Lokasi File & Baris | Deskripsi Bug & Akar Masalah | Dampak Nyata pada Pengalaman Pengguna | Solusi di Kode Referensi |
+| :--- | :--- | :--- | :--- | :--- |
+| **THEME-BUG-013** | `MainViewModel.kt:108, 190, 241-292` | `_state` diinisialisasi dengan `ForgeUiState()` yang memiliki default `themeMode = "dark"`. Nilai `preferences.themeMode` baru dimuat di baris `277` setelah `isRootAccessAvailable()` (`su -c id`) dan `installer.isInstalled()` selesai di *background thread*. | **Cold-Boot Dark Flash**: Jika pengguna menyimpan tema **White** atau **Glass**, saat aplikasi dibuka layar akan tampil **Gelap selama 1–5 detik** (selama pengecekan Root/Chroot) lalu tiba-tiba berkedip berubah menjadi Putih/Glass! | Inisialisasi `MutableStateFlow(ForgeUiState(themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id))` secara sinkron di konstruktor `MainViewModel` sebelum `bootstrap()`. |
+| **THEME-BUG-014** | `MainActivity.kt:38-41`<br>`LocaleHelper.kt:13-19`<br>`Theme.kt` (`SideEffect`) | `MainActivity.attachBaseContext` membungkus `Context` dengan `LocalizedContext( ContextWrapper )`. Jika `SideEffect` di `Theme.kt` melakukan cast langsung `view.context as? Activity`, hasilnya **`null`** saat bahasa kustom aktif. | Sinkronisasi warna Status Bar & Navigation Bar gagal secara diam-diam (*silent failure*) ketika pengguna memilih bahasa selain `"system"`. | Gunakan fungsi rekursif `tailrec fun Context.findActivity(): Activity?` yang membuka lapisan `ContextWrapper` sampai menemukan instance `Activity`. |
+| **THEME-BUG-015** | `LocaleHelper.kt:13-19, 34-59` | 1) Saat beralih dari bahasa RTL (`ar` Arab) kembali ke `"system"`, `applyLanguage` langsung me-`return context` tanpa menyetel ulang `config.setLayoutDirection(systemLocale)`.<br>2) `LocalizedContext` hanya meng-override `getResources()` & `getAssets()` sehingga `uiMode` (siang/malam) pada `configContext` dapat kehilangan sinkronisasi dengan konfigurasi `base` terbaru. | Tata letak bisa tertinggal dalam mode RTL (kanan-ke-kiri) setelah kembali ke bahasa Default, atau gagal mendeteksi perubahan mode siang/malam OS pada mode **Bawaan System**. | Selalu perbarui `LayoutDirection` sesuai `systemLocale` dan salin bit `uiMode` terbaru dari `base.resources.configuration.uiMode` di dalam `LocalizedContext`. |
+| **THEME-BUG-016** | `AndroidAndPreviewScreen.kt:483-506` | `WebView(context)` pada tab **Preview** dibuat tanpa menyetel `webView.setBackgroundColor(...)`. Secara bawaan Android `WebView` memiliki kanvas putih `#FFFFFF`. | Saat pengguna berada di mode **Gelap (`dark`)** atau **Glass (`glass`)** dan membuka tab Preview sebelum server lokal merespons, layar menyilaukan mata dengan kotak putih `#FFFFFF` penuh. | Panggil `webView.setBackgroundColor(tokens.terminalBackground.toArgb())` di dalam blok `factory` dan `update` pada `AndroidView`. |
+| **THEME-BUG-017** | `FilesAndDiffScreen.kt:437-466` | 1) Baris diff (`+` / `-`) hanya mengubah warna teks tanpa memberi warna latar baris (`diffAddedBackground` / `diffRemovedBackground`).<br>2) Kotak diff tidak memiliki `.horizontalScroll(rememberScrollState())`, sehingga baris kode panjang terpotong/melipat secara berantakan. | Di mode **White** maupun **Glass**, tampilan diff sulit dipindai secara visual karena tidak ada *highlight* baris hijau/merah dan indentasi kode rusak saat baris panjang melipat. | Tambahkan `.horizontalScroll(rememberScrollState())` pada kontainer diff dan beri `.background(lineBgColor)` per baris (`diffAddedBackground` / `diffRemovedBackground`). |
+| **THEME-BUG-018** | `NextCraftForgeApp.kt:87-98, 426-584` | `RuntimeOnboardingScreen` di-`return` sebelum `Scaffold` utama. Jika latar kanvas `tokens.canvasBrush` hanya dipasang di dalam `Scaffold`, maka layar Onboarding tidak mendapatkan latar kosmik **Glass** maupun kartu ber-border **White**. | Saat pertama kali menginstal runtime di mode **Glass** atau **White**, layar Onboarding kehilangan latar tema dan kartu di baris `470` & `515` tidak memiliki border. | Pasang `.background(tokens.canvasBrush)` pada `Box` terluar di `NextCraftForgeApp` (sebelum percabangan `RuntimeOnboardingScreen`), dan gunakan `ForgeThemedCard` di seluruh Onboarding. |
+| **THEME-BUG-019** | `SettingsScreenModern.kt:114 -> 134` & `422 -> 442`<br>`NextCraftForgeApp.kt:470, 515` | **Bug Kartu Bersarang Hilang (*Same-Color Nested Cards*)**: Kartu luar (`baris 114` & `422`) memakai warna default Material 3 `Card` (yaitu `surfaceVariant`), lalu kartu di dalamnya (`baris 134` pilihan Agen & `baris 442` kode GitHub) **juga** menyetel `containerColor = surfaceVariant` tanpa border! | Kartu pilihan agen (`Claude Code`, `Antigravity CLI`, `DeepSeek Harness`) yang tidak dipilih serta kartu `One-Time Device Code` **menyatu/hilang tanpa batas visual** di dalam kartu induknya pada semua tema! | Pisahkan secara tegas hierarki 3D: Kartu Induk (`Z=1`) memakai `tokens.cardContainerColor` + `tokens.cardBorderStroke`, sedangkan Kartu Anak (`Z=1.5`) memakai `tokens.cardElevatedColor` + border tipis `outlineVariant`. |
+| **THEME-BUG-020** | `AgentScreen.kt:429-486` (`ToolApprovalCard`) | 1) Kotak `commandPreview` (`baris 466`) memakai `surface.copy(alpha = 0.25f)` di atas `errorContainer`. Pada mode **White**, `White(25%)` di atas `#FFF0EE` tidak terlihat.<br>2) Tombol `Deny` & `Approve Execution` memakai warna `primary` default di atas kartu merah `errorContainer`. | Pratinjau perintah shell berisiko tinggi kehilangan kotak pembatasnya di mode **White**, dan tombol persetujuan bertabrakan warna dengan latar merah peringatan. | Gunakan `tokens.terminalBackground` + border `error.copy(alpha = 0.4f)` untuk pratinjau perintah, serta gunakan `ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)` untuk tombol konfirmasi. |
+| **THEME-BUG-021** | `NextCraftForgeApp.kt:367-369` (`ForgeTopBar`) | Tombol pengalih tema di Top Bar memakai ikon `Icons.Default.Refresh` (sama persis dengan ikon *Refresh File* dan *Reload WebView*) tanpa label mode tema yang sedang aktif. | Pengguna mengira tombol tersebut adalah tombol *Refresh/Reload*, dan tidak tahu apakah aplikasi sedang berada di mode `SYSTEM`, `DARK`, `GLASS`, atau `WHITE`. | Ganti dengan `AssistChip` / `Surface` kapsul bertuliskan lencana tema aktif (`AUTO` / `DARK` / `GLASS` / `WHITE`) yang saat diketuk membuka menu cepat 4 mode atau memutar mode. |
+| **THEME-BUG-022** | `NextCraftForgeApp.kt:252, 333, 624`<br>`FilesAndDiffScreen.kt:480` | Pada mode **Glass**, jika `colorScheme.surface` disetel terlalu transparan (`alpha = 0.62f`), maka `DropdownMenu` (menu Proyek/Agen) dan `AlertDialog` ikut menjadi transparan tanpa efek *blur* OS, sehingga teks menu bertumpuk dengan teks layar di belakangnya. | Daftar proyek dan daftar agen di `DropdownMenu` menjadi sulit dibaca karena bayangan teks dari layar utama menembus menu. | Pisahkan token permukaan: set `ZuanGlassColorScheme.surface = Color(0xF0111827)` (`94%` opasitas untuk `DropdownMenu` & `AlertDialog` di `Z=3`), sementara kartu `Z=1` memakai `tokens.cardContainerColor` (`alpha = 0.62f`). |
+
