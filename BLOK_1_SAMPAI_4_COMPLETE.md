@@ -1,14 +1,11 @@
-# NextCraft Forge — Dokumentasi & Kode Sumber Lengkap Blok 1 s/d Blok 4
+# DOKUMENTASI LENGKAP NEXTCRAFT FORGE — BLOK 1 SAMPAI BLOK 4 (TERINTEGRASI & TERSINKRONISASI)
 
-Dokumen ini berisi penjelasan arsitektur lengkap beserta **seluruh kode sumber utuh (100% baris tanpa pemotongan/truncation)** dari **Blok 1 hingga Blok 4** (27 file Kotlin inti + 2 file C/CMake + 7 skrip bundel runtime Chroot = **36 file**).
+> Dokumen ini menggabungkan secara utuh seluruh kode sumber inti dan arsitektur dari:
+> - `BLOK_1.md` (Core Models, Native PTY Spawn C/JNI, Rootfs Repair, Chroot Scripts, RuntimeInstaller)
+> - `BLOK_2.md` (WorkspaceCheckpoints, RuntimeBridge, LocalFormatGateway, OpenRouterRoutingGateway, ApiKeyVault, AppPreferences)
+> - `BLOK_3.md` (AgentDriver, ClaudeRuntimeBridge, AntigravityRuntimeBridge, AntigravityAuthController, DshRuntimeBridge)
+> - `BLOK_4.md` (Android Build & Install Pipeline, Foreground Services, Network Gateways, GitHub OAuth, AppUpdater)
 
-## Daftar Isi Blok
-- **Blok 1**: Fondasi Native Process (`forge_spawn.c`), Root Chroot Ubuntu 24.04, Ekstraktor Bundel Runtime & Model Domain Inti (6 file Kotlin + 9 file Native/Skrip)
-- **Blok 2**: Workspace Checkpoints (Snapshot/Diff/Undo), Brankas API Key Terenkripsi & Local Protocol Gateways (6 file Kotlin)
-- **Blok 3**: Mesin Penggerak Multi-Agen — Claude Code, Antigravity CLI (`agy`) + OAuth Controller & DeepSeek Harness (`dsh`) (5 file Kotlin)
-- **Blok 4**: Pipeline Build Android Lokal, 1-Tap Root APK Installer, Foreground Services, Klien Jaringan & Self-Updater (10 file Kotlin)
-
----
 
 ---
 

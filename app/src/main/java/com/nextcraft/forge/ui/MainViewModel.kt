@@ -650,6 +650,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshWorkspaceFilesAndChanges(projectId)
+        syncProjectWithGitHub(projectId, "Sync agent changes from NextCraft Forge")
     }
 
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
@@ -744,6 +745,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path")
             }
             refreshWorkspaceFilesAndChanges(project.id)
+            if (saved) {
+                syncProjectWithGitHub(project.id, "Update $path")
+            }
         }
     }
 
@@ -1388,6 +1392,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onFailure { err ->
                 _state.update { it.copy(githubStatusMessage = "Failed to create repository: ${err.message}") }
+            }
+        }
+    }
+
+    fun syncProjectWithGitHub(
+        projectId: String = _state.value.activeProjectId,
+        commitMessage: String = "Sync project changes from NextCraft Forge",
+    ) {
+        val token = vault.get("GITHUB_TOKEN").orEmpty()
+        if (token.isBlank()) return
+        val project = _state.value.projects.firstOrNull { it.id == projectId } ?: _state.value.activeProject ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val ws = checkpoints.ensureWorkspace(project.id)
+                val gitDir = File(ws, ".git")
+                if (!gitDir.isDirectory) return@runCatching
+                val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
+                installer.configureGitHubAccess(token, login)
+                val syncCmd = buildString {
+                    append("if git remote get-url origin >/dev/null 2>&1; then ")
+                    append("git config user.name ${shellSingleQuote(login)} && ")
+                    append("git config user.email ${shellSingleQuote("$login@users.noreply.github.com")} && ")
+                    append("git add -A && ")
+                    append("(git diff --cached --quiet || git commit -m ${shellSingleQuote(commitMessage)}) && ")
+                    append("git pull --rebase --autostash origin main >/dev/null 2>&1 || true; ")
+                    append("git push -u origin HEAD:main; ")
+                    append("fi")
+                }
+                runCommandInChrootOrHost(project.slug, ws, syncCmd)
             }
         }
     }
