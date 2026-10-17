@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.NextCraftForge" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="android:statusBarColor">#0B0F17</item>
-        <item name="android:navigationBarColor">#0B0F17</item>
+        <!-- Transparan: warna bar diatur Compose (Theme.kt SideEffect) sesuai mode tema -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>
