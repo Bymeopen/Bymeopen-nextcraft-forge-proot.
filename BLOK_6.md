@@ -23,16 +23,16 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
    - Mengelola konfigurasi penyedia AI & kunci API terenkripsi (`ApiKeyVault`) beserta rotasi multi-kunci dan pengambilan katalog model langsung dari server, pengelolaan bundle runtime (impor `.tar.zst` lokal, unduh dari rilis resmi, *Verify & Repair Rootfs*, bersihkan *staging* atau *reset runtime*), integrasi penuh akun & repositori GitHub (`Connect Token`, `Create Repo`, `Clone`, `Push`, `Pull`, dan *Auto-Sync*), pemilih tema & bahasa antarmuka, kebijakan persetujuan perintah berisiko tinggi, serta pemeriksaan dan instalasi pembaruan aplikasi (`AppUpdater`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (685 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (507 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (191 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (193 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (685 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -68,15 +68,12 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -105,6 +102,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -135,6 +133,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             ForgeTopBar(
                 state = state,
@@ -142,7 +141,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 onDeleteProject = viewModel::deleteProject,
                 onOpenNewProject = { showNewProjectDialog = true },
                 onSelectAgent = viewModel::selectAgent,
-                onToggleTheme = viewModel::toggleThemeMode,
+                onSelectThemeMode = viewModel::setThemeMode,
             )
         },
         bottomBar = {
@@ -161,37 +160,42 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             state.bannerMessage?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = banner,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = viewModel::dismissBanner,
-                            modifier = Modifier.size(24.dp),
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Dismiss",
-                                modifier = Modifier.size(16.dp),
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(18.dp),
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = banner,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = viewModel::dismissBanner,
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                         }
+                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
             }
@@ -227,14 +231,18 @@ private fun ForgeTopBar(
     onDeleteProject: (String) -> Unit,
     onOpenNewProject: () -> Unit,
     onSelectAgent: (AgentKind) -> Unit,
-    onToggleTheme: () -> Unit,
+    onSelectThemeMode: (String) -> Unit,
 ) {
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
+    var themeMenuExpanded by remember { mutableStateOf(false) }
     val activeProject = state.activeProject
+    val tokens = LocalForgeThemeTokens.current
+    val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
 
     Surface(
-        tonalElevation = 2.dp,
+        color = tokens.topBarContainerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -250,9 +258,9 @@ private fun ForgeTopBar(
                         .clip(CircleShape)
                         .background(
                             if (state.rootAvailable && state.runtimeInstalled) {
-                                ForgeGreen
+                                tokens.successText
                             } else {
-                                ForgeAmber
+                                tokens.warningText
                             },
                         ),
                 )
@@ -270,6 +278,7 @@ private fun ForgeTopBar(
                             Text(
                                 text = activeProject?.name ?: "NextCraft Forge",
                                 style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -401,11 +410,50 @@ private fun ForgeTopBar(
                 IconButton(onClick = onOpenNewProject) {
                     Icon(Icons.Default.Add, contentDescription = "New Project")
                 }
-                IconButton(onClick = onToggleTheme) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Toggle theme")
+
+                // Perbaikan THEME-BUG-021: Lencana pemilih 4 mode tema langsung di Top Bar
+                Box {
+                    AssistChip(
+                        onClick = { themeMenuExpanded = true },
+                        label = {
+                            Text(
+                                text = activeThemeMode.badge,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        },
+                    )
+                    DropdownMenu(
+                        expanded = themeMenuExpanded,
+                        onDismissRequest = { themeMenuExpanded = false },
+                    ) {
+                        ForgeThemeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(mode.title, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = mode.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                leadingIcon = {
+                                    if (mode == activeThemeMode) {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                },
+                                onClick = {
+                                    themeMenuExpanded = false
+                                    onSelectThemeMode(mode.id)
+                                },
+                            )
+                        }
+                    }
                 }
             }
-            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
@@ -416,33 +464,62 @@ private fun ForgeBottomBar(
     changedCount: Int,
     onSelectTab: (ForgeTab) -> Unit,
 ) {
-    NavigationBar {
-        ForgeTab.entries.forEach { tab ->
-            val label = when (tab) {
-                ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
-                else -> tab.title
+    val tokens = LocalForgeThemeTokens.current
+    val shape = if (tokens.isGlass) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = if (tokens.isGlass) 16.dp else 0.dp,
+                vertical = if (tokens.isGlass) 10.dp else 0.dp,
+            ),
+    ) {
+        Surface(
+            shape = shape,
+            color = tokens.bottomBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = if (tokens.isGlass) tokens.cardBorderStroke else null,
+            shadowElevation = if (tokens.isGlass) 12.dp else 0.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column {
+                if (!tokens.isGlass) {
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                }
+                NavigationBar(
+                    containerColor = Color.Transparent,
+                    tonalElevation = 0.dp,
+                ) {
+                    ForgeTab.entries.forEach { tab ->
+                        val label = when (tab) {
+                            ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
+                            else -> tab.title
+                        }
+                        val icon = when (tab) {
+                            ForgeTab.AGENT -> Icons.Default.Star
+                            ForgeTab.FILES -> Icons.Default.Edit
+                            ForgeTab.TERMINAL -> Icons.Default.List
+                            ForgeTab.ANDROID -> Icons.Default.Build
+                            ForgeTab.PREVIEW -> Icons.Default.PlayArrow
+                            ForgeTab.SETTINGS -> Icons.Default.Settings
+                        }
+                        NavigationBarItem(
+                            selected = activeTab == tab,
+                            onClick = { onSelectTab(tab) },
+                            icon = { Icon(icon, contentDescription = label) },
+                            label = {
+                                Text(
+                                    text = label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontSize = 11.sp,
+                                )
+                            },
+                        )
+                    }
+                }
             }
-            val icon = when (tab) {
-                ForgeTab.AGENT -> Icons.Default.Star
-                ForgeTab.FILES -> Icons.Default.Edit
-                ForgeTab.TERMINAL -> Icons.Default.List
-                ForgeTab.ANDROID -> Icons.Default.Build
-                ForgeTab.PREVIEW -> Icons.Default.PlayArrow
-                ForgeTab.SETTINGS -> Icons.Default.Settings
-            }
-            NavigationBarItem(
-                selected = activeTab == tab,
-                onClick = { onSelectTab(tab) },
-                icon = { Icon(icon, contentDescription = label) },
-                label = {
-                    Text(
-                        text = label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontSize = 11.sp,
-                    )
-                },
-            )
         }
     }
 }
@@ -459,6 +536,7 @@ private fun RuntimeOnboardingScreen(
 ) {
     val snap = state.setupSnapshot
     val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
+    val tokens = LocalForgeThemeTokens.current
 
     Column(
         modifier = Modifier
@@ -470,6 +548,7 @@ private fun RuntimeOnboardingScreen(
         Text(
             text = "NextCraft Forge",
             style = MaterialTheme.typography.headlineLarge,
+            color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
         )
         Text(
@@ -478,10 +557,7 @@ private fun RuntimeOnboardingScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        ) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -504,7 +580,7 @@ private fun RuntimeOnboardingScreen(
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -512,6 +588,7 @@ private fun RuntimeOnboardingScreen(
                 Text(
                     text = "Select Development Stacks to Provision",
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                 )
                 DevStack.entries.forEach { stack ->
                     val selected = stack in state.selectedDevStacks
@@ -539,7 +616,7 @@ private fun RuntimeOnboardingScreen(
                             Text(
                                 text = stack.installsSummary,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = tokens.accentText,
                             )
                         }
                     }
@@ -549,7 +626,7 @@ private fun RuntimeOnboardingScreen(
 
         if (snap.status != RuntimeSetupStatus.IDLE) {
             val pct = (snap.progress.coerceIn(0f, 1f) * 100f).toInt()
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -559,7 +636,7 @@ private fun RuntimeOnboardingScreen(
                         Text(
                             text = err,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = tokens.dangerText,
                         )
                     }
                     LinearProgressIndicator(
@@ -626,6 +703,7 @@ private fun StatusCheckRow(
     ok: Boolean,
     detail: String,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -633,7 +711,7 @@ private fun StatusCheckRow(
         Icon(
             imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
             contentDescription = null,
-            tint = if (ok) ForgeGreen else ForgeAmber,
+            tint = if (ok) tokens.successText else tokens.warningText,
             modifier = Modifier.size(20.dp),
         )
         Spacer(modifier = Modifier.width(10.dp))
@@ -724,7 +802,7 @@ private fun NewProjectDialog(
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -733,7 +811,9 @@ package com.nextcraft.forge.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -818,6 +898,7 @@ fun AgentScreen(
     val listState = rememberLazyListState()
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val tokens = LocalForgeThemeTokens.current
     // hasOfficialCredential() may spawn `su` and block for seconds; never call it during composition.
     val hasAgyCredential by produceState(
         initialValue = true,
@@ -861,7 +942,8 @@ fun AgentScreen(
 
         state.activeStatusLine?.let { statusLine ->
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                color = tokens.cardElevatedColor,
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -877,7 +959,8 @@ fun AgentScreen(
                         Text(
                             text = statusLine,
                             style = MaterialTheme.typography.labelMedium,
-                            color = ForgeCyan,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
@@ -892,6 +975,7 @@ fun AgentScreen(
                             }
                         }
                     }
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -934,9 +1018,10 @@ fun AgentScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
         Surface(
-            tonalElevation = 2.dp,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -962,7 +1047,10 @@ fun AgentScreen(
                 if (state.sessionRunning) {
                     Button(
                         onClick = viewModel::stopActiveTask,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
                     ) {
                         Icon(Icons.Default.Close, contentDescription = "Stop")
                     }
@@ -992,56 +1080,61 @@ private fun ChatTabsRow(
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = tokens.topBarContainerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            state.chats.forEach { chat ->
-                val selected = chat.id == state.activeChatId
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelectChat(chat.id) },
-                    label = {
-                        Text(
-                            text = chat.displayTitle(),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    trailingIcon = if (state.chats.size > 1 && selected) {
-                        {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Delete chat",
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clickable { onDeleteChat(chat.id) },
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.chats.forEach { chat ->
+                    val selected = chat.id == state.activeChatId
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onSelectChat(chat.id) },
+                        label = {
+                            Text(
+                                text = chat.displayTitle(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                        }
-                    } else {
-                        null
+                        },
+                        trailingIcon = if (state.chats.size > 1 && selected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Delete chat",
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable { onDeleteChat(chat.id) },
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                }
+                AssistChip(
+                    onClick = onCreateChat,
+                    label = { Text("New Chat") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
                     },
                 )
             }
-            AssistChip(
-                onClick = onCreateChat,
-                label = { Text("New Chat") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                },
-            )
+            Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
@@ -1055,13 +1148,13 @@ private fun AntigravityOAuthBanner(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val tokens = LocalForgeThemeTokens.current
     var verificationCode by rememberSaveable { mutableStateOf("") }
 
-    Card(
+    ForgeThemedCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -1071,7 +1164,7 @@ private fun AntigravityOAuthBanner(
                 Icon(
                     imageVector = Icons.Default.Lock,
                     contentDescription = null,
-                    tint = ForgeCyan,
+                    tint = tokens.accentText,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1155,11 +1248,18 @@ private fun ToolApprovalCard(
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
+    val tokens = LocalForgeThemeTokens.current
+    val shape = RoundedCornerShape(tokens.cardCornerRadius)
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        shape = shape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -1185,14 +1285,16 @@ private fun ToolApprovalCard(
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
+                val cmdShape = RoundedCornerShape(8.dp)
                 Text(
                     text = cmd,
                     style = ForgeCodeTextStyle,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = tokens.terminalText,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.25f))
+                        .clip(cmdShape)
+                        .background(tokens.terminalBackground)
+                        .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), cmdShape)
                         .padding(8.dp),
                 )
             }
@@ -1200,13 +1302,25 @@ private fun ToolApprovalCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                OutlinedButton(onClick = onReject) {
+                OutlinedButton(
+                    onClick = onReject,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Deny")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Button(onClick = onApprove) {
+                Button(
+                    onClick = onApprove,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Approve Execution")
@@ -1238,6 +1352,7 @@ private fun EmptyAgentWelcome(
         Text(
             text = state.agentKind.displayTitle(),
             style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
         )
         Spacer(modifier = Modifier.height(4.dp))
@@ -1254,11 +1369,9 @@ private fun EmptyAgentWelcome(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             suggestions.forEach { prompt ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onQuickPrompt(prompt) },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                ForgeThemedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onQuickPrompt(prompt) },
                 ) {
                     Text(
                         text = prompt,
@@ -1278,15 +1391,29 @@ private fun ChatMessageCard(
     onRunSnippet: (String) -> Unit,
 ) {
     var expandTools by remember { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
     val bgColor = if (message.fromUser) {
-        MaterialTheme.colorScheme.primaryContainer
+        scheme.primaryContainer
     } else {
-        MaterialTheme.colorScheme.surfaceVariant
+        tokens.cardContainerColor
+    }
+    val textColor = if (message.fromUser) {
+        scheme.onPrimaryContainer
+    } else {
+        scheme.onSurface
+    }
+    val border = if (message.fromUser) {
+        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.35f))
+    } else {
+        tokens.cardBorderStroke
     }
 
-    Card(
+    ForgeThemedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = bgColor),
+        containerColor = bgColor,
+        contentColor = textColor,
+        border = border,
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -1302,9 +1429,9 @@ private fun ChatMessageCard(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = if (message.fromUser) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                        scheme.onPrimaryContainer
                     } else {
-                        ForgeCyan
+                        tokens.accentText
                     },
                 )
                 if (message.workItems.isNotEmpty()) {
@@ -1318,6 +1445,7 @@ private fun ChatMessageCard(
                         Text(
                             text = "${message.workItems.size} tool steps",
                             style = MaterialTheme.typography.labelSmall,
+                            color = textColor,
                         )
                         Icon(
                             imageVector = if (expandTools) {
@@ -1326,6 +1454,7 @@ private fun ChatMessageCard(
                                 Icons.Default.KeyboardArrowDown
                             },
                             contentDescription = null,
+                            tint = textColor,
                             modifier = Modifier.size(16.dp),
                         )
                     }
@@ -1339,13 +1468,14 @@ private fun ChatMessageCard(
             if (message.text.isNotBlank()) {
                 MarkdownText(
                     markdown = message.text,
+                    color = textColor,
                     onRunCode = onRunSnippet,
                 )
             } else if (!message.fromUser) {
                 Text(
                     text = "Thinking…",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant,
                 )
             }
         }
@@ -1354,11 +1484,14 @@ private fun ChatMessageCard(
 
 @Composable
 private fun ToolActivityList(items: List<ActivityItem>) {
+    val tokens = LocalForgeThemeTokens.current
+    val shape = RoundedCornerShape(8.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+            .clip(shape)
+            .background(tokens.cardElevatedColor)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1370,7 +1503,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
                     contentDescription = null,
-                    tint = if (item.isComplete) ForgeGreen else ForgeAmber,
+                    tint = if (item.isComplete) tokens.successText else tokens.warningText,
                     modifier = Modifier
                         .size(15.dp)
                         .padding(top = 2.dp),
@@ -1380,12 +1513,14 @@ private fun ToolActivityList(items: List<ActivityItem>) {
                     Text(
                         text = item.title,
                         style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                     )
                     if (item.detail.isNotBlank()) {
                         Text(
                             text = item.detail,
                             style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
@@ -1400,7 +1535,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 
 ---
 
-## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (507 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -1408,7 +1543,9 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 package com.nextcraft.forge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1423,6 +1560,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -1434,8 +1572,6 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -1472,10 +1608,12 @@ fun FilesAndDiffScreen(
 ) {
     var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -1521,7 +1659,7 @@ fun FilesAndDiffScreen(
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         when (mode) {
             "files" -> WorkspaceTreeList(
@@ -1591,6 +1729,7 @@ private fun WorkspaceTreeList(
         return
     }
 
+    val scheme = MaterialTheme.colorScheme
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
@@ -1598,13 +1737,19 @@ private fun WorkspaceTreeList(
     ) {
         items(entries, key = { it.path }) { entry ->
             val isSelected = entry.path == selectedPath
+            val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
+            val secondaryTextColor = if (isSelected) {
+                scheme.onPrimaryContainer.copy(alpha = 0.78f)
+            } else {
+                scheme.onSurfaceVariant
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
+                            scheme.primaryContainer
                         } else {
                             Color.Transparent
                         },
@@ -1627,7 +1772,8 @@ private fun WorkspaceTreeList(
                     Text(
                         text = entry.name,
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (entry.isDirectory) FontWeight.Bold else FontWeight.Normal,
+                        color = primaryTextColor,
+                        fontWeight = if (entry.isDirectory || isSelected) FontWeight.Bold else FontWeight.Normal,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1635,7 +1781,7 @@ private fun WorkspaceTreeList(
                     Text(
                         text = entry.path,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondaryTextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1644,7 +1790,7 @@ private fun WorkspaceTreeList(
                     Text(
                         text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondaryTextColor,
                     )
                 }
             }
@@ -1662,6 +1808,7 @@ private fun WorkspaceFileEditor(
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     if (selectedPath == null) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -1695,6 +1842,7 @@ private fun WorkspaceFileEditor(
             Text(
                 text = selectedPath,
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
@@ -1705,7 +1853,8 @@ private fun WorkspaceFileEditor(
                 Text(
                     text = msg,
                     style = MaterialTheme.typography.labelSmall,
-                    color = ForgeGreen,
+                    color = tokens.successText,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }
@@ -1719,7 +1868,7 @@ private fun WorkspaceFileEditor(
         OutlinedTextField(
             value = content,
             onValueChange = onContentChange,
-            textStyle = ForgeCodeTextStyle,
+            textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -1737,6 +1886,7 @@ private fun WorkspaceDiffReviewList(
     onKeepAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     if (changes.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -1762,6 +1912,7 @@ private fun WorkspaceDiffReviewList(
             Text(
                 text = "${changes.size} modified file(s) since last checkpoint",
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1780,10 +1931,7 @@ private fun WorkspaceDiffReviewList(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(changes, key = { it.path }) { item ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                ) {
+                ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1803,7 +1951,7 @@ private fun WorkspaceDiffReviewList(
                             )
                             Text(
                                 text = "+${item.additions}",
-                                color = ForgeGreen,
+                                color = tokens.successText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
@@ -1811,7 +1959,7 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "-${item.deletions}",
-                                color = ForgeRed,
+                                color = tokens.dangerText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
@@ -1824,6 +1972,7 @@ private fun WorkspaceDiffReviewList(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Keep file",
+                                    tint = tokens.successText,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
@@ -1834,16 +1983,20 @@ private fun WorkspaceDiffReviewList(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Revert file",
+                                    tint = tokens.dangerText,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
                         }
 
+                        val diffShape = RoundedCornerShape(8.dp)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF090D16))
+                                .clip(diffShape)
+                                .background(tokens.terminalBackground)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, diffShape)
+                                .horizontalScroll(rememberScrollState())
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
@@ -1854,11 +2007,16 @@ private fun WorkspaceDiffReviewList(
                                     DiffLineType.INFO -> "  "
                                     DiffLineType.CONTEXT -> "  "
                                 }
+                                val lineBg = when (line.type) {
+                                    DiffLineType.ADDITION -> tokens.diffAddedBackground
+                                    DiffLineType.DELETION -> tokens.diffRemovedBackground
+                                    else -> Color.Transparent
+                                }
                                 val lineColor = when (line.type) {
-                                    DiffLineType.ADDITION -> ForgeGreen
-                                    DiffLineType.DELETION -> ForgeRed
-                                    DiffLineType.INFO -> ForgeCyan
-                                    DiffLineType.CONTEXT -> Color(0xFFCBD5E1)
+                                    DiffLineType.ADDITION -> tokens.diffAddedText
+                                    DiffLineType.DELETION -> tokens.diffRemovedText
+                                    DiffLineType.INFO -> tokens.accentText
+                                    DiffLineType.CONTEXT -> tokens.terminalText.copy(alpha = 0.85f)
                                 }
                                 Text(
                                     text = prefix + line.text,
@@ -1866,6 +2024,11 @@ private fun WorkspaceDiffReviewList(
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 11.sp,
                                     lineHeight = 16.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(lineBg)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
                                 )
                             }
                         }
@@ -1914,7 +2077,7 @@ private fun NewWorkspaceFileDialog(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (191 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (193 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -1959,7 +2122,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -1975,6 +2137,7 @@ fun TerminalScreen(
     var commandInput by rememberSaveable { mutableStateOf("") }
     val scrollState = rememberScrollState()
     val clipboard = LocalClipboardManager.current
+    val tokens = LocalForgeThemeTokens.current
 
     val quickCommands = listOf(
         "uname -a",
@@ -1992,7 +2155,8 @@ fun TerminalScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -2044,20 +2208,20 @@ fun TerminalScreen(
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF090D16))
+                .background(tokens.terminalBackground)
                 .verticalScroll(scrollState)
                 .padding(12.dp),
         ) {
             SelectionContainer {
                 Text(
                     text = state.terminalOutput.ifEmpty { "Ready.\n" },
-                    color = Color(0xFFE2E8F0),
+                    color = tokens.terminalText,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
@@ -2065,9 +2229,10 @@ fun TerminalScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
         Surface(
-            tonalElevation = 2.dp,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -2085,7 +2250,7 @@ fun TerminalScreen(
                             fontFamily = FontFamily.Monospace,
                         )
                     },
-                    textStyle = ForgeCodeTextStyle,
+                    textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -2112,7 +2277,7 @@ fun TerminalScreen(
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -2123,6 +2288,7 @@ import android.annotation.SuppressLint
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -2132,7 +2298,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -2150,8 +2315,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -2172,7 +2335,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -2190,6 +2353,7 @@ fun AndroidBuildScreen(
     val build = state.androidBuild
     val isBuilding = build.phase == AndroidBuildPhase.BUILDING
     var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
+    val tokens = LocalForgeThemeTokens.current
 
     Column(
         modifier = Modifier
@@ -2197,10 +2361,7 @@ fun AndroidBuildScreen(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        ) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2222,17 +2383,20 @@ fun AndroidBuildScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    val (badgeBg, badgeFg) = when (build.phase) {
+                        AndroidBuildPhase.SUCCEEDED -> tokens.diffAddedBackground to tokens.successText
+                        AndroidBuildPhase.FAILED -> tokens.diffRemovedBackground to tokens.dangerText
+                        AndroidBuildPhase.BUILDING -> tokens.inlineCodeBackground to tokens.accentText
+                        else -> tokens.cardElevatedColor to MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                     Surface(
-                        color = when (build.phase) {
-                            AndroidBuildPhase.SUCCEEDED -> ForgeGreen.copy(alpha = 0.2f)
-                            AndroidBuildPhase.FAILED -> ForgeRed.copy(alpha = 0.2f)
-                            AndroidBuildPhase.BUILDING -> ForgeCyan.copy(alpha = 0.2f)
-                            else -> MaterialTheme.colorScheme.surface
-                        },
+                        color = badgeBg,
+                        contentColor = badgeFg,
                         shape = RoundedCornerShape(6.dp),
                     ) {
                         Text(
                             text = build.phase.displayBadge(),
+                            color = badgeFg,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -2313,23 +2477,27 @@ fun AndroidBuildScreen(
         }
 
         when (activeConsoleTab) {
-            "gradle" -> Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF090D16))
-                    .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
-            ) {
-                SelectionContainer {
-                    Text(
-                        text = build.log.ifBlank { "No Gradle build output yet. Tap 'Build & Install APK' to compile." },
-                        color = Color(0xFFE2E8F0),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        lineHeight = 17.sp,
-                    )
+            "gradle" -> {
+                val consoleShape = RoundedCornerShape(10.dp)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clip(consoleShape)
+                        .background(tokens.terminalBackground)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, consoleShape)
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = build.log.ifBlank { "No Gradle build output yet. Tap 'Build & Install APK' to compile." },
+                            color = tokens.terminalText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 17.sp,
+                        )
+                    }
                 }
             }
 
@@ -2363,6 +2531,7 @@ private fun BuildIssuesList(
     onOpenFile: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     if (issues.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -2383,10 +2552,7 @@ private fun BuildIssuesList(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(issues) { issue ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            ) {
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -2395,7 +2561,7 @@ private fun BuildIssuesList(
                         Icon(
                             imageVector = Icons.Default.Warning,
                             contentDescription = null,
-                            tint = ForgeRed,
+                            tint = tokens.dangerText,
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -2413,7 +2579,8 @@ private fun BuildIssuesList(
                             },
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
-                            color = ForgeCyan,
+                            fontWeight = FontWeight.SemiBold,
+                            color = tokens.accentText,
                         )
                     }
                     Text(
@@ -2452,6 +2619,7 @@ private fun LogcatPanel(
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
+    val tokens = LocalForgeThemeTokens.current
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2478,21 +2646,23 @@ private fun LogcatPanel(
             }
         }
 
+        val logcatShape = RoundedCornerShape(10.dp)
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF090D16))
+                .clip(logcatShape)
+                .background(tokens.terminalBackground)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, logcatShape)
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             items(logcat.lines, key = { it.id }) { line ->
                 val color = when (line.level) {
-                    AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> ForgeRed
-                    AndroidLogLevel.WARNING -> ForgeAmber
-                    AndroidLogLevel.INFO -> ForgeCyan
-                    else -> Color(0xFFCBD5E1)
+                    AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
+                    AndroidLogLevel.WARNING -> tokens.warningText
+                    AndroidLogLevel.INFO -> tokens.accentText
+                    else -> tokens.terminalText
                 }
                 Text(
                     text = line.text,
@@ -2514,6 +2684,9 @@ fun WebPreviewScreen(
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    val tokens = LocalForgeThemeTokens.current
+    val webViewBgArgb = tokens.terminalBackground.toArgb()
+
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
             webViewRef?.destroy()
@@ -2523,7 +2696,8 @@ fun WebPreviewScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
@@ -2577,7 +2751,7 @@ fun WebPreviewScreen(
                         Text(
                             text = "Open Ports:",
                             style = MaterialTheme.typography.labelSmall,
-                            color = ForgeGreen,
+                            color = tokens.successText,
                             fontWeight = FontWeight.Bold,
                         )
                         state.activeLocalPorts.forEach { port ->
@@ -2595,7 +2769,7 @@ fun WebPreviewScreen(
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         AndroidView(
             modifier = Modifier
@@ -2603,6 +2777,7 @@ fun WebPreviewScreen(
                 .fillMaxWidth(),
             factory = { context ->
                 WebView(context).apply {
+                    setBackgroundColor(webViewBgArgb)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.allowFileAccess = false
@@ -2618,6 +2793,7 @@ fun WebPreviewScreen(
                 }
             },
             update = { webView ->
+                webView.setBackgroundColor(webViewBgArgb)
                 webViewRef = webView
             },
         )
@@ -2627,7 +2803,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -2653,16 +2829,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -2672,6 +2844,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -2709,6 +2882,7 @@ fun SettingsScreenModern(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val tokens = LocalForgeThemeTokens.current
 
     var baseUrlInput by rememberSaveable(state.providerProfile.kind) {
         mutableStateOf(state.providerProfile.baseUrl)
@@ -2743,7 +2917,7 @@ fun SettingsScreenModern(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         // 1. Coding Agent Engine
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2755,17 +2929,10 @@ fun SettingsScreenModern(
                 )
                 AgentKind.entries.forEach { kind ->
                     val selected = state.agentKind == kind
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.selectAgent(kind) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (selected) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                        ),
+                    ForgeElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        selected = selected,
+                        onClick = { viewModel.selectAgent(kind) },
                     ) {
                         Row(
                             modifier = Modifier
@@ -2778,17 +2945,26 @@ fun SettingsScreenModern(
                                 Text(
                                     text = kind.displaySubtitle(),
                                     style = MaterialTheme.typography.bodySmall,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                 )
                             }
                             if (selected) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ForgeGreen)
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = tokens.successText,
+                                )
                             }
                         }
                     }
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
-                    Divider()
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = "Antigravity CLI Configuration",
                         style = MaterialTheme.typography.titleSmall,
@@ -2848,7 +3024,7 @@ fun SettingsScreenModern(
         // 2. AI Provider & Keystore Multi-Key Vault
         val availableProviders = providersForAgent(state.agentKind)
         if (availableProviders.isNotEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2945,7 +3121,8 @@ fun SettingsScreenModern(
                         Text(
                             text = msg,
                             style = MaterialTheme.typography.bodySmall,
-                            color = ForgeCyan,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
 
@@ -2977,7 +3154,7 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Divider()
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = "API Keys for ${state.providerProfile.kind.displayTitle()} (Auto-Rotation Pool)",
                         style = MaterialTheme.typography.titleSmall,
@@ -2995,7 +3172,7 @@ fun SettingsScreenModern(
                             Icon(
                                 imageVector = if (keyInfo.isActive) Icons.Default.CheckCircle else Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = if (keyInfo.isActive) ForgeGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (keyInfo.isActive) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -3051,7 +3228,7 @@ fun SettingsScreenModern(
         }
 
         // 3. GitHub Integration & Two-Way Repository Sync
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -3065,15 +3242,13 @@ fun SettingsScreenModern(
                     Text(
                         text = status,
                         style = MaterialTheme.typography.bodySmall,
-                        color = ForgeCyan,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
 
                 state.githubDeviceCode?.let { dc ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -3147,7 +3322,7 @@ fun SettingsScreenModern(
                         Text(
                             text = "Connected as @${state.githubLogin}",
                             fontWeight = FontWeight.Bold,
-                            color = ForgeGreen,
+                            color = tokens.successText,
                         )
                         OutlinedButton(onClick = viewModel::disconnectGitHub) {
                             Text("Disconnect")
@@ -3184,7 +3359,7 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Divider()
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = "Create & Push New GitHub Repository",
                         style = MaterialTheme.typography.titleSmall,
@@ -3233,7 +3408,7 @@ fun SettingsScreenModern(
                     }
 
                     if (state.githubRepos.isNotEmpty()) {
-                        Divider()
+                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text(
                             text = "Your Repositories (tap Clone to import into Workspace):",
                             style = MaterialTheme.typography.labelMedium,
@@ -3267,7 +3442,7 @@ fun SettingsScreenModern(
         }
 
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -3322,8 +3497,8 @@ fun SettingsScreenModern(
             }
         }
 
-        // 5. Security, Language & Appearance
-        Card(modifier = Modifier.fillMaxWidth()) {
+        // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -3352,6 +3527,7 @@ fun SettingsScreenModern(
                     }
                 }
 
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
                     text = "Interface Language",
                     style = MaterialTheme.typography.labelMedium,
@@ -3372,23 +3548,88 @@ fun SettingsScreenModern(
                     }
                 }
 
-                Row(
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+                Text(
+                    text = "Theme Mode (${activeThemeMode.title})",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Theme Mode: ${state.themeMode.uppercase()}", fontWeight = FontWeight.SemiBold)
-                    OutlinedButton(onClick = viewModel::toggleThemeMode) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Switch Theme")
+                    ForgeThemeMode.entries.forEach { mode ->
+                        val selected = mode == activeThemeMode
+                        ForgeElevatedCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = selected,
+                            onClick = { viewModel.setThemeMode(mode.id) },
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = mode.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            } else {
+                                                tokens.cardContainerColor
+                                            },
+                                        ) {
+                                            Text(
+                                                text = mode.badge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (selected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    tokens.accentText
+                                                },
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = mode.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = tokens.successText,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
         // 6. Application Self-Updater
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -3402,7 +3643,8 @@ fun SettingsScreenModern(
                     Text(
                         text = msg,
                         style = MaterialTheme.typography.bodySmall,
-                        color = ForgeCyan,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
                 Button(onClick = { viewModel.checkForAppUpdates() }) {

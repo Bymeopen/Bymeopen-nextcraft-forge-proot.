@@ -31,15 +31,12 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -68,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,6 +96,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             ForgeTopBar(
                 state = state,
@@ -105,7 +104,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 onDeleteProject = viewModel::deleteProject,
                 onOpenNewProject = { showNewProjectDialog = true },
                 onSelectAgent = viewModel::selectAgent,
-                onToggleTheme = viewModel::toggleThemeMode,
+                onSelectThemeMode = viewModel::setThemeMode,
             )
         },
         bottomBar = {
@@ -124,37 +123,42 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             state.bannerMessage?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = banner,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = viewModel::dismissBanner,
-                            modifier = Modifier.size(24.dp),
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Dismiss",
-                                modifier = Modifier.size(16.dp),
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(18.dp),
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = banner,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = viewModel::dismissBanner,
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                         }
+                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
             }
@@ -190,14 +194,18 @@ private fun ForgeTopBar(
     onDeleteProject: (String) -> Unit,
     onOpenNewProject: () -> Unit,
     onSelectAgent: (AgentKind) -> Unit,
-    onToggleTheme: () -> Unit,
+    onSelectThemeMode: (String) -> Unit,
 ) {
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
+    var themeMenuExpanded by remember { mutableStateOf(false) }
     val activeProject = state.activeProject
+    val tokens = LocalForgeThemeTokens.current
+    val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
 
     Surface(
-        tonalElevation = 2.dp,
+        color = tokens.topBarContainerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -213,9 +221,9 @@ private fun ForgeTopBar(
                         .clip(CircleShape)
                         .background(
                             if (state.rootAvailable && state.runtimeInstalled) {
-                                ForgeGreen
+                                tokens.successText
                             } else {
-                                ForgeAmber
+                                tokens.warningText
                             },
                         ),
                 )
@@ -233,6 +241,7 @@ private fun ForgeTopBar(
                             Text(
                                 text = activeProject?.name ?: "NextCraft Forge",
                                 style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -364,11 +373,50 @@ private fun ForgeTopBar(
                 IconButton(onClick = onOpenNewProject) {
                     Icon(Icons.Default.Add, contentDescription = "New Project")
                 }
-                IconButton(onClick = onToggleTheme) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Toggle theme")
+
+                // Perbaikan THEME-BUG-021: Lencana pemilih 4 mode tema langsung di Top Bar
+                Box {
+                    AssistChip(
+                        onClick = { themeMenuExpanded = true },
+                        label = {
+                            Text(
+                                text = activeThemeMode.badge,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        },
+                    )
+                    DropdownMenu(
+                        expanded = themeMenuExpanded,
+                        onDismissRequest = { themeMenuExpanded = false },
+                    ) {
+                        ForgeThemeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(mode.title, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = mode.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                leadingIcon = {
+                                    if (mode == activeThemeMode) {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                },
+                                onClick = {
+                                    themeMenuExpanded = false
+                                    onSelectThemeMode(mode.id)
+                                },
+                            )
+                        }
+                    }
                 }
             }
-            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
@@ -379,33 +427,62 @@ private fun ForgeBottomBar(
     changedCount: Int,
     onSelectTab: (ForgeTab) -> Unit,
 ) {
-    NavigationBar {
-        ForgeTab.entries.forEach { tab ->
-            val label = when (tab) {
-                ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
-                else -> tab.title
+    val tokens = LocalForgeThemeTokens.current
+    val shape = if (tokens.isGlass) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = if (tokens.isGlass) 16.dp else 0.dp,
+                vertical = if (tokens.isGlass) 10.dp else 0.dp,
+            ),
+    ) {
+        Surface(
+            shape = shape,
+            color = tokens.bottomBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = if (tokens.isGlass) tokens.cardBorderStroke else null,
+            shadowElevation = if (tokens.isGlass) 12.dp else 0.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column {
+                if (!tokens.isGlass) {
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                }
+                NavigationBar(
+                    containerColor = Color.Transparent,
+                    tonalElevation = 0.dp,
+                ) {
+                    ForgeTab.entries.forEach { tab ->
+                        val label = when (tab) {
+                            ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
+                            else -> tab.title
+                        }
+                        val icon = when (tab) {
+                            ForgeTab.AGENT -> Icons.Default.Star
+                            ForgeTab.FILES -> Icons.Default.Edit
+                            ForgeTab.TERMINAL -> Icons.Default.List
+                            ForgeTab.ANDROID -> Icons.Default.Build
+                            ForgeTab.PREVIEW -> Icons.Default.PlayArrow
+                            ForgeTab.SETTINGS -> Icons.Default.Settings
+                        }
+                        NavigationBarItem(
+                            selected = activeTab == tab,
+                            onClick = { onSelectTab(tab) },
+                            icon = { Icon(icon, contentDescription = label) },
+                            label = {
+                                Text(
+                                    text = label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontSize = 11.sp,
+                                )
+                            },
+                        )
+                    }
+                }
             }
-            val icon = when (tab) {
-                ForgeTab.AGENT -> Icons.Default.Star
-                ForgeTab.FILES -> Icons.Default.Edit
-                ForgeTab.TERMINAL -> Icons.Default.List
-                ForgeTab.ANDROID -> Icons.Default.Build
-                ForgeTab.PREVIEW -> Icons.Default.PlayArrow
-                ForgeTab.SETTINGS -> Icons.Default.Settings
-            }
-            NavigationBarItem(
-                selected = activeTab == tab,
-                onClick = { onSelectTab(tab) },
-                icon = { Icon(icon, contentDescription = label) },
-                label = {
-                    Text(
-                        text = label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontSize = 11.sp,
-                    )
-                },
-            )
         }
     }
 }
@@ -422,6 +499,7 @@ private fun RuntimeOnboardingScreen(
 ) {
     val snap = state.setupSnapshot
     val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
+    val tokens = LocalForgeThemeTokens.current
 
     Column(
         modifier = Modifier
@@ -433,6 +511,7 @@ private fun RuntimeOnboardingScreen(
         Text(
             text = "NextCraft Forge",
             style = MaterialTheme.typography.headlineLarge,
+            color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
         )
         Text(
@@ -441,10 +520,7 @@ private fun RuntimeOnboardingScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        ) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -467,7 +543,7 @@ private fun RuntimeOnboardingScreen(
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -475,6 +551,7 @@ private fun RuntimeOnboardingScreen(
                 Text(
                     text = "Select Development Stacks to Provision",
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                 )
                 DevStack.entries.forEach { stack ->
                     val selected = stack in state.selectedDevStacks
@@ -502,7 +579,7 @@ private fun RuntimeOnboardingScreen(
                             Text(
                                 text = stack.installsSummary,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = tokens.accentText,
                             )
                         }
                     }
@@ -512,7 +589,7 @@ private fun RuntimeOnboardingScreen(
 
         if (snap.status != RuntimeSetupStatus.IDLE) {
             val pct = (snap.progress.coerceIn(0f, 1f) * 100f).toInt()
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -522,7 +599,7 @@ private fun RuntimeOnboardingScreen(
                         Text(
                             text = err,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = tokens.dangerText,
                         )
                     }
                     LinearProgressIndicator(
@@ -589,6 +666,7 @@ private fun StatusCheckRow(
     ok: Boolean,
     detail: String,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -596,7 +674,7 @@ private fun StatusCheckRow(
         Icon(
             imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
             contentDescription = null,
-            tint = if (ok) ForgeGreen else ForgeAmber,
+            tint = if (ok) tokens.successText else tokens.warningText,
             modifier = Modifier.size(20.dp),
         )
         Spacer(modifier = Modifier.width(10.dp))

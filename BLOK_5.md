@@ -17,18 +17,18 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1821 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1833 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (82 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (90 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/ModelLabels.kt` (74 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidBuildText.kt` (62 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (433 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (478 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -37,25 +37,31 @@ import android.Manifest
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.ui.AppStrings
+import com.nextcraft.forge.ui.LocalForgeThemeTokens
 import com.nextcraft.forge.ui.LocaleHelper
 import com.nextcraft.forge.ui.MainViewModel
 import com.nextcraft.forge.ui.NextCraftForgeApp
 import com.nextcraft.forge.ui.NextCraftForgeTheme
+import com.nextcraft.forge.ui.resolveThemeTokens
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -74,6 +80,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyPreComposeWindowTheme()
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
@@ -84,14 +91,29 @@ class MainActivity : ComponentActivity() {
                 if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
             }
             NextCraftForgeTheme(themeMode = state.themeMode) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
+                val tokens = LocalForgeThemeTokens.current
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(tokens.canvasBrush),
                 ) {
                     NextCraftForgeApp(viewModel = viewModel)
                 }
             }
         }
+    }
+
+    private fun applyPreComposeWindowTheme() {
+        val savedTheme = AppPreferences(this).themeMode
+        val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
+        window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
+        window.statusBarColor = tokens.topBarContainerColor.toArgb()
+        window.navigationBarColor = tokens.bottomBarContainerColor.toArgb()
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !tokens.isDark
+        controller.isAppearanceLightNavigationBars = !tokens.isDark
     }
 
     override fun onResume() {
@@ -125,7 +147,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1821 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1833 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -317,7 +339,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
-    private val _state = MutableStateFlow(ForgeUiState())
+    private val _state = MutableStateFlow(
+        ForgeUiState(
+            themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
+            languageCode = AppStrings.languageCode(application),
+        ),
+    )
     val state: StateFlow<ForgeUiState> = _state.asStateFlow()
 
     private var activeAgentJob: Job? = null
@@ -404,7 +431,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDevStacks = savedStacks,
                     installedDevStacks = installedStacks,
                     agentKind = savedAgent,
-                    themeMode = preferences.themeMode,
+                    themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
                     projects = projects,
                     activeProjectId = firstProject.id,
                     chats = chats,
@@ -1929,10 +1956,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setThemeMode(mode: String) {
+        val resolved = ForgeThemeMode.fromStored(mode).id
+        preferences.themeMode = resolved
+        _state.update { it.copy(themeMode = resolved) }
+    }
+
     fun toggleThemeMode() {
-        val next = if (_state.value.themeMode == "dark") "light" else "dark"
-        preferences.themeMode = next
-        _state.update { it.copy(themeMode = next) }
+        val current = ForgeThemeMode.fromStored(_state.value.themeMode)
+        val entries = ForgeThemeMode.entries
+        val next = entries[(current.ordinal + 1) % entries.size]
+        setThemeMode(next.id)
     }
 
     fun dismissBanner() {
@@ -1981,7 +2015,7 @@ enum class AppLanguage(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (82 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -2000,7 +2034,20 @@ class LocalizedContext(
     base: Context,
     private val configContext: Context,
 ) : ContextWrapper(base) {
-    override fun getResources(): Resources = configContext.resources
+    override fun getResources(): Resources {
+        val baseConfig = baseContext?.resources?.configuration
+        val targetResources = configContext.resources
+        if (baseConfig != null) {
+            val nightMask = baseConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            val currentMask = targetResources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            if (nightMask != currentMask) {
+                targetResources.configuration.uiMode =
+                    (targetResources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightMask
+            }
+        }
+        return targetResources
+    }
+
     override fun getAssets(): AssetManager = configContext.assets
 }
 
@@ -2027,6 +2074,7 @@ object LocaleHelper {
             }
             if (systemLocale != null) {
                 Locale.setDefault(systemLocale)
+                context.resources.configuration.setLayoutDirection(systemLocale)
             }
             return context
         }
@@ -2070,23 +2118,50 @@ object AppStrings {
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (90 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
+// Base palette constants retained for binary/source compatibility
 val ForgeCyan = Color(0xFF38BDF8)
 val ForgeGreen = Color(0xFF34D399)
 val ForgeAmber = Color(0xFFFBBF24)
@@ -2096,47 +2171,331 @@ val ForgeDarkBg = Color(0xFF0B0F17)
 val ForgeDarkSurface = Color(0xFF111827)
 val ForgeDarkElevated = Color(0xFF1E293B)
 
-private val ForgeDarkColorScheme = darkColorScheme(
-    primary = ForgeCyan,
-    onPrimary = Color(0xFF06202E),
-    primaryContainer = Color(0xFF0E3A53),
-    onPrimaryContainer = Color(0xFFBAE6FD),
-    secondary = ForgeGreen,
-    onSecondary = Color(0xFF052E1E),
-    secondaryContainer = Color(0xFF064E3B),
-    onSecondaryContainer = Color(0xFFA7F3D0),
-    tertiary = ForgePurple,
-    onTertiary = Color(0xFF23134D),
-    background = ForgeDarkBg,
-    onBackground = Color(0xFFE2E8F0),
-    surface = ForgeDarkSurface,
-    onSurface = Color(0xFFE2E8F0),
-    surfaceVariant = ForgeDarkElevated,
-    onSurfaceVariant = Color(0xFF94A3B8),
-    error = ForgeRed,
-    onError = Color(0xFF450A0A),
+/**
+ * Four selectable theme modes supported by NextCraft Forge:
+ * 1. SYSTEM ("system") — Bawaan System (follows Android OS day/night setting)
+ * 2. DARK   ("dark")   — Gelap (Zuan Tinted Obsidian Dark)
+ * 3. GLASS  ("glass")  — Glass (Zuan Liquid Glassmorphism & Floating Capsule)
+ * 4. WHITE  ("white")  — White (Airbnb Daylight 100% Pure White)
+ */
+enum class ForgeThemeMode(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val badge: String,
+) {
+    SYSTEM(
+        id = "system",
+        title = "Bawaan System",
+        subtitle = "Ikuti mode siang/malam otomatis dari sistem Android",
+        badge = "AUTO",
+    ),
+    DARK(
+        id = "dark",
+        title = "Gelap (Dark)",
+        subtitle = "Obsidian kontras tinggi untuk pemrograman malam hari",
+        badge = "DARK",
+    ),
+    GLASS(
+        id = "glass",
+        title = "Glass (Liquid)",
+        subtitle = "Permukaan kaca transparan 3D & kapsul navigasi melayang",
+        badge = "GLASS",
+    ),
+    WHITE(
+        id = "white",
+        title = "White (Daylight)",
+        subtitle = "Putih murni bersih bergaya editorial siang hari",
+        badge = "WHITE",
+    );
+
+    companion object {
+        fun fromStored(raw: String?): ForgeThemeMode {
+            val clean = raw?.trim()?.lowercase().orEmpty()
+            if (clean == "light") return WHITE
+            return entries.firstOrNull { it.id == clean } ?: DARK
+        }
+    }
+}
+
+@Immutable
+data class ForgeThemeTokens(
+    val mode: ForgeThemeMode,
+    val isDark: Boolean,
+    val isGlass: Boolean,
+    val isWhite: Boolean,
+    val canvasBrush: Brush,
+    val windowBackgroundArgb: Int,
+    val cardContainerColor: Color,
+    val cardElevatedColor: Color,
+    val cardBorderStroke: BorderStroke?,
+    val elevatedBorderStroke: BorderStroke?,
+    val cardCornerRadius: Dp,
+    val topBarContainerColor: Color,
+    val bottomBarContainerColor: Color,
+    val accentText: Color,
+    val successText: Color,
+    val warningText: Color,
+    val dangerText: Color,
+    val terminalBackground: Color,
+    val terminalHeaderBackground: Color,
+    val terminalText: Color,
+    val inlineCodeBackground: Color,
+    val diffAddedBackground: Color,
+    val diffAddedText: Color,
+    val diffRemovedBackground: Color,
+    val diffRemovedText: Color,
+    val selectionColors: TextSelectionColors,
 )
 
-private val ForgeLightColorScheme = lightColorScheme(
+// 1. DARK (Zuan Tinted Obsidian Dark)
+private val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
+    primary = Color(0xFF38BDF8),
+    onPrimary = Color(0xFF06202E),
+    primaryContainer = Color(0xFF12354E),
+    onPrimaryContainer = Color(0xFFD8F3FF),
+    secondary = Color(0xFF34D399),
+    onSecondary = Color(0xFF052E1E),
+    secondaryContainer = Color(0xFF0A3F30),
+    onSecondaryContainer = Color(0xFFA7F3D0),
+    tertiary = Color(0xFFA78BFA),
+    onTertiary = Color(0xFF23134D),
+    background = Color(0xFF0B0F17),
+    onBackground = Color(0xFFEEEEEE),
+    surface = Color(0xFF111827),
+    onSurface = Color(0xFFEEEEEE),
+    surfaceVariant = Color(0xFF161F30),
+    onSurfaceVariant = Color(0xFF94A3B8),
+    outline = Color(0xFF263248),
+    outlineVariant = Color(0xFF1E293B),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0xFF3B1219),
+    onErrorContainer = Color(0xFFFECACA),
+    surfaceTint = Color.Transparent,
+)
+
+// 2. GLASS (Zuan Liquid Glassmorphism)
+private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
+    primary = Color(0xFF60A5FA),
+    onPrimary = Color(0xFF061830),
+    primaryContainer = Color(0x731E3A8A),
+    onPrimaryContainer = Color(0xFFE0F2FE),
+    secondary = Color(0xFF2DD4BF),
+    onSecondary = Color(0xFF042F2E),
+    secondaryContainer = Color(0x73115E59),
+    onSecondaryContainer = Color(0xFFCCFBF1),
+    tertiary = Color(0xFFC084FC),
+    onTertiary = Color(0xFF2E1065),
+    background = Color(0xFF090D16),
+    onBackground = Color(0xFFF8FAFC),
+    surface = Color(0xF0111827), // High opacity for DropdownMenu & AlertDialog popups (THEME-BUG-022)
+    onSurface = Color(0xFFF8FAFC),
+    surfaceVariant = Color(0xA61E293B),
+    onSurfaceVariant = Color(0xFFCBD5E1),
+    outline = Color(0x47FFFFFF),
+    outlineVariant = Color(0x24FFFFFF),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0x99450A0A),
+    onErrorContainer = Color(0xFFFEE2E2),
+    surfaceTint = Color.Transparent,
+)
+
+// 3. WHITE (Airbnb Daylight 100% Pure White)
+private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFFFF385C),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFF0F3),
+    onPrimaryContainer = Color(0xFF8A0F28),
+    secondary = Color(0xFF008489),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE6F6F7),
+    onSecondaryContainer = Color(0xFF004F52),
+    tertiary = Color(0xFF6D28D9),
+    onTertiary = Color(0xFFFFFFFF),
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF222222),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF222222),
+    surfaceVariant = Color(0xFFF7F7F7),
+    onSurfaceVariant = Color(0xFF717171),
+    outline = Color(0xFFDDDDDD),
+    outlineVariant = Color(0xFFEBEBEB),
+    error = Color(0xFFC13515),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFF0EE),
+    onErrorContainer = Color(0xFF7A1C08),
+    surfaceTint = Color.Transparent,
+)
+
+// 4. SYSTEM LIGHT (Daylight Clean Blue-Slate when OS is in Light Mode)
+private val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
     primary = Color(0xFF0284C7),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFE0F2FE),
     onPrimaryContainer = Color(0xFF0C4A6E),
-    secondary = Color(0xFF059669),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFD1FAE5),
-    onSecondaryContainer = Color(0xFF064E3B),
-    tertiary = Color(0xFF7C3AED),
-    onTertiary = Color(0xFFFFFFFF),
     background = Color(0xFFF8FAFC),
-    onBackground = Color(0xFF0F172A),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF0F172A),
-    surfaceVariant = Color(0xFFE2E8F0),
-    onSurfaceVariant = Color(0xFF475569),
-    error = Color(0xFFDC2626),
-    onError = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFFF1F5F9),
+    outline = Color(0xFFCBD5E1),
+    outlineVariant = Color(0xFFE2E8F0),
 )
+
+// Pre-allocated Brushes & Tokens to prevent recomposition allocation thrashing (THEME-BUG-025)
+private val GlassSpecularBorderBrush = Brush.linearGradient(
+    colors = listOf(
+        Color.White.copy(alpha = 0.28f),
+        Color.White.copy(alpha = 0.07f),
+    ),
+)
+
+private val GlassInnerBorderBrush = Brush.linearGradient(
+    colors = listOf(
+        Color.White.copy(alpha = 0.18f),
+        Color.White.copy(alpha = 0.04f),
+    ),
+)
+
+private val GlassCosmicCanvasBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF090D16),
+        Color(0xFF122038),
+        Color(0xFF0B1324),
+    ),
+)
+
+private val DarkThemeTokens = ForgeThemeTokens(
+    mode = ForgeThemeMode.DARK,
+    isDark = true,
+    isGlass = false,
+    isWhite = false,
+    canvasBrush = SolidColor(Color(0xFF0B0F17)),
+    windowBackgroundArgb = Color(0xFF0B0F17).toArgb(),
+    cardContainerColor = Color(0xFF151E2E),
+    cardElevatedColor = Color(0xFF1E293B),
+    cardBorderStroke = BorderStroke(1.dp, Color(0xFF263248)),
+    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFF334155)),
+    cardCornerRadius = 18.dp,
+    topBarContainerColor = Color(0xFF111827),
+    bottomBarContainerColor = Color(0xFF111827),
+    accentText = Color(0xFF38BDF8),
+    successText = Color(0xFF34D399),
+    warningText = Color(0xFFFBBF24),
+    dangerText = Color(0xFFF87171),
+    terminalBackground = Color(0xFF080B11),
+    terminalHeaderBackground = Color(0xFF131B2E),
+    terminalText = Color(0xFFE2E8F0),
+    inlineCodeBackground = Color(0x3338BDF8),
+    diffAddedBackground = Color(0xFF063626),
+    diffAddedText = Color(0xFF6EE7B7),
+    diffRemovedBackground = Color(0xFF450A0A),
+    diffRemovedText = Color(0xFFFCA5A5),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFF38BDF8),
+        backgroundColor = Color(0xFF38BDF8).copy(alpha = 0.32f),
+    ),
+)
+
+private val GlassThemeTokens = ForgeThemeTokens(
+    mode = ForgeThemeMode.GLASS,
+    isDark = true,
+    isGlass = true,
+    isWhite = false,
+    canvasBrush = GlassCosmicCanvasBrush,
+    windowBackgroundArgb = Color(0xFF090D16).toArgb(),
+    cardContainerColor = Color(0xFF1E293B).copy(alpha = 0.62f),
+    cardElevatedColor = Color(0xFF283750).copy(alpha = 0.72f),
+    cardBorderStroke = BorderStroke(0.8.dp, GlassSpecularBorderBrush),
+    elevatedBorderStroke = BorderStroke(0.8.dp, GlassInnerBorderBrush),
+    cardCornerRadius = 22.dp,
+    topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.76f),
+    bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.82f),
+    accentText = Color(0xFF60A5FA),
+    successText = Color(0xFF2DD4BF),
+    warningText = Color(0xFFFBBF24),
+    dangerText = Color(0xFFF87171),
+    terminalBackground = Color(0xFF090D16).copy(alpha = 0.72f),
+    terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.78f),
+    terminalText = Color(0xFFF8FAFC),
+    inlineCodeBackground = Color(0x4060A5FA),
+    diffAddedBackground = Color(0x73064E3B),
+    diffAddedText = Color(0xFFA7F3D0),
+    diffRemovedBackground = Color(0x737F1D1D),
+    diffRemovedText = Color(0xFFFECACA),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFF60A5FA),
+        backgroundColor = Color(0xFF60A5FA).copy(alpha = 0.35f),
+    ),
+)
+
+private val WhiteThemeTokens = ForgeThemeTokens(
+    mode = ForgeThemeMode.WHITE,
+    isDark = false,
+    isGlass = false,
+    isWhite = true,
+    canvasBrush = SolidColor(Color(0xFFFFFFFF)),
+    windowBackgroundArgb = Color(0xFFFFFFFF).toArgb(),
+    cardContainerColor = Color(0xFFFFFFFF),
+    cardElevatedColor = Color(0xFFF7F7F7),
+    cardBorderStroke = BorderStroke(1.dp, Color(0xFFDDDDDD)),
+    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFFE5E5E5)),
+    cardCornerRadius = 16.dp,
+    topBarContainerColor = Color(0xFFFFFFFF),
+    bottomBarContainerColor = Color(0xFFFFFFFF),
+    accentText = Color(0xFFD90B38),  // WCAG > 5.2:1 on White
+    successText = Color(0xFF008A05), // Airbnb Kazan Green (WCAG > 4.6:1)
+    warningText = Color(0xFFB45309), // Deep Amber (WCAG > 5.0:1)
+    dangerText = Color(0xFFC13515),  // Airbnb Arches Red
+    terminalBackground = Color(0xFFF7F7F7),
+    terminalHeaderBackground = Color(0xFFEBEBEB),
+    terminalText = Color(0xFF222222),
+    inlineCodeBackground = Color(0xFFFFF0F3),
+    diffAddedBackground = Color(0xFFEAFBF0),
+    diffAddedText = Color(0xFF006338),
+    diffRemovedBackground = Color(0xFFFFF0F0),
+    diffRemovedText = Color(0xFFC13515),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFFFF385C),
+        backgroundColor = Color(0xFFFF385C).copy(alpha = 0.22f),
+    ),
+)
+
+private val SystemDarkThemeTokens = DarkThemeTokens.copy(mode = ForgeThemeMode.SYSTEM)
+
+private val SystemLightThemeTokens = WhiteThemeTokens.copy(
+    mode = ForgeThemeMode.SYSTEM,
+    isWhite = false,
+    canvasBrush = SolidColor(Color(0xFFF8FAFC)),
+    windowBackgroundArgb = Color(0xFFF8FAFC).toArgb(),
+    cardElevatedColor = Color(0xFFF1F5F9),
+    cardBorderStroke = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+    accentText = Color(0xFF0369A1),
+    inlineCodeBackground = Color(0xFFE0F2FE),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFF0284C7),
+        backgroundColor = Color(0xFF0284C7).copy(alpha = 0.22f),
+    ),
+)
+
+fun resolveThemeTokens(
+    themeMode: String?,
+    systemDark: Boolean,
+): Pair<ColorScheme, ForgeThemeTokens> {
+    return when (ForgeThemeMode.fromStored(themeMode)) {
+        ForgeThemeMode.SYSTEM -> if (systemDark) {
+            ZuanDarkColorScheme to SystemDarkThemeTokens
+        } else {
+            SystemLightColorScheme to SystemLightThemeTokens
+        }
+        ForgeThemeMode.DARK -> ZuanDarkColorScheme to DarkThemeTokens
+        ForgeThemeMode.GLASS -> ZuanGlassColorScheme to GlassThemeTokens
+        ForgeThemeMode.WHITE -> AirbnbWhiteColorScheme to WhiteThemeTokens
+    }
+}
+
+val LocalForgeThemeTokens = staticCompositionLocalOf<ForgeThemeTokens> { DarkThemeTokens }
 
 val ForgeCodeTextStyle = TextStyle(
     fontFamily = FontFamily.Monospace,
@@ -2152,16 +2511,120 @@ fun NextCraftForgeTheme(
     themeMode: String = "dark",
     content: @Composable () -> Unit,
 ) {
-    val useDark = when (themeMode.lowercase()) {
-        "light" -> false
-        "system" -> isSystemInDarkTheme()
-        else -> true
+    val systemDark = isSystemInDarkTheme()
+    val mode = ForgeThemeMode.fromStored(themeMode)
+    val (colorScheme, tokens) = remember(mode, systemDark) {
+        resolveThemeTokens(mode.id, systemDark)
     }
-    MaterialTheme(
-        colorScheme = if (useDark) ForgeDarkColorScheme else ForgeLightColorScheme,
-        typography = ForgeTypography,
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val activity = view.context.findActivity() ?: return@SideEffect
+            val window = activity.window
+            window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
+            window.statusBarColor = tokens.topBarContainerColor.toArgb()
+            window.navigationBarColor = if (tokens.isGlass) {
+                Color(0xFF0B1324).toArgb()
+            } else {
+                tokens.bottomBarContainerColor.toArgb()
+            }
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !tokens.isDark
+            controller.isAppearanceLightNavigationBars = !tokens.isDark
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalForgeThemeTokens provides tokens,
+        LocalTextSelectionColors provides tokens.selectionColors,
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = ForgeTypography,
+            content = content,
+        )
+    }
+}
+
+/**
+ * Primary Z=1 surface card with theme-specific border (Hairline in White, Specular Gradient in Glass,
+ * Slate Outline in Dark) and explicit contentColor to prevent THEME-BUG-019 & THEME-BUG-026.
+ */
+@Composable
+fun ForgeThemedCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    containerColor: Color = LocalForgeThemeTokens.current.cardContainerColor,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    border: BorderStroke? = LocalForgeThemeTokens.current.cardBorderStroke,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    val shape = RoundedCornerShape(tokens.cardCornerRadius)
+    val cardModifier = if (onClick != null) {
+        modifier
+            .clip(shape)
+            .clickable(onClick = onClick)
+    } else {
+        modifier
+    }
+    Card(
+        modifier = cardModifier,
+        shape = shape,
+        border = border,
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
         content = content,
     )
+}
+
+/**
+ * Nested Z=1.5 elevated sub-card that stays visually distinct inside [ForgeThemedCard] across all 4 themes
+ * (fixes THEME-BUG-019 where inner cards disappeared into outer cards).
+ */
+@Composable
+fun ForgeElevatedCard(
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape((tokens.cardCornerRadius - 4.dp).coerceAtLeast(10.dp))
+    val container = if (selected) scheme.primaryContainer else tokens.cardElevatedColor
+    val contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurface
+    val border = if (selected) {
+        BorderStroke(1.2.dp, scheme.primary.copy(alpha = 0.65f))
+    } else {
+        tokens.elevatedBorderStroke
+    }
+    val cardModifier = if (onClick != null) {
+        modifier
+            .clip(shape)
+            .clickable(onClick = onClick)
+    } else {
+        modifier
+    }
+    Card(
+        modifier = cardModifier,
+        shape = shape,
+        border = border,
+        colors = CardDefaults.cardColors(
+            containerColor = container,
+            contentColor = contentColor,
+        ),
+        content = content,
+    )
+}
+
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 ```
 
@@ -2317,7 +2780,7 @@ fun AndroidBuildIssue.formatForAgentPrompt(): String = buildString {
 
 ---
 
-## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (433 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (478 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -2391,22 +2854,27 @@ fun MarkdownText(
 ) {
     val blocks = remember(markdown) { parseMarkdown(markdown) }
     val resolvedColor = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface else color
+    val tokens = LocalForgeThemeTokens.current
 
     SelectionContainer {
         Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             blocks.forEach { block ->
                 when (block) {
-                    is MarkdownBlock.Header -> HeaderBlock(block, resolvedColor)
-                    is MarkdownBlock.CodeBlock -> CodeSnippetBlock(block, onRunCode)
-                    is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor)
-                    is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor)
-                    is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor)
+                    is MarkdownBlock.Header -> HeaderBlock(block, resolvedColor, tokens)
+                    is MarkdownBlock.CodeBlock -> CodeSnippetBlock(block, onRunCode, tokens)
+                    is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor, tokens)
+                    is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor, tokens)
+                    is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
                     )
                     is MarkdownBlock.Paragraph -> Text(
-                        text = parseInlineMarkdown(block.text),
+                        text = parseInlineMarkdown(
+                            text = block.text,
+                            accentColor = tokens.accentText,
+                            inlineCodeBg = tokens.inlineCodeBackground,
+                        ),
                         color = resolvedColor,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -2417,14 +2885,22 @@ fun MarkdownText(
 }
 
 @Composable
-private fun HeaderBlock(block: MarkdownBlock.Header, color: Color) {
+private fun HeaderBlock(
+    block: MarkdownBlock.Header,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     val style = when (block.level) {
         1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
         2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
         else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
     }
     Text(
-        text = parseInlineMarkdown(block.text),
+        text = parseInlineMarkdown(
+            text = block.text,
+            accentColor = tokens.accentText,
+            inlineCodeBg = tokens.inlineCodeBackground,
+        ),
         style = style,
         color = color,
         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
@@ -2432,7 +2908,11 @@ private fun HeaderBlock(block: MarkdownBlock.Header, color: Color) {
 }
 
 @Composable
-private fun BulletBlock(block: MarkdownBlock.BulletItem, color: Color) {
+private fun BulletBlock(
+    block: MarkdownBlock.BulletItem,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2441,12 +2921,16 @@ private fun BulletBlock(block: MarkdownBlock.BulletItem, color: Color) {
     ) {
         Text(
             text = "•",
-            color = ForgeCyan,
+            color = tokens.accentText,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(end = 8.dp),
         )
         Text(
-            text = parseInlineMarkdown(block.text),
+            text = parseInlineMarkdown(
+                text = block.text,
+                accentColor = tokens.accentText,
+                inlineCodeBg = tokens.inlineCodeBackground,
+            ),
             color = color,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -2454,19 +2938,27 @@ private fun BulletBlock(block: MarkdownBlock.BulletItem, color: Color) {
 }
 
 @Composable
-private fun NumberedBlock(block: MarkdownBlock.NumberedItem, color: Color) {
+private fun NumberedBlock(
+    block: MarkdownBlock.NumberedItem,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
             text = "${block.number}.",
-            color = ForgeCyan,
+            color = tokens.accentText,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(end = 8.dp),
         )
         Text(
-            text = parseInlineMarkdown(block.text),
+            text = parseInlineMarkdown(
+                text = block.text,
+                accentColor = tokens.accentText,
+                inlineCodeBg = tokens.inlineCodeBackground,
+            ),
             color = color,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -2474,24 +2966,32 @@ private fun NumberedBlock(block: MarkdownBlock.NumberedItem, color: Color) {
 }
 
 @Composable
-private fun BlockQuoteView(block: MarkdownBlock.BlockQuote, color: Color) {
+private fun BlockQuoteView(
+    block: MarkdownBlock.BlockQuote,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .background(tokens.cardElevatedColor.copy(alpha = 0.65f))
             .padding(8.dp),
     ) {
         Box(
             modifier = Modifier
                 .width(3.dp)
                 .height(20.dp)
-                .background(ForgeCyan),
+                .background(tokens.accentText),
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = parseInlineMarkdown(block.text),
-            color = color.copy(alpha = 0.9f),
+            text = parseInlineMarkdown(
+                text = block.text,
+                accentColor = tokens.accentText,
+                inlineCodeBg = tokens.inlineCodeBackground,
+            ),
+            color = color.copy(alpha = 0.92f),
             fontStyle = FontStyle.Italic,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -2502,31 +3002,33 @@ private fun BlockQuoteView(block: MarkdownBlock.BlockQuote, color: Color) {
 private fun CodeSnippetBlock(
     block: MarkdownBlock.CodeBlock,
     onRunCode: ((String) -> Unit)?,
+    tokens: ForgeThemeTokens,
 ) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
     val isShell = block.language.lowercase() in setOf("sh", "bash", "zsh", "shell", "console")
+    val shape = RoundedCornerShape(10.dp)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), RoundedCornerShape(8.dp)),
-        color = Color(0xFF090D16),
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
+        color = tokens.terminalBackground,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF131B2E))
+                    .background(tokens.terminalHeaderBackground)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
                     text = block.language.ifBlank { "code" }.uppercase(),
-                    color = Color(0xFF94A3B8),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
@@ -2540,7 +3042,7 @@ private fun CodeSnippetBlock(
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = "Run in Terminal",
-                                tint = ForgeGreen,
+                                tint = tokens.successText,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -2560,7 +3062,7 @@ private fun CodeSnippetBlock(
                         Icon(
                             imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
                             contentDescription = "Copy Code",
-                            tint = if (copied) ForgeGreen else Color(0xFF94A3B8),
+                            tint = if (copied) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(15.dp),
                         )
                     }
@@ -2574,7 +3076,7 @@ private fun CodeSnippetBlock(
             ) {
                 Text(
                     text = block.code,
-                    color = Color(0xFFE2E8F0),
+                    color = tokens.terminalText,
                     style = ForgeCodeTextStyle,
                 )
             }
@@ -2663,7 +3165,11 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     return blocks
 }
 
-private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+private fun parseInlineMarkdown(
+    text: String,
+    accentColor: Color,
+    inlineCodeBg: Color,
+): AnnotatedString = buildAnnotatedString {
     var i = 0
     val n = text.length
     while (i < n) {
@@ -2698,8 +3204,9 @@ private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedS
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            background = Color(0x3338BDF8),
-                            color = ForgeCyan,
+                            background = inlineCodeBg,
+                            color = accentColor,
+                            fontWeight = FontWeight.Medium,
                         ),
                     ) {
                         append(text.substring(i + 1, end))
@@ -2734,8 +3241,9 @@ private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedS
                     val label = text.substring(i + 1, closeBracket)
                     withStyle(
                         SpanStyle(
-                            color = ForgeCyan,
+                            color = accentColor,
                             textDecoration = TextDecoration.Underline,
+                            fontWeight = FontWeight.Medium,
                         ),
                     ) {
                         append(label)

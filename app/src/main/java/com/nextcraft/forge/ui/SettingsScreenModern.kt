@@ -21,16 +21,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -40,6 +36,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,6 +74,7 @@ fun SettingsScreenModern(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val tokens = LocalForgeThemeTokens.current
 
     var baseUrlInput by rememberSaveable(state.providerProfile.kind) {
         mutableStateOf(state.providerProfile.baseUrl)
@@ -111,7 +109,7 @@ fun SettingsScreenModern(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         // 1. Coding Agent Engine
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -123,17 +121,10 @@ fun SettingsScreenModern(
                 )
                 AgentKind.entries.forEach { kind ->
                     val selected = state.agentKind == kind
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.selectAgent(kind) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (selected) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                        ),
+                    ForgeElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        selected = selected,
+                        onClick = { viewModel.selectAgent(kind) },
                     ) {
                         Row(
                             modifier = Modifier
@@ -146,17 +137,26 @@ fun SettingsScreenModern(
                                 Text(
                                     text = kind.displaySubtitle(),
                                     style = MaterialTheme.typography.bodySmall,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                 )
                             }
                             if (selected) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ForgeGreen)
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = tokens.successText,
+                                )
                             }
                         }
                     }
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
-                    Divider()
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = "Antigravity CLI Configuration",
                         style = MaterialTheme.typography.titleSmall,
@@ -216,7 +216,7 @@ fun SettingsScreenModern(
         // 2. AI Provider & Keystore Multi-Key Vault
         val availableProviders = providersForAgent(state.agentKind)
         if (availableProviders.isNotEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -313,7 +313,8 @@ fun SettingsScreenModern(
                         Text(
                             text = msg,
                             style = MaterialTheme.typography.bodySmall,
-                            color = ForgeCyan,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
 
@@ -345,7 +346,7 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Divider()
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = "API Keys for ${state.providerProfile.kind.displayTitle()} (Auto-Rotation Pool)",
                         style = MaterialTheme.typography.titleSmall,
@@ -363,7 +364,7 @@ fun SettingsScreenModern(
                             Icon(
                                 imageVector = if (keyInfo.isActive) Icons.Default.CheckCircle else Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = if (keyInfo.isActive) ForgeGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (keyInfo.isActive) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -419,7 +420,7 @@ fun SettingsScreenModern(
         }
 
         // 3. GitHub Integration & Two-Way Repository Sync
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -433,15 +434,13 @@ fun SettingsScreenModern(
                     Text(
                         text = status,
                         style = MaterialTheme.typography.bodySmall,
-                        color = ForgeCyan,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
 
                 state.githubDeviceCode?.let { dc ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -515,7 +514,7 @@ fun SettingsScreenModern(
                         Text(
                             text = "Connected as @${state.githubLogin}",
                             fontWeight = FontWeight.Bold,
-                            color = ForgeGreen,
+                            color = tokens.successText,
                         )
                         OutlinedButton(onClick = viewModel::disconnectGitHub) {
                             Text("Disconnect")
@@ -552,7 +551,7 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Divider()
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = "Create & Push New GitHub Repository",
                         style = MaterialTheme.typography.titleSmall,
@@ -601,7 +600,7 @@ fun SettingsScreenModern(
                     }
 
                     if (state.githubRepos.isNotEmpty()) {
-                        Divider()
+                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text(
                             text = "Your Repositories (tap Clone to import into Workspace):",
                             style = MaterialTheme.typography.labelMedium,
@@ -635,7 +634,7 @@ fun SettingsScreenModern(
         }
 
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -690,8 +689,8 @@ fun SettingsScreenModern(
             }
         }
 
-        // 5. Security, Language & Appearance
-        Card(modifier = Modifier.fillMaxWidth()) {
+        // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -720,6 +719,7 @@ fun SettingsScreenModern(
                     }
                 }
 
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
                     text = "Interface Language",
                     style = MaterialTheme.typography.labelMedium,
@@ -740,23 +740,88 @@ fun SettingsScreenModern(
                     }
                 }
 
-                Row(
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+                Text(
+                    text = "Theme Mode (${activeThemeMode.title})",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Theme Mode: ${state.themeMode.uppercase()}", fontWeight = FontWeight.SemiBold)
-                    OutlinedButton(onClick = viewModel::toggleThemeMode) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Switch Theme")
+                    ForgeThemeMode.entries.forEach { mode ->
+                        val selected = mode == activeThemeMode
+                        ForgeElevatedCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = selected,
+                            onClick = { viewModel.setThemeMode(mode.id) },
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = mode.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            } else {
+                                                tokens.cardContainerColor
+                                            },
+                                        ) {
+                                            Text(
+                                                text = mode.badge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (selected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    tokens.accentText
+                                                },
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = mode.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = tokens.successText,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
         // 6. Application Self-Updater
-        Card(modifier = Modifier.fillMaxWidth()) {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -770,7 +835,8 @@ fun SettingsScreenModern(
                     Text(
                         text = msg,
                         style = MaterialTheme.typography.bodySmall,
-                        color = ForgeCyan,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
                 Button(onClick = { viewModel.checkForAppUpdates() }) {

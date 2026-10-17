@@ -14,7 +14,20 @@ class LocalizedContext(
     base: Context,
     private val configContext: Context,
 ) : ContextWrapper(base) {
-    override fun getResources(): Resources = configContext.resources
+    override fun getResources(): Resources {
+        val baseConfig = baseContext?.resources?.configuration
+        val targetResources = configContext.resources
+        if (baseConfig != null) {
+            val nightMask = baseConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            val currentMask = targetResources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            if (nightMask != currentMask) {
+                targetResources.configuration.uiMode =
+                    (targetResources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightMask
+            }
+        }
+        return targetResources
+    }
+
     override fun getAssets(): AssetManager = configContext.assets
 }
 
@@ -41,6 +54,7 @@ object LocaleHelper {
             }
             if (systemLocale != null) {
                 Locale.setDefault(systemLocale)
+                context.resources.configuration.setLayoutDirection(systemLocale)
             }
             return context
         }

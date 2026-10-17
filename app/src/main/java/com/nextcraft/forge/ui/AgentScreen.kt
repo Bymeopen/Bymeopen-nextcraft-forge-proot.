@@ -4,7 +4,9 @@ package com.nextcraft.forge.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +91,7 @@ fun AgentScreen(
     val listState = rememberLazyListState()
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val tokens = LocalForgeThemeTokens.current
     // hasOfficialCredential() may spawn `su` and block for seconds; never call it during composition.
     val hasAgyCredential by produceState(
         initialValue = true,
@@ -132,7 +135,8 @@ fun AgentScreen(
 
         state.activeStatusLine?.let { statusLine ->
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                color = tokens.cardElevatedColor,
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -148,7 +152,8 @@ fun AgentScreen(
                         Text(
                             text = statusLine,
                             style = MaterialTheme.typography.labelMedium,
-                            color = ForgeCyan,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
@@ -163,6 +168,7 @@ fun AgentScreen(
                             }
                         }
                     }
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -205,9 +211,10 @@ fun AgentScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
         Surface(
-            tonalElevation = 2.dp,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -233,7 +240,10 @@ fun AgentScreen(
                 if (state.sessionRunning) {
                     Button(
                         onClick = viewModel::stopActiveTask,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
                     ) {
                         Icon(Icons.Default.Close, contentDescription = "Stop")
                     }
@@ -263,56 +273,61 @@ private fun ChatTabsRow(
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = tokens.topBarContainerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            state.chats.forEach { chat ->
-                val selected = chat.id == state.activeChatId
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelectChat(chat.id) },
-                    label = {
-                        Text(
-                            text = chat.displayTitle(),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    trailingIcon = if (state.chats.size > 1 && selected) {
-                        {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Delete chat",
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clickable { onDeleteChat(chat.id) },
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.chats.forEach { chat ->
+                    val selected = chat.id == state.activeChatId
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onSelectChat(chat.id) },
+                        label = {
+                            Text(
+                                text = chat.displayTitle(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                        }
-                    } else {
-                        null
+                        },
+                        trailingIcon = if (state.chats.size > 1 && selected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Delete chat",
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable { onDeleteChat(chat.id) },
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                }
+                AssistChip(
+                    onClick = onCreateChat,
+                    label = { Text("New Chat") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
                     },
                 )
             }
-            AssistChip(
-                onClick = onCreateChat,
-                label = { Text("New Chat") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                },
-            )
+            Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
@@ -326,13 +341,13 @@ private fun AntigravityOAuthBanner(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val tokens = LocalForgeThemeTokens.current
     var verificationCode by rememberSaveable { mutableStateOf("") }
 
-    Card(
+    ForgeThemedCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -342,7 +357,7 @@ private fun AntigravityOAuthBanner(
                 Icon(
                     imageVector = Icons.Default.Lock,
                     contentDescription = null,
-                    tint = ForgeCyan,
+                    tint = tokens.accentText,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -426,11 +441,18 @@ private fun ToolApprovalCard(
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
+    val tokens = LocalForgeThemeTokens.current
+    val shape = RoundedCornerShape(tokens.cardCornerRadius)
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        shape = shape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -456,14 +478,16 @@ private fun ToolApprovalCard(
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
+                val cmdShape = RoundedCornerShape(8.dp)
                 Text(
                     text = cmd,
                     style = ForgeCodeTextStyle,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = tokens.terminalText,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.25f))
+                        .clip(cmdShape)
+                        .background(tokens.terminalBackground)
+                        .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), cmdShape)
                         .padding(8.dp),
                 )
             }
@@ -471,13 +495,25 @@ private fun ToolApprovalCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                OutlinedButton(onClick = onReject) {
+                OutlinedButton(
+                    onClick = onReject,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Deny")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Button(onClick = onApprove) {
+                Button(
+                    onClick = onApprove,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Approve Execution")
@@ -509,6 +545,7 @@ private fun EmptyAgentWelcome(
         Text(
             text = state.agentKind.displayTitle(),
             style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
         )
         Spacer(modifier = Modifier.height(4.dp))
@@ -525,11 +562,9 @@ private fun EmptyAgentWelcome(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             suggestions.forEach { prompt ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onQuickPrompt(prompt) },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                ForgeThemedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onQuickPrompt(prompt) },
                 ) {
                     Text(
                         text = prompt,
@@ -549,15 +584,29 @@ private fun ChatMessageCard(
     onRunSnippet: (String) -> Unit,
 ) {
     var expandTools by remember { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
     val bgColor = if (message.fromUser) {
-        MaterialTheme.colorScheme.primaryContainer
+        scheme.primaryContainer
     } else {
-        MaterialTheme.colorScheme.surfaceVariant
+        tokens.cardContainerColor
+    }
+    val textColor = if (message.fromUser) {
+        scheme.onPrimaryContainer
+    } else {
+        scheme.onSurface
+    }
+    val border = if (message.fromUser) {
+        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.35f))
+    } else {
+        tokens.cardBorderStroke
     }
 
-    Card(
+    ForgeThemedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = bgColor),
+        containerColor = bgColor,
+        contentColor = textColor,
+        border = border,
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -573,9 +622,9 @@ private fun ChatMessageCard(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = if (message.fromUser) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                        scheme.onPrimaryContainer
                     } else {
-                        ForgeCyan
+                        tokens.accentText
                     },
                 )
                 if (message.workItems.isNotEmpty()) {
@@ -589,6 +638,7 @@ private fun ChatMessageCard(
                         Text(
                             text = "${message.workItems.size} tool steps",
                             style = MaterialTheme.typography.labelSmall,
+                            color = textColor,
                         )
                         Icon(
                             imageVector = if (expandTools) {
@@ -597,6 +647,7 @@ private fun ChatMessageCard(
                                 Icons.Default.KeyboardArrowDown
                             },
                             contentDescription = null,
+                            tint = textColor,
                             modifier = Modifier.size(16.dp),
                         )
                     }
@@ -610,13 +661,14 @@ private fun ChatMessageCard(
             if (message.text.isNotBlank()) {
                 MarkdownText(
                     markdown = message.text,
+                    color = textColor,
                     onRunCode = onRunSnippet,
                 )
             } else if (!message.fromUser) {
                 Text(
                     text = "Thinking…",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant,
                 )
             }
         }
@@ -625,11 +677,14 @@ private fun ChatMessageCard(
 
 @Composable
 private fun ToolActivityList(items: List<ActivityItem>) {
+    val tokens = LocalForgeThemeTokens.current
+    val shape = RoundedCornerShape(8.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+            .clip(shape)
+            .background(tokens.cardElevatedColor)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -641,7 +696,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
                     contentDescription = null,
-                    tint = if (item.isComplete) ForgeGreen else ForgeAmber,
+                    tint = if (item.isComplete) tokens.successText else tokens.warningText,
                     modifier = Modifier
                         .size(15.dp)
                         .padding(top = 2.dp),
@@ -651,12 +706,14 @@ private fun ToolActivityList(items: List<ActivityItem>) {
                     Text(
                         text = item.title,
                         style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                     )
                     if (item.detail.isNotBlank()) {
                         Text(
                             text = item.detail,
                             style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis,

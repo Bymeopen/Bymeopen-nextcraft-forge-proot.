@@ -4,25 +4,31 @@ import android.Manifest
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.ui.AppStrings
+import com.nextcraft.forge.ui.LocalForgeThemeTokens
 import com.nextcraft.forge.ui.LocaleHelper
 import com.nextcraft.forge.ui.MainViewModel
 import com.nextcraft.forge.ui.NextCraftForgeApp
 import com.nextcraft.forge.ui.NextCraftForgeTheme
+import com.nextcraft.forge.ui.resolveThemeTokens
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -41,6 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyPreComposeWindowTheme()
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
@@ -51,14 +58,29 @@ class MainActivity : ComponentActivity() {
                 if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
             }
             NextCraftForgeTheme(themeMode = state.themeMode) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
+                val tokens = LocalForgeThemeTokens.current
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(tokens.canvasBrush),
                 ) {
                     NextCraftForgeApp(viewModel = viewModel)
                 }
             }
         }
+    }
+
+    private fun applyPreComposeWindowTheme() {
+        val savedTheme = AppPreferences(this).themeMode
+        val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
+        window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
+        window.statusBarColor = tokens.topBarContainerColor.toArgb()
+        window.navigationBarColor = tokens.bottomBarContainerColor.toArgb()
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !tokens.isDark
+        controller.isAppearanceLightNavigationBars = !tokens.isDark
     }
 
     override fun onResume() {

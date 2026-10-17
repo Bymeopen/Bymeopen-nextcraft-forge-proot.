@@ -3,7 +3,9 @@
 package com.nextcraft.forge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -29,8 +32,6 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -67,10 +68,12 @@ fun FilesAndDiffScreen(
 ) {
     var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -116,7 +119,7 @@ fun FilesAndDiffScreen(
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         when (mode) {
             "files" -> WorkspaceTreeList(
@@ -186,6 +189,7 @@ private fun WorkspaceTreeList(
         return
     }
 
+    val scheme = MaterialTheme.colorScheme
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
@@ -193,13 +197,19 @@ private fun WorkspaceTreeList(
     ) {
         items(entries, key = { it.path }) { entry ->
             val isSelected = entry.path == selectedPath
+            val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
+            val secondaryTextColor = if (isSelected) {
+                scheme.onPrimaryContainer.copy(alpha = 0.78f)
+            } else {
+                scheme.onSurfaceVariant
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
+                            scheme.primaryContainer
                         } else {
                             Color.Transparent
                         },
@@ -222,7 +232,8 @@ private fun WorkspaceTreeList(
                     Text(
                         text = entry.name,
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (entry.isDirectory) FontWeight.Bold else FontWeight.Normal,
+                        color = primaryTextColor,
+                        fontWeight = if (entry.isDirectory || isSelected) FontWeight.Bold else FontWeight.Normal,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -230,7 +241,7 @@ private fun WorkspaceTreeList(
                     Text(
                         text = entry.path,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondaryTextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -239,7 +250,7 @@ private fun WorkspaceTreeList(
                     Text(
                         text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondaryTextColor,
                     )
                 }
             }
@@ -257,6 +268,7 @@ private fun WorkspaceFileEditor(
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     if (selectedPath == null) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -290,6 +302,7 @@ private fun WorkspaceFileEditor(
             Text(
                 text = selectedPath,
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
@@ -300,7 +313,8 @@ private fun WorkspaceFileEditor(
                 Text(
                     text = msg,
                     style = MaterialTheme.typography.labelSmall,
-                    color = ForgeGreen,
+                    color = tokens.successText,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }
@@ -314,7 +328,7 @@ private fun WorkspaceFileEditor(
         OutlinedTextField(
             value = content,
             onValueChange = onContentChange,
-            textStyle = ForgeCodeTextStyle,
+            textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -332,6 +346,7 @@ private fun WorkspaceDiffReviewList(
     onKeepAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalForgeThemeTokens.current
     if (changes.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -357,6 +372,7 @@ private fun WorkspaceDiffReviewList(
             Text(
                 text = "${changes.size} modified file(s) since last checkpoint",
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -375,10 +391,7 @@ private fun WorkspaceDiffReviewList(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(changes, key = { it.path }) { item ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                ) {
+                ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -398,7 +411,7 @@ private fun WorkspaceDiffReviewList(
                             )
                             Text(
                                 text = "+${item.additions}",
-                                color = ForgeGreen,
+                                color = tokens.successText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
@@ -406,7 +419,7 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "-${item.deletions}",
-                                color = ForgeRed,
+                                color = tokens.dangerText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
@@ -419,6 +432,7 @@ private fun WorkspaceDiffReviewList(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Keep file",
+                                    tint = tokens.successText,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
@@ -429,16 +443,20 @@ private fun WorkspaceDiffReviewList(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Revert file",
+                                    tint = tokens.dangerText,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
                         }
 
+                        val diffShape = RoundedCornerShape(8.dp)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF090D16))
+                                .clip(diffShape)
+                                .background(tokens.terminalBackground)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, diffShape)
+                                .horizontalScroll(rememberScrollState())
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
@@ -449,11 +467,16 @@ private fun WorkspaceDiffReviewList(
                                     DiffLineType.INFO -> "  "
                                     DiffLineType.CONTEXT -> "  "
                                 }
+                                val lineBg = when (line.type) {
+                                    DiffLineType.ADDITION -> tokens.diffAddedBackground
+                                    DiffLineType.DELETION -> tokens.diffRemovedBackground
+                                    else -> Color.Transparent
+                                }
                                 val lineColor = when (line.type) {
-                                    DiffLineType.ADDITION -> ForgeGreen
-                                    DiffLineType.DELETION -> ForgeRed
-                                    DiffLineType.INFO -> ForgeCyan
-                                    DiffLineType.CONTEXT -> Color(0xFFCBD5E1)
+                                    DiffLineType.ADDITION -> tokens.diffAddedText
+                                    DiffLineType.DELETION -> tokens.diffRemovedText
+                                    DiffLineType.INFO -> tokens.accentText
+                                    DiffLineType.CONTEXT -> tokens.terminalText.copy(alpha = 0.85f)
                                 }
                                 Text(
                                     text = prefix + line.text,
@@ -461,6 +484,11 @@ private fun WorkspaceDiffReviewList(
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 11.sp,
                                     lineHeight = 16.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(lineBg)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
                                 )
                             }
                         }

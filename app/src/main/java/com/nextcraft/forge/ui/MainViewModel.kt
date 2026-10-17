@@ -187,7 +187,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
-    private val _state = MutableStateFlow(ForgeUiState())
+    private val _state = MutableStateFlow(
+        ForgeUiState(
+            themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
+            languageCode = AppStrings.languageCode(application),
+        ),
+    )
     val state: StateFlow<ForgeUiState> = _state.asStateFlow()
 
     private var activeAgentJob: Job? = null
@@ -274,7 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDevStacks = savedStacks,
                     installedDevStacks = installedStacks,
                     agentKind = savedAgent,
-                    themeMode = preferences.themeMode,
+                    themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
                     projects = projects,
                     activeProjectId = firstProject.id,
                     chats = chats,
@@ -1799,10 +1804,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setThemeMode(mode: String) {
+        val resolved = ForgeThemeMode.fromStored(mode).id
+        preferences.themeMode = resolved
+        _state.update { it.copy(themeMode = resolved) }
+    }
+
     fun toggleThemeMode() {
-        val next = if (_state.value.themeMode == "dark") "light" else "dark"
-        preferences.themeMode = next
-        _state.update { it.copy(themeMode = next) }
+        val current = ForgeThemeMode.fromStored(_state.value.themeMode)
+        val entries = ForgeThemeMode.entries
+        val next = entries[(current.ordinal + 1) % entries.size]
+        setThemeMode(next.id)
     }
 
     fun dismissBanner() {

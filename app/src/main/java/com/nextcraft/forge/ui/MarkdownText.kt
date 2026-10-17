@@ -69,22 +69,27 @@ fun MarkdownText(
 ) {
     val blocks = remember(markdown) { parseMarkdown(markdown) }
     val resolvedColor = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface else color
+    val tokens = LocalForgeThemeTokens.current
 
     SelectionContainer {
         Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             blocks.forEach { block ->
                 when (block) {
-                    is MarkdownBlock.Header -> HeaderBlock(block, resolvedColor)
-                    is MarkdownBlock.CodeBlock -> CodeSnippetBlock(block, onRunCode)
-                    is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor)
-                    is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor)
-                    is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor)
+                    is MarkdownBlock.Header -> HeaderBlock(block, resolvedColor, tokens)
+                    is MarkdownBlock.CodeBlock -> CodeSnippetBlock(block, onRunCode, tokens)
+                    is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor, tokens)
+                    is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor, tokens)
+                    is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
                     )
                     is MarkdownBlock.Paragraph -> Text(
-                        text = parseInlineMarkdown(block.text),
+                        text = parseInlineMarkdown(
+                            text = block.text,
+                            accentColor = tokens.accentText,
+                            inlineCodeBg = tokens.inlineCodeBackground,
+                        ),
                         color = resolvedColor,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -95,14 +100,22 @@ fun MarkdownText(
 }
 
 @Composable
-private fun HeaderBlock(block: MarkdownBlock.Header, color: Color) {
+private fun HeaderBlock(
+    block: MarkdownBlock.Header,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     val style = when (block.level) {
         1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
         2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
         else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
     }
     Text(
-        text = parseInlineMarkdown(block.text),
+        text = parseInlineMarkdown(
+            text = block.text,
+            accentColor = tokens.accentText,
+            inlineCodeBg = tokens.inlineCodeBackground,
+        ),
         style = style,
         color = color,
         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
@@ -110,7 +123,11 @@ private fun HeaderBlock(block: MarkdownBlock.Header, color: Color) {
 }
 
 @Composable
-private fun BulletBlock(block: MarkdownBlock.BulletItem, color: Color) {
+private fun BulletBlock(
+    block: MarkdownBlock.BulletItem,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -119,12 +136,16 @@ private fun BulletBlock(block: MarkdownBlock.BulletItem, color: Color) {
     ) {
         Text(
             text = "•",
-            color = ForgeCyan,
+            color = tokens.accentText,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(end = 8.dp),
         )
         Text(
-            text = parseInlineMarkdown(block.text),
+            text = parseInlineMarkdown(
+                text = block.text,
+                accentColor = tokens.accentText,
+                inlineCodeBg = tokens.inlineCodeBackground,
+            ),
             color = color,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -132,19 +153,27 @@ private fun BulletBlock(block: MarkdownBlock.BulletItem, color: Color) {
 }
 
 @Composable
-private fun NumberedBlock(block: MarkdownBlock.NumberedItem, color: Color) {
+private fun NumberedBlock(
+    block: MarkdownBlock.NumberedItem,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
             text = "${block.number}.",
-            color = ForgeCyan,
+            color = tokens.accentText,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(end = 8.dp),
         )
         Text(
-            text = parseInlineMarkdown(block.text),
+            text = parseInlineMarkdown(
+                text = block.text,
+                accentColor = tokens.accentText,
+                inlineCodeBg = tokens.inlineCodeBackground,
+            ),
             color = color,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -152,24 +181,32 @@ private fun NumberedBlock(block: MarkdownBlock.NumberedItem, color: Color) {
 }
 
 @Composable
-private fun BlockQuoteView(block: MarkdownBlock.BlockQuote, color: Color) {
+private fun BlockQuoteView(
+    block: MarkdownBlock.BlockQuote,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .background(tokens.cardElevatedColor.copy(alpha = 0.65f))
             .padding(8.dp),
     ) {
         Box(
             modifier = Modifier
                 .width(3.dp)
                 .height(20.dp)
-                .background(ForgeCyan),
+                .background(tokens.accentText),
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = parseInlineMarkdown(block.text),
-            color = color.copy(alpha = 0.9f),
+            text = parseInlineMarkdown(
+                text = block.text,
+                accentColor = tokens.accentText,
+                inlineCodeBg = tokens.inlineCodeBackground,
+            ),
+            color = color.copy(alpha = 0.92f),
             fontStyle = FontStyle.Italic,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -180,31 +217,33 @@ private fun BlockQuoteView(block: MarkdownBlock.BlockQuote, color: Color) {
 private fun CodeSnippetBlock(
     block: MarkdownBlock.CodeBlock,
     onRunCode: ((String) -> Unit)?,
+    tokens: ForgeThemeTokens,
 ) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
     val isShell = block.language.lowercase() in setOf("sh", "bash", "zsh", "shell", "console")
+    val shape = RoundedCornerShape(10.dp)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), RoundedCornerShape(8.dp)),
-        color = Color(0xFF090D16),
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
+        color = tokens.terminalBackground,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF131B2E))
+                    .background(tokens.terminalHeaderBackground)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
                     text = block.language.ifBlank { "code" }.uppercase(),
-                    color = Color(0xFF94A3B8),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
@@ -218,7 +257,7 @@ private fun CodeSnippetBlock(
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = "Run in Terminal",
-                                tint = ForgeGreen,
+                                tint = tokens.successText,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -238,7 +277,7 @@ private fun CodeSnippetBlock(
                         Icon(
                             imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
                             contentDescription = "Copy Code",
-                            tint = if (copied) ForgeGreen else Color(0xFF94A3B8),
+                            tint = if (copied) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(15.dp),
                         )
                     }
@@ -252,7 +291,7 @@ private fun CodeSnippetBlock(
             ) {
                 Text(
                     text = block.code,
-                    color = Color(0xFFE2E8F0),
+                    color = tokens.terminalText,
                     style = ForgeCodeTextStyle,
                 )
             }
@@ -341,7 +380,11 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     return blocks
 }
 
-private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+private fun parseInlineMarkdown(
+    text: String,
+    accentColor: Color,
+    inlineCodeBg: Color,
+): AnnotatedString = buildAnnotatedString {
     var i = 0
     val n = text.length
     while (i < n) {
@@ -376,8 +419,9 @@ private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedS
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            background = Color(0x3338BDF8),
-                            color = ForgeCyan,
+                            background = inlineCodeBg,
+                            color = accentColor,
+                            fontWeight = FontWeight.Medium,
                         ),
                     ) {
                         append(text.substring(i + 1, end))
@@ -412,8 +456,9 @@ private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedS
                     val label = text.substring(i + 1, closeBracket)
                     withStyle(
                         SpanStyle(
-                            color = ForgeCyan,
+                            color = accentColor,
                             textDecoration = TextDecoration.Underline,
+                            fontWeight = FontWeight.Medium,
                         ),
                     ) {
                         append(label)

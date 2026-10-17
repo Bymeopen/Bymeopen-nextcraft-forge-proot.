@@ -40,7 +40,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -56,6 +55,7 @@ fun TerminalScreen(
     var commandInput by rememberSaveable { mutableStateOf("") }
     val scrollState = rememberScrollState()
     val clipboard = LocalClipboardManager.current
+    val tokens = LocalForgeThemeTokens.current
 
     val quickCommands = listOf(
         "uname -a",
@@ -73,7 +73,8 @@ fun TerminalScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -125,20 +126,20 @@ fun TerminalScreen(
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF090D16))
+                .background(tokens.terminalBackground)
                 .verticalScroll(scrollState)
                 .padding(12.dp),
         ) {
             SelectionContainer {
                 Text(
                     text = state.terminalOutput.ifEmpty { "Ready.\n" },
-                    color = Color(0xFFE2E8F0),
+                    color = tokens.terminalText,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
@@ -146,9 +147,10 @@ fun TerminalScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant)
         Surface(
-            tonalElevation = 2.dp,
+            color = tokens.topBarContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -166,7 +168,7 @@ fun TerminalScreen(
                             fontFamily = FontFamily.Monospace,
                         )
                     },
-                    textStyle = ForgeCodeTextStyle,
+                    textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
