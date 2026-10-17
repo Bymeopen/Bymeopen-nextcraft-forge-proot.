@@ -164,3 +164,496 @@ Ketika arsitektur 4-Tema ini dieksekusi ke kode sumber, perubahan hanya menyentu
    - Menampilkan pemilih 4 mode tema (`Bawaan System`, `Gelap`, `Glass`, `White`) yang langsung mengubah tampilan seluruh aplikasi secara *real-time* tanpa perlu me-restart aktivitas.
 5. **`AgentScreen.kt`, `FilesAndDiffScreen.kt`, `TerminalScreen.kt`, `AndroidAndPreviewScreen.kt`**:
    - Mengganti warna permukaan terminal/diff/kartu yang sebelumnya *hardcoded* dengan token adaptif dari `LocalForgeThemeTokens.current` sehingga keempat mode (`System`, `Gelap`, `Glass`, `White`) tampil 100% konsisten di seluruh 7 layar.
+
+
+---
+
+## 6. Hasil Audit Mendalam: 12 Bug Tema pada Kode Saat Ini (`THEME-BUG-001` s/d `THEME-BUG-012`)
+
+Hasil bedah baris-demi-baris terhadap seluruh file UI di `app/src/main/java/com/nextcraft/forge/ui/`, `MainActivity.kt`, dan `res/values/themes.xml` menemukan **12 bug nyata** yang menyebabkan kebocoran warna gelap, teks tidak terbaca di mode terang/putih, serta terhalangnya efek kaca transparan di mode Glass:
+
+| ID Bug | Lokasi File & Baris | Deskripsi Bug & Akar Masalah | Dampak Visual (Terutama di Mode `White`, `System`, & `Glass`) | Solusi Arsitektural di `ForgeThemeTokens` |
+| :--- | :--- | :--- | :--- | :--- |
+| **THEME-BUG-001** | `MainViewModel.kt:1802-1806`<br>`Theme.kt:80-84` | `toggleThemeMode()` hanya membalik `"dark"` ↔ `"light"`. Cabang `"system"` di `Theme.kt:82` adalah *dead code* yang tidak pernah bisa dipilih dari UI, serta belum ada fungsi `setThemeMode(mode: String)` untuk `"system"`, `"dark"`, `"glass"`, dan `"white"`. | Pengguna tidak bisa memilih **Bawaan System**, **Glass**, maupun **White**. | Tambahkan `enum class ForgeThemeMode` (`SYSTEM`, `DARK`, `GLASS`, `WHITE`) dan fungsi `setThemeMode(mode: String)` + rotasi 4-arah di `toggleThemeMode()`. |
+| **THEME-BUG-002** | `res/values/themes.xml:4-5`<br>`Theme.kt:76-90` | `android:statusBarColor` dan `android:navigationBarColor` dikunci mati (*hardcoded*) ke `#0B0F17`, dan `NextCraftForgeTheme` tidak memiliki `SideEffect` untuk mengatur `WindowInsetsControllerCompat.isAppearanceLightStatusBars`. | Saat memilih **White** atau **System (Siang)**, layar aplikasi menjadi putih tetapi Status Bar & Navigation Bar sistem Android tetap hitam pekat `#0B0F17`. | Tambahkan `SideEffect` di `NextCraftForgeTheme` yang menyelaraskan warna Status/Nav Bar dengan `colorScheme.background` dan mengatur ikon gelap (`isAppearanceLightStatusBars = !tokens.isDark`). |
+| **THEME-BUG-003** | `Theme.kt:24-64` | `ForgeDarkColorScheme` dan `ForgeLightColorScheme` tidak mendefinisikan `outline`, `outlineVariant`, `errorContainer`, `onErrorContainer`, dan `surfaceTint`. | Material 3 jatuh ke warna *default* ungu-abu (`#79747E`) untuk border `OutlinedTextField` / `Divider`, serta memberi efek warna ungu/biru (*tonal tint*) pada `Surface(tonalElevation = 2.dp)` di mode **White**. | Definisikan seluruh slot `ColorScheme` secara eksplisit (termasuk `outline = #DDDDDD` dan `surfaceTint = Color.Transparent` pada mode **White**). |
+| **THEME-BUG-004** | `MarkdownText.kt:122, 142, 167, 194, 200, 255, 379-380, 415` | 1) `CodeSnippetBlock` mengunci latar `#090D16` & header `#131B2E`.<br>2) `parseInlineMarkdown` bukan `@Composable` dan mengunci warna `ForgeCyan` (`#38BDF8`) untuk `` `inline code` ``, tautan, *bullet* (`•`), dan nomor urut. | Di mode **White**, blok kode menjadi kotak hitam pekat yang merusak estetika putih bersih, dan teks `` `inline code` `` berwarna biru muda `#38BDF8` di atas latar terang hanya memiliki rasio kontras **1.95:1** (nyaris tak terbaca). | Gunakan `LocalForgeThemeTokens.current` (`codeBlockBg`, `codeHeaderBg`, `codeText`, `inlineCodeBg`, `accentText`) di dalam `MarkdownText`. |
+| **THEME-BUG-005** | `AgentScreen.kt:552-614` | Pada `ChatMessageCard`, gelembung pesan pengguna memakai `containerColor = primaryContainer`, tetapi `MarkdownText(markdown = message.text)` di baris `611` tidak diberi parameter `color`, sehingga jatuh ke `colorScheme.onSurface`. | Jika `primaryContainer` memiliki kontras berbeda dengan `surface` (mis. aksen Rausch/Biru), teks pesan pengguna menjadi sulit dibaca. | Teruskan `color = if (message.fromUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface` ke `MarkdownText`. |
+| **THEME-BUG-006** | `AgentScreen.kt:151, 345, 578, 644`<br>`NextCraftForgeApp.kt:216, 218, 599` | Penggunaan langsung konstanta warna neon gelap `ForgeCyan` (`#38BDF8`), `ForgeGreen` (`#34D399`), dan `ForgeAmber` (`#FBBF24`) di atas permukaan kartu. | Di mode **White** (`#FFFFFF`) atau **System (Siang)**, warna kuning `ForgeAmber` (`#FBBF24`) hanya memiliki kontras **1.65:1** dan hijau pastel `#34D399` hanya **2.1:1** (tidak terbaca di latar putih). | Gunakan token semantik adaptif: `tokens.accentText`, `tokens.successText`, dan `tokens.warningText` (yang di mode **White** otomatis memakai `#FF385C`/`#008489`, `#008A05`, dan `#B45309`). |
+| **THEME-BUG-007** | `FilesAndDiffScreen.kt:201-244` | Pada `WorkspaceTreeList`, baris file yang dipilih memakai `.background(primaryContainer)`, tetapi warna teks nama file (`baris 222`) tidak diubah ke `onPrimaryContainer`. | Nama file yang sedang aktif/dipilih kehilangan kontras optimal terhadap latar `primaryContainer`. | Atur warna teks baris terpilih ke `if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface`. |
+| **THEME-BUG-008** | `FilesAndDiffScreen.kt:303, 401, 409, 441, 453-456` | Kotak *diff viewer* mengunci `.background(Color(0xFF090D16))` (`baris 441`), serta angka `+additions` / `-deletions` (`baris 401, 409`) memakai `ForgeGreen` / `ForgeRed` langsung di atas `surfaceVariant`. | Di mode **White**, angka `+additions` hijau muda di atas abu-abu terang `#E2E8F0` pudar (kontras **1.6:1**), dan kotak diff tetap hitam pekat. | Gunakan `tokens.diffBoxBackground`, `tokens.diffAddedBg`, `tokens.diffAddedText` (`#006338` di White), dan `tokens.diffRemovedText` (`#C13515` di White). |
+| **THEME-BUG-009** | `TerminalScreen.kt:134, 141` | Konsol terminal mengunci `.background(Color(0xFF090D16))` dan `color = Color(0xFFE2E8F0)`. | Di mode **White**, layar Terminal tetap hitam pekat; di mode **Glass**, layar Terminal menutup efek *frosted glass* di belakangnya. | Gunakan `tokens.terminalBackground`, `tokens.terminalText`, dan `tokens.cardBorderBrush`. |
+| **THEME-BUG-010** | `AndroidAndPreviewScreen.kt:109-123, 204, 211, 281, 299, 369, 375-378, 463` | 1) Konsol Gradle (`baris 204`) & Logcat (`baris 369`) mengunci `#090D16`.<br>2) Tautan path error (`baris 299`) & label `"Open Ports:"` (`baris 463`) mengunci `ForgeCyan` & `ForgeGreen`. | Konsol Gradle & Logcat tetap hitam di mode **White** dan menutup latar di mode **Glass**; teks path error dan port sulit dibaca di latar putih. | Gunakan `tokens.terminalBackground`, `tokens.terminalText`, `tokens.accentText`, `tokens.successText`, dan `tokens.warningText`. |
+| **THEME-BUG-011** | `SettingsScreenModern.kt:131-153, 316, 366, 436, 518, 748-754, 773` | 1) Pesan status API, GitHub, dan Updater mengunci `ForgeCyan` / `ForgeGreen`.<br>2) Pemilih tema (`baris 748-754`) hanya berupa tombol *"Switch Theme"* 2-arah. | Teks status pudar di atas kartu putih, dan pengguna tidak memiliki kartu pemilih untuk 4 mode (**Bawaan System**, **Gelap**, **Glass**, **White**). | Ganti dengan `tokens.accentText` / `tokens.successText` dan sediakan **2×2 Bento Theme Selector Grid** untuk keempat mode tema. |
+| **THEME-BUG-012** | `MainActivity.kt:54-59`<br>`NextCraftForgeApp.kt:100, 199, 382` | `MainActivity` membungkus aplikasi dengan `Surface(color = background)` berlapis ganda dengan `Scaffold`, dan `Card` memakai warna solid `surfaceVariant`. | Pada mode **Glass (`glass`)**, kanvas gradasi kosmik (`Z=0`) tertutup rapat oleh `Scaffold` solid, kartu tidak memiliki border kilau kaca (*specular border*), dan `NavigationBar` bawah masih kaku (belum berbentuk kapsul melayang `RoundedCornerShape(100)`). | Di `NextCraftForgeApp`, render kanvas gradasi `tokens.canvasBrush` di `Z=0`, set `Scaffold(containerColor = Color.Transparent)`, gunakan `ForgeThemedCard`, dan aktifkan `ForgeLiquidNavigationBar` saat `tokens.isGlass == true`. |
+
+---
+
+## 7. Kode Referensi Lengkap Multi-Theme Engine (Disimpan — Belum Diterapkan ke Source File)
+
+Sesuai instruksi Anda (*"simpan dulu saja kodenya jangan di terapkan"*), seluruh kode perbaikan untuk ke-12 bug tema beserta implementasi penuh **4 Pilihan Tema (`Bawaan System`, `Gelap`, `Glass`, `White`)** disimpan di bawah ini sebagai cetak biru referensi siap pakai:
+
+### A. Kode Referensi `app/src/main/java/com/nextcraft/forge/ui/Theme.kt`
+
+```kotlin
+package com.nextcraft.forge.ui
+
+import android.app.Activity
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+
+// Konstanta kompatibilitas untuk kode lama
+val ForgeCyan = Color(0xFF38BDF8)
+val ForgeGreen = Color(0xFF34D399)
+val ForgeAmber = Color(0xFFFBBF24)
+val ForgePurple = Color(0xFFA78BFA)
+val ForgeRed = Color(0xFFF87171)
+val ForgeDarkBg = Color(0xFF0B0F17)
+val ForgeDarkSurface = Color(0xFF111827)
+val ForgeDarkElevated = Color(0xFF1E293B)
+
+/**
+ * Empat pilihan mode tema resmi NextCraft Forge.
+ */
+enum class ForgeThemeMode(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val badge: String,
+) {
+    SYSTEM(
+        id = "system",
+        title = "Bawaan System",
+        subtitle = "Otomatis mengikuti mode siang/malam Android",
+        badge = "AUTO",
+    ),
+    DARK(
+        id = "dark",
+        title = "Gelap (Dark)",
+        subtitle = "Zuan Tinted Obsidian untuk kontras malam hari",
+        badge = "DARK",
+    ),
+    GLASS(
+        id = "glass",
+        title = "Glass (Liquid)",
+        subtitle = "Kaca transparan 3D & kapsul navigasi melayang",
+        badge = "GLASS",
+    ),
+    WHITE(
+        id = "white",
+        title = "White (Daylight)",
+        subtitle = "Putih murni bersih bergaya editorial Airbnb",
+        badge = "WHITE",
+    );
+
+    companion object {
+        fun fromStored(raw: String?): ForgeThemeMode {
+            val clean = raw?.trim()?.lowercase().orEmpty()
+            if (clean == "light") return WHITE // migrasi mulus dari nilai lama "light"
+            return entries.firstOrNull { it.id == clean } ?: DARK
+        }
+    }
+}
+
+/**
+ * Token semantik 3D (Z=0 s/d Z=3) yang memperbaiki seluruh THEME-BUG-001..012.
+ */
+@Immutable
+data class ForgeThemeTokens(
+    val mode: ForgeThemeMode,
+    val isDark: Boolean,
+    val isGlass: Boolean,
+    val isWhite: Boolean,
+    val canvasBrush: Brush,
+    val cardContainerColor: Color,
+    val cardElevatedColor: Color,
+    val cardBorderStroke: BorderStroke?,
+    val cardCornerRadius: Dp,
+    val topBarContainerColor: Color,
+    val bottomBarContainerColor: Color,
+    val accentText: Color,
+    val successText: Color,
+    val warningText: Color,
+    val dangerText: Color,
+    val terminalBackground: Color,
+    val terminalHeaderBackground: Color,
+    val terminalText: Color,
+    val inlineCodeBackground: Color,
+    val diffAddedBackground: Color,
+    val diffAddedText: Color,
+    val diffRemovedBackground: Color,
+    val diffRemovedText: Color,
+)
+
+// 1. Palet GELAP (Zuan Tinted Obsidian Dark)
+private val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
+    primary = Color(0xFF38BDF8),
+    onPrimary = Color(0xFF06202E),
+    primaryContainer = Color(0xFF12354E),
+    onPrimaryContainer = Color(0xFFD8F3FF),
+    secondary = Color(0xFF34D399),
+    onSecondary = Color(0xFF052E1E),
+    secondaryContainer = Color(0xFF0A3F30),
+    onSecondaryContainer = Color(0xFFA7F3D0),
+    tertiary = Color(0xFFA78BFA),
+    onTertiary = Color(0xFF23134D),
+    background = Color(0xFF0B0F17),
+    onBackground = Color(0xFFEEEEEE),
+    surface = Color(0xFF111827),
+    onSurface = Color(0xFFEEEEEE),
+    surfaceVariant = Color(0xFF161F30),
+    onSurfaceVariant = Color(0xFF94A3B8),
+    outline = Color(0xFF263248),
+    outlineVariant = Color(0xFF1E293B),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0xFF3B1219),
+    onErrorContainer = Color(0xFFFECACA),
+    surfaceTint = Color.Transparent,
+)
+
+// 2. Palet GLASS (Zuan Liquid Glassmorphism)
+private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
+    primary = Color(0xFF60A5FA),
+    onPrimary = Color(0xFF061830),
+    primaryContainer = Color(0x591E3A8A),
+    onPrimaryContainer = Color(0xFFE0F2FE),
+    secondary = Color(0xFF2DD4BF),
+    onSecondary = Color(0xFF042F2E),
+    secondaryContainer = Color(0x59115E59),
+    onSecondaryContainer = Color(0xFFCCFBF1),
+    tertiary = Color(0xFFC084FC),
+    onTertiary = Color(0xFF2E1065),
+    background = Color(0xFF090D16),
+    onBackground = Color(0xFFF8FAFC),
+    surface = Color(0xB3111827),
+    onSurface = Color(0xFFF8FAFC),
+    surfaceVariant = Color(0x9E1E293B),
+    onSurfaceVariant = Color(0xFFCBD5E1),
+    outline = Color(0x47FFFFFF),
+    outlineVariant = Color(0x24FFFFFF),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0x80450A0A),
+    onErrorContainer = Color(0xFFFEE2E2),
+    surfaceTint = Color.Transparent,
+)
+
+// 3. Palet WHITE (Airbnb Daylight 100% Pure White)
+private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFFFF385C),          // Airbnb Rausch
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFF0F3), // Soft Rausch Tint
+    onPrimaryContainer = Color(0xFF8A0F28),
+    secondary = Color(0xFF008489),        // Airbnb Babu Teal
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE6F6F7),
+    onSecondaryContainer = Color(0xFF004F52),
+    tertiary = Color(0xFF6D28D9),
+    onTertiary = Color(0xFFFFFFFF),
+    background = Color(0xFFFFFFFF),       // 100% Pure Daylight White
+    onBackground = Color(0xFF222222),     // Airbnb Hof Charcoal
+    surface = Color(0xFFFFFFFF),          // Pure White Card
+    onSurface = Color(0xFF222222),
+    surfaceVariant = Color(0xFFF7F7F7),   // Airbnb Warm Alabaster Secondary Surface
+    onSurfaceVariant = Color(0xFF717171), // Airbnb Foggy Metadata
+    outline = Color(0xFFDDDDDD),          // 1.dp Hairline Border
+    outlineVariant = Color(0xFFEBEBEB),   // Subtle Section Divider
+    error = Color(0xFFC13515),            // Airbnb Arches Error Red
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFF0EE),
+    onErrorContainer = Color(0xFF7A1C08),
+    surfaceTint = Color.Transparent,      // Mencegah warna pink/ungu M3 mengotori kartu putih
+)
+
+// 4. Palet SYSTEM LIGHT (Daylight Clean Blue-Slate saat mode Bawaan System di siang hari)
+private val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
+    primary = Color(0xFF0284C7),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE0F2FE),
+    onPrimaryContainer = Color(0xFF0C4A6E),
+    background = Color(0xFFF8FAFC),
+    surface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFFF1F5F9),
+    outline = Color(0xFFCBD5E1),
+)
+
+private fun buildTokensForMode(
+    resolvedMode: ForgeThemeMode,
+    systemDark: Boolean,
+): Pair<ColorScheme, ForgeThemeTokens> {
+    return when (resolvedMode) {
+        ForgeThemeMode.SYSTEM -> {
+            if (systemDark) {
+                val (_, darkTokens) = buildTokensForMode(ForgeThemeMode.DARK, true)
+                ZuanDarkColorScheme to darkTokens.copy(mode = ForgeThemeMode.SYSTEM)
+            } else {
+                val (_, whiteTokens) = buildTokensForMode(ForgeThemeMode.WHITE, false)
+                SystemLightColorScheme to whiteTokens.copy(
+                    mode = ForgeThemeMode.SYSTEM,
+                    isWhite = false,
+                    canvasBrush = SolidColor(Color(0xFFF8FAFC)),
+                    accentText = Color(0xFF0369A1),
+                    inlineCodeBackground = Color(0xFFE0F2FE),
+                )
+            }
+        }
+
+        ForgeThemeMode.DARK -> {
+            ZuanDarkColorScheme to ForgeThemeTokens(
+                mode = ForgeThemeMode.DARK,
+                isDark = true,
+                isGlass = false,
+                isWhite = false,
+                canvasBrush = SolidColor(Color(0xFF0B0F17)),
+                cardContainerColor = Color(0xFF161F30),
+                cardElevatedColor = Color(0xFF1C273C),
+                cardBorderStroke = BorderStroke(1.dp, Color(0xFF263248)),
+                cardCornerRadius = 20.dp,
+                topBarContainerColor = Color(0xFF111827),
+                bottomBarContainerColor = Color(0xFF111827),
+                accentText = Color(0xFF38BDF8),
+                successText = Color(0xFF34D399),
+                warningText = Color(0xFFFBBF24),
+                dangerText = Color(0xFFF87171),
+                terminalBackground = Color(0xFF080B11),
+                terminalHeaderBackground = Color(0xFF131B2E),
+                terminalText = Color(0xFFE2E8F0),
+                inlineCodeBackground = Color(0x3338BDF8),
+                diffAddedBackground = Color(0xFF063626),
+                diffAddedText = Color(0xFF6EE7B7),
+                diffRemovedBackground = Color(0xFF450A0A),
+                diffRemovedText = Color(0xFFFCA5A5),
+            )
+        }
+
+        ForgeThemeMode.GLASS -> {
+            val specularBorder = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.28f),
+                    Color.White.copy(alpha = 0.06f),
+                ),
+            )
+            val cosmicCanvas = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF090D16),
+                    Color(0xFF122038),
+                    Color(0xFF0B1324),
+                ),
+            )
+            ZuanGlassColorScheme to ForgeThemeTokens(
+                mode = ForgeThemeMode.GLASS,
+                isDark = true,
+                isGlass = true,
+                isWhite = false,
+                canvasBrush = cosmicCanvas,
+                cardContainerColor = Color(0xFF1E293B).copy(alpha = 0.62f),
+                cardElevatedColor = Color(0xFF26354D).copy(alpha = 0.72f),
+                cardBorderStroke = BorderStroke(0.8.dp, specularBorder),
+                cardCornerRadius = 24.dp,
+                topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.75f),
+                bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.78f),
+                accentText = Color(0xFF60A5FA),
+                successText = Color(0xFF2DD4BF),
+                warningText = Color(0xFFFBBF24),
+                dangerText = Color(0xFFF87171),
+                terminalBackground = Color(0xFF090D16).copy(alpha = 0.72f),
+                terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.75f),
+                terminalText = Color(0xFFF8FAFC),
+                inlineCodeBackground = Color(0x4060A5FA),
+                diffAddedBackground = Color(0x73064E3B),
+                diffAddedText = Color(0xFFA7F3D0),
+                diffRemovedBackground = Color(0x737F1D1D),
+                diffRemovedText = Color(0xFFFECACA),
+            )
+        }
+
+        ForgeThemeMode.WHITE -> {
+            AirbnbWhiteColorScheme to ForgeThemeTokens(
+                mode = ForgeThemeMode.WHITE,
+                isDark = false,
+                isGlass = false,
+                isWhite = true,
+                canvasBrush = SolidColor(Color(0xFFFFFFFF)),
+                cardContainerColor = Color(0xFFFFFFFF),
+                cardElevatedColor = Color(0xFFF7F7F7),
+                cardBorderStroke = BorderStroke(1.dp, Color(0xFFDDDDDD)),
+                cardCornerRadius = 16.dp,
+                topBarContainerColor = Color(0xFFFFFFFF),
+                bottomBarContainerColor = Color(0xFFFFFFFF),
+                accentText = Color(0xFFD90B38),       // Kontras tinggi di atas putih (WCAG > 5.2:1)
+                successText = Color(0xFF008A05),      // Airbnb Kazan Green (WCAG > 4.6:1)
+                warningText = Color(0xFFB45309),      // Deep Warm Amber (WCAG > 5.0:1, bebas kuning pudar)
+                dangerText = Color(0xFFC13515),       // Airbnb Arches Red
+                terminalBackground = Color(0xFFF7F7F7),
+                terminalHeaderBackground = Color(0xFFEBEBEB),
+                terminalText = Color(0xFF222222),
+                inlineCodeBackground = Color(0xFFFFF0F3),
+                diffAddedBackground = Color(0xFFEAFBF0),
+                diffAddedText = Color(0xFF006338),
+                diffRemovedBackground = Color(0xFFFFF0F0),
+                diffRemovedText = Color(0xFFC13515),
+            )
+        }
+    }
+}
+
+val LocalForgeThemeTokens = staticCompositionLocalOf<ForgeThemeTokens> {
+    buildTokensForMode(ForgeThemeMode.DARK, true).second
+}
+
+val ForgeCodeTextStyle = TextStyle(
+    fontFamily = FontFamily.Monospace,
+    fontWeight = FontWeight.Normal,
+    fontSize = 13.sp,
+    lineHeight = 19.sp,
+)
+
+private val ForgeTypography = Typography()
+
+@Composable
+fun NextCraftForgeTheme(
+    themeMode: String = "dark",
+    content: @Composable () -> Unit,
+) {
+    val systemDark = isSystemInDarkTheme()
+    val mode = ForgeThemeMode.fromStored(themeMode)
+    val (colorScheme, tokens) = buildTokensForMode(mode, systemDark)
+
+    // Perbaikan THEME-BUG-002: Sinkronisasi warna Status Bar & Navigation Bar beserta polaritas ikon
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val activity = view.context as? Activity ?: return@SideEffect
+            val window = activity.window
+            window.statusBarColor = tokens.topBarContainerColor.toArgb()
+            window.navigationBarColor = if (tokens.isGlass) {
+                Color(0xFF0B1324).toArgb()
+            } else {
+                tokens.bottomBarContainerColor.toArgb()
+            }
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !tokens.isDark
+            controller.isAppearanceLightNavigationBars = !tokens.isDark
+        }
+    }
+
+    CompositionLocalProvider(LocalForgeThemeTokens provides tokens) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = ForgeTypography,
+            content = content,
+        )
+    }
+}
+```
+
+### B. Kode Referensi `MainViewModel.kt` (Fungsi `setThemeMode` & `toggleThemeMode`)
+
+```kotlin
+    fun setThemeMode(mode: String) {
+        val resolved = ForgeThemeMode.fromStored(mode).id
+        preferences.themeMode = resolved
+        _state.update { it.copy(themeMode = resolved) }
+    }
+
+    fun toggleThemeMode() {
+        val current = ForgeThemeMode.fromStored(_state.value.themeMode)
+        val entries = ForgeThemeMode.entries
+        val next = entries[(current.ordinal + 1) % entries.size]
+        setThemeMode(next.id)
+    }
+```
+
+### C. Kode Referensi Pemilih 4 Mode Tema & Liquid Navigation Capsule (`NextCraftForgeApp.kt` & `SettingsScreenModern.kt`)
+
+```kotlin
+// 1. Di NextCraftForgeApp.kt — Kapsul Navigasi Melayang untuk Mode GLASS & Bar Bersih untuk Mode WHITE/DARK/SYSTEM:
+@Composable
+private fun ForgeBottomBar(
+    activeTab: ForgeTab,
+    changedCount: Int,
+    onSelectTab: (ForgeTab) -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    val shape = if (tokens.isGlass) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = if (tokens.isGlass) 16.dp else 0.dp,
+                vertical = if (tokens.isGlass) 12.dp else 0.dp,
+            ),
+    ) {
+        Surface(
+            shape = shape,
+            color = tokens.bottomBarContainerColor,
+            border = if (tokens.isGlass) tokens.cardBorderStroke else null,
+            shadowElevation = if (tokens.isGlass) 12.dp else 0.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column {
+                if (tokens.isWhite) {
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                }
+                NavigationBar(
+                    containerColor = Color.Transparent,
+                    tonalElevation = 0.dp,
+                ) {
+                    ForgeTab.entries.forEach { tab ->
+                        val label = when (tab) {
+                            ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
+                            else -> tab.title
+                        }
+                        val icon = when (tab) {
+                            ForgeTab.AGENT -> Icons.Default.Star
+                            ForgeTab.FILES -> Icons.Default.Edit
+                            ForgeTab.TERMINAL -> Icons.Default.List
+                            ForgeTab.ANDROID -> Icons.Default.Build
+                            ForgeTab.PREVIEW -> Icons.Default.PlayArrow
+                            ForgeTab.SETTINGS -> Icons.Default.Settings
+                        }
+                        NavigationBarItem(
+                            selected = activeTab == tab,
+                            onClick = { onSelectTab(tab) },
+                            icon = { Icon(icon, contentDescription = label) },
+                            label = {
+                                Text(
+                                    text = label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontSize = 11.sp,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+```
