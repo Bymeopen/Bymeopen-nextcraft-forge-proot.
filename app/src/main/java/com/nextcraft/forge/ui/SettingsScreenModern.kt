@@ -46,6 +46,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -86,7 +88,8 @@ fun SettingsScreenModern(
         mutableStateOf(state.providerProfile.openRouterProviderOrder)
     }
     var keyLabelInput by rememberSaveable { mutableStateOf("") }
-    var keySecretInput by rememberSaveable { mutableStateOf("") }
+    // Secrets use plain remember: rememberSaveable would write them into the saved-instance Bundle.
+    var keySecretInput by remember { mutableStateOf("") }
 
     var agyModelInput by rememberSaveable(state.antigravityModel) {
         mutableStateOf(state.antigravityModel)
@@ -95,7 +98,7 @@ fun SettingsScreenModern(
         mutableStateOf(state.antigravityEffort)
     }
 
-    var githubTokenInput by rememberSaveable { mutableStateOf("") }
+    var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
     var newRepoPrivate by rememberSaveable { mutableStateOf(true) }
@@ -187,9 +190,12 @@ fun SettingsScreenModern(
                         ) {
                             Text("Save Antigravity Model")
                         }
-                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN ||
-                            viewModel.antigravityAuth.hasOfficialCredential()
-                        ) {
+                        val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
+                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                viewModel.antigravityAuth.hasOfficialCredential()
+                            }
+                        }
+                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
                             ) {

@@ -397,6 +397,12 @@ fun WebPreviewScreen(
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            webViewRef?.destroy()
+            webViewRef = null
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -424,7 +430,8 @@ fun WebPreviewScreen(
                     Button(
                         onClick = {
                             val clean = urlInput.trim()
-                            if (clean.isNotEmpty()) {
+                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
+                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
                                 viewModel.updatePreviewUrl(clean)
                                 webViewRef?.loadUrl(clean)
                             }
@@ -481,7 +488,14 @@ fun WebPreviewScreen(
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    webViewClient = WebViewClient()
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: android.webkit.WebResourceRequest,
+                        ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+                    }
                     loadUrl(state.previewUrl)
                     webViewRef = this
                 }

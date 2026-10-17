@@ -56,6 +56,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -88,6 +89,20 @@ fun AgentScreen(
     val listState = rememberLazyListState()
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
+    // hasOfficialCredential() may spawn `su` and block for seconds; never call it during composition.
+    val hasAgyCredential by produceState(
+        initialValue = true,
+        state.agentKind,
+        agyAuthState.status,
+    ) {
+        value = if (state.agentKind == AgentKind.ANTIGRAVITY) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                viewModel.antigravityAuth.hasOfficialCredential()
+            }
+        } else {
+            true
+        }
+    }
 
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
@@ -105,7 +120,7 @@ fun AgentScreen(
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
             agyAuthState.status != AntigravityAuthStatus.SIGNED_IN &&
-            !viewModel.antigravityAuth.hasOfficialCredential()
+            !hasAgyCredential
         ) {
             AntigravityOAuthBanner(
                 authState = agyAuthState,

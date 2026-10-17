@@ -13,10 +13,12 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.nextcraft.forge.ui.AppStrings
 import com.nextcraft.forge.ui.LocaleHelper
 import com.nextcraft.forge.ui.MainViewModel
 import com.nextcraft.forge.ui.NextCraftForgeApp
@@ -31,7 +33,10 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshRuntimeStatus()
     }
 
+    private var appliedLanguage = "system"
+
     override fun attachBaseContext(newBase: Context) {
+        appliedLanguage = AppStrings.languageCode(newBase)
         super.attachBaseContext(LocaleHelper.wrapContext(newBase))
     }
 
@@ -41,6 +46,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val state by viewModel.state.collectAsState()
+            // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
+            LaunchedEffect(state.languageCode) {
+                if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+            }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),

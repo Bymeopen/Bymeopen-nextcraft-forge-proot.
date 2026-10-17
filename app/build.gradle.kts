@@ -96,6 +96,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     implementation("org.apache.commons:commons-compress:1.21")
+    // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
+    implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
