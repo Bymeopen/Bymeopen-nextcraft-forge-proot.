@@ -2096,6 +2096,10 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             connection.instanceFollowRedirects = true
             if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
             val code = connection.responseCode
+            if (code == 416 && existing > 0L) {
+                // Stale/complete .part cannot be resumed; discard so the next attempt starts clean.
+                temporary.delete()
+            }
             check(code in 200..299) { "Download failed with HTTP $code" }
             val resumed = code == HttpURLConnection.HTTP_PARTIAL && existing > 0L
             if (!resumed) {

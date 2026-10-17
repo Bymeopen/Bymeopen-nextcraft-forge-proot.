@@ -199,6 +199,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeBuildJob: Job? = null
     private var activeBuildProcess: Process? = null
     private var activeTerminalJob: Job? = null
+    @Volatile private var activeTerminalProcess: Process? = null
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
@@ -636,15 +637,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopActiveTask() {
         RuntimeTaskController.requestStop()
-        activeAgentJob?.cancel()
+        val agentJob = activeAgentJob
+        agentJob?.cancel()
         activeBuildProcess?.destroyForcibly()
         activeBuildJob?.cancel()
-        _state.update {
-            it.copy(
-                sessionRunning = false,
-                activeStatusLine = "Stopped by user",
-                pendingToolRequest = null,
-            )
+        _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+        // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
+        // otherwise a new prompt could race with it over shared bridge state.
+        viewModelScope.launch {
+            agentJob?.join()
+            _state.update {
+                it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+            }
         }
     }
 
@@ -972,17 +976,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         activeTerminalJob = viewModelScope.launch {
-            val output = withContext(Dispatchers.IO) {
-                val ws = checkpoints.ensureWorkspace(project.id)
-                runCommandInChrootOrHost(project.slug, ws, cleanCmd)
-            }
-            _state.update {
-                it.copy(
-                    terminalRunning = false,
-                    terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
-                )
+            var output = ""
+            try {
+                output = withContext(Dispatchers.IO) {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    runCommandInChrootOrHost(project.slug, ws, cleanCmd)
+                }
+            } finally {
+                activeTerminalProcess = null
+                _state.update {
+                    it.copy(
+                        terminalRunning = false,
+                        terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
+                    )
+                }
             }
         }
+    }
+
+    fun stopTerminal() {
+        // Killing the process unblocks the reader thread; the job then ends normally and resets state.
+        activeTerminalProcess?.destroyForcibly()
+        activeTerminalJob?.cancel()
     }
 
     fun clearTerminal() {
@@ -1025,6 +1040,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 ProcessBuilder("sh", "-c", command).directory(workspaceDir).redirectErrorStream(true).start()
             }
+            activeTerminalProcess = process
             val buffer = StringBuilder()
             // The read below blocks until the command closes its output, so the timeout needs its own watchdog.
             val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -1822,8 +1838,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        RuntimeTaskController.requestStop()
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
+        activeTerminalProcess?.destroyForcibly()
         super.onCleared()
     }
 

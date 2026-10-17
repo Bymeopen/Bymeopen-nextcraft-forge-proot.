@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
@@ -95,6 +96,11 @@ fun TerminalScreen(
                         onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = "Copy terminal output", modifier = Modifier.size(18.dp))
+                    }
+                    if (state.terminalRunning) {
+                        IconButton(onClick = viewModel::stopTerminal) {
+                            Icon(Icons.Default.Close, contentDescription = "Stop command", modifier = Modifier.size(18.dp))
+                        }
                     }
                     IconButton(onClick = viewModel::clearTerminal) {
                         Icon(Icons.Default.Delete, contentDescription = "Clear terminal", modifier = Modifier.size(18.dp))

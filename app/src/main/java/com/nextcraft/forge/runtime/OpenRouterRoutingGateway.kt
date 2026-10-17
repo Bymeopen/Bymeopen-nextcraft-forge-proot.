@@ -12,6 +12,7 @@ import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -42,14 +43,30 @@ internal class OpenRouterRoutingGateway(
         Thread({ acceptLoop() }, "forge-openrouter-routing").apply { isDaemon = true; start() }
     }
 
+    // Bounded pool: caps concurrent connections instead of one unbounded thread per accept().
+    private val workers = java.util.concurrent.ThreadPoolExecutor(
+        0, MAX_CONNECTIONS, 30L, TimeUnit.SECONDS, java.util.concurrent.SynchronousQueue(),
+    ) { task -> Thread(task, "forge-openrouter-request").apply { isDaemon = true } }
+
     private fun acceptLoop() {
+        var failures = 0
         while (running.get()) {
-            runCatching { server.accept() }.getOrNull()?.let { socket ->
-                runCatching {
-                    socket.soTimeout = SOCKET_TIMEOUT_MS
-                    socket.tcpNoDelay = true
-                }
-                Thread({ socket.use(::handle) }, "forge-openrouter-request").apply { isDaemon = true; start() }
+            val socket = try {
+                server.accept().also { failures = 0 }
+            } catch (_: Exception) {
+                // Closed server ends the loop; transient errors (e.g. EMFILE) back off instead of busy-spinning.
+                if (!running.get() || server.isClosed || ++failures > MAX_ACCEPT_FAILURES) break
+                Thread.sleep(ACCEPT_BACKOFF_MS)
+                continue
+            }
+            runCatching {
+                socket.soTimeout = SOCKET_TIMEOUT_MS
+                socket.tcpNoDelay = true
+            }
+            try {
+                workers.execute { socket.use(::handle) }
+            } catch (_: java.util.concurrent.RejectedExecutionException) {
+                runCatching { socket.close() }
             }
         }
     }
@@ -222,9 +239,13 @@ internal class OpenRouterRoutingGateway(
     override fun close() {
         running.set(false)
         runCatching { server.close() }
+        workers.shutdown()
     }
 
     private companion object {
+        const val MAX_CONNECTIONS = 32
+        const val MAX_ACCEPT_FAILURES = 50
+        const val ACCEPT_BACKOFF_MS = 100L
         const val MAX_REQUEST_BYTES = 16 * 1024 * 1024
         const val MAX_HEADER_LINE_BYTES = 16 * 1024
         const val SOCKET_TIMEOUT_MS = 30_000
