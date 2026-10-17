@@ -2437,7 +2437,7 @@ class AppUpdater(
 ) {
     fun check(): AppUpdateInfo? {
         val manifestUrl = manifestUrlOverride.ifBlank { defaultManifestUrl() }.trim()
-        if (!manifestUrl.startsWith("https://")) return null
+        check(manifestUrl.startsWith("https://")) { "No HTTPS update manifest URL is configured." }
         val connection = URL(manifestUrl).openConnection() as HttpURLConnection
         return try {
             connection.connectTimeout = 8_000
@@ -2445,7 +2445,7 @@ class AppUpdater(
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/json")
             val code = connection.responseCode
-            if (code !in 200..299) return null
+            if (code !in 200..299) throw java.io.IOException("Update manifest request failed (HTTP $code)")
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 buildString {
                     val buffer = CharArray(4 * 1024)

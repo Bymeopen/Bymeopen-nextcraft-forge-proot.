@@ -12483,7 +12483,7 @@ class AppUpdater(
 ) {
     fun check(): AppUpdateInfo? {
         val manifestUrl = manifestUrlOverride.ifBlank { defaultManifestUrl() }.trim()
-        if (!manifestUrl.startsWith("https://")) return null
+        check(manifestUrl.startsWith("https://")) { "No HTTPS update manifest URL is configured." }
         val connection = URL(manifestUrl).openConnection() as HttpURLConnection
         return try {
             connection.connectTimeout = 8_000
@@ -12491,7 +12491,7 @@ class AppUpdater(
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/json")
             val code = connection.responseCode
-            if (code !in 200..299) return null
+            if (code !in 200..299) throw java.io.IOException("Update manifest request failed (HTTP $code)")
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 buildString {
                     val buffer = CharArray(4 * 1024)
@@ -12690,8 +12690,8 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (81 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1739 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1782 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (82 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (90 baris)
@@ -12701,7 +12701,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (81 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -12719,10 +12719,12 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.nextcraft.forge.ui.AppStrings
 import com.nextcraft.forge.ui.LocaleHelper
 import com.nextcraft.forge.ui.MainViewModel
 import com.nextcraft.forge.ui.NextCraftForgeApp
@@ -12737,7 +12739,10 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshRuntimeStatus()
     }
 
+    private var appliedLanguage = "system"
+
     override fun attachBaseContext(newBase: Context) {
+        appliedLanguage = AppStrings.languageCode(newBase)
         super.attachBaseContext(LocaleHelper.wrapContext(newBase))
     }
 
@@ -12747,6 +12752,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val state by viewModel.state.collectAsState()
+            // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
+            LaunchedEffect(state.languageCode) {
+                if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+            }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -12789,7 +12798,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1739 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1782 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -12912,6 +12921,7 @@ data class ForgeUiState(
     val workspaceFiles: List<WorkspaceEntry> = emptyList(),
     val selectedFilePath: String? = null,
     val selectedFileContent: String = "",
+    val selectedFileEditable: Boolean = true,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -13192,8 +13202,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val rootfs = File(getApplication<Application>().filesDir, "runtime/ubuntu")
                     installer.ensureChrootScripts()
-                    RootfsRepair.ensureUnmounted(rootfs)
-                    "Chroot mount points and supervisor scripts verified."
+                    if (RootfsRepair.ensureUnmounted(rootfs)) {
+                        "Chroot mount points and supervisor scripts verified."
+                    } else {
+                        "Chroot repair incomplete: some mounts are still active. Reboot the device and retry."
+                    }
                 }.getOrElse { "Chroot repair note: ${it.message}" }
             }
             refreshRuntimeStatus()
@@ -13292,6 +13305,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteProject(projectId: String) {
+        // The workspace would be wiped under a running agent, and the active-project switch is blocked mid-run.
+        if (_state.value.sessionRunning) return
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
@@ -13311,6 +13326,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectChat(chatId: String) {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
         val messages = preferences.loadMessages(project.id, chatId)
@@ -13323,6 +13339,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createChat(title: String = "") {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val nextIndex = _state.value.chats.size + 1
         val chat = ProjectChat(
@@ -13341,6 +13358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChat(chatId: String) {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val currentChats = _state.value.chats
         if (currentChats.size <= 1) return
@@ -13610,17 +13628,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openWorkspaceFile(relativePath: String) {
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            val content = withContext(Dispatchers.IO) {
+            // Saving a truncated, binary or unreadable file back as text would destroy it, so those open read-only.
+            val (content, editable) = withContext(Dispatchers.IO) {
                 runCatching {
                     val ws = checkpoints.ensureWorkspace(project.id)
                     val target = checkpoints.safeWorkspaceFile(ws, relativePath)
-                    if (target.isFile) target.readBoundedText(256 * 1024) else ""
-                }.getOrDefault("")
+                    if (!target.isFile) {
+                        "" to true
+                    } else {
+                        val head = ByteArray(8192)
+                        val headCount = target.inputStream().use { it.read(head) }
+                        val binary = (0 until maxOf(headCount, 0)).any { head[it] == 0.toByte() }
+                        if (binary || target.length() > 256 * 1024) {
+                            "[Read-only: binary file or larger than 256 KB]" to false
+                        } else {
+                            target.readBoundedText(256 * 1024) to true
+                        }
+                    }
+                }.getOrDefault("[Read-only: file could not be read]" to false)
             }
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
                     selectedFileContent = content,
+                    selectedFileEditable = editable,
                     fileSavedBanner = null,
                 )
             }
@@ -13634,6 +13665,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSelectedFile() {
         val project = _state.value.activeProject ?: return
         val path = _state.value.selectedFilePath ?: return
+        if (!_state.value.selectedFileEditable) {
+            _state.update { it.copy(fileSavedBanner = "$path is read-only here") }
+            return
+        }
         val content = _state.value.selectedFileContent
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) {
@@ -13773,6 +13808,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
+    }
+
+    /** Runs [command] like the terminal, but throws when it exits non-zero (the plain runner only returns output). */
+    private fun runCheckedCommand(projectSlug: String, workspaceDir: File, command: String): String {
+        val wrapped = "{ $command\n} 2>&1; printf '\\n[forge-exit:%s]\\n' \"\$?\""
+        val raw = runCommandInChrootOrHost(projectSlug, workspaceDir, wrapped)
+        val code = Regex("""\[forge-exit:(\d+)]\s*$""").find(raw)?.groupValues?.get(1)?.toIntOrNull()
+        val output = raw.substringBeforeLast("[forge-exit:").trim()
+        check(code == 0) {
+            output.lineSequence().filter { it.isNotBlank() }.toList().takeLast(3).joinToString(" | ")
+                .ifBlank { "command failed" }
+        }
+        return output
     }
 
     private fun shellSingleQuote(raw: String): String = "'" + raw.replace("'", "'\"'\"'") + "'"
@@ -14320,7 +14368,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             append("git push -u origin main")
                         }
                         withGitHubCredentials(token, login) {
-                            runCommandInChrootOrHost(project.slug, ws, pushCmd)
+                            runCheckedCommand(project.slug, ws, pushCmd)
                         }
                     }
                     val updatedRepos = runCatching { githubClient.repositories(token) }.getOrDefault(listOf(repo))
@@ -14359,7 +14407,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     append("git config user.email ${shellSingleQuote("$login@users.noreply.github.com")} && ")
                     append("git add -A && ")
                     append("(git diff --cached --quiet || git commit -m ${shellSingleQuote(commitMessage)}) && ")
-                    append("git pull --rebase --autostash origin main >/dev/null 2>&1 || true; ")
+                    append("git pull --rebase --autostash origin main >/dev/null 2>&1 || git rebase --abort >/dev/null 2>&1; ")
                     append("git push -u origin HEAD:main; ")
                     append("fi")
                 }
@@ -14385,11 +14433,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val pullCmd = buildString {
                         append("if git remote get-url origin >/dev/null 2>&1; then ")
-                        append("git fetch origin && git pull --rebase --autostash origin main; ")
+                        append("git fetch origin && (git pull --rebase --autostash origin main || ")
+                        append("{ git rebase --abort 2>/dev/null; false; }); ")
                         append("else echo 'No origin remote configured in workspace'; fi")
                     }
                     withGitHubCredentials(token, login) {
-                        runCommandInChrootOrHost(project.slug, ws, pullCmd)
+                        runCheckedCommand(project.slug, ws, pullCmd)
                     }
                 }
             }
@@ -14429,10 +14478,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
                     if (token.isNotBlank()) {
                         withGitHubCredentials(token, login) {
-                            runCommandInChrootOrHost(project.slug, ws, cloneCmd)
+                            runCheckedCommand(project.slug, ws, cloneCmd)
                         }
                     } else {
-                        runCommandInChrootOrHost(project.slug, ws, cloneCmd)
+                        runCheckedCommand(project.slug, ws, cloneCmd)
                     }
                     project
                 }
@@ -14495,13 +14544,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun checkForAppUpdates(manifestUrlOverride: String = "") {
         viewModelScope.launch {
             _state.update { it.copy(updateStatusMessage = "Checking for updates…") }
-            val info = withContext(Dispatchers.IO) {
-                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }.getOrNull()
+            val result = withContext(Dispatchers.IO) {
+                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }
             }
+            val info = result.getOrNull()
             _state.update {
                 it.copy(
                     updateInfo = info,
-                    updateStatusMessage = if (info != null) {
+                    updateStatusMessage = if (result.isFailure) {
+                        "Update check failed: ${result.exceptionOrNull()?.message ?: "network error"}"
+                    } else if (info != null) {
                         "Update available: v${info.versionName} (${info.versionCode})"
                     } else {
                         "NextCraft Forge is up to date."
@@ -15365,11 +15417,11 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (685 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (654 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (490 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (191 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (494 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (778 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
 
 ---
 
@@ -16065,7 +16117,7 @@ private fun NewProjectDialog(
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (654 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -16126,6 +16178,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -16158,6 +16211,20 @@ fun AgentScreen(
     val listState = rememberLazyListState()
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
+    // hasOfficialCredential() may spawn `su` and block for seconds; never call it during composition.
+    val hasAgyCredential by produceState(
+        initialValue = true,
+        state.agentKind,
+        agyAuthState.status,
+    ) {
+        value = if (state.agentKind == AgentKind.ANTIGRAVITY) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                viewModel.antigravityAuth.hasOfficialCredential()
+            }
+        } else {
+            true
+        }
+    }
 
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
@@ -16175,7 +16242,7 @@ fun AgentScreen(
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
             agyAuthState.status != AntigravityAuthStatus.SIGNED_IN &&
-            !viewModel.antigravityAuth.hasOfficialCredential()
+            !hasAgyCredential
         ) {
             AntigravityOAuthBanner(
                 authState = agyAuthState,
@@ -17421,7 +17488,7 @@ fun TerminalScreen(
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (494 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17823,6 +17890,12 @@ fun WebPreviewScreen(
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            webViewRef?.destroy()
+            webViewRef = null
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -17850,7 +17923,8 @@ fun WebPreviewScreen(
                     Button(
                         onClick = {
                             val clean = urlInput.trim()
-                            if (clean.isNotEmpty()) {
+                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
+                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
                                 viewModel.updatePreviewUrl(clean)
                                 webViewRef?.loadUrl(clean)
                             }
@@ -17907,7 +17981,14 @@ fun WebPreviewScreen(
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    webViewClient = WebViewClient()
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: android.webkit.WebResourceRequest,
+                        ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+                    }
                     loadUrl(state.previewUrl)
                     webViewRef = this
                 }
@@ -17922,7 +18003,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (778 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17973,6 +18054,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -18013,7 +18096,8 @@ fun SettingsScreenModern(
         mutableStateOf(state.providerProfile.openRouterProviderOrder)
     }
     var keyLabelInput by rememberSaveable { mutableStateOf("") }
-    var keySecretInput by rememberSaveable { mutableStateOf("") }
+    // Secrets use plain remember: rememberSaveable would write them into the saved-instance Bundle.
+    var keySecretInput by remember { mutableStateOf("") }
 
     var agyModelInput by rememberSaveable(state.antigravityModel) {
         mutableStateOf(state.antigravityModel)
@@ -18022,7 +18106,7 @@ fun SettingsScreenModern(
         mutableStateOf(state.antigravityEffort)
     }
 
-    var githubTokenInput by rememberSaveable { mutableStateOf("") }
+    var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
     var newRepoPrivate by rememberSaveable { mutableStateOf(true) }
@@ -18114,9 +18198,12 @@ fun SettingsScreenModern(
                         ) {
                             Text("Save Antigravity Model")
                         }
-                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN ||
-                            viewModel.antigravityAuth.hasOfficialCredential()
-                        ) {
+                        val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
+                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                viewModel.antigravityAuth.hasOfficialCredential()
+                            }
+                        }
+                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
                             ) {
@@ -18726,7 +18813,7 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `settings.gradle.kts` (18 baris)
 - `build.gradle.kts` (4 baris)
 - `gradle.properties` (5 baris)
-- `app/build.gradle.kts` (101 baris)
+- `app/build.gradle.kts` (103 baris)
 - `app/src/main/AndroidManifest.xml` (61 baris)
 - `app/src/main/res/values/strings.xml` (5 baris)
 - `app/src/main/res/values-in/strings.xml` (5 baris)
@@ -18795,7 +18882,7 @@ org.gradle.workers.max=2
 
 ---
 
-## 4. `app/build.gradle.kts` (101 baris)
+## 4. `app/build.gradle.kts` (103 baris)
 
 ```kotlin
 import java.io.File
@@ -18896,6 +18983,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     implementation("org.apache.commons:commons-compress:1.21")
+    // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
+    implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

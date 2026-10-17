@@ -17,7 +17,7 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `settings.gradle.kts` (18 baris)
 - `build.gradle.kts` (4 baris)
 - `gradle.properties` (5 baris)
-- `app/build.gradle.kts` (101 baris)
+- `app/build.gradle.kts` (103 baris)
 - `app/src/main/AndroidManifest.xml` (61 baris)
 - `app/src/main/res/values/strings.xml` (5 baris)
 - `app/src/main/res/values-in/strings.xml` (5 baris)
@@ -86,7 +86,7 @@ org.gradle.workers.max=2
 
 ---
 
-## 4. `app/build.gradle.kts` (101 baris)
+## 4. `app/build.gradle.kts` (103 baris)
 
 ```kotlin
 import java.io.File
@@ -187,6 +187,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     implementation("org.apache.commons:commons-compress:1.21")
+    // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
+    implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

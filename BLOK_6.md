@@ -24,11 +24,11 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (685 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (654 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (490 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (191 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (494 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (778 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
 
 ---
 
@@ -724,7 +724,7 @@ private fun NewProjectDialog(
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (654 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (669 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -785,6 +785,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -817,6 +818,20 @@ fun AgentScreen(
     val listState = rememberLazyListState()
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
+    // hasOfficialCredential() may spawn `su` and block for seconds; never call it during composition.
+    val hasAgyCredential by produceState(
+        initialValue = true,
+        state.agentKind,
+        agyAuthState.status,
+    ) {
+        value = if (state.agentKind == AgentKind.ANTIGRAVITY) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                viewModel.antigravityAuth.hasOfficialCredential()
+            }
+        } else {
+            true
+        }
+    }
 
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
@@ -834,7 +849,7 @@ fun AgentScreen(
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
             agyAuthState.status != AntigravityAuthStatus.SIGNED_IN &&
-            !viewModel.antigravityAuth.hasOfficialCredential()
+            !hasAgyCredential
         ) {
             AntigravityOAuthBanner(
                 authState = agyAuthState,
@@ -2080,7 +2095,7 @@ fun TerminalScreen(
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (494 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (508 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -2482,6 +2497,12 @@ fun WebPreviewScreen(
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            webViewRef?.destroy()
+            webViewRef = null
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -2509,7 +2530,8 @@ fun WebPreviewScreen(
                     Button(
                         onClick = {
                             val clean = urlInput.trim()
-                            if (clean.isNotEmpty()) {
+                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
+                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
                                 viewModel.updatePreviewUrl(clean)
                                 webViewRef?.loadUrl(clean)
                             }
@@ -2566,7 +2588,14 @@ fun WebPreviewScreen(
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    webViewClient = WebViewClient()
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: android.webkit.WebResourceRequest,
+                        ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+                    }
                     loadUrl(state.previewUrl)
                     webViewRef = this
                 }
@@ -2581,7 +2610,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (778 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (784 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -2632,6 +2661,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -2672,7 +2703,8 @@ fun SettingsScreenModern(
         mutableStateOf(state.providerProfile.openRouterProviderOrder)
     }
     var keyLabelInput by rememberSaveable { mutableStateOf("") }
-    var keySecretInput by rememberSaveable { mutableStateOf("") }
+    // Secrets use plain remember: rememberSaveable would write them into the saved-instance Bundle.
+    var keySecretInput by remember { mutableStateOf("") }
 
     var agyModelInput by rememberSaveable(state.antigravityModel) {
         mutableStateOf(state.antigravityModel)
@@ -2681,7 +2713,7 @@ fun SettingsScreenModern(
         mutableStateOf(state.antigravityEffort)
     }
 
-    var githubTokenInput by rememberSaveable { mutableStateOf("") }
+    var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
     var newRepoPrivate by rememberSaveable { mutableStateOf(true) }
@@ -2773,9 +2805,12 @@ fun SettingsScreenModern(
                         ) {
                             Text("Save Antigravity Model")
                         }
-                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN ||
-                            viewModel.antigravityAuth.hasOfficialCredential()
-                        ) {
+                        val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
+                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                viewModel.antigravityAuth.hasOfficialCredential()
+                            }
+                        }
+                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
                             ) {

@@ -17,8 +17,8 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (81 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1739 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1782 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (82 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (90 baris)
@@ -28,7 +28,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (81 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (90 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -46,10 +46,12 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.nextcraft.forge.ui.AppStrings
 import com.nextcraft.forge.ui.LocaleHelper
 import com.nextcraft.forge.ui.MainViewModel
 import com.nextcraft.forge.ui.NextCraftForgeApp
@@ -64,7 +66,10 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshRuntimeStatus()
     }
 
+    private var appliedLanguage = "system"
+
     override fun attachBaseContext(newBase: Context) {
+        appliedLanguage = AppStrings.languageCode(newBase)
         super.attachBaseContext(LocaleHelper.wrapContext(newBase))
     }
 
@@ -74,6 +79,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val state by viewModel.state.collectAsState()
+            // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
+            LaunchedEffect(state.languageCode) {
+                if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+            }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -116,7 +125,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1739 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1782 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -239,6 +248,7 @@ data class ForgeUiState(
     val workspaceFiles: List<WorkspaceEntry> = emptyList(),
     val selectedFilePath: String? = null,
     val selectedFileContent: String = "",
+    val selectedFileEditable: Boolean = true,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -519,8 +529,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val rootfs = File(getApplication<Application>().filesDir, "runtime/ubuntu")
                     installer.ensureChrootScripts()
-                    RootfsRepair.ensureUnmounted(rootfs)
-                    "Chroot mount points and supervisor scripts verified."
+                    if (RootfsRepair.ensureUnmounted(rootfs)) {
+                        "Chroot mount points and supervisor scripts verified."
+                    } else {
+                        "Chroot repair incomplete: some mounts are still active. Reboot the device and retry."
+                    }
                 }.getOrElse { "Chroot repair note: ${it.message}" }
             }
             refreshRuntimeStatus()
@@ -619,6 +632,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteProject(projectId: String) {
+        // The workspace would be wiped under a running agent, and the active-project switch is blocked mid-run.
+        if (_state.value.sessionRunning) return
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
@@ -638,6 +653,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectChat(chatId: String) {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
         val messages = preferences.loadMessages(project.id, chatId)
@@ -650,6 +666,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createChat(title: String = "") {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val nextIndex = _state.value.chats.size + 1
         val chat = ProjectChat(
@@ -668,6 +685,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChat(chatId: String) {
+        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val currentChats = _state.value.chats
         if (currentChats.size <= 1) return
@@ -937,17 +955,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openWorkspaceFile(relativePath: String) {
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            val content = withContext(Dispatchers.IO) {
+            // Saving a truncated, binary or unreadable file back as text would destroy it, so those open read-only.
+            val (content, editable) = withContext(Dispatchers.IO) {
                 runCatching {
                     val ws = checkpoints.ensureWorkspace(project.id)
                     val target = checkpoints.safeWorkspaceFile(ws, relativePath)
-                    if (target.isFile) target.readBoundedText(256 * 1024) else ""
-                }.getOrDefault("")
+                    if (!target.isFile) {
+                        "" to true
+                    } else {
+                        val head = ByteArray(8192)
+                        val headCount = target.inputStream().use { it.read(head) }
+                        val binary = (0 until maxOf(headCount, 0)).any { head[it] == 0.toByte() }
+                        if (binary || target.length() > 256 * 1024) {
+                            "[Read-only: binary file or larger than 256 KB]" to false
+                        } else {
+                            target.readBoundedText(256 * 1024) to true
+                        }
+                    }
+                }.getOrDefault("[Read-only: file could not be read]" to false)
             }
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
                     selectedFileContent = content,
+                    selectedFileEditable = editable,
                     fileSavedBanner = null,
                 )
             }
@@ -961,6 +992,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSelectedFile() {
         val project = _state.value.activeProject ?: return
         val path = _state.value.selectedFilePath ?: return
+        if (!_state.value.selectedFileEditable) {
+            _state.update { it.copy(fileSavedBanner = "$path is read-only here") }
+            return
+        }
         val content = _state.value.selectedFileContent
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) {
@@ -1100,6 +1135,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
+    }
+
+    /** Runs [command] like the terminal, but throws when it exits non-zero (the plain runner only returns output). */
+    private fun runCheckedCommand(projectSlug: String, workspaceDir: File, command: String): String {
+        val wrapped = "{ $command\n} 2>&1; printf '\\n[forge-exit:%s]\\n' \"\$?\""
+        val raw = runCommandInChrootOrHost(projectSlug, workspaceDir, wrapped)
+        val code = Regex("""\[forge-exit:(\d+)]\s*$""").find(raw)?.groupValues?.get(1)?.toIntOrNull()
+        val output = raw.substringBeforeLast("[forge-exit:").trim()
+        check(code == 0) {
+            output.lineSequence().filter { it.isNotBlank() }.toList().takeLast(3).joinToString(" | ")
+                .ifBlank { "command failed" }
+        }
+        return output
     }
 
     private fun shellSingleQuote(raw: String): String = "'" + raw.replace("'", "'\"'\"'") + "'"
@@ -1647,7 +1695,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             append("git push -u origin main")
                         }
                         withGitHubCredentials(token, login) {
-                            runCommandInChrootOrHost(project.slug, ws, pushCmd)
+                            runCheckedCommand(project.slug, ws, pushCmd)
                         }
                     }
                     val updatedRepos = runCatching { githubClient.repositories(token) }.getOrDefault(listOf(repo))
@@ -1686,7 +1734,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     append("git config user.email ${shellSingleQuote("$login@users.noreply.github.com")} && ")
                     append("git add -A && ")
                     append("(git diff --cached --quiet || git commit -m ${shellSingleQuote(commitMessage)}) && ")
-                    append("git pull --rebase --autostash origin main >/dev/null 2>&1 || true; ")
+                    append("git pull --rebase --autostash origin main >/dev/null 2>&1 || git rebase --abort >/dev/null 2>&1; ")
                     append("git push -u origin HEAD:main; ")
                     append("fi")
                 }
@@ -1712,11 +1760,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val pullCmd = buildString {
                         append("if git remote get-url origin >/dev/null 2>&1; then ")
-                        append("git fetch origin && git pull --rebase --autostash origin main; ")
+                        append("git fetch origin && (git pull --rebase --autostash origin main || ")
+                        append("{ git rebase --abort 2>/dev/null; false; }); ")
                         append("else echo 'No origin remote configured in workspace'; fi")
                     }
                     withGitHubCredentials(token, login) {
-                        runCommandInChrootOrHost(project.slug, ws, pullCmd)
+                        runCheckedCommand(project.slug, ws, pullCmd)
                     }
                 }
             }
@@ -1756,10 +1805,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
                     if (token.isNotBlank()) {
                         withGitHubCredentials(token, login) {
-                            runCommandInChrootOrHost(project.slug, ws, cloneCmd)
+                            runCheckedCommand(project.slug, ws, cloneCmd)
                         }
                     } else {
-                        runCommandInChrootOrHost(project.slug, ws, cloneCmd)
+                        runCheckedCommand(project.slug, ws, cloneCmd)
                     }
                     project
                 }
@@ -1822,13 +1871,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun checkForAppUpdates(manifestUrlOverride: String = "") {
         viewModelScope.launch {
             _state.update { it.copy(updateStatusMessage = "Checking for updates…") }
-            val info = withContext(Dispatchers.IO) {
-                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }.getOrNull()
+            val result = withContext(Dispatchers.IO) {
+                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }
             }
+            val info = result.getOrNull()
             _state.update {
                 it.copy(
                     updateInfo = info,
-                    updateStatusMessage = if (info != null) {
+                    updateStatusMessage = if (result.isFailure) {
+                        "Update check failed: ${result.exceptionOrNull()?.message ?: "network error"}"
+                    } else if (info != null) {
                         "Update available: v${info.versionName} (${info.versionCode})"
                     } else {
                         "NextCraft Forge is up to date."
