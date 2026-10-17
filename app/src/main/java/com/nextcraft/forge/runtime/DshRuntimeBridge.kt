@@ -359,7 +359,7 @@ class DshRuntimeBridge(
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        // Headless SDK runs with danger-full-access inside Chroot.
+        // No approval answerer is wired for dsh; DSH_PERMISSION_MODE is not read by the upstream dsh packages (unverified for the bundled build).
     }
 
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {

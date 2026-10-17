@@ -107,7 +107,7 @@ internal class OpenRouterRoutingGateway(
                 .removeSuffix("/v1")
             val endpoint = if (isChatCompletions) "$normalizedBase/v1/chat/completions" else "$normalizedBase/v1/messages"
             if (!isPlainHttpAllowedEndpoint(endpoint)) {
-                writeJson(output, 400, errorJson("Plain http:// is only allowed for local network addresses"))
+                writeJson(output, 400, errorJson("Plain http:// is only allowed for localhost"))
                 return
             }
             if (!forwardUpstream(endpoint, headers, routedBody, output, allowRetry = true)) {

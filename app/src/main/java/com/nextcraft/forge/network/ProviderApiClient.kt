@@ -161,7 +161,7 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
             return HttpResult(
                 0,
                 "",
-                "Plain http:// is only allowed for local network addresses. Use https:// for this server.",
+                "Plain http:// is only allowed for localhost. Use https:// for this server.",
             )
         }
         return runCatching {
