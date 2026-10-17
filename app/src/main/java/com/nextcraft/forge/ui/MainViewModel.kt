@@ -76,6 +76,7 @@ import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -186,6 +187,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
     private val logLineIdCounter = AtomicLong(1L)
+    /** Session whose events may touch the active chat; late events from older sessions are dropped. */
+    private val activeRuntimeSessionId = AtomicReference<String?>(null)
 
     init {
         RuntimeSetupController.restore(application)
@@ -270,7 +273,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val savedGitHubToken = vault.get("GITHUB_TOKEN").orEmpty()
             if (savedGitHubToken.isNotBlank()) {
                 withContext(Dispatchers.IO) {
-                    runCatching { installer.configureGitHubAccess(savedGitHubToken, preferences.githubLogin) }
+                    // Credentials are written into the rootfs only for the duration of a sync.
+                    runCatching { installer.clearGitHubAccess() }
                     val repos = runCatching { githubClient.repositories(savedGitHubToken) }.getOrDefault(emptyList())
                     if (repos.isNotEmpty()) {
                         _state.update { it.copy(githubRepos = repos) }
@@ -435,7 +439,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
             val newProject = withContext(Dispatchers.IO) {
-                val slug = projectSlug(cleanName)
+                val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                val baseSlug = projectSlug(cleanName)
+                var slug = baseSlug
+                var suffix = 2
+                while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
@@ -540,6 +548,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun onRuntimeEvent(event: RuntimeEvent) {
+        if (event is RuntimeEvent.SessionStarted) {
+            activeRuntimeSessionId.set(event.sessionId)
+        } else if (event.sessionId != activeRuntimeSessionId.get()) {
+            return
+        }
         when (event) {
             is RuntimeEvent.SessionStarted -> {
                 _state.update { it.copy(sessionRunning = true, activeStatusLine = "Session started…") }
@@ -650,7 +663,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshWorkspaceFilesAndChanges(projectId)
-        syncProjectWithGitHub(projectId, "Sync agent changes from NextCraft Forge")
+        if (preferences.autoSyncGitHub) {
+            syncProjectWithGitHub(projectId, "Sync agent changes from NextCraft Forge")
+        }
+    }
+
+    fun setAutoSyncGitHub(enabled: Boolean) {
+        preferences.autoSyncGitHub = enabled
     }
 
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
@@ -862,6 +881,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun shellSingleQuote(raw: String): String = "'" + raw.replace("'", "'\"'\"'") + "'"
+
+    /**
+     * Writes the GitHub PAT into the rootfs only while [block] runs, then removes it so agent
+     * processes (UID 0 inside the chroot) can never read a long-lived credential file.
+     */
+    private inline fun <T> withGitHubCredentials(token: String, login: String, block: () -> T): T {
+        installer.configureGitHubAccess(token, login)
+        return try {
+            block()
+        } finally {
+            installer.clearGitHubAccess()
+        }
+    }
 
     fun runAndroidBuild(task: String = "assembleDebug", installAfterBuild: Boolean = false) {
         val project = _state.value.activeProject ?: return
@@ -1256,7 +1288,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         val login = account?.login.orEmpty()
                         withContext(Dispatchers.IO) {
-                            runCatching { installer.configureGitHubAccess(poll.accessToken, login) }
+                            // Credentials are provisioned into the rootfs only during sync/push.
+                            runCatching { installer.clearGitHubAccess() }
                         }
                         val repos = withContext(Dispatchers.IO) {
                             runCatching { githubClient.repositories(poll.accessToken) }.getOrDefault(emptyList())
@@ -1297,7 +1330,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val account = githubClient.account(cleanToken)
                     val repos = githubClient.repositories(cleanToken)
-                    installer.configureGitHubAccess(cleanToken, account.login)
+                    // Credentials are provisioned into the rootfs only during sync/push.
+                    runCatching { installer.clearGitHubAccess() }
                     account to repos
                 }
             }
@@ -1366,7 +1400,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (pushActiveProject && project != null) {
                         val ws = checkpoints.ensureWorkspace(project.id)
                         val login = _state.value.githubLogin.ifBlank { "x-access-token" }
-                        installer.configureGitHubAccess(token, login)
                         val pushCmd = buildString {
                             append("git init -b main && ")
                             append("git config user.name ${shellSingleQuote(login)} && ")
@@ -1377,7 +1410,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             append("(git diff --cached --quiet || git commit -m 'Initial commit from NextCraft Forge') && ")
                             append("git push -u origin main")
                         }
-                        runCommandInChrootOrHost(project.slug, ws, pushCmd)
+                        withGitHubCredentials(token, login) {
+                            runCommandInChrootOrHost(project.slug, ws, pushCmd)
+                        }
                     }
                     val updatedRepos = runCatching { githubClient.repositories(token) }.getOrDefault(listOf(repo))
                     repo to updatedRepos
@@ -1409,7 +1444,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val gitDir = File(ws, ".git")
                 if (!gitDir.isDirectory) return@runCatching
                 val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
-                installer.configureGitHubAccess(token, login)
                 val syncCmd = buildString {
                     append("if git remote get-url origin >/dev/null 2>&1; then ")
                     append("git config user.name ${shellSingleQuote(login)} && ")
@@ -1420,7 +1454,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     append("git push -u origin HEAD:main; ")
                     append("fi")
                 }
-                runCommandInChrootOrHost(project.slug, ws, syncCmd)
+                withGitHubCredentials(token, login) {
+                    runCommandInChrootOrHost(project.slug, ws, syncCmd)
+                }
             }
         }
     }

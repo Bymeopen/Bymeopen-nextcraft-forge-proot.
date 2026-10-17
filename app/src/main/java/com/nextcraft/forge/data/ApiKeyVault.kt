@@ -2,6 +2,7 @@ package com.nextcraft.forge.data
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import org.json.JSONArray
@@ -11,11 +12,52 @@ import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 class ApiKeyVault(context: Context) {
     private val preferences = context.getSharedPreferences("nextcraft_secrets", Context.MODE_PRIVATE)
     private val alias = "nextcraft-provider-key"
+
+    init {
+        migrateAuthBoundKeyIfNeeded()
+    }
+
+    /**
+     * Earlier builds created the master key with setUserAuthenticationRequired(true) and a 300 s
+     * validity window, which made every decrypt fail (and self-destruct) a few minutes after each
+     * unlock. When such a key is still present, re-encrypt every secret under a fresh unbound key.
+     * Decryption of the old key only works shortly after an unlock, so this retries on each launch
+     * until it succeeds and never deletes anything on failure.
+     */
+    @Synchronized
+    private fun migrateAuthBoundKeyIfNeeded() {
+        runCatching {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (!keyStore.containsAlias(alias)) return
+            val oldKey = keyStore.getKey(alias, null) as? SecretKey ?: return
+            val info = SecretKeyFactory.getInstance(oldKey.algorithm, "AndroidKeyStore")
+                .getKeySpec(oldKey, KeyInfo::class.java) as KeyInfo
+            if (!info.isUserAuthenticationRequired) return
+
+            // Decrypt everything first; abort (without touching storage) if any entry fails.
+            val secretIds = preferences.all.keys
+                .filter { it.endsWith(".value") }
+                .map { it.removeSuffix(".value") }
+            val plaintexts = secretIds.associateWith { storageId ->
+                val iv = Base64.decode(preferences.getString("$storageId.iv", null) ?: return, Base64.NO_WRAP)
+                val encrypted = Base64.decode(preferences.getString("$storageId.value", null) ?: return, Base64.NO_WRAP)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, oldKey, GCMParameterSpec(128, iv))
+                cipher.doFinal(encrypted).toString(Charsets.UTF_8)
+            }
+            resetKeyStoreKey()
+            plaintexts.forEach { (storageId, secret) -> putEncrypted(storageId, secret) }
+            android.util.Log.i("ApiKeyVault", "Migrated ${plaintexts.size} secrets to an unbound keystore key")
+        }.onFailure { error ->
+            android.util.Log.w("ApiKeyVault", "Keystore migration deferred: ${error::class.simpleName}")
+        }
+    }
 
     @Synchronized
     fun put(providerId: String, secret: String) {
@@ -97,13 +139,12 @@ class ApiKeyVault(context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
             cipher.iv to cipher.doFinal(plaintext)
-        }.recoverCatching {
-            // Self-heal if AndroidKeyStore key was invalidated by lockscreen/OS change
-            resetKeyStoreKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-            cipher.iv to cipher.doFinal(plaintext)
-        }.getOrThrow()
+        }.getOrElse { error ->
+            // Never reset the master key here: that would make every other stored secret
+            // (all provider keys + GITHUB_TOKEN) unreadable. Surface the failure instead.
+            android.util.Log.w("ApiKeyVault", "Encrypt failed: ${error::class.simpleName}")
+            throw IllegalStateException("Could not encrypt the API key. Unlock the device and try again.", error)
+        }
         preferences.edit()
             .putString("$storageId.iv", Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
@@ -138,9 +179,13 @@ class ApiKeyVault(context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
             cleanSecret(cipher.doFinal(encrypted).toString(Charsets.UTF_8))
-        }.onFailure {
-            // Clean up unreadable/invalidated ciphertext so it does not fail silently forever
-            removeEncrypted(storageId)
+        }.onFailure { error ->
+            // Only drop ciphertext that is provably corrupt. Transient keystore failures
+            // (device locked, keystore daemon busy) must not destroy the user's secrets.
+            android.util.Log.w("ApiKeyVault", "Decrypt failed: ${error::class.simpleName}")
+            if (error is javax.crypto.AEADBadTagException || error is IllegalArgumentException) {
+                removeEncrypted(storageId)
+            }
         }.getOrNull()
     }
 
@@ -199,27 +244,21 @@ class ApiKeyVault(context: Context) {
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        runCatching { keyStore.getKey(alias, null) as? SecretKey }.getOrNull()?.let { return it }
-        resetKeyStoreKey()
+        if (keyStore.containsAlias(alias)) {
+            // An existing key that cannot be loaded right now is a transient keystore error.
+            // Do not delete it: that would orphan every ciphertext written with it.
+            return keyStore.getKey(alias, null) as? SecretKey
+                ?: throw IllegalStateException("AndroidKeyStore key '$alias' is unavailable")
+        }
+        // No user-authentication binding: the app never shows a BiometricPrompt/Keyguard, so an
+        // auth-bound key would throw UserNotAuthenticatedException minutes after each unlock.
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
-            runCatching {
-                @Suppress("DEPRECATION")
-                init(
-                    KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setUserAuthenticationRequired(true)
-                        .setUserAuthenticationValidityDurationSeconds(300)
-                        .build(),
-                )
-            }.recoverCatching {
-                init(
-                    KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .build(),
-                )
-            }.getOrThrow()
+            init(
+                KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .build(),
+            )
             generateKey()
         }
     }

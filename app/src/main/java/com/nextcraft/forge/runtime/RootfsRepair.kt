@@ -29,9 +29,15 @@ internal object RootfsRepair {
 
     private fun moveDirectory(source: File, target: File): Boolean {
         if (source.renameTo(target)) return true
-        return runCatching {
-            source.copyRecursively(target, overwrite = true) && safeDeleteRecursively(source)
-        }.getOrDefault(false)
+        // Never copyRecursively a rootfs: it follows symlinks and drops ownership, modes and
+        // special files. A root `mv` preserves all of them (and is a plain rename on one fs).
+        if (target.exists()) return false
+        val exit = runRootCommand(
+            "su", "-c",
+            "mv -- ${shellSingleQuote(source.absolutePath)} ${shellSingleQuote(target.absolutePath)}",
+            timeoutSeconds = 120L,
+        )
+        return exit == 0 && target.exists() && !source.exists()
     }
 
     /**

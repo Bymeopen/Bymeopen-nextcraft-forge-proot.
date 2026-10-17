@@ -140,7 +140,7 @@ internal class OpenRouterRoutingGateway(
             connection.outputStream.use { it.write(routedBody) }
 
             val code = connection.responseCode
-            if (allowRetry && code in setOf(401, 402, 429) && onRotateApiKey != null) {
+            if (allowRetry && code in setOf(402, 429) && onRotateApiKey != null) {
                 val shouldRetry = synchronized(rotationLock) {
                     if (activeApiKey == currentKey) {
                         val rotated = onRotateApiKey.invoke()?.takeIf { it.isNotBlank() && it != currentKey }

@@ -53,8 +53,17 @@ android {
         kotlinCompilerExtensionVersion = "1.5.10"
     }
 
-    val sdkNdkDir = File("/root/android-sdk/ndk")
-    if (sdkNdkDir.isDirectory && !sdkNdkDir.listFiles().isNullOrEmpty()) {
+    // Build libforgespawn.so whenever an NDK can be located; without it NativeSpawnProcess
+    // silently falls back to ProcessBuilder (no PTY, no process-group kill).
+    val ndkCandidates = listOfNotNull(
+        System.getenv("ANDROID_NDK_HOME")?.let(::File),
+        System.getenv("ANDROID_NDK_ROOT")?.let(::File),
+        System.getenv("ANDROID_HOME")?.let { File(it, "ndk") },
+        System.getenv("ANDROID_SDK_ROOT")?.let { File(it, "ndk") },
+        File("/root/android-sdk/ndk"),
+    )
+    val ndkAvailable = ndkCandidates.any { it.isDirectory && !it.listFiles().isNullOrEmpty() }
+    if (ndkAvailable) {
         externalNativeBuild {
             cmake {
                 path = file("src/main/cpp/CMakeLists.txt")

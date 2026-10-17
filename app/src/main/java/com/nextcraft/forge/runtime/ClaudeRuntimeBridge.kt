@@ -32,15 +32,21 @@ import org.json.JSONObject
 internal object ProviderRuntimeErrorDetector {
     fun detect(line: String): String? {
         val json = runCatching { JSONObject(line) }.getOrNull()
-        val combined = buildString {
-            append(line)
-            json?.let {
+        // Structured stream-json lines carry assistant text and tool output. Scanning those
+        // would abort the session whenever a file or answer merely mentions "quota" or
+        // "rate limit". Only error-bearing fields are inspected; raw (non-JSON) lines are
+        // runtime stderr and are scanned whole.
+        val combined = if (json == null) {
+            line.lowercase()
+        } else buildString {
+            append(json.optString("error"))
+            if (json.optString("type") == "error") {
                 append(' ')
-                append(it.optString("error"))
+                append(json.optString("message"))
+            }
+            if (json.optBoolean("is_error")) {
                 append(' ')
-                append(it.optString("message"))
-                append(' ')
-                append(it.optString("result"))
+                append(json.optString("result"))
             }
         }.lowercase()
         return when {
@@ -73,7 +79,10 @@ class ClaudeRuntimeBridge(
 ) : RuntimeBridge {
     private val installer by lazy { RuntimeInstaller(context) }
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir, context) }
-    private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
+    private val eventBus = MutableSharedFlow<RuntimeEvent>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
     private val toolNames = ConcurrentHashMap<String, String>()
@@ -839,6 +848,8 @@ internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
     val highRiskPatterns = listOf(
         "rm -rf",
+        "rm -fr",
+        "rm -r ",
         "git push",
         "git reset",
         "sudo",
@@ -848,6 +859,10 @@ internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
         "dd if=",
         "mkfs",
         "chown -r /",
+        "/dev/block",
+        "umount",
+        "| sh",
+        "| bash",
     )
     return when {
         highRiskPatterns.any(preview::contains) -> RiskLevel.HIGH

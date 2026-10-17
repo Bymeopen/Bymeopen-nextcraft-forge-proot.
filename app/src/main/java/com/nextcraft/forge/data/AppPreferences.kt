@@ -70,6 +70,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    /** Auto-commit and push the workspace to GitHub after every agent turn. Off by default. */
+    var autoSyncGitHub: Boolean
+        get() = preferences.getBoolean("auto_sync_github", false)
+        set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
+
     /** Whether high-risk tool executions prompt for interactive approval instead of immediate rejection. */
     var interactiveHighRiskApprovals: Boolean
         get() = preferences.getBoolean("interactive_high_risk_approvals", true)

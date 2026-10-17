@@ -104,10 +104,15 @@ class WorkspaceCheckpoints(
                     val relative = source.relativeTo(workspace).invariantSeparatorsPath
                     activeRelatives.add(relative)
                     val destination = safeWorkspaceFile(backup, relative)
+                    // Fast path: identical size + mtime means the baseline is current. Only hash
+                    // when metadata differs, so large workspaces are not re-digested every prompt.
                     val upToDate = destination.isFile &&
                         !Files.isSymbolicLink(destination.toPath()) &&
                         destination.length() == source.length() &&
-                        digest(destination) == digest(source)
+                        (
+                            destination.lastModified() == source.lastModified() ||
+                                digest(destination) == digest(source)
+                            )
                     if (!upToDate) {
                         destination.parentFile?.mkdirs()
                         // Always copy bytes into a distinct inode so in-place O_TRUNC edits in

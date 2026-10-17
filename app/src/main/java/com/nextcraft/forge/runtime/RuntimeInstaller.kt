@@ -1720,6 +1720,11 @@ class RuntimeInstaller(private val context: Context) {
             mkdirs()
             runCatching { Os.chmod(absolutePath, 0b111000000) } // 0700
         }
+        // A launch that never reached `rm -f` (su denied, process killed) leaves API keys on
+        // disk. Purge anything old enough that it cannot belong to a launch in progress.
+        runtimeEnvDir.listFiles { f -> f.name.startsWith(".env-") }
+            ?.filter { System.currentTimeMillis() - it.lastModified() > 10 * 60 * 1_000L }
+            ?.forEach { it.delete() }
         val envFile = File(runtimeEnvDir, ".env-${java.util.UUID.randomUUID()}.sh")
         val envScript = buildString {
             for ((key, value) in guestEnv) {
@@ -1775,10 +1780,29 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
+        // Hands every permission request to the app through the shared bridge directory and
+        // waits for the user's/guardrail decision. The app classifies risk, auto-answers
+        // SAFE/REVIEW and prompts for HIGH. No answer within the timeout means deny.
         hook.writeText(
             """#!/bin/sh
-cat > /dev/null
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
+DECISION=deny
+if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
+    i=0
+    while [ "${'$'}i" -lt 600 ]; do
+        if [ -f "${'$'}BRIDGE/${'$'}ID.response" ]; then
+            [ "${'$'}(cat "${'$'}BRIDGE/${'$'}ID.response")" = "allow" ] && DECISION=allow
+            break
+        fi
+        sleep 0.1
+        i=${'$'}((i + 1))
+    done
+    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.response"
+else
+    cat > /dev/null
+fi
+printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
 """,
         )
         Os.chmod(hook.absolutePath, 0b111101101)
@@ -1835,11 +1859,9 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         stateFile.writeText(state.toString())
     }
 
+    // Only auto-allow read-only tools. Bash/Edit/Write/NotebookEdit go through the
+    // PermissionRequest hook so the app can classify and gate each command.
     private fun claudeWorkspaceToolRules() = JSONArray().apply {
-        put("Bash")
-        put("Edit")
-        put("Write")
-        put("NotebookEdit")
         put("Read")
         put("Glob")
         put("Grep")
