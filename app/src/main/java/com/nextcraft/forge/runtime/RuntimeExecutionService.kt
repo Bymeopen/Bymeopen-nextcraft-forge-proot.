@@ -1,0 +1,232 @@
+package com.nextcraft.forge.runtime
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.IBinder
+import android.os.PowerManager
+import androidx.core.app.NotificationCompat
+
+class RuntimeExecutionService : Service() {
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var projectNameOverride: String? = null
+    private var notificationTitleOverride: String? = null
+    private val projectName: String
+        get() = projectNameOverride ?: "Forge Workspace"
+    private val notificationTitle: String
+        get() = notificationTitleOverride ?: "Forge Runtime Active"
+    private var canStop: Boolean = true
+    private var taskRunning: Boolean = false
+
+    override fun onCreate() {
+        super.onCreate()
+        ensureNotificationChannels(this)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val action = intent?.action ?: ACTION_START
+        val incomingProjectName = intent?.getStringExtra(EXTRA_PROJECT_NAME)
+            ?: intent?.getStringExtra(LEGACY_EXTRA_PROJECT_NAME)
+        val incomingTitle = intent?.getStringExtra(EXTRA_TITLE)
+            ?: intent?.getStringExtra(LEGACY_EXTRA_TITLE)
+        val incomingDetail = intent?.getStringExtra(EXTRA_DETAIL)
+            ?: intent?.getStringExtra(LEGACY_EXTRA_DETAIL)
+
+        incomingProjectName?.takeIf(String::isNotBlank)?.let { projectNameOverride = it }
+
+        when (action) {
+            ACTION_STOP, LEGACY_ACTION_STOP -> {
+                RuntimeTaskController.requestStop()
+                getSystemService(NotificationManager::class.java)?.notify(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification("Stopping active task…", includeStop = false),
+                )
+            }
+            ACTION_PROGRESS, LEGACY_ACTION_PROGRESS -> {
+                if (!taskRunning) return START_NOT_STICKY
+                incomingTitle?.takeIf(String::isNotBlank)?.let { notificationTitleOverride = it }
+                if (intent?.hasExtra(EXTRA_CAN_STOP) == true) {
+                    canStop = intent.getBooleanExtra(EXTRA_CAN_STOP, true)
+                } else if (intent?.hasExtra(LEGACY_EXTRA_CAN_STOP) == true) {
+                    canStop = intent.getBooleanExtra(LEGACY_EXTRA_CAN_STOP, true)
+                }
+                val detail = incomingDetail?.takeIf(String::isNotBlank)
+                    ?: "Working in $projectName"
+                getSystemService(NotificationManager::class.java)?.notify(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification(detail, includeStop = canStop),
+                )
+            }
+            ACTION_COMPLETE, LEGACY_ACTION_COMPLETE -> finishTask(
+                title = "Task completed",
+                detail = incomingDetail?.takeIf(String::isNotBlank) ?: "Finished task in $projectName",
+                failed = false,
+            )
+            ACTION_FAILED, LEGACY_ACTION_FAILED -> finishTask(
+                title = "Task needs attention",
+                detail = incomingDetail?.takeIf(String::isNotBlank) ?: "Could not finish the active task.",
+                failed = true,
+            )
+            ACTION_CANCELLED, LEGACY_ACTION_CANCELLED -> {
+                taskRunning = false
+                releaseWakeLock()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            else -> {
+                // Reset per-task overrides on fresh start so previous non-stoppable or custom-titled
+                // tasks never bleed into subsequent coding sessions.
+                notificationTitleOverride = incomingTitle?.takeIf(String::isNotBlank)
+                canStop = when {
+                    intent?.hasExtra(EXTRA_CAN_STOP) == true -> intent.getBooleanExtra(EXTRA_CAN_STOP, true)
+                    intent?.hasExtra(LEGACY_EXTRA_CAN_STOP) == true -> intent.getBooleanExtra(LEGACY_EXTRA_CAN_STOP, true)
+                    else -> true
+                }
+                taskRunning = true
+                val detail = incomingDetail?.takeIf(String::isNotBlank)
+                    ?: "Working in $projectName"
+                startForeground(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification(detail, includeStop = canStop),
+                )
+                acquireWakeLock()
+            }
+        }
+        return START_NOT_STICKY
+    }
+
+    private fun runningNotification(detail: String, includeStop: Boolean): Notification {
+        val builder = NotificationCompat.Builder(this, RUNNING_CHANNEL_ID)
+            .setSmallIcon(smallIconRes())
+            .setContentTitle(notificationTitle)
+            .setContentText(detail)
+            .setContentIntent(openAppIntent())
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        if (includeStop) {
+            val stopIntent = PendingIntent.getService(
+                this,
+                2,
+                Intent(this, RuntimeExecutionService::class.java).setAction(ACTION_STOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(0, "Stop task", stopIntent)
+        }
+        return builder.build()
+    }
+
+    private fun finishTask(title: String, detail: String, failed: Boolean) {
+        taskRunning = false
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        val notification = NotificationCompat.Builder(this, RESULT_CHANNEL_ID)
+            .setSmallIcon(smallIconRes())
+            .setContentTitle(title)
+            .setContentText(detail)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+            .setContentIntent(openAppIntent())
+            .setAutoCancel(true)
+            .setCategory(if (failed) NotificationCompat.CATEGORY_ERROR else NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        getSystemService(NotificationManager::class.java)?.notify(RESULT_NOTIFICATION_ID, notification)
+        stopSelf()
+    }
+
+    private fun smallIconRes(): Int =
+        applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.stat_notify_sync
+
+    private fun openAppIntent(): PendingIntent {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: runCatching { Intent(this, Class.forName("$packageName.MainActivity")) }.getOrNull()
+            ?: runCatching { Intent(this, Class.forName("com.nextcraft.forge.MainActivity")) }.getOrNull()
+            ?: Intent().setPackage(packageName)
+        launchIntent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        return PendingIntent.getActivity(
+            this,
+            1,
+            launchIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        wakeLock = getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.nextcraft.forge:active-coding-task")
+            ?.apply { acquire(MAX_WAKE_LOCK_MS) }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.takeIf { it.isHeld }?.let { lock ->
+            runCatching { lock.release() }
+        }
+        wakeLock = null
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    companion object {
+        const val ACTION_START = RuntimeExecutionServiceContract.ACTION_START
+        const val ACTION_STOP = "com.nextcraft.forge.runtime.action.STOP"
+        const val ACTION_PROGRESS = RuntimeExecutionServiceContract.ACTION_PROGRESS
+        const val ACTION_COMPLETE = RuntimeExecutionServiceContract.ACTION_COMPLETE
+        const val ACTION_FAILED = RuntimeExecutionServiceContract.ACTION_FAILED
+        const val ACTION_CANCELLED = RuntimeExecutionServiceContract.ACTION_CANCELLED
+
+        const val EXTRA_PROJECT_NAME = RuntimeExecutionServiceContract.EXTRA_PROJECT_NAME
+        const val EXTRA_DETAIL = RuntimeExecutionServiceContract.EXTRA_DETAIL
+        const val EXTRA_TITLE = "com.nextcraft.forge.runtime.extra.TITLE"
+        const val EXTRA_CAN_STOP = "com.nextcraft.forge.runtime.extra.CAN_STOP"
+
+        private const val LEGACY_ACTION_STOP = "com.nextcraft.forge.STOP_RUNTIME"
+        private const val LEGACY_ACTION_PROGRESS = "com.nextcraft.forge.PROGRESS_RUNTIME"
+        private const val LEGACY_ACTION_COMPLETE = "com.nextcraft.forge.COMPLETE_RUNTIME"
+        private const val LEGACY_ACTION_FAILED = "com.nextcraft.forge.FAIL_RUNTIME"
+        private const val LEGACY_ACTION_CANCELLED = "com.nextcraft.forge.CANCEL_RUNTIME"
+        private const val LEGACY_EXTRA_PROJECT_NAME = "project_name"
+        private const val LEGACY_EXTRA_DETAIL = "detail"
+        private const val LEGACY_EXTRA_TITLE = "title"
+        private const val LEGACY_EXTRA_CAN_STOP = "can_stop"
+
+        private const val RUNNING_CHANNEL_ID = "runtime"
+        private const val RESULT_CHANNEL_ID = "task-results"
+        private const val RUNNING_NOTIFICATION_ID = 41
+        private const val RESULT_NOTIFICATION_ID = 42
+        private const val MAX_WAKE_LOCK_MS = 90 * 60 * 1_000L
+
+        fun ensureNotificationChannels(context: Context) {
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    RUNNING_CHANNEL_ID,
+                    "Active coding tasks",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Shows live progress while an agent or build task is running."
+                },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    RESULT_CHANNEL_ID,
+                    "Task results",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Notifies when background coding or build tasks complete."
+                },
+            )
+        }
+    }
+}

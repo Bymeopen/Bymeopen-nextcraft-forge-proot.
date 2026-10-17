@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NextCraftForge" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0B0F17</item>
+        <item name="android:navigationBarColor">#0B0F17</item>
+    </style>
+</resources>

@@ -1,0 +1,20 @@
+# Gradle & Android build outputs
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE & OS metadata
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# PocketDev workspace transient attachments & secrets
+attachments/
+.git/forge_github_device.json

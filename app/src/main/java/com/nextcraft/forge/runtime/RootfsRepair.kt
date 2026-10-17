@@ -1,0 +1,185 @@
+package com.nextcraft.forge.runtime
+
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+/**
+ * Failure-safe activation of a rebuilt Ubuntu 24.04 Chroot environment while
+ * retaining the user's `/root` home directory and guaranteeing that all kernel
+ * bind-mounts (`/dev`, `/proc`, `/sys`, `/system`, `/apex`, `/workspace`) are
+ * unmounted before any directory rename or recursive delete occurs.
+ */
+internal object RootfsRepair {
+
+    private fun shellSingleQuote(value: String): String =
+        "'" + value.replace("'", "'\"'\"'") + "'"
+
+    private fun runRootCommand(vararg command: String, timeoutSeconds: Long = 15L): Int =
+        runCatching {
+            val proc = ProcessBuilder(*command).redirectErrorStream(true).start()
+            val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+            if (!finished) {
+                proc.destroyForcibly()
+                -1
+            } else {
+                runCatching { proc.inputStream.bufferedReader().use { it.readText() } }
+                proc.exitValue()
+            }
+        }.getOrDefault(-1)
+
+    private fun moveDirectory(source: File, target: File): Boolean {
+        if (source.renameTo(target)) return true
+        return runCatching {
+            source.copyRecursively(target, overwrite = true) && safeDeleteRecursively(source)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Unmounts every kernel mount inside [targetDir] in reverse mount-depth order
+     * across both the master mount namespace (`su -mm`) and default root context (`su`),
+     * and throws if `/proc/mounts` still reports any active mount under [targetDir].
+     */
+    fun ensureUnmounted(targetDir: File): Boolean {
+        if (!targetDir.exists()) return true
+        val canonicalPath = runCatching { targetDir.canonicalPath }.getOrDefault(targetDir.absolutePath).trimEnd('/')
+        require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
+            "Refusing to operate on invalid rootfs path: '$canonicalPath'"
+        }
+        val quotedRootfs = shellSingleQuote(canonicalPath)
+        val unmountScript = """
+            ROOTFS_PATH=$quotedRootfs
+            for pass in 1 2 3; do
+                MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
+                [ -z "${'$'}MOUNTS" ] && break
+                for mp in ${'$'}MOUNTS; do
+                    if [ "${'$'}pass" -lt 3 ]; then
+                        umount "${'$'}mp" 2>/dev/null || true
+                    else
+                        umount -lf "${'$'}mp" 2>/dev/null || umount -f "${'$'}mp" 2>/dev/null || true
+                    fi
+                done
+            done
+            if awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { found=1 } END { exit !found }' /proc/mounts; then
+                exit 1
+            fi
+            rm -rf "${'$'}{ROOTFS_PATH}/tmp/.nextcraft-mounts" 2>/dev/null || true
+            exit 0
+        """.trimIndent()
+
+        val masterCode = runRootCommand("su", "-mm", "-c", unmountScript)
+        val defaultCode = runRootCommand("su", "-c", unmountScript)
+        check(masterCode == 0 && defaultCode == 0) {
+            "Refusing to modify or delete Chroot directory '$canonicalPath' while kernel mounts are still active (master=$masterCode, default=$defaultCode)"
+        }
+        return true
+    }
+
+    fun safeDeleteRecursively(targetDir: File): Boolean {
+        if (!targetDir.exists()) return true
+        ensureUnmounted(targetDir)
+        if (targetDir.deleteRecursively()) return true
+        // Fallback to root rm -rf ONLY after ensureUnmounted verified 0 active kernel mounts
+        val canonicalPath = targetDir.canonicalPath.trimEnd('/')
+        require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
+            "Refusing to delete invalid path: '$canonicalPath'"
+        }
+        val quotedPath = shellSingleQuote(canonicalPath)
+        val exit = runRootCommand(
+            "su",
+            "-c",
+            "rm -rf --one-file-system -- $quotedPath 2>/dev/null || rm -rf -- $quotedPath",
+        )
+        return exit == 0 && !targetDir.exists()
+    }
+
+    fun reconcileInterruptedSwap(
+        rootfs: File,
+        staging: File,
+        backup: File,
+        validate: (File) -> Boolean,
+    ) {
+        if (!backup.exists()) return
+
+        ensureUnmounted(rootfs)
+        ensureUnmounted(staging)
+        ensureUnmounted(backup)
+
+        if (!rootfs.exists()) {
+            check(moveDirectory(backup, rootfs)) { "Could not restore the previous Linux environment" }
+            safeDeleteRecursively(staging)
+            return
+        }
+
+        if (validate(rootfs)) {
+            restoreHome(backup, rootfs)
+            check(validate(rootfs)) { "Repaired Linux environment failed validation" }
+            check(safeDeleteRecursively(backup)) { "Could not remove the previous Linux environment" }
+            safeDeleteRecursively(staging)
+            return
+        }
+
+        rollback(rootfs, staging, backup)
+    }
+
+    fun activate(
+        rootfs: File,
+        staging: File,
+        backup: File,
+        validate: (File) -> Boolean,
+    ) {
+        require(staging.isDirectory && validate(staging)) {
+            "Rebuilt Linux environment failed validation"
+        }
+        check(!backup.exists()) { "A previous Linux environment repair is still pending" }
+
+        ensureUnmounted(rootfs)
+        ensureUnmounted(staging)
+
+        val hadRootfs = rootfs.exists()
+        if (hadRootfs) {
+            check(moveDirectory(rootfs, backup)) { "Could not preserve the previous Linux environment" }
+        }
+
+        try {
+            check(moveDirectory(staging, rootfs)) { "Could not activate the rebuilt Linux environment" }
+            if (hadRootfs) restoreHome(backup, rootfs)
+            check(validate(rootfs)) { "Rebuilt Linux environment failed validation after activation" }
+            if (hadRootfs) {
+                check(safeDeleteRecursively(backup)) { "Could not remove the previous Linux environment" }
+            }
+        } catch (error: Throwable) {
+            if (hadRootfs && backup.exists()) {
+                runCatching { rollback(rootfs, staging, backup) }
+                    .onFailure(error::addSuppressed)
+            }
+            throw error
+        }
+    }
+
+    private fun restoreHome(backup: File, rootfs: File) {
+        val preservedHome = File(backup, "root")
+        if (!preservedHome.exists()) return
+        val freshHome = File(rootfs, "root")
+        if (freshHome.exists()) {
+            check(safeDeleteRecursively(freshHome)) { "Could not replace the rebuilt Linux home" }
+        }
+        check(moveDirectory(preservedHome, freshHome)) { "Could not restore the Linux home" }
+    }
+
+    private fun rollback(rootfs: File, staging: File, backup: File) {
+        ensureUnmounted(rootfs)
+        ensureUnmounted(staging)
+        ensureUnmounted(backup)
+
+        val activeHome = File(rootfs, "root")
+        val backupHome = File(backup, "root")
+        if (!backupHome.exists() && activeHome.exists()) {
+            check(moveDirectory(activeHome, backupHome)) { "Could not preserve the Linux home during rollback" }
+        }
+        if (rootfs.exists()) {
+            check(safeDeleteRecursively(rootfs)) { "Could not remove the failed Linux environment" }
+        }
+        check(moveDirectory(backup, rootfs)) { "Could not restore the previous Linux environment" }
+        safeDeleteRecursively(staging)
+    }
+}
