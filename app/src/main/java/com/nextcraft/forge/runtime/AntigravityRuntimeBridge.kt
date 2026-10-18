@@ -344,7 +344,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
-            RuntimeTaskController.stopAction = stopHandler
+            RuntimeTaskController.register(RuntimeTaskController.AGENT, stopHandler)
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()

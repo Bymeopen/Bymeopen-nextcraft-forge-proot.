@@ -25,25 +25,36 @@ data class RuntimeLaunchConfig(
  * coding agent session in ClaudeRuntimeBridge, AntigravityRuntimeBridge, or DshRuntimeBridge.
  */
 object RuntimeTaskController {
-    @Volatile
-    var stopAction: (() -> Unit)? = null
+    const val AGENT = "agent"
+    const val BUILD = "build"
+
+    /**
+     * Stop hooks by task kind. The agent and the Android build can run at the same time; a single slot let one
+     * overwrite the other's hook, and stopping the agent also killed the build.
+     */
+    private val hooks = LinkedHashMap<String, () -> Unit>()
 
     @Synchronized
-    fun stopCurrentTask() {
-        val action = stopAction
-        stopAction = null
+    fun register(kind: String, action: () -> Unit) {
+        hooks[kind] = action
+    }
+
+    /** Clears [action] only if it is still registered, so a finishing task cannot drop another task's stop hook. */
+    @Synchronized
+    fun release(action: (() -> Unit)?) {
+        if (action != null) hooks.entries.removeAll { it.value === action }
+    }
+
+    /** Stops only the task of [kind]. */
+    fun stop(kind: String) {
+        val action = synchronized(this) { hooks.remove(kind) }
         action?.invoke()
     }
 
-    /** Clears [action] only if it is still the registered one, so a finishing task cannot drop another task's stop hook. */
-    @Synchronized
-    fun release(action: (() -> Unit)?) {
-        if (action != null && stopAction === action) stopAction = null
-    }
-
-    @Synchronized
+    /** Stops every running task (the shared notification's Stop action, app teardown). */
     fun requestStop() {
-        stopCurrentTask()
+        val actions = synchronized(this) { hooks.values.toList().also { hooks.clear() } }
+        actions.forEach { it() }
     }
 }
 

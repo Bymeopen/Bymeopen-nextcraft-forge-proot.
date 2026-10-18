@@ -446,19 +446,29 @@ class RuntimeInstaller(private val context: Context) {
         gitCredentials.writeText("https://$cleanLogin:$cleanToken@github.com\n")
         runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
 
+        // Merge instead of replacing: the user's own name, email, aliases and editor settings must survive connecting
+        // GitHub. Only the credential helper is forced; identity and default branch are filled in when missing.
         val gitConfig = File(rootHome, ".gitconfig")
-        gitConfig.writeText(
-            buildString {
-                appendLine("[user]")
-                appendLine("    name = $cleanLogin")
-                appendLine("    email = $cleanLogin@users.noreply.github.com")
-                appendLine("[init]")
-                appendLine("    defaultBranch = main")
-                appendLine("[credential]")
-                appendLine("    helper = store")
-                appendLine("[safe]")
-                appendLine("    directory = *")
-            },
+        if (gitConfig.exists() && !gitConfig.canRead()) RootfsRepair.reclaimOwnership(gitConfig, AndroidProcess.myUid())
+        val existingConfig = if (gitConfig.isFile) {
+            // An unreadable existing file must not be replaced by a template that drops the user's settings.
+            checkNotNull(runCatching { gitConfig.readText() }.getOrNull()) { "Could not read ~/.gitconfig" }
+        } else {
+            ""
+        }
+        writeRootfsFileAtomically(
+            gitConfig,
+            mergeGitConfig(
+                existingConfig,
+                listOf(
+                    GitConfigEntry("credential", "helper", "store", replace = true),
+                    GitConfigEntry("user", "name", cleanLogin),
+                    GitConfigEntry("user", "email", "$cleanLogin@users.noreply.github.com"),
+                    GitConfigEntry("init", "defaultBranch", "main"),
+                    // Workspaces belong to the app UID while git runs as root, so git needs this to trust them.
+                    GitConfigEntry("safe", "directory", "*", multiValue = true),
+                ),
+            ),
         )
         runCatching { Os.chmod(gitConfig.absolutePath, 384) } // 0600
 
@@ -2847,4 +2857,47 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             exit 0
         """.trimIndent() + "\n"
     }
+}
+
+internal data class GitConfigEntry(
+    val section: String,
+    val key: String,
+    val value: String,
+    val replace: Boolean = false,
+    /** For multi-valued keys (safe.directory): add the value unless that exact value is already there. */
+    val multiValue: Boolean = false,
+)
+
+/**
+ * Adds [entries] to a git config text. An entry whose key already exists in its section is kept as the user set it,
+ * unless [GitConfigEntry.replace]. Sections are matched by exact `[name]` header (no subsections are needed here).
+ */
+internal fun mergeGitConfig(existing: String, entries: List<GitConfigEntry>): String {
+    val lines = existing.lines().dropLastWhile { it.isBlank() }.toMutableList()
+    fun sectionOf(line: String) = Regex("^\\s*\\[\\s*([A-Za-z0-9.-]+)\\s*]\\s*$").find(line)?.groupValues?.get(1)?.lowercase()
+    fun keyOf(line: String) = Regex("^\\s*([A-Za-z][A-Za-z0-9-]*)\\s*(=|$)").find(line)?.groupValues?.get(1)?.lowercase()
+    for (entry in entries) {
+        val wanted = entry.section.lowercase()
+        val start = lines.indexOfFirst { sectionOf(it) == wanted }
+        val formatted = "    ${entry.key} = ${entry.value}"
+        if (start < 0) {
+            lines += "[${entry.section}]"
+            lines += formatted
+            continue
+        }
+        var end = start + 1
+        while (end < lines.size && sectionOf(lines[end]) == null) end++
+        val sameKey = (start + 1 until end).filter { keyOf(lines[it]) == entry.key.lowercase() }
+        if (entry.multiValue) {
+            val present = sameKey.any { lines[it].substringAfter('=', "").trim() == entry.value }
+            if (!present) lines.add(end, formatted)
+            continue
+        }
+        val existingIndex = sameKey.firstOrNull()
+        when {
+            existingIndex == null -> lines.add(end, formatted)
+            entry.replace -> lines[existingIndex] = formatted
+        }
+    }
+    return lines.joinToString("\n") + "\n"
 }

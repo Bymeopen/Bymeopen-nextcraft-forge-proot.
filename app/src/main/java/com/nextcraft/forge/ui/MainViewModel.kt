@@ -860,18 +860,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 finishAgentTurn(project.id)
             }
+            // The bridge normally ends the turn with a SessionCompleted/SessionFailed event, but that event is dropped
+            // when its session id does not match (e.g. it failed before SessionStarted), leaving the UI "running" and
+            // blocking prompts and project switching. Events are delivered asynchronously, so give the real one a
+            // moment to arrive first; finishAgentTurn is idempotent, and a newer turn is left alone.
+            val turnJob = coroutineContext[Job]
+            viewModelScope.launch {
+                delay(AGENT_TURN_END_GRACE_MS)
+                if (activeAgentJob === turnJob) finishAgentTurn(project.id)
+            }
         }
     }
 
+    /** Stops the Android build only; a running agent session keeps going. */
+    fun stopAndroidBuild() {
+        RuntimeTaskController.stop(RuntimeTaskController.BUILD)
+        activeBuildProcess?.destroyForcibly()
+        activeBuildJob?.cancel()
+    }
+
+    /** Stops the agent session only; a running Android build keeps going. */
     fun stopActiveTask() {
         val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
         val pendingApproval = _state.value.pendingToolRequest
         val bridge = activeRuntimeBridge
-        RuntimeTaskController.requestStop()
+        RuntimeTaskController.stop(RuntimeTaskController.AGENT)
         val agentJob = activeAgentJob
         agentJob?.cancel()
-        activeBuildProcess?.destroyForcibly()
-        activeBuildJob?.cancel()
         if (wasSessionRunning) {
             _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
             // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
@@ -1532,7 +1547,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activeBuildProcess?.destroyForcibly()
             activeBuildJob?.cancel()
         }
-        RuntimeTaskController.stopAction = buildStopHook
+        RuntimeTaskController.register(RuntimeTaskController.BUILD, buildStopHook)
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
@@ -1540,13 +1555,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var builtApk: File? = null
             var fullLog = ""
             var exitCode = -1
-            val ws = withContext(Dispatchers.IO) { checkpoints.ensureWorkspace(project.id) }
-            val androidRoot = withContext(Dispatchers.IO) { findAndroidProjectRoot(ws) ?: ws }
+            // Resolved inside the try: a failure or a cancel here must still end the build (phase, service, stop
+            // hook) instead of leaving it BUILDING, which blocks switching projects.
+            var androidRoot: File? = null
 
             try {
-                val cmd = androidGradleCommand(androidRoot, task)
+                val ws = withContext(Dispatchers.IO) { checkpoints.ensureWorkspace(project.id) }
+                val root = withContext(Dispatchers.IO) { findAndroidProjectRoot(ws) ?: ws }
+                androidRoot = root
+                val cmd = androidGradleCommand(root, task)
                 withContext(Dispatchers.IO) {
-                    val relativeRoot = androidRoot.relativeTo(ws).invariantSeparatorsPath
+                    val relativeRoot = root.relativeTo(ws).invariantSeparatorsPath
                     val guestCommand = if (relativeRoot.isEmpty()) cmd else "cd ${shellSingleQuote(relativeRoot)} && $cmd"
                     val process = startChrootProcess(project.slug, ws, guestCommand)
                     activeBuildProcess = process
@@ -1567,7 +1586,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     exitCode = process.waitFor()
                     fullLog = logBuilder.toString()
-                    builtApk = if (exitCode == 0) findDebugApk(androidRoot) else null
+                    builtApk = if (exitCode == 0) findDebugApk(root) else null
                     succeeded = exitCode == 0 && (task == "clean" || builtApk != null)
                 }
             } catch (e: CancellationException) {
@@ -1584,13 +1603,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 RuntimeTaskController.release(buildStopHook)
             }
 
-            val issues = if (!succeeded && !cancelled && task != "clean") {
-                parseAndroidBuildIssues(fullLog, androidRoot, exitCode)
+            val resolvedRoot = androidRoot
+            val issues = if (!succeeded && !cancelled && task != "clean" && resolvedRoot != null) {
+                parseAndroidBuildIssues(fullLog, resolvedRoot, exitCode)
             } else {
                 emptyList()
             }
-            val finalApk = builtApk ?: if (!cancelled && task != "clean") {
-                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(androidRoot) }
+            val finalApk = builtApk ?: if (!cancelled && task != "clean" && resolvedRoot != null) {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(resolvedRoot) }
             } else {
                 null
             }
@@ -2474,3 +2494,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
     }
 }
+
+private const val AGENT_TURN_END_GRACE_MS = 2_000L
