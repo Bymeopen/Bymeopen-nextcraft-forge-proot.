@@ -35,7 +35,7 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2456 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2464 baris)
 - `app/src/main/cpp/forge_spawn.c` (297 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
@@ -1130,7 +1130,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2456 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2464 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -2127,15 +2127,9 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Downloading Composer…", fraction))
         downloads.mkdirs()
         val staged = File(downloads, "composer.phar")
-        val checksum = fetchText("https://getcomposer.org/download/latest-stable/composer.phar.sha256sum")
-            .lineSequence()
-            .firstOrNull()
-            ?.trim()
-            ?.substringBefore(' ')
-            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
-            ?: error("Composer checksum was not found")
+        val checksum = COMPOSER_SHA256
         downloadVerified(
-            "https://getcomposer.org/download/latest-stable/composer.phar",
+            "https://getcomposer.org/download/$COMPOSER_VERSION/composer.phar",
             staged,
             checksum,
         ) { _, _ -> }
@@ -2417,12 +2411,7 @@ class RuntimeInstaller(private val context: Context) {
         downloads.mkdirs()
         val nodeFileName = "node-$NODE_VERSION-linux-arm64.tar.gz"
         val nodeBaseUrl = "https://nodejs.org/dist/$NODE_VERSION"
-        val checksum = fetchText("$nodeBaseUrl/SHASUMS256.txt")
-            .lineSequence()
-            .map(String::trim)
-            .firstOrNull { it.endsWith("  $nodeFileName") }
-            ?.substringBefore(' ')
-            ?: error("Node.js checksum was not found")
+        val checksum = NODE_ARM64_SHA256
         val nodeArchive = File(downloads, nodeFileName)
         downloadVerified("$nodeBaseUrl/$nodeFileName", nodeArchive, checksum) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
@@ -2823,6 +2812,7 @@ class RuntimeInstaller(private val context: Context) {
             ensureWorkspaceTrust(guestWorkspacePath)
         }
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
+        File(context.filesDir, "runtime-bridge-responses").mkdirs()
         val appUid = AndroidProcess.myUid().toString()
 
         val guestEnv = buildMap {
@@ -2921,19 +2911,20 @@ class RuntimeInstaller(private val context: Context) {
         hook.writeText(
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
 ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
 if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
     i=0
     while [ "${'$'}i" -lt 600 ]; do
-        if [ -f "${'$'}BRIDGE/${'$'}ID.response" ]; then
-            [ "${'$'}(cat "${'$'}BRIDGE/${'$'}ID.response")" = "allow" ] && DECISION=allow
+        if [ -f "${'$'}RESP/${'$'}ID.response" ]; then
+            [ "${'$'}(cat "${'$'}RESP/${'$'}ID.response")" = "allow" ] && DECISION=allow
             break
         fi
         sleep 0.1
         i=${'$'}((i + 1))
     done
-    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.response"
+    rm -f "${'$'}BRIDGE/${'$'}ID.request" "${'$'}BRIDGE/${'$'}ID.request.tmp"
 else
     cat > /dev/null
 fi
@@ -3231,6 +3222,10 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             connection.instanceFollowRedirects = true
             if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
             val code = connection.responseCode
+            if (code == 416 && existing > 0L) {
+                // Stale/complete .part cannot be resumed; discard so the next attempt starts clean.
+                temporary.delete()
+            }
             check(code in 200..299) { "Download failed with HTTP $code" }
             val resumed = code == HttpURLConnection.HTTP_PARTIAL && existing > 0L
             if (!resumed) {
@@ -3318,6 +3313,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val ROOTFS_VERSION = "ubuntu-24.04.5-arm64"
         private const val LEGACY_ROOTFS_VERSION = "ubuntu-20.04.5-arm64"
         private const val NODE_VERSION = "v24.19.0"
+        private const val NODE_ARM64_SHA256 = "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f"
+        private const val COMPOSER_VERSION = "2.10.3"
+        private const val COMPOSER_SHA256 = "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
         private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
@@ -3468,7 +3466,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             }
 
-            mount -o remount,suid,exec /data 2>/dev/null || true
+            # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
+            if ! is_mounted "${'$'}ROOTFS"; then
+                mount -o bind "${'$'}ROOTFS" "${'$'}ROOTFS" 2>/dev/null || true
+            fi
+            mount -o remount,bind,suid,exec "${'$'}ROOTFS" 2>/dev/null || true
 
             mount_once "/dev" "${'$'}ROOTFS/dev" "bind" "rw"
             mount_once "/dev/pts" "${'$'}ROOTFS/dev/pts" "bind" "rw"
@@ -3490,6 +3492,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/nextcraft-bridge"
             mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/pocketdev-bridge"
             mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/pocket-bridge"
+            HOST_RESP="${'$'}HOST_BRIDGE-responses"
+            mkdir -p "${'$'}HOST_RESP"
+            chown "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_RESP" 2>/dev/null || true
+            mount_dynamic_bind "${'$'}HOST_RESP" "${'$'}ROOTFS/pocketdev-bridge-responses"
+            mount -o remount,bind,ro "${'$'}ROOTFS/pocketdev-bridge-responses" 2>/dev/null || true
 
             if [ ! -s "${'$'}ROOTFS/etc/resolv.conf" ]; then
                 mkdir -p "${'$'}ROOTFS/etc"
@@ -3532,6 +3539,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             export GLIBC_TUNABLES="glibc.pthread.rseq=0"
             export NEXTCRAFT_BRIDGE_DIR="/pocketdev-bridge"
             export POCKETDEV_BRIDGE_DIR="/pocketdev-bridge"
+            export NEXTCRAFT_RESPONSE_DIR="/pocketdev-bridge-responses"
             export PATH="${'$'}{PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
             case ":${'$'}PATH:" in
                 *:/root/.local/bin:*) ;;
@@ -4440,8 +4448,8 @@ Blok 2 menangani **keamanan penyimpanan kredensial**, **sistem snapshot/undo fil
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (221 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (752 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (232 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (253 baris)
 - `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
 - `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (521 baris)
 
@@ -5214,7 +5222,7 @@ object RuntimeLaunchConfigBuilder {
 }
 ```
 
-## 3. `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (752 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5234,6 +5242,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -5257,14 +5266,30 @@ internal class LocalFormatGateway(
         Thread({ acceptLoop() }, "forge-format-gateway").apply { isDaemon = true; start() }
     }
 
+    // Bounded pool: caps concurrent connections instead of one unbounded thread per accept().
+    private val workers = java.util.concurrent.ThreadPoolExecutor(
+        0, MAX_CONNECTIONS, 30L, TimeUnit.SECONDS, java.util.concurrent.SynchronousQueue(),
+    ) { task -> Thread(task, "forge-format-request").apply { isDaemon = true } }
+
     private fun acceptLoop() {
+        var failures = 0
         while (running.get()) {
-            runCatching { server.accept() }.getOrNull()?.let { socket ->
-                runCatching {
-                    socket.soTimeout = SOCKET_TIMEOUT_MS
-                    socket.tcpNoDelay = true
-                }
-                Thread({ socket.use(::handle) }, "forge-format-request").apply { isDaemon = true; start() }
+            val socket = try {
+                server.accept().also { failures = 0 }
+            } catch (_: Exception) {
+                // Closed server ends the loop; transient errors (e.g. EMFILE) back off instead of busy-spinning.
+                if (!running.get() || server.isClosed || ++failures > MAX_ACCEPT_FAILURES) break
+                Thread.sleep(ACCEPT_BACKOFF_MS)
+                continue
+            }
+            runCatching {
+                socket.soTimeout = SOCKET_TIMEOUT_MS
+                socket.tcpNoDelay = true
+            }
+            try {
+                workers.execute { runCatching { socket.use(::handle) } } // client disconnects must not escape as uncaught exceptions (crashes the app)
+            } catch (_: java.util.concurrent.RejectedExecutionException) {
+                runCatching { socket.close() }
             }
         }
     }
@@ -5960,9 +5985,13 @@ internal class LocalFormatGateway(
     override fun close() {
         running.set(false)
         runCatching { server.close() }
+        workers.shutdown()
     }
 
     private companion object {
+        const val MAX_CONNECTIONS = 32
+        const val MAX_ACCEPT_FAILURES = 50
+        const val ACCEPT_BACKOFF_MS = 100L
         const val MAX_REQUEST_BYTES = 8 * 1024 * 1024
         const val MAX_UPSTREAM_RESPONSE_CHARS = 4 * 1024 * 1024
         const val MAX_HEADER_LINE_BYTES = 16 * 1024
@@ -5971,7 +6000,7 @@ internal class LocalFormatGateway(
 }
 ```
 
-## 4. `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (232 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (253 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5988,6 +6017,7 @@ import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -6018,14 +6048,30 @@ internal class OpenRouterRoutingGateway(
         Thread({ acceptLoop() }, "forge-openrouter-routing").apply { isDaemon = true; start() }
     }
 
+    // Bounded pool: caps concurrent connections instead of one unbounded thread per accept().
+    private val workers = java.util.concurrent.ThreadPoolExecutor(
+        0, MAX_CONNECTIONS, 30L, TimeUnit.SECONDS, java.util.concurrent.SynchronousQueue(),
+    ) { task -> Thread(task, "forge-openrouter-request").apply { isDaemon = true } }
+
     private fun acceptLoop() {
+        var failures = 0
         while (running.get()) {
-            runCatching { server.accept() }.getOrNull()?.let { socket ->
-                runCatching {
-                    socket.soTimeout = SOCKET_TIMEOUT_MS
-                    socket.tcpNoDelay = true
-                }
-                Thread({ socket.use(::handle) }, "forge-openrouter-request").apply { isDaemon = true; start() }
+            val socket = try {
+                server.accept().also { failures = 0 }
+            } catch (_: Exception) {
+                // Closed server ends the loop; transient errors (e.g. EMFILE) back off instead of busy-spinning.
+                if (!running.get() || server.isClosed || ++failures > MAX_ACCEPT_FAILURES) break
+                Thread.sleep(ACCEPT_BACKOFF_MS)
+                continue
+            }
+            runCatching {
+                socket.soTimeout = SOCKET_TIMEOUT_MS
+                socket.tcpNoDelay = true
+            }
+            try {
+                workers.execute { runCatching { socket.use(::handle) } } // client disconnects must not escape as uncaught exceptions (crashes the app)
+            } catch (_: java.util.concurrent.RejectedExecutionException) {
+                runCatching { socket.close() }
             }
         }
     }
@@ -6198,9 +6244,13 @@ internal class OpenRouterRoutingGateway(
     override fun close() {
         running.set(false)
         runCatching { server.close() }
+        workers.shutdown()
     }
 
     private companion object {
+        const val MAX_CONNECTIONS = 32
+        const val MAX_ACCEPT_FAILURES = 50
+        const val ACCEPT_BACKOFF_MS = 100L
         const val MAX_REQUEST_BYTES = 16 * 1024 * 1024
         const val MAX_HEADER_LINE_BYTES = 16 * 1024
         const val SOCKET_TIMEOUT_MS = 30_000
@@ -6361,7 +6411,7 @@ class ApiKeyVault(context: Context) {
         preferences.edit()
             .putString("$storageId.iv", Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+            .commit()
     }
 
     fun contains(providerId: String): Boolean = get(providerId) != null
@@ -7028,14 +7078,14 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (938 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (876 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (938 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7071,20 +7121,30 @@ import org.json.JSONObject
 
 internal object ProviderRuntimeErrorDetector {
     fun detect(line: String): String? {
-        val json = runCatching { JSONObject(line) }.getOrNull()
+        val trimmed = line.trim()
+        val json = runCatching { JSONObject(trimmed) }.getOrNull()
         // Structured stream-json lines carry assistant text and tool output. Scanning those
         // would abort the session whenever a file or answer merely mentions "quota" or
         // "rate limit". Only error-bearing fields are inspected; raw (non-JSON) lines are
-        // runtime stderr and are scanned whole.
+        // runtime stderr and are scanned whole, except truncated stream-json lines.
+        if (json == null && trimmed.startsWith("{")) {
+            return null
+        }
         val combined = if (json == null) {
-            line.lowercase()
+            trimmed.lowercase()
         } else buildString {
             append(json.optString("error"))
             if (json.optString("type") == "error") {
                 append(' ')
                 append(json.optString("message"))
+                json.optJSONObject("error")?.let { errObj ->
+                    append(' ')
+                    append(errObj.optString("type"))
+                    append(' ')
+                    append(errObj.optString("message"))
+                }
             }
-            if (json.optBoolean("is_error")) {
+            if (json.optString("type") == "result" && json.optBoolean("is_error")) {
                 append(' ')
                 append(json.optString("result"))
             }
@@ -7094,13 +7154,15 @@ internal object ProviderRuntimeErrorDetector {
             "authentication_failed" in combined ||
                 "authentication failed" in combined ||
                 "invalid api key" in combined ||
+                "invalid_api_key" in combined ||
+                "invalid x-api-key" in combined ||
+                "oauth token has expired" in combined ||
+                "token has expired" in combined ||
+                "api key expired" in combined ||
                 "http 401" in combined ||
-                "http 403" in combined ||
-                "http 429" in combined ||
-                "expired" in combined ||
-                "quota" in combined ||
-                "rate limit" in combined ||
-                (json?.optString("subtype") == "api_retry" && json.optInt("error_status") in listOf(401, 403, 429)) ->
+                "status 401" in combined ||
+                "401 unauthorized" in combined ||
+                (json?.optString("subtype") == "api_retry" && json.optInt("error_status") == 401) ->
                 "The provider rejected the saved API key."
             else -> null
         }
@@ -7456,6 +7518,19 @@ class ClaudeRuntimeBridge(
         }
     }
 
+    /**
+     * Responses live in a sibling directory that the chroot mounts read-only, so the guest can
+     * request a decision but cannot write its own approval next to the request.
+     */
+    private fun responseFile(request: File, approvalId: String): File {
+        val requestDir = request.parentFile ?: File(".")
+        val dir = File(requestDir.parentFile, requestDir.name + "-responses").apply { mkdirs() }
+        val cutoff = System.currentTimeMillis() - STALE_RESPONSE_MS
+        dir.listFiles { f -> f.name.endsWith(".response") && f.lastModified() < cutoff }.orEmpty()
+            .forEach { runCatching { it.delete() } }
+        return File(dir, "$approvalId.response")
+    }
+
     internal suspend fun expirePendingPermissions(
         sessionId: String,
         nowElapsedRealtime: Long = android.os.SystemClock.elapsedRealtime(),
@@ -7484,8 +7559,8 @@ class ClaudeRuntimeBridge(
                 .ifBlank { command.orEmpty() }
                 .ifBlank { "$toolName running in project" }
 
-            val risk = classifyRisk(toolName, command)
-            val response = File(file.parentFile, "$approvalId.response")
+            val risk = classifyRisk(toolName, command, paths)
+            val response = responseFile(file, approvalId)
             if (risk == RiskLevel.HIGH) {
                 if (interactiveHighRiskApprovals()) {
                     val toolRequest = ToolRequest(
@@ -7520,7 +7595,7 @@ class ClaudeRuntimeBridge(
                 eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, explanation))
             }
         }.onFailure {
-            File(file.parentFile, "$approvalId.response").writeText("deny")
+            runCatching { responseFile(file, approvalId).writeText("deny") }
             runCatching { file.delete() }
         }
     }
@@ -7813,8 +7888,8 @@ class ClaudeRuntimeBridge(
         checkpoints.configureProjectRoot(projectId, rootPath)
     }
 
-    private fun classifyRisk(tool: String, command: String?): RiskLevel =
-        classifyToolRisk(tool, command)
+    private fun classifyRisk(tool: String, command: String?, paths: List<String>): RiskLevel =
+        classifyToolRisk(tool, command, paths)
 
     private fun friendlyError(error: Throwable): String {
         val message = error.message.orEmpty()
@@ -7884,33 +7959,70 @@ class ClaudeRuntimeBridge(
     companion object {
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         private const val HIGH_RISK_APPROVAL_TIMEOUT_MS = 40_000L
+        private const val STALE_RESPONSE_MS = 600_000L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
     }
 }
 
-internal fun classifyToolRisk(tool: String, command: String?): RiskLevel {
+private val DANGEROUS_PATTERNS = listOf(
+    "git push", "git reset", "git clean", "git checkout --", "sudo", "curl ", "wget ", "chmod ", "chown ", "mkfs",
+    "dd if=", "/dev/block", "/dev/loop", "/dev/sd", "/dev/zero", "/dev/mem", "/dev/kmem", "/proc/", "umount",
+    "| sh", "| bash", "find -exec", "find -delete", "pocketdev-bridge", "nextcraft-bridge", "pocket-bridge",
+    "/opt/pocket", ".claude", ".git-credentials",
+)
+
+private val SAFE_STREAM_REDIRECT_REGEX =
+    Regex("(?:[12]?>>?\\s*/dev/null|&>\\s*/dev/null|[12]>&[12]|<\\s*/dev/null)")
+
+// Commands whose first word is auto-approved; everything else (python, node, sh, find -exec ...) needs the user.
+private val SAFE_BASH_COMMANDS = setOf(
+    "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg", "sort", "uniq", "diff", "cd",
+    "true", "false", "test", "which", "type", "stat", "file", "tree", "mkdir", "touch", "date", "printf",
+    "basename", "dirname", "realpath", "readlink", "cut", "tr", "awk", "sed", "find", "xargs", "jq", "du", "df",
+    "env", "md5sum", "sha256sum", "cp", "mv", "gradle", "javac", "kotlinc",
+)
+private val SAFE_GIT_SUBCOMMANDS = setOf(
+    "status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "ls-tree", "blame",
+    "remote", "fetch", "pull", "stash", "restore", "switch", "tag",
+)
+private val SENSITIVE_PATH_PREFIXES = listOf(
+    "/opt/", "/etc/", "/proc/", "/sys/", "/dev/", "/usr/", "/bin", "/sbin", "/lib", "/var/",
+    "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge",
+)
+private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook")
+
+private fun isSensitivePath(path: String): Boolean =
+    SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
+
+private fun isSafeBashSegment(segment: String): Boolean {
+    val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
+        .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
+    val first = words.firstOrNull()?.substringAfterLast('/') ?: return false
+    if (first == "git") return words.getOrNull(1) in SAFE_GIT_SUBCOMMANDS
+    if (first == "find" && words.any { it in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
+    return first in SAFE_BASH_COMMANDS
+}
+
+/**
+ * Default-deny for Bash: only simple commands from [SAFE_BASH_COMMANDS] chained without
+ * substitution or redirection are auto-approved; anything else is HIGH (user prompt or deny).
+ */
+internal fun classifyToolRisk(tool: String, command: String?, paths: List<String> = emptyList()): RiskLevel {
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
-    val highRiskPatterns = listOf(
-        "rm -rf",
-        "rm -fr",
-        "rm -r ",
-        "git push",
-        "git reset",
-        "sudo",
-        "curl ",
-        "wget ",
-        "chmod 777",
-        "dd if=",
-        "mkfs",
-        "chown -r /",
-        "/dev/block",
-        "umount",
-        "| sh",
-        "| bash",
-    )
-    return when {
-        highRiskPatterns.any(preview::contains) -> RiskLevel.HIGH
-        tool in listOf("Write", "Edit", "NotebookEdit", "Bash") -> RiskLevel.REVIEW
+    if (DANGEROUS_PATTERNS.any(preview::contains)) return RiskLevel.HIGH
+    if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
+    return when (tool) {
+        "Bash" -> {
+            val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
+            val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
+            val segments = text.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
+            if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {
+                RiskLevel.HIGH
+            } else {
+                RiskLevel.REVIEW
+            }
+        }
+        "Write", "Edit", "NotebookEdit" -> RiskLevel.REVIEW
         else -> RiskLevel.SAFE
     }
 }
@@ -8974,7 +9086,7 @@ private fun sanitizeTerminalOutput(text: String): String = text
     .filter { it == '\n' || it == '\r' || it == '\t' || it.code >= 0x20 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (969 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -9465,14 +9577,18 @@ class DshRuntimeBridge(
             error is DshSessionException && message.isMeaningfulDshText() -> message
             message.contains("authentication", true) ||
                 message.contains("invalid api key", true) ||
+                message.contains("invalid_api_key", true) ||
                 message.contains("autherror", true) ||
-                message.contains("expired", true) ||
-                message.contains("quota", true) ||
-                message.contains("rate limit", true) ||
-                listOf("401", "403", "429").any { code ->
+                message.contains("token has expired", true) ||
+                message.contains("api key expired", true) ||
+                listOf("401", "403").any { code ->
                     message.contains(code) && (message.contains("auth", true) || message.contains("HTTP", true))
                 } ->
                 "The provider rejected the saved API key."
+            message.contains("rate limit", true) ||
+                message.contains("quota", true) ||
+                (message.contains("429") && message.contains("HTTP", true)) ->
+                "The provider rate limit or quota was reached. Wait a moment or switch keys."
             message.contains("missing_credential", true) ->
                 "No API key reached DeepSeek Harness. Re-save the provider key in Settings."
             message.contains("not installed", true) -> message.take(300)
@@ -9974,12 +10090,12 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (242 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
 - `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
 - `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 - `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
-- `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
+- `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (218 baris)
 
 ---
 
@@ -10973,7 +11089,7 @@ class AndroidAppInstallReceiver : BroadcastReceiver() {
 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (232 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (242 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -11019,13 +11135,23 @@ class RuntimeExecutionService : Service() {
         when (action) {
             ACTION_STOP, LEGACY_ACTION_STOP -> {
                 RuntimeTaskController.requestStop()
+                if (!taskRunning) {
+                    // Service was recreated without an active task; nothing to show or keep alive.
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 getSystemService(NotificationManager::class.java)?.notify(
                     RUNNING_NOTIFICATION_ID,
                     runningNotification("Stopping active task…", includeStop = false),
                 )
             }
             ACTION_PROGRESS, LEGACY_ACTION_PROGRESS -> {
-                if (!taskRunning) return START_NOT_STICKY
+                if (!taskRunning) {
+                    // Stray progress for a finished task must not leave an idle service running.
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 incomingTitle?.takeIf(String::isNotBlank)?.let { notificationTitleOverride = it }
                 if (intent?.hasExtra(EXTRA_CAN_STOP) == true) {
                     canStop = intent.getBooleanExtra(EXTRA_CAN_STOP, true)
@@ -12183,7 +12309,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return GitHubDeviceCode(
             deviceCode = json.getString("device_code"),
             userCode = json.getString("user_code"),
-            verificationUri = json.optString("verification_uri", "https://github.com/login/device"),
+            verificationUri = json.optString("verification_uri").ifBlank { "https://github.com/login/device" },
             expiresInSeconds = json.optLong("expires_in", 900L),
             intervalSeconds = json.optLong("interval", 5L).coerceAtLeast(5L),
         )
@@ -12362,7 +12488,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
 }
 ```
 
-## 10. `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (214 baris)
+## 10. `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (218 baris)
 
 ```kotlin
 package com.nextcraft.forge.update
@@ -12451,6 +12577,8 @@ class AppUpdater(
                 val code = connection.responseCode
                 check(code in 200..299) { "Update download failed (HTTP $code)." }
                 val total = connection.contentLengthLong.takeIf { it > 0 } ?: info.sizeBytes
+                val maxBytes = if (info.sizeBytes in 1..MAX_APK_BYTES) info.sizeBytes else MAX_APK_BYTES
+                check(total <= maxBytes) { "Update download exceeds the allowed size." }
                 connection.inputStream.use { input ->
                     partial.outputStream().use { output ->
                         val buffer = ByteArray(128 * 1024)
@@ -12460,6 +12588,7 @@ class AppUpdater(
                             if (count < 0) break
                             output.write(buffer, 0, count)
                             downloaded += count
+                            check(downloaded <= maxBytes) { "Update download exceeds the allowed size." }
                             progress(downloaded, total)
                         }
                     }
@@ -12577,6 +12706,7 @@ class AppUpdater(
 
     private companion object {
         const val MAX_MANIFEST_CHARS = 256 * 1024
+        const val MAX_APK_BYTES = 512L * 1024 * 1024
     }
 }
 ```
@@ -12603,7 +12733,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1833 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1851 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
@@ -12732,7 +12862,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1833 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1851 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -12936,6 +13066,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeBuildJob: Job? = null
     private var activeBuildProcess: Process? = null
     private var activeTerminalJob: Job? = null
+    @Volatile private var activeTerminalProcess: Process? = null
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
@@ -13373,15 +13504,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopActiveTask() {
         RuntimeTaskController.requestStop()
-        activeAgentJob?.cancel()
+        val agentJob = activeAgentJob
+        agentJob?.cancel()
         activeBuildProcess?.destroyForcibly()
         activeBuildJob?.cancel()
-        _state.update {
-            it.copy(
-                sessionRunning = false,
-                activeStatusLine = "Stopped by user",
-                pendingToolRequest = null,
-            )
+        _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+        // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
+        // otherwise a new prompt could race with it over shared bridge state.
+        viewModelScope.launch {
+            agentJob?.join()
+            _state.update {
+                it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+            }
         }
     }
 
@@ -13709,17 +13843,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         activeTerminalJob = viewModelScope.launch {
-            val output = withContext(Dispatchers.IO) {
-                val ws = checkpoints.ensureWorkspace(project.id)
-                runCommandInChrootOrHost(project.slug, ws, cleanCmd)
-            }
-            _state.update {
-                it.copy(
-                    terminalRunning = false,
-                    terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
-                )
+            var output = ""
+            try {
+                output = withContext(Dispatchers.IO) {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    runCommandInChrootOrHost(project.slug, ws, cleanCmd)
+                }
+            } finally {
+                activeTerminalProcess = null
+                _state.update {
+                    it.copy(
+                        terminalRunning = false,
+                        terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
+                    )
+                }
             }
         }
+    }
+
+    fun stopTerminal() {
+        // Killing the process unblocks the reader thread; the job then ends normally and resets state.
+        activeTerminalProcess?.destroyForcibly()
+        activeTerminalJob?.cancel()
     }
 
     fun clearTerminal() {
@@ -13762,6 +13907,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 ProcessBuilder("sh", "-c", command).directory(workspaceDir).redirectErrorStream(true).start()
             }
+            activeTerminalProcess = process
             val buffer = StringBuilder()
             // The read below blocks until the command closes its output, so the timeout needs its own watchdog.
             val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -14559,8 +14705,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        RuntimeTaskController.requestStop()
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
+        activeTerminalProcess?.destroyForcibly()
         super.onCleared()
     }
 
@@ -15878,7 +16026,7 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 - `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (193 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (199 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
 
@@ -17929,7 +18077,7 @@ private fun NewWorkspaceFileDialog(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (193 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (199 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17952,6 +18100,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
@@ -18029,6 +18178,11 @@ fun TerminalScreen(
                         onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = "Copy terminal output", modifier = Modifier.size(18.dp))
+                    }
+                    if (state.terminalRunning) {
+                        IconButton(onClick = viewModel::stopTerminal) {
+                            Icon(Icons.Default.Close, contentDescription = "Stop command", modifier = Modifier.size(18.dp))
+                        }
                     }
                     IconButton(onClick = viewModel::clearTerminal) {
                         Icon(Icons.Default.Delete, contentDescription = "Clear terminal", modifier = Modifier.size(18.dp))
@@ -19531,7 +19685,7 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `settings.gradle.kts` (18 baris)
 - `build.gradle.kts` (4 baris)
 - `gradle.properties` (5 baris)
-- `app/build.gradle.kts` (103 baris)
+- `app/build.gradle.kts` (125 baris)
 - `app/src/main/AndroidManifest.xml` (61 baris)
 - `app/src/main/res/values/strings.xml` (5 baris)
 - `app/src/main/res/values-in/strings.xml` (5 baris)
@@ -19540,7 +19694,7 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `app/src/main/res/values-ar/strings.xml` (5 baris)
 - `app/src/main/res/values-hi/strings.xml` (5 baris)
 - `app/src/main/res/values-ru/strings.xml` (5 baris)
-- `app/src/main/res/values/themes.xml` (7 baris)
+- `app/src/main/res/values/themes.xml` (8 baris)
 - `app/src/main/res/xml/file_paths.xml` (7 baris)
 - `app/src/main/res/xml/network_security_config.xml` (13 baris)
 - `app/src/main/res/drawable/ic_launcher_background.xml` (13 baris)
@@ -19600,7 +19754,7 @@ org.gradle.workers.max=2
 
 ---
 
-## 4. `app/build.gradle.kts` (103 baris)
+## 4. `app/build.gradle.kts` (125 baris)
 
 ```kotlin
 import java.io.File
@@ -19629,13 +19783,29 @@ android {
         buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"\"")
     }
 
+    // Release signing comes from the environment so no key material lives in the repo.
+    val releaseKeystore = System.getenv("FORGE_KEYSTORE_FILE")
+    if (!releaseKeystore.isNullOrBlank()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("FORGE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("FORGE_KEY_ALIAS")
+                keyPassword = System.getenv("FORGE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             buildConfigField("String", "APP_VARIANT", "\"release\"")
         }
     }
@@ -19669,6 +19839,12 @@ android {
     )
     val ndkAvailable = ndkCandidates.any { it.isDirectory && !it.listFiles().isNullOrEmpty() }
     if (ndkAvailable) {
+        // AGP prefers its own default NDK and fails when only another version is installed,
+        // so pin to the version found under <sdk>/ndk when there is exactly one.
+        ndkCandidates
+            .firstOrNull { it.name == "ndk" && it.listFiles()?.size == 1 }
+            ?.listFiles()?.single()?.name
+            ?.let { ndkVersion = it }
         externalNativeBuild {
             cmake {
                 path = file("src/main/cpp/CMakeLists.txt")
@@ -19698,9 +19874,9 @@ dependencies {
     implementation("androidx.compose.material:material")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material3:material3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
-    implementation("org.apache.commons:commons-compress:1.21")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.apache.commons:commons-compress:1.26.2")
     // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
     implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")
@@ -19862,14 +20038,15 @@ dependencies {
 
 ---
 
-## 13. `app/src/main/res/values/themes.xml` (7 baris)
+## 13. `app/src/main/res/values/themes.xml` (8 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.NextCraftForge" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="android:statusBarColor">#0B0F17</item>
-        <item name="android:navigationBarColor">#0B0F17</item>
+        <!-- Transparan: warna bar diatur Compose (Theme.kt SideEffect) sesuai mode tema -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>
 ```

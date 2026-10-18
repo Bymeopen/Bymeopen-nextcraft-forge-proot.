@@ -50,7 +50,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return GitHubDeviceCode(
             deviceCode = json.getString("device_code"),
             userCode = json.getString("user_code"),
-            verificationUri = json.optString("verification_uri", "https://github.com/login/device"),
+            verificationUri = json.optString("verification_uri").ifBlank { "https://github.com/login/device" },
             expiresInSeconds = json.optLong("expires_in", 900L),
             intervalSeconds = json.optLong("interval", 5L).coerceAtLeast(5L),
         )

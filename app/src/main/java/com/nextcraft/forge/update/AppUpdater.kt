@@ -84,7 +84,7 @@ class AppUpdater(
                 val code = connection.responseCode
                 check(code in 200..299) { "Update download failed (HTTP $code)." }
                 val total = connection.contentLengthLong.takeIf { it > 0 } ?: info.sizeBytes
-                val maxBytes = if (info.sizeBytes > 0) info.sizeBytes else MAX_APK_BYTES
+                val maxBytes = if (info.sizeBytes in 1..MAX_APK_BYTES) info.sizeBytes else MAX_APK_BYTES
                 check(total <= maxBytes) { "Update download exceeds the allowed size." }
                 connection.inputStream.use { input ->
                     partial.outputStream().use { output ->

@@ -486,14 +486,18 @@ class DshRuntimeBridge(
             error is DshSessionException && message.isMeaningfulDshText() -> message
             message.contains("authentication", true) ||
                 message.contains("invalid api key", true) ||
+                message.contains("invalid_api_key", true) ||
                 message.contains("autherror", true) ||
-                message.contains("expired", true) ||
-                message.contains("quota", true) ||
-                message.contains("rate limit", true) ||
-                listOf("401", "403", "429").any { code ->
+                message.contains("token has expired", true) ||
+                message.contains("api key expired", true) ||
+                listOf("401", "403").any { code ->
                     message.contains(code) && (message.contains("auth", true) || message.contains("HTTP", true))
                 } ->
                 "The provider rejected the saved API key."
+            message.contains("rate limit", true) ||
+                message.contains("quota", true) ||
+                (message.contains("429") && message.contains("HTTP", true)) ->
+                "The provider rate limit or quota was reached. Wait a moment or switch keys."
             message.contains("missing_credential", true) ->
                 "No API key reached DeepSeek Harness. Re-save the provider key in Settings."
             message.contains("not installed", true) -> message.take(300)

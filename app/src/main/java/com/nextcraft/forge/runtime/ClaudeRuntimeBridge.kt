@@ -31,20 +31,30 @@ import org.json.JSONObject
 
 internal object ProviderRuntimeErrorDetector {
     fun detect(line: String): String? {
-        val json = runCatching { JSONObject(line) }.getOrNull()
+        val trimmed = line.trim()
+        val json = runCatching { JSONObject(trimmed) }.getOrNull()
         // Structured stream-json lines carry assistant text and tool output. Scanning those
         // would abort the session whenever a file or answer merely mentions "quota" or
         // "rate limit". Only error-bearing fields are inspected; raw (non-JSON) lines are
-        // runtime stderr and are scanned whole.
+        // runtime stderr and are scanned whole, except truncated stream-json lines.
+        if (json == null && trimmed.startsWith("{")) {
+            return null
+        }
         val combined = if (json == null) {
-            line.lowercase()
+            trimmed.lowercase()
         } else buildString {
             append(json.optString("error"))
             if (json.optString("type") == "error") {
                 append(' ')
                 append(json.optString("message"))
+                json.optJSONObject("error")?.let { errObj ->
+                    append(' ')
+                    append(errObj.optString("type"))
+                    append(' ')
+                    append(errObj.optString("message"))
+                }
             }
-            if (json.optBoolean("is_error")) {
+            if (json.optString("type") == "result" && json.optBoolean("is_error")) {
                 append(' ')
                 append(json.optString("result"))
             }
@@ -54,13 +64,15 @@ internal object ProviderRuntimeErrorDetector {
             "authentication_failed" in combined ||
                 "authentication failed" in combined ||
                 "invalid api key" in combined ||
+                "invalid_api_key" in combined ||
+                "invalid x-api-key" in combined ||
+                "oauth token has expired" in combined ||
+                "token has expired" in combined ||
+                "api key expired" in combined ||
                 "http 401" in combined ||
-                "http 403" in combined ||
-                "http 429" in combined ||
-                "expired" in combined ||
-                "quota" in combined ||
-                "rate limit" in combined ||
-                (json?.optString("subtype") == "api_retry" && json.optInt("error_status") in listOf(401, 403, 429)) ->
+                "status 401" in combined ||
+                "401 unauthorized" in combined ||
+                (json?.optString("subtype") == "api_retry" && json.optInt("error_status") == 401) ->
                 "The provider rejected the saved API key."
             else -> null
         }
@@ -864,16 +876,25 @@ class ClaudeRuntimeBridge(
 
 private val DANGEROUS_PATTERNS = listOf(
     "git push", "git reset", "git clean", "git checkout --", "sudo", "curl ", "wget ", "chmod ", "chown ", "mkfs",
-    "/dev/", "/proc/", "umount", "| sh", "| bash", "pocketdev-bridge", "nextcraft-bridge", "pocket-bridge",
+    "dd if=", "/dev/block", "/dev/loop", "/dev/sd", "/dev/zero", "/dev/mem", "/dev/kmem", "/proc/", "umount",
+    "| sh", "| bash", "find -exec", "find -delete", "pocketdev-bridge", "nextcraft-bridge", "pocket-bridge",
     "/opt/pocket", ".claude", ".git-credentials",
 )
 
+private val SAFE_STREAM_REDIRECT_REGEX =
+    Regex("(?:[12]?>>?\\s*/dev/null|&>\\s*/dev/null|[12]>&[12]|<\\s*/dev/null)")
+
 // Commands whose first word is auto-approved; everything else (python, node, sh, find -exec ...) needs the user.
 private val SAFE_BASH_COMMANDS = setOf(
-    "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "rg", "sort", "uniq", "diff", "cd", "true", "false", "test",
-    "which", "stat", "file", "tree", "mkdir", "touch", "date", "printf", "basename", "dirname", "realpath",
+    "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg", "sort", "uniq", "diff", "cd",
+    "true", "false", "test", "which", "type", "stat", "file", "tree", "mkdir", "touch", "date", "printf",
+    "basename", "dirname", "realpath", "readlink", "cut", "tr", "awk", "sed", "find", "xargs", "jq", "du", "df",
+    "env", "md5sum", "sha256sum", "cp", "mv", "gradle", "javac", "kotlinc",
 )
-private val SAFE_GIT_SUBCOMMANDS = setOf("status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "blame")
+private val SAFE_GIT_SUBCOMMANDS = setOf(
+    "status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "ls-tree", "blame",
+    "remote", "fetch", "pull", "stash", "restore", "switch", "tag",
+)
 private val SENSITIVE_PATH_PREFIXES = listOf(
     "/opt/", "/etc/", "/proc/", "/sys/", "/dev/", "/usr/", "/bin", "/sbin", "/lib", "/var/",
     "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge",
@@ -888,6 +909,7 @@ private fun isSafeBashSegment(segment: String): Boolean {
         .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
     val first = words.firstOrNull()?.substringAfterLast('/') ?: return false
     if (first == "git") return words.getOrNull(1) in SAFE_GIT_SUBCOMMANDS
+    if (first == "find" && words.any { it in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
 }
 
@@ -901,7 +923,7 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
     if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
     return when (tool) {
         "Bash" -> {
-            val text = command.orEmpty()
+            val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
             val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
             val segments = text.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
             if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {

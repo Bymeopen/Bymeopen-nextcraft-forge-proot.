@@ -1248,10 +1248,30 @@ fun main() {
         check(classifyToolRisk("Bash", "ls && rm --recursive x") == RiskLevel.HIGH)
         check(classifyToolRisk("Bash", "echo ${'$'}(id)") == RiskLevel.HIGH)
         check(classifyToolRisk("Bash", "echo x > /etc/passwd") == RiskLevel.HIGH)
+        check(classifyToolRisk("Bash", "find . -exec rm {} +") == RiskLevel.HIGH)
         check(classifyToolRisk("Bash", "git status") == RiskLevel.REVIEW)
         check(classifyToolRisk("Bash", "git add . && git commit -m x") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Bash", "gradle :app:compileDebugKotlin -q 2>&1 | tail -40") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Bash", "find app/src/main -name '*.kt' 2>/dev/null | xargs wc -l") == RiskLevel.REVIEW)
         check(classifyToolRisk("Edit", "", listOf("/opt/pocket/permission-hook.sh")) == RiskLevel.HIGH)
         check(classifyToolRisk("Write", "", listOf("/workspace/p/a.txt")) == RiskLevel.REVIEW)
+
+        // Verify ProviderRuntimeErrorDetector ignores assistant/tool content, truncated JSON, and 429 api_retry
+        check(ProviderRuntimeErrorDetector.detect("""{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"authentication failed expired quota rate limit HTTP 401"}]}}""") == null) {
+            "ProviderRuntimeErrorDetector must ignore tool_result contents"
+        }
+        check(ProviderRuntimeErrorDetector.detect("""{"type":"user","message":{"role":"user","content":"authentication failed expired quota... [truncated]""") == null) {
+            "ProviderRuntimeErrorDetector must ignore truncated stream-json lines"
+        }
+        check(ProviderRuntimeErrorDetector.detect("""{"type":"system","subtype":"api_retry","error_status":429}""") == null) {
+            "ProviderRuntimeErrorDetector must not abort on transient 429 api_retry"
+        }
+        check(ProviderRuntimeErrorDetector.detect("""{"type":"system","subtype":"api_retry","error_status":401}""") == "The provider rejected the saved API key.") {
+            "ProviderRuntimeErrorDetector must detect 401 api_retry"
+        }
+        check(ProviderRuntimeErrorDetector.detect("""{"type":"result","is_error":true,"result":"API Error: 401 {\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}"}""") == "The provider rejected the saved API key.") {
+            "ProviderRuntimeErrorDetector must detect 401 authentication error in result"
+        }
 
         kotlinx.coroutines.runBlocking {
             val unsafeField = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe").apply { isAccessible = true }
@@ -1309,7 +1329,7 @@ EOF
 
 mkdir -p "$TMP_WORK/kt-classes"
 mapfile -t ALL_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -not -path "*/ui/*" -not -name "MainActivity.kt" -name "*.kt" | sort)
-[[ "${#ALL_KT_FILES[@]}" -eq 27 ]] || fail "Expected 27 core Kotlin source files, found ${#ALL_KT_FILES[@]}"
+[[ "${#ALL_KT_FILES[@]}" -eq 26 ]] || fail "Expected 26 core Kotlin source files, found ${#ALL_KT_FILES[@]}"
 
 java -cp "$TMP_WORK/compiler-shims:$GRADLE_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -language-version 1.9 -nowarn -no-stdlib \
@@ -1323,7 +1343,7 @@ java -cp "$TMP_WORK/compiler-shims:$GRADLE_LIB/*" org.jetbrains.kotlin.cli.jvm.K
     "$TMP_WORK/AllBlocksTest.kt" \
     -d "$TMP_WORK/kt-classes"
 
-pass "All 27 core Kotlin source files across Blocks 1, 2, 3, and 4 compiled cleanly with zero errors"
+pass "All 26 core Kotlin source files across Blocks 1, 2, 3, and 4 compiled cleanly with zero errors"
 
 java -cp "$TMP_WORK/kt-classes:$KOTLIN_STDLIB:$COROUTINES_JAR:$COMMONS_COMPRESS_JAR:$ANDROID_JAR" com.nextcraft.forge.runtime.AllBlocksTestKt
 pass "BUG-020: WorkspaceCheckpoints.safeWorkspaceFile blocks symlinked ancestor dirs & allows valid 'v1..v2.diff' filenames"
@@ -1337,18 +1357,19 @@ pass "Audit C-1..C-3, H-1..H-6, M-1..M-18, L-1..L-12 runtime checks passed"
 pass "BUG-036..041: AgentKind.fromStored, OPENAI_RESPONSES + tool ordering, chroot PATH, UTF-8 tailer truncation, synchronized checkpoint pruning, and background APK installer verified"
 pass "UPGRADE-001..004: InotifyLogTailer bridge integration, real-time OpenAI->Anthropic SSE streaming, incremental SHA-256 checkpoint sync, and interactive high-risk tool approvals verified"
 
-# Compile all 41 Kotlin files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) with Compose IR plugin
+# Compile all 40 Kotlin files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) with Compose IR plugin
 mapfile -t ALL_APP_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -name "*.kt" | sort)
-[[ "${#ALL_APP_KT_FILES[@]}" -eq 41 ]] || fail "Expected 41 total Kotlin source files across Blocks 1–6, found ${#ALL_APP_KT_FILES[@]}"
+[[ "${#ALL_APP_KT_FILES[@]}" -eq 40 ]] || fail "Expected 40 total Kotlin source files across Blocks 1–6, found ${#ALL_APP_KT_FILES[@]}"
 
 mkdir -p "$TMP_WORK/aar-jars" "$TMP_WORK/full-app-classes"
 aar_idx=0
 while IFS= read -r aar_file; do
     aar_idx=$((aar_idx + 1))
-    unzip -q -p "$aar_file" classes.jar > "$TMP_WORK/aar-jars/aar_${aar_idx}.jar" 2>/dev/null || rm -f "$TMP_WORK/aar-jars/aar_${aar_idx}.jar"
-done < <(find /root/maven/localMvnRepository -name "*.aar")
+    printf -v aar_name "aar_%04d.jar" "$aar_idx"
+    unzip -q -p "$aar_file" classes.jar > "$TMP_WORK/aar-jars/$aar_name" 2>/dev/null || rm -f "$TMP_WORK/aar-jars/$aar_name"
+done < <(find /root/maven/localMvnRepository -name "*.aar" | sort -rV)
 
-FULL_CP="$ANDROID_JAR:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-stdlib/1.9.22/kotlin-stdlib-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar:/root/maven/localMvnRepository/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.6.4/kotlinx-coroutines-android-1.6.4.jar:$(find /root/maven/localMvnRepository -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'kotlin-compiler*' ! -path '*/2.1.20/*' ! -path '*coroutines*' | tr '\n' ':'):$(find "$TMP_WORK/aar-jars" -name '*.jar' | tr '\n' ':')"
+FULL_CP="$ANDROID_JAR:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-stdlib/1.9.22/kotlin-stdlib-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar:/root/maven/localMvnRepository/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.6.4/kotlinx-coroutines-android-1.6.4.jar:$(find /root/maven/localMvnRepository -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'kotlin-compiler*' ! -path '*/2.1.20/*' ! -path '*coroutines*' | sort -rV | tr '\n' ':'):$(find "$TMP_WORK/aar-jars" -name '*.jar' | sort | tr '\n' ':')"
 
 java -cp "/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-compiler-embeddable/1.9.22/kotlin-compiler-embeddable-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-stdlib/1.9.22/kotlin-stdlib-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-script-runtime/1.9.22/kotlin-script-runtime-1.9.22.jar:/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-reflect/1.6.10/kotlin-reflect-1.6.10.jar:/root/maven/localMvnRepository/org/jetbrains/intellij/deps/trove4j/1.0.20200330/trove4j-1.0.20200330.jar:/root/maven/localMvnRepository/org/jetbrains/annotations/13.0/annotations-13.0.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
@@ -1358,7 +1379,7 @@ java -cp "/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-compiler-em
     -d "$TMP_WORK/full-app-classes" \
     "${ALL_APP_KT_FILES[@]}"
 
-pass "All 41 Kotlin source files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) compiled cleanly with Compose IR plugin"
+pass "All 40 Kotlin source files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) compiled cleanly with Compose IR plugin"
 
 # Test BUG-019 awk exact match logic in RootfsRepair.kt and unmount-chroot.sh
 MOCK_MOUNTS="$TMP_WORK/mock_mounts"
@@ -1412,10 +1433,10 @@ pass "BUG-025: Timed-out su processes are forcibly destroyed in RuntimeCompatibi
 # Ensure C-1..C-3, H-1..H-6, BUG-036..BUG-041, and UPGRADE-001..UPGRADE-004 invariants
 grep -q "OsConstants.O_EXCL" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt" || fail "Missing C-1 O_EXCL atomic envFile creation"
 grep -q "GITHUB_CLI_RELEASE_SHA256.length == 64" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt" || fail "Missing C-2 SHA-256 length check"
-grep -q "classifyRisk(toolName, command)" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt" || fail "Missing C-3 classifyRisk enforcement"
+grep -q "classifyRisk(toolName, command, paths)" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt" || fail "Missing C-3 classifyRisk enforcement"
 grep -q "synchronized(rotationLock)" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt" || fail "Missing H-2 rotationLock in LocalFormatGateway"
 grep -q "synchronized(rotationLock)" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt" || fail "Missing H-2 rotationLock in OpenRouterRoutingGateway"
-grep -q "setUserAuthenticationRequired(true)" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt" || fail "Missing H-3 setUserAuthenticationRequired in ApiKeyVault"
+grep -q "migrateAuthBoundKeyIfNeeded()" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt" || fail "Missing H-3 migrateAuthBoundKeyIfNeeded in ApiKeyVault"
 grep -q "Update manifest is missing SHA-256 checksum" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt" || fail "Missing H-4 mandatory SHA-256 check in AppUpdater"
 grep -q "candidate.toPath().startsWith(workspaceBase.toPath())" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt" || fail "Missing H-5 canonical rootPath check in AppPreferences"
 grep -q "AgentKind.fromStored(" "$ROOT_DIR/app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt" || fail "Missing BUG-036 AgentKind.fromStored in RuntimeSetupService.kt"
