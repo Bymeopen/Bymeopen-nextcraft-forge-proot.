@@ -6,6 +6,20 @@ import java.io.File
 import java.nio.file.Files
 
 object AndroidProjectTemplateGenerator {
+    /**
+     * Android 9 (API 28): the oldest release that still receives Google Play system updates in practice, and the
+     * minimum the stock templates have always used; raising it would only drop devices without unlocking any API the
+     * templates need.
+     */
+    const val MIN_SDK = 28
+
+    // Dependency versions baked into the offline Maven repository (see scripts/runtime-bundles/build-android-bundle.sh).
+    // Bumping any of them requires rebuilding the Android bundle, otherwise new projects stop resolving offline.
+    const val CORE_KTX_VERSION = "1.19.1"
+    const val ACTIVITY_COMPOSE_VERSION = "1.13.0"
+    const val APPCOMPAT_VERSION = "1.8.0"
+    const val MATERIAL_VERSION = "1.14.0"
+
     private val JAVA_KEYWORDS = setOf(
         "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
         "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
@@ -57,15 +71,17 @@ object AndroidProjectTemplateGenerator {
             include(":app")
             """,
         )
+        // AGP 9 has built-in Kotlin: org.jetbrains.kotlin.android is not applied. Compose only needs the compiler plugin.
+        val composePlugin = "org.jetbrains.kotlin.plugin.compose"
         write(
             root,
             "build.gradle.kts",
-            """
-            plugins {
-                id("com.android.application") version "8.11.0" apply false
-                id("org.jetbrains.kotlin.android") version "1.9.22" apply false
-            }
-            """,
+            block(
+                "plugins {",
+                "    id(\"com.android.application\") version \"${AndroidToolchain.AGP_VERSION}\" apply false",
+                if (compose) "    id(\"$composePlugin\") version \"${AndroidToolchain.KOTLIN_VERSION}\" apply false" else null,
+                "}",
+            ),
         )
         write(
             root,
@@ -76,49 +92,55 @@ object AndroidProjectTemplateGenerator {
             android.nonTransitiveRClass=true
             """,
         )
+        val dependencies = if (compose) {
+            listOf(
+                "implementation(platform(\"androidx.compose:compose-bom:${AndroidToolchain.COMPOSE_BOM_VERSION}\"))",
+                "implementation(\"androidx.activity:activity-compose:$ACTIVITY_COMPOSE_VERSION\")",
+                "implementation(\"androidx.compose.ui:ui\")",
+                "implementation(\"androidx.compose.foundation:foundation\")",
+                "implementation(\"androidx.compose.material3:material3\")",
+            )
+        } else {
+            listOf(
+                "implementation(\"androidx.appcompat:appcompat:$APPCOMPAT_VERSION\")",
+                "implementation(\"com.google.android.material:material:$MATERIAL_VERSION\")",
+            )
+        }
         write(
             root,
             "app/build.gradle.kts",
-            """
-            plugins {
-                id("com.android.application")
-                id("org.jetbrains.kotlin.android")
-            }
-
-            android {
-                namespace = "$namespace"
-                compileSdk = 36
-
-                defaultConfig {
-                    applicationId = "$namespace"
-                    minSdk = 28
-                    targetSdk = 36
-                    versionCode = 1
-                    versionName = "1.0"
-                }
-
-                compileOptions {
-                    sourceCompatibility = JavaVersion.VERSION_17
-                    targetCompatibility = JavaVersion.VERSION_17
-                }
-                kotlinOptions { jvmTarget = "17" }
-                buildFeatures { compose = $compose }
-                ${if (compose) "composeOptions { kotlinCompilerExtensionVersion = \"1.5.10\" }" else ""}
-            }
-
-            dependencies {
-                implementation("androidx.core:core-ktx:1.8.0")
-                ${if (compose) """
-                implementation("androidx.activity:activity-compose:1.5.1")
-                implementation("androidx.compose.ui:ui:1.3.0")
-                implementation("androidx.compose.foundation:foundation:1.3.0")
-                implementation("androidx.compose.material3:material3:1.0.0")
-                """.trimIndent() else """
-                implementation("androidx.appcompat:appcompat:1.6.1")
-                implementation("com.google.android.material:material:1.9.0")
-                """.trimIndent()}
-            }
-            """,
+            block(
+                "plugins {",
+                "    id(\"com.android.application\")",
+                if (compose) "    id(\"$composePlugin\")" else null,
+                "}",
+                "",
+                "android {",
+                "    namespace = \"$namespace\"",
+                "    compileSdk {",
+                "        version = release(${AndroidToolchain.COMPILE_SDK}) { minorApiLevel = ${AndroidToolchain.COMPILE_SDK_MINOR} }",
+                "    }",
+                "",
+                "    defaultConfig {",
+                "        applicationId = \"$namespace\"",
+                "        minSdk = $MIN_SDK",
+                "        targetSdk = ${AndroidToolchain.TARGET_SDK}",
+                "        versionCode = 1",
+                "        versionName = \"1.0\"",
+                "    }",
+                "",
+                "    compileOptions {",
+                "        sourceCompatibility = JavaVersion.VERSION_${AndroidToolchain.JAVA_TARGET}",
+                "        targetCompatibility = JavaVersion.VERSION_${AndroidToolchain.JAVA_TARGET}",
+                "    }",
+                "    buildFeatures { compose = $compose }",
+                "}",
+                "",
+                "dependencies {",
+                "    implementation(\"androidx.core:core-ktx:$CORE_KTX_VERSION\")",
+                *dependencies.map { "    $it" }.toTypedArray(),
+                "}",
+            ),
         )
         write(
             root,
@@ -286,6 +308,9 @@ object AndroidProjectTemplateGenerator {
             """,
         )
     }
+
+    /** Joins pre-indented lines; `null` entries are conditional lines that are left out. */
+    private fun block(vararg lines: String?): String = lines.filterNotNull().joinToString("\n")
 
     private fun write(root: File, relative: String, content: String) {
         val rootPath = root.canonicalFile.toPath()

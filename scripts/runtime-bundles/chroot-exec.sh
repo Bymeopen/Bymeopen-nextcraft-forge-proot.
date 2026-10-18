@@ -199,10 +199,11 @@ BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/u
 if [ -d "$ROOTFS/root/android-sdk" ]; then
     export ANDROID_HOME="${ANDROID_HOME:-/root/android-sdk}"
     export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/root/android-sdk}"
-    export GRADLE_HOME="${GRADLE_HOME:-/opt/gradle/gradle-8.14.3}"
+    # Keep in sync with AndroidToolchain.kt (RuntimeInstaller sets the same environment for in-app launches).
+    export GRADLE_HOME="${GRADLE_HOME:-/opt/gradle/gradle-9.8.1}"
     export GRADLE_USER_HOME="${GRADLE_USER_HOME:-/root/.gradle}"
-    export ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride="/root/android-sdk/build-tools/35.0.0/aapt2"
-    export PATH="/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:$BASE_PATH"
+    export ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride="/root/android-sdk/build-tools/36.0.0/aapt2"
+    export PATH="/opt/gradle/gradle-9.8.1/bin:/root/android-sdk/build-tools/36.0.0:/root/android-sdk/cmdline-tools/latest/bin:$BASE_PATH"
 else
     export PATH="$BASE_PATH"
 fi

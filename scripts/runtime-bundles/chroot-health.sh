@@ -56,14 +56,19 @@ check "venv"              'd=$(mktemp -d) && python3 -m venv "$d/v" && "$d/v/bin
 check "stdlib ssl/sqlite" 'python3 -c "import ssl,sqlite3,ctypes; print(ssl.OPENSSL_VERSION)"'
 
 echo "== Android"
-check "java 17"           'java -version 2>&1 | head -1 | grep -E "\"17\."'
+# Versions and paths: keep in sync with app/src/main/java/com/nextcraft/forge/runtime/AndroidToolchain.kt.
+JDK_MAJOR=21
+GRADLE_VERSION=9.8.1
+ANDROID_PLATFORM=android-37.2
+BUILD_TOOLS=/root/android-sdk/build-tools/36.0.0
+check "java $JDK_MAJOR"   "java -version 2>&1 | head -1 | grep -E '\"$JDK_MAJOR\\.'"
 check "javac"             'javac -version'
-check "gradle"            'gradle --version --offline | grep ^Gradle'
-check "android.jar"       'ls /root/android-sdk/platforms/android-36/android.jar'
-check "aapt2"             '/root/android-sdk/build-tools/35.0.0/aapt2 version'
+check "gradle $GRADLE_VERSION" "gradle --version --offline | grep '^Gradle $GRADLE_VERSION'"
+check "android.jar"       "ls /root/android-sdk/platforms/$ANDROID_PLATFORM/android.jar"
+check "aapt2"             "$BUILD_TOOLS/aapt2 version"
 # zipalign without arguments prints usage and exits non-zero; a missing linker gives "cannot execute" instead.
-check "zipalign"          'out=$(/root/android-sdk/build-tools/35.0.0/zipalign 2>&1); echo "$out" | head -1; echo "$out" | grep -qi "usage"'
-check "d8"                '/root/android-sdk/build-tools/35.0.0/d8 --version'
+check "zipalign"          "out=\$($BUILD_TOOLS/zipalign 2>&1); echo \"\$out\" | head -1; echo \"\$out\" | grep -qi usage"
+check "d8"                "$BUILD_TOOLS/d8 --version"
 check "gradle init"       'grep -q "android.aapt2FromMavenOverride" /root/.gradle/init.d/pocketdev-android.gradle && echo ok'
 
 echo "== C/C++"

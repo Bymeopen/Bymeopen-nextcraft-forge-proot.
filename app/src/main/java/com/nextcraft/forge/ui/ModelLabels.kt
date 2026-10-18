@@ -5,6 +5,7 @@ import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
 import com.nextcraft.forge.model.ProviderKind
+import com.nextcraft.forge.runtime.AndroidToolchain
 
 fun ProviderKind.displayTitle(): String = when (this) {
     ProviderKind.CLAUDE -> "Claude Subscription (OAuth)"
@@ -51,7 +52,7 @@ fun DevStack.displayLabel(): String = when (this) {
 fun DevStack.displayDescription(): String = when (this) {
     DevStack.WEB -> "Node.js 24, npm, TypeScript, Vite, Next.js"
     DevStack.PYTHON -> "Python 3.12, pip, venv, FastAPI, data tools"
-    DevStack.ANDROID -> "OpenJDK 17, Gradle, Android SDK 35/36, Bionic aapt2"
+    DevStack.ANDROID -> "OpenJDK ${AndroidToolchain.JDK_MAJOR}, Gradle ${AndroidToolchain.GRADLE_VERSION}, Android SDK ${AndroidToolchain.COMPILE_SDK}, Bionic aapt2"
     DevStack.CPP -> "Clang/GCC, CMake, Make, Ninja, gdb"
     DevStack.PHP -> "PHP CLI, Composer, SQLite/PDO extensions"
 }
