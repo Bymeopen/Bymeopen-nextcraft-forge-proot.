@@ -74,6 +74,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 
 /**
  * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
@@ -114,7 +119,8 @@ fun ProjectsScreen(
         item(key = "import") {
             BringExistingProjectCard(
                 githubLogin = state.githubLogin,
-                onPickZip = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
+                // Any type: file managers often label .zip as application/octet-stream, which would grey it out.
+                onPickZip = { zipPicker.launch(arrayOf("*/*")) },
                 onGitUrl = { showCloneDialog = true },
                 onConnectGitHub = onConnectGitHub,
             )
@@ -272,7 +278,12 @@ private fun BringExistingProjectCard(
                     modifier = Modifier.size(22.dp),
                 )
             }
-            AnimatedVisibility(visible = expanded) {
+            // Height-only animation keeps the LazyColumn item from jumping while the body appears.
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
+                exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+            ) {
                 Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ImportTile(

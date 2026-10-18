@@ -88,6 +88,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.nextcraft.forge.model.generateQuickChatIdentity
 
 enum class ForgeTab(val title: String) {
     PROJECTS("Projects"),
@@ -1810,6 +1811,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** A throwaway chat workspace (kind QUICK_PROJECT) with a generated name; opens straight into Agent. */
+    fun createQuickProject() {
+        viewModelScope.launch {
+            val project = withContext(Dispatchers.IO) {
+                val identity = generateQuickChatIdentity(_state.value.projects.map { it.slug }.toSet())
+                val project = Project(
+                    name = identity.displayName,
+                    description = "Quick project",
+                    language = "Multi-language",
+                    slug = identity.slug,
+                    kind = ProjectKind.QUICK_PROJECT,
+                )
+                checkpoints.ensureWorkspace(project.id)
+                project
+            }
+            val updated = listOf(project) + _state.value.projects
+            preferences.saveProjects(updated)
+            configureAllProjectRoots(updated)
+            _state.update { it.copy(projects = updated) }
+            selectProject(project.id)
+        }
+    }
+
     /** Clones any http(s) git URL into a fresh workspace project (GitHub token is used only for github.com). */
     fun cloneGitUrl(rawUrl: String) {
         val url = rawUrl.trim()
@@ -1841,6 +1865,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                         if (c.moveToFirst() && idx >= 0) c.getString(idx) else null
                     } ?: "import.zip"
+                    val magic = app.contentResolver.openInputStream(uri)?.use { it.readNBytes(4) } ?: ByteArray(0)
+                    val isZip = magic.size == 4 && magic[0] == 0x50.toByte() && magic[1] == 0x4B.toByte() &&
+                        magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte()
+                    if (!isZip) throw IllegalArgumentException("$displayName is not a ZIP archive")
                     val cleanName = displayName.removeSuffix(".zip").ifBlank { "Imported project" }
                     val usedSlugs = _state.value.projects.map { it.slug }.toSet()
                     val baseSlug = projectSlug(cleanName)

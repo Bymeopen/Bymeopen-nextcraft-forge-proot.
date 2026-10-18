@@ -187,7 +187,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         },
                         onNewProject = { showNewProjectDialog = true },
                         onQuickProject = {
-                            viewModel.createProject(name = "Quick project", description = "", isAndroid = false)
+                            viewModel.createQuickProject()
                             viewModel.selectTab(ForgeTab.AGENT)
                         },
                         onImportZip = viewModel::importZipProject,
