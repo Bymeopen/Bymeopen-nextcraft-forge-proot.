@@ -79,7 +79,7 @@ class WorkspaceCheckpoints(
             val checkpoint = checkpointDir(safeId)
             val backup = File(checkpoint, "project")
             // Keep the original baseline only while unreviewed pending files exist.
-            if (backup.isDirectory && readChangedPathsUnlocked(safeId).isNotEmpty()) return
+            if (backup.isDirectory && (readChangedPathsUnlocked(safeId).isNotEmpty() || isManifestUnreadable(safeId))) return
             File(checkpoint, "changes.json").delete()
             File(checkpoint, ".changes.json.tmp").delete()
             backup.mkdirs()
@@ -153,6 +153,12 @@ class WorkspaceCheckpoints(
         return synchronized(lockFor(safeId)) {
             readChangedPathsUnlocked(safeId)
         }
+    }
+
+    /** A manifest that exists but cannot be parsed still guards an undo baseline; do not overwrite that baseline. */
+    private fun isManifestUnreadable(safeId: String): Boolean {
+        val manifest = File(checkpointDir(safeId), "changes.json")
+        return manifest.isFile && runCatching { JSONArray(manifest.readText()) }.isFailure
     }
 
     private fun readChangedPathsUnlocked(safeId: String): List<String> {
@@ -484,9 +490,16 @@ class WorkspaceCheckpoints(
 
     fun isInternalRuntimePath(path: String): Boolean {
         val normalized = path.replace('\\', '/')
-        return normalized == ".claude.json" || IGNORED_DIRECTORY_NAMES.any { directory ->
-            normalized == directory || normalized.startsWith("$directory/") || normalized.contains("/$directory/")
+        if (normalized == ".claude.json") return true
+        var insideSourceTree = false
+        for (segment in normalized.split('/')) {
+            if (segment in IGNORED_DIRECTORY_NAMES) return true
+            // build/dist/target are artifact folders, but a package or directory with that name under src/
+            // is real source and must stay tracked (and undoable).
+            if (segment in BUILD_OUTPUT_DIRECTORY_NAMES && !insideSourceTree) return true
+            if (segment == "src") insideSourceTree = true
         }
+        return false
     }
 
     private fun digest(file: File): String {
@@ -526,11 +539,9 @@ class WorkspaceCheckpoints(
             ".next",
             ".dart_tool",
             ".venv",
-            "build",
-            "dist",
             "node_modules",
-            "target",
             "venv",
         )
+        private val BUILD_OUTPUT_DIRECTORY_NAMES = setOf("build", "dist", "target")
     }
 }

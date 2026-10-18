@@ -217,7 +217,9 @@ Java_com_nextcraft_forge_runtime_NativeSpawn_spawn(JNIEnv *env, jobject self, jo
             _exit(126);
         }
         prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
-        execve(argv[0], argv, envp);
+        // execvpe, not execve: callers pass bare names such as "su", which execve never resolves via PATH
+        // (it would always fail with ENOENT). The lookup uses this process's PATH; the child gets envp.
+        execvpe(argv[0], argv, envp);
         dprintf(STDERR_FILENO, "NextCraft native exec failed: %s\n", strerror(errno));
         _exit(127);
     }

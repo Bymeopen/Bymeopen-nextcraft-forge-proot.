@@ -2,6 +2,7 @@ package com.nextcraft.forge.network
 
 import android.content.Context
 import com.nextcraft.forge.model.ProviderProtocol
+import com.nextcraft.forge.model.stringOrEmpty
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -345,9 +346,9 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         val extracted = runCatching {
             val root = JSONObject(body)
             when (val error = root.opt("error")) {
-                is JSONObject -> error.optString("message").ifBlank { error.optString("detail") }
+                is JSONObject -> error.stringOrEmpty("message").ifBlank { error.stringOrEmpty("detail") }
                 is String -> error
-                else -> root.optString("message").ifBlank { root.optString("detail") }
+                else -> root.stringOrEmpty("message").ifBlank { root.stringOrEmpty("detail") }
             }
         }.getOrNull().orEmpty()
         if (extracted.isBlank()) return null
@@ -382,17 +383,17 @@ object ModelResponseParser {
                 when (val item = array.opt(index)) {
                     is String -> if (item.isNotBlank()) add(DiscoveredModel(item))
                     is JSONObject -> {
-                        val id = item.optString("id")
-                            .ifBlank { item.optString("name") }
-                            .ifBlank { item.optString("model") }
+                        val id = item.stringOrEmpty("id")
+                            .ifBlank { item.stringOrEmpty("name") }
+                            .ifBlank { item.stringOrEmpty("model") }
                         if (id.isNotBlank()) {
-                            val label = item.optString("display_name")
-                                .ifBlank { item.optString("displayName") }
+                            val label = item.stringOrEmpty("display_name")
+                                .ifBlank { item.stringOrEmpty("displayName") }
                                 .ifBlank { id }
                             val pricing = item.optJSONObject("pricing")
                             val free = id.endsWith(":free", ignoreCase = true) || pricing?.let {
                                 listOf("prompt", "completion", "request").all { field ->
-                                    it.optString(field, "0").toDoubleOrNull() == 0.0
+                                    it.stringOrEmpty(field, "0").toDoubleOrNull() == 0.0
                                 }
                             } == true
                             add(DiscoveredModel(id, label, free))

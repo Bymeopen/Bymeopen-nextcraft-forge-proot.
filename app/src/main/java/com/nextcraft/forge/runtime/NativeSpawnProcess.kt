@@ -25,17 +25,32 @@ internal class NativeSpawnProcess private constructor(
     override fun getInputStream(): InputStream = FileInputStream(outputFile)
     override fun getErrorStream(): InputStream = ByteArrayInputStream(ByteArray(0))
 
+    /**
+     * Non-blocking exit check. The lock is held only for a WNOHANG waitpid, so isAlive/destroy
+     * called from another thread are never stuck behind a thread that is waiting for exit.
+     */
+    private fun pollExit(): Int? {
+        result?.let { return it }
+        synchronized(waitLock) {
+            result?.let { return it }
+            val status = NativeSpawn.waitFor(pid, true)
+            if (status == NativeSpawn.STILL_RUNNING) return null
+            result = status
+            return status
+        }
+    }
+
     override fun waitFor(): Int {
         result?.let { return it }
-        val exitCode = synchronized(waitLock) {
-            result?.let { return@synchronized it }
-            val code = if (delegateProcess != null) {
-                delegateProcess.waitFor()
-            } else {
-                NativeSpawn.waitFor(pid, false)
+        val exitCode = if (delegateProcess != null) {
+            delegateProcess.waitFor().also { result = it }
+        } else {
+            var polled = pollExit()
+            while (polled == null) {
+                Thread.sleep(EXIT_POLL_INTERVAL_MS)
+                polled = pollExit()
             }
-            result = code
-            code
+            polled
         }
         runCatching { stdin.close() }
         outputPump?.join(1_000)
@@ -44,20 +59,15 @@ internal class NativeSpawnProcess private constructor(
 
     override fun exitValue(): Int {
         result?.let { return it }
-        synchronized(waitLock) {
-            result?.let { return it }
-            if (delegateProcess != null) {
-                val code = delegateProcess.exitValue()
-                result = code
-                runCatching { stdin.close() }
-                return code
-            }
-            val status = NativeSpawn.waitFor(pid, true)
-            if (status == NativeSpawn.STILL_RUNNING) throw IllegalThreadStateException("Process is still running")
-            result = status
+        if (delegateProcess != null) {
+            val code = delegateProcess.exitValue()
+            result = code
             runCatching { stdin.close() }
-            return status
+            return code
         }
+        val status = pollExit() ?: throw IllegalThreadStateException("Process is still running")
+        runCatching { stdin.close() }
+        return status
     }
 
     override fun destroy() {
@@ -115,6 +125,8 @@ internal class NativeSpawnProcess private constructor(
         delegateProcess?.isAlive ?: runCatching { exitValue(); false }.getOrDefault(true)
 
     companion object {
+        private const val EXIT_POLL_INTERVAL_MS = 20L
+
         private fun extractProcessPid(process: Process): Int = runCatching {
             val field = process.javaClass.getDeclaredField("pid")
             field.isAccessible = true
