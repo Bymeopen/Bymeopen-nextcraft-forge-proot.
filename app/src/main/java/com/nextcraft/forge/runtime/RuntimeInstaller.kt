@@ -900,17 +900,39 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePythonStack() {
+        // The overlay is unmanaged by dpkg, so it is removed by path. Covers the current Ubuntu 24.04 bundle
+        // (Python 3.12) and the legacy 20.04 bundle (Python 3.8). Shared libraries the overlay also ships
+        // (libsqlite3, libreadline, libhistory) and tzdata files are left in place: other tools may use them.
         listOf(
             ".pocket-python-tools-version",
+            ".nextcraft-python-tools-version",
             "usr/bin/python3",
+            "usr/bin/python3.12",
             "usr/bin/python3.8",
             "usr/bin/pip",
             "usr/bin/pip3",
+            "usr/bin/pip3.12",
+            "usr/bin/pdb3",
+            "usr/bin/pdb3.12",
+            "usr/bin/pydoc3",
+            "usr/bin/pydoc3.12",
+            "usr/bin/pygettext3",
+            "usr/bin/pygettext3.12",
+            "usr/bin/py3clean",
+            "usr/bin/py3compile",
+            "usr/bin/py3versions",
+            "usr/lib/aarch64-linux-gnu/libpython3.12.so.1",
+            "usr/lib/aarch64-linux-gnu/libpython3.12.so.1.0",
             "usr/lib/aarch64-linux-gnu/libpython3.8.so.1",
             "usr/lib/aarch64-linux-gnu/libpython3.8.so.1.0",
             "usr/lib/python3",
+            "usr/lib/python3.12",
             "usr/lib/python3.8",
+            "usr/lib/valgrind/python3.supp",
+            "usr/local/lib/python3.12",
             "usr/local/lib/python3.8",
+            "etc/python3",
+            "etc/python3.12",
             "usr/share/python3",
             "usr/share/python-wheels",
             "root/.cache/pip",
