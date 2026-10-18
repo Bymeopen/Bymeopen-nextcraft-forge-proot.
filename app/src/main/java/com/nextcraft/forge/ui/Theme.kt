@@ -451,13 +451,14 @@ fun ForgeElevatedCard(
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape((tokens.cardCornerRadius - 4.dp).coerceAtLeast(10.dp))
-    val container = if (selected) scheme.primaryContainer else tokens.cardElevatedColor
-    val contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurface
+    val shape = RoundedCornerShape(14.dp)
+    // Selected = soft accent tint + accent edge; text keeps the normal surface colour (no filled container).
+    val container = if (selected) scheme.primary.copy(alpha = 0.10f) else tokens.cardElevatedColor
+    val contentColor = scheme.onSurface
     val border = if (selected) {
-        BorderStroke(1.2.dp, scheme.primary.copy(alpha = 0.65f))
+        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.45f))
     } else {
-        tokens.elevatedBorderStroke
+        null
     }
     val cardModifier = if (onClick != null) {
         modifier

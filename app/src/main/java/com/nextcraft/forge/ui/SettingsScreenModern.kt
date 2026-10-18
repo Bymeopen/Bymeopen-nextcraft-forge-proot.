@@ -132,7 +132,7 @@ fun SettingsScreenModern(
                     onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
                 )
 
-                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                 Text(
                     text = stringResource(R.string.settings_interface_language),
                     style = MaterialTheme.typography.labelMedium,
@@ -146,6 +146,7 @@ fun SettingsScreenModern(
                 ) {
                     AppLanguage.entries.forEach { lang ->
                         FilterChip(
+                            shape = RoundedCornerShape(100),
                             selected = state.languageCode.equals(lang.code, ignoreCase = true),
                             onClick = { viewModel.setLanguageCode(lang.code) },
                             label = { Text("${lang.nativeName} (${lang.displayName})") },
@@ -153,7 +154,7 @@ fun SettingsScreenModern(
                     }
                 }
 
-                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                 val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
                 Text(
                     text = stringResource(R.string.settings_theme_mode, stringResource(activeThemeMode.title)),
@@ -282,13 +283,14 @@ fun SettingsScreenModern(
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                     Text(
                         text = stringResource(R.string.settings_antigravity_cli_configuration),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
                         value = agyModelInput,
                         onValueChange = { agyModelInput = it },
                         label = { Text(stringResource(R.string.settings_antigravity_model)) },
@@ -301,6 +303,7 @@ fun SettingsScreenModern(
                     ) {
                         listOf("low", "medium", "high").forEach { effort ->
                             FilterChip(
+                                shape = RoundedCornerShape(100),
                                 selected = agyEffortInput == effort,
                                 onClick = {
                                     agyEffortInput = effort
@@ -312,6 +315,7 @@ fun SettingsScreenModern(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
+                            shape = RoundedCornerShape(100),
                             onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
                         ) {
                             Text(stringResource(R.string.settings_save_antigravity_model))
@@ -323,12 +327,14 @@ fun SettingsScreenModern(
                         }
                         if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
+                                shape = RoundedCornerShape(100),
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
                             ) {
                                 Text(stringResource(R.string.settings_sign_out_google_oauth))
                             }
                         } else {
                             OutlinedButton(
+                                shape = RoundedCornerShape(100),
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
                             ) {
                                 Text(stringResource(R.string.settings_sign_in_with_google))
@@ -360,6 +366,7 @@ fun SettingsScreenModern(
                     ) {
                         availableProviders.forEach { kind ->
                             FilterChip(
+                                shape = RoundedCornerShape(100),
                                 selected = state.providerProfile.kind == kind,
                                 onClick = { viewModel.updateProviderKind(kind) },
                                 label = { Text(kind.displayTitle()) },
@@ -376,6 +383,7 @@ fun SettingsScreenModern(
                         state.providerProfile.kind != ProviderKind.CLAUDE
                     ) {
                         OutlinedTextField(
+                            shape = RoundedCornerShape(14.dp),
                             value = baseUrlInput,
                             onValueChange = { baseUrlInput = it },
                             label = { Text(stringResource(R.string.settings_api_base_url)) },
@@ -385,6 +393,7 @@ fun SettingsScreenModern(
                     }
 
                     OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
                         value = modelInput,
                         onValueChange = { modelInput = it },
                         label = { Text(stringResource(R.string.settings_model_identifier)) },
@@ -394,6 +403,7 @@ fun SettingsScreenModern(
 
                     if (state.providerProfile.kind == ProviderKind.LLM_ROUTER) {
                         OutlinedTextField(
+                            shape = RoundedCornerShape(14.dp),
                             value = openRouterOrderInput,
                             onValueChange = { openRouterOrderInput = it },
                             label = { Text(stringResource(R.string.settings_openrouter_provider_order_comma)) },
@@ -408,6 +418,7 @@ fun SettingsScreenModern(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Button(
+                            shape = RoundedCornerShape(100),
                             onClick = {
                                 viewModel.updateProviderConfig(
                                     baseUrl = baseUrlInput,
@@ -419,12 +430,14 @@ fun SettingsScreenModern(
                             Text(stringResource(R.string.settings_save_config))
                         }
                         OutlinedButton(
+                            shape = RoundedCornerShape(100),
                             onClick = viewModel::discoverProviderModels,
                             enabled = !state.apiBusy,
                         ) {
                             Text(stringResource(R.string.settings_discover_models))
                         }
                         OutlinedButton(
+                            shape = RoundedCornerShape(100),
                             onClick = viewModel::validateProviderConnection,
                             enabled = !state.apiBusy,
                         ) {
@@ -458,6 +471,7 @@ fun SettingsScreenModern(
                         ) {
                             state.discoveredModels.take(30).forEach { m ->
                                 AssistChip(
+                                    shape = RoundedCornerShape(100),
                                     onClick = {
                                         modelInput = m.id
                                         viewModel.updateProviderConfig(
@@ -472,7 +486,7 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                     Text(
                         text = stringResource(R.string.settings_api_keys_for_auto, state.providerProfile.kind.displayTitle()),
                         style = MaterialTheme.typography.titleSmall,
@@ -511,6 +525,7 @@ fun SettingsScreenModern(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         OutlinedTextField(
+                            shape = RoundedCornerShape(14.dp),
                             value = keyLabelInput,
                             onValueChange = { keyLabelInput = it },
                             label = { Text(stringResource(R.string.settings_label)) },
@@ -519,6 +534,7 @@ fun SettingsScreenModern(
                             modifier = Modifier.weight(0.35f),
                         )
                         OutlinedTextField(
+                            shape = RoundedCornerShape(14.dp),
                             value = keySecretInput,
                             onValueChange = { keySecretInput = it },
                             label = { Text(stringResource(R.string.settings_api_key_token)) },
@@ -528,6 +544,7 @@ fun SettingsScreenModern(
                         )
                     }
                     Button(
+                        shape = RoundedCornerShape(100),
                         onClick = {
                             if (keySecretInput.isNotBlank()) {
                                 viewModel.addApiKey(keyLabelInput, keySecretInput)
@@ -580,6 +597,7 @@ fun SettingsScreenModern(
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
+                                    shape = RoundedCornerShape(100),
                                     onClick = {
                                         clipboard.setText(AnnotatedString(dc.userCode))
                                         runCatching {
@@ -590,6 +608,7 @@ fun SettingsScreenModern(
                                     Text(stringResource(R.string.settings_copy_code_open_github))
                                 }
                                 OutlinedButton(
+                                    shape = RoundedCornerShape(100),
                                     onClick = { clipboard.setText(AnnotatedString(dc.userCode)) },
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -603,6 +622,7 @@ fun SettingsScreenModern(
 
                 if (state.githubLogin.isBlank()) {
                     Button(
+                        shape = RoundedCornerShape(100),
                         onClick = { viewModel.startGitHubDeviceSignIn() },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -614,6 +634,7 @@ fun SettingsScreenModern(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         OutlinedTextField(
+                            shape = RoundedCornerShape(14.dp),
                             value = githubTokenInput,
                             onValueChange = { githubTokenInput = it },
                             label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
@@ -622,6 +643,7 @@ fun SettingsScreenModern(
                             modifier = Modifier.weight(1f),
                         )
                         OutlinedButton(
+                            shape = RoundedCornerShape(100),
                             onClick = {
                                 if (githubTokenInput.isNotBlank()) {
                                     viewModel.connectGitHubWithToken(githubTokenInput)
@@ -643,7 +665,7 @@ fun SettingsScreenModern(
                             fontWeight = FontWeight.Bold,
                             color = tokens.successText,
                         )
-                        OutlinedButton(onClick = viewModel::disconnectGitHub) {
+                        OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel::disconnectGitHub) {
                             Text(stringResource(R.string.settings_disconnect))
                         }
                     }
@@ -660,12 +682,14 @@ fun SettingsScreenModern(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Button(
+                            shape = RoundedCornerShape(100),
                             onClick = { viewModel.syncProjectWithGitHub() },
                             modifier = Modifier.weight(1f),
                         ) {
                             Text(stringResource(R.string.settings_push_workspace))
                         }
                         OutlinedButton(
+                            shape = RoundedCornerShape(100),
                             onClick = { viewModel.pullProjectFromGitHub() },
                             modifier = Modifier.weight(1f),
                         ) {
@@ -673,13 +697,14 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                     Text(
                         text = stringResource(R.string.settings_create_push_new_github),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
                         value = newRepoName,
                         onValueChange = { newRepoName = it },
                         label = { Text(stringResource(R.string.settings_repository_name)) },
@@ -688,6 +713,7 @@ fun SettingsScreenModern(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
                         value = newRepoDesc,
                         onValueChange = { newRepoDesc = it },
                         label = { Text(stringResource(R.string.settings_description_optional)) },
@@ -702,6 +728,7 @@ fun SettingsScreenModern(
                     )
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Button(
+                            shape = RoundedCornerShape(100),
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 val targetName = newRepoName.ifBlank { state.activeProject?.slug.orEmpty() }
@@ -722,7 +749,7 @@ fun SettingsScreenModern(
                     }
 
                     if (state.githubRepos.isNotEmpty()) {
-                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                         Text(
                             text = stringResource(R.string.settings_your_repositories_tap_clone),
                             style = MaterialTheme.typography.labelMedium,
@@ -745,7 +772,7 @@ fun SettingsScreenModern(
                                         )
                                     }
                                 }
-                                OutlinedButton(onClick = { viewModel.cloneGitHubRepository(repo) }) {
+                                OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.cloneGitHubRepository(repo) }) {
                                     Text(stringResource(R.string.settings_clone))
                                 }
                             }
@@ -782,12 +809,14 @@ fun SettingsScreenModern(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(
+                        shape = RoundedCornerShape(100),
                         onClick = viewModel::startRuntimeSetup,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(stringResource(R.string.settings_apply_provision_stacks))
                     }
                     OutlinedButton(
+                        shape = RoundedCornerShape(100),
                         onClick = viewModel::repairRootfs,
                         modifier = Modifier.weight(1f),
                     ) {
@@ -817,7 +846,7 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
-                Button(onClick = { viewModel.checkForAppUpdates() }) {
+                Button(shape = RoundedCornerShape(100), onClick = { viewModel.checkForAppUpdates() }) {
                     Text(stringResource(R.string.settings_check_for_app_updates))
                 }
             }
