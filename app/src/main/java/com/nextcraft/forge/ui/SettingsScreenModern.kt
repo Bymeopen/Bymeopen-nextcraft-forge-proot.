@@ -131,6 +131,12 @@ fun SettingsScreenModern(
                     checked = state.interactiveHighRiskApprovals,
                     onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
                 )
+                ForgeToggleRow(
+                    title = stringResource(R.string.settings_auto_approve_all_tools),
+                    subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
+                    checked = state.autoApproveAllTools,
+                    onCheckedChange = viewModel::setAutoApproveAllTools,
+                )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
@@ -282,6 +288,7 @@ fun SettingsScreenModern(
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
+                    var agyVerificationCode by rememberSaveable { mutableStateOf("") }
                     Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = stringResource(R.string.settings_antigravity_cli_configuration),
@@ -310,7 +317,10 @@ fun SettingsScreenModern(
                             )
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Button(
                             onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
                         ) {
@@ -330,8 +340,83 @@ fun SettingsScreenModern(
                         } else {
                             OutlinedButton(
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                                enabled = agyAuth.status != AntigravityAuthStatus.STARTING && agyAuth.status != AntigravityAuthStatus.COMPLETING,
                             ) {
                                 Text(stringResource(R.string.settings_sign_in_with_google))
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateAntigravityConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text(stringResource(R.string.settings_validate))
+                        }
+                    }
+                    if (agyAuth.status == AntigravityAuthStatus.STARTING ||
+                        agyAuth.status == AntigravityAuthStatus.COMPLETING ||
+                        state.apiBusy
+                    ) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    agyAuth.message?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    agyAuth.authorizationUrl?.let { url ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.agent_open_google_sign_in))
+                            }
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(url)) },
+                            ) {
+                                Text(stringResource(R.string.agent_copy_link))
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.antigravityAuth.cancel() },
+                            ) {
+                                Text(stringResource(R.string.agent_cancel))
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = agyVerificationCode,
+                                onValueChange = { agyVerificationCode = it },
+                                label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = {
+                                    if (agyVerificationCode.isNotBlank()) {
+                                        runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }
+                                        agyVerificationCode = ""
+                                    }
+                                },
+                                enabled = agyVerificationCode.isNotBlank(),
+                            ) {
+                                Text(stringResource(R.string.agent_verify))
                             }
                         }
                     }
@@ -758,6 +843,7 @@ fun SettingsScreenModern(
         ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp)
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            val isProvisioning = state.setupSnapshot.status == com.nextcraft.forge.runtime.RuntimeSetupStatus.RUNNING
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -774,7 +860,26 @@ fun SettingsScreenModern(
                         title = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
                         subtitle = stack.displayDescription(),
                         checked = selected,
-                        onCheckedChange = { viewModel.toggleDevStack(stack) },
+                        onCheckedChange = { if (!isProvisioning) viewModel.toggleDevStack(stack) },
+                    )
+                }
+                if (state.setupSnapshot.status != com.nextcraft.forge.runtime.RuntimeSetupStatus.IDLE) {
+                    Text(
+                        text = state.setupSnapshot.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    state.setupSnapshot.errorMessage?.let { err ->
+                        Text(
+                            text = err,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.dangerText,
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = state.setupSnapshot.progress.coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 Row(
@@ -783,15 +888,22 @@ fun SettingsScreenModern(
                 ) {
                     Button(
                         onClick = viewModel::startRuntimeSetup,
+                        enabled = !isProvisioning,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(stringResource(R.string.settings_apply_provision_stacks))
                     }
-                    OutlinedButton(
-                        onClick = viewModel::repairRootfs,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.settings_repair_chroot))
+                    if (isProvisioning) {
+                        OutlinedButton(onClick = viewModel::pauseRuntimeSetup) {
+                            Text(stringResource(R.string.launch_pause))
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = viewModel::repairRootfs,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.settings_repair_chroot))
+                        }
                     }
                 }
             }
@@ -817,8 +929,15 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
-                Button(onClick = { viewModel.checkForAppUpdates() }) {
-                    Text(stringResource(R.string.settings_check_for_app_updates))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { viewModel.checkForAppUpdates() }) {
+                        Text(stringResource(R.string.settings_check_for_app_updates))
+                    }
+                    state.updateInfo?.let { info ->
+                        OutlinedButton(onClick = viewModel::downloadAndInstallAppUpdate) {
+                            Text(stringResource(R.string.settings_download_install_update, info.versionName))
+                        }
+                    }
                 }
             }
         }

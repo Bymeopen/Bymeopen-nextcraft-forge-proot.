@@ -334,6 +334,12 @@ fun AndroidBuildScreen(
 
             2 -> {
                 val consoleShape = RoundedCornerShape(12.dp)
+                val logScrollState = rememberScrollState()
+                LaunchedEffect(build.log.length) {
+                    if (busy) {
+                        logScrollState.scrollTo(logScrollState.maxValue)
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -341,7 +347,7 @@ fun AndroidBuildScreen(
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                         .clip(consoleShape)
                         .background(tokens.terminalBackground)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(logScrollState)
                         .padding(12.dp),
                 ) {
                     SelectionContainer {
@@ -360,6 +366,9 @@ fun AndroidBuildScreen(
                 state = state,
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
+                onClearLogcat = viewModel::clearProjectLogcat,
+                onSetMinLevel = viewModel::setLogcatMinimumLevel,
+                onSetQuery = viewModel::setLogcatQuery,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -458,18 +467,30 @@ private fun LogcatPanel(
     state: ForgeUiState,
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
+    onClearLogcat: () -> Unit,
+    onSetMinLevel: (AndroidLogLevel) -> Unit,
+    onSetQuery: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
     val tokens = LocalForgeThemeTokens.current
+    val filteredLines = remember(logcat.lines, logcat.minimumLevel, logcat.query) {
+        val q = logcat.query.trim()
+        logcat.lines.filter { line ->
+            line.level.ordinal >= logcat.minimumLevel.ordinal &&
+                (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+        }
+    }
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
@@ -477,6 +498,11 @@ private fun LogcatPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
+            if (logcat.lines.isNotEmpty()) {
+                OutlinedButton(onClick = onClearLogcat) {
+                    Text(stringResource(R.string.launch_clear_logcat))
+                }
+            }
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
                     Text(stringResource(R.string.launch_pause))
@@ -487,6 +513,30 @@ private fun LogcatPanel(
                 }
             }
         }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AndroidLogLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = logcat.minimumLevel == level,
+                    onClick = { onSetMinLevel(level) },
+                    label = { Text(level.name) },
+                )
+            }
+        }
+
+        OutlinedTextField(
+            value = logcat.query,
+            onValueChange = onSetQuery,
+            placeholder = { Text(stringResource(R.string.launch_filter_logcat)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         val logcatShape = RoundedCornerShape(10.dp)
         LazyColumn(
@@ -499,7 +549,7 @@ private fun LogcatPanel(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(logcat.lines, key = { it.id }) { line ->
+            items(filteredLines, key = { it.id }) { line ->
                 val color = when (line.level) {
                     AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
                     AndroidLogLevel.WARNING -> tokens.warningText
@@ -537,12 +587,29 @@ fun WebPreviewScreen(
         }
     }
 
+    LaunchedEffect(state.previewUrl) {
+        val target = state.previewUrl.trim()
+        if (target.isNotEmpty() && webViewRef?.url != target) {
+            webViewRef?.loadUrl(target)
+        }
+    }
+
     fun openUrl(raw: String) {
-        val clean = raw.trim()
-        val uriScheme = android.net.Uri.parse(clean).scheme?.lowercase()
-        if (clean.isNotEmpty() && (uriScheme == "http" || uriScheme == "https")) {
-            viewModel.updatePreviewUrl(clean)
-            webViewRef?.loadUrl(clean)
+        val trimmed = raw.trim()
+        val normalized = when {
+            trimmed.startsWith(":") && trimmed.drop(1).all { it.isDigit() } ->
+                "http://127.0.0.1$trimmed"
+            trimmed.isNotEmpty() && trimmed.all { it.isDigit() } ->
+                "http://127.0.0.1:$trimmed"
+            trimmed.startsWith("localhost", ignoreCase = true) || trimmed.startsWith("127.0.0.1") ->
+                "http://$trimmed"
+            else -> trimmed
+        }
+        val uriScheme = android.net.Uri.parse(normalized).scheme?.lowercase()
+        if (normalized.isNotEmpty() && (uriScheme == "http" || uriScheme == "https")) {
+            urlInput = normalized
+            viewModel.updatePreviewUrl(normalized)
+            webViewRef?.loadUrl(normalized)
         }
     }
 

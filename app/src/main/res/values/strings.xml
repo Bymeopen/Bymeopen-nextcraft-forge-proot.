@@ -203,4 +203,18 @@
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
+    <string name="settings_auto_approve_all_tools">Auto-approve all tools</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Skip confirmation prompts for all tool executions</string>
+    <string name="settings_download_install_update">Download &amp; Install v%1$s</string>
+    <string name="files_read_only_badge">Read-Only</string>
+    <string name="files_delete_file">Delete file</string>
+    <string name="files_delete_file_confirm_title">Delete File</string>
+    <string name="files_delete_file_confirm_message">Are you sure you want to delete %1$s from this workspace?</string>
+    <string name="shell_delete_project_confirm_title">Delete Project</string>
+    <string name="shell_delete_project_confirm_message">Permanently delete %1$s and all files inside /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Delete</string>
+    <string name="projects_new_quick_chat">New quick chat</string>
+    <string name="agent_clear_chat">Clear Chat</string>
+    <string name="launch_clear_logcat">Clear</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
 </resources>

@@ -65,6 +65,7 @@ fun ProjectsScreen(
     onOpenProject: (String) -> Unit,
     onNewProject: () -> Unit,
     onDeleteProject: (String) -> Unit,
+    onNewQuickProject: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val regular = state.projects
@@ -73,11 +74,18 @@ fun ProjectsScreen(
     val quick = state.projects
         .filter { it.kind == ProjectKind.QUICK_PROJECT }
         .sortedByDescending { it.updatedAtMillis }
-    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project.
-    val canDelete = state.projects.size > 1 && !state.sessionRunning
+    val busy = state.sessionRunning ||
+        state.androidBuild.phase == com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING ||
+        state.terminalRunning
+    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while tasks run.
+    val canDelete = state.projects.size > 1 && !busy
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        ProjectsHeader(onNewProject = onNewProject)
+        ProjectsHeader(
+            onNewProject = onNewProject,
+            onNewQuickProject = onNewQuickProject,
+        )
         Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 
         if (state.projects.isEmpty()) {
@@ -90,11 +98,11 @@ fun ProjectsScreen(
                         ProjectRow(
                             project = project,
                             active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while the agent streams.
-                            locked = state.sessionRunning && project.id != state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while active tasks run.
+                            locked = busy && project.id != state.activeProjectId,
                             canDelete = canDelete,
                             onOpen = { onOpenProject(project.id) },
-                            onDelete = { onDeleteProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
                         )
                     }
                 }
@@ -104,21 +112,47 @@ fun ProjectsScreen(
                         ProjectRow(
                             project = project,
                             active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while the agent streams.
-                            locked = state.sessionRunning && project.id != state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while active tasks run.
+                            locked = busy && project.id != state.activeProjectId,
                             canDelete = canDelete,
                             onOpen = { onOpenProject(project.id) },
-                            onDelete = { onDeleteProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
                         )
                     }
                 }
             }
         }
     }
+
+    pendingDeleteProject?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+            text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteProject(target.id)
+                        pendingDeleteProject = null
+                    },
+                ) {
+                    Text(stringResource(R.string.shell_confirm_delete))
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text(stringResource(R.string.agent_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun ProjectsHeader(onNewProject: () -> Unit) {
+private fun ProjectsHeader(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -132,6 +166,9 @@ private fun ProjectsHeader(onNewProject: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
+        androidx.compose.material3.TextButton(onClick = onNewQuickProject) {
+            Text(stringResource(R.string.projects_new_quick_chat), fontSize = 12.sp)
+        }
         // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
         IconButton(onClick = onNewProject) {
             Icon(

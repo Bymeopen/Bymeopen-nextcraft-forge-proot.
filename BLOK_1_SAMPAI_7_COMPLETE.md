@@ -35,7 +35,7 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (194 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (245 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2661 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2677 baris)
 - `app/src/main/cpp/forge_spawn.c` (299 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (170 baris)
@@ -1145,7 +1145,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2661 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2677 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -1417,11 +1417,27 @@ class RuntimeInstaller(private val context: Context) {
         if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
         if (!nextcraftReadyMarker.exists()) nextcraftReadyMarker.writeText(CORE_TOOLS_VERSION)
 
+        val removedStacks = if (selectedStacks.isNotEmpty()) {
+            (installedStacks() - selectedStacks) - DevStack.WEB
+        } else {
+            emptySet()
+        }
         val missingStacks = selectedStacks.filterNot(::isStackInstalled)
-        missingStacks.forEachIndexed { index, stack ->
-            val slice = 0.26f / maxOf(1, missingStacks.size)
-            val from = 0.72f + index * slice
+        val totalStackOps = maxOf(1, removedStacks.size + missingStacks.size)
+        var opIndex = 0
+        removedStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
+            removeStack(stack) { p ->
+                onProgress(p.copy(fraction = from + p.fraction.coerceIn(0f, 1f) * slice))
+            }
+            opIndex++
+        }
+        missingStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
             applyStack(chrootExec, stack, from, from + slice, onProgress)
+            opIndex++
         }
 
         when (agent) {
@@ -13341,10 +13357,10 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (119 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2366 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (121 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2389 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (92 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (506 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/ModelLabels.kt` (74 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidBuildText.kt` (62 baris)
@@ -13352,7 +13368,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (119 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (121 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -13412,7 +13428,9 @@ class MainActivity : ComponentActivity() {
             val state by viewModel.state.collectAsState()
             // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
             LaunchedEffect(state.languageCode) {
-                if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+                if (state.languageCode != appliedLanguage || AppStrings.languageCode(this@MainActivity) != appliedLanguage) {
+                    recreate()
+                }
             }
             LaunchedEffect(state.themeMode) {
                 applyWindowTheme(state.themeMode)
@@ -13478,7 +13496,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2366 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2389 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13626,6 +13644,7 @@ data class ForgeUiState(
     val githubStatusMessage: String? = null,
     val languageCode: String = "system",
     val interactiveHighRiskApprovals: Boolean = true,
+    val autoApproveAllTools: Boolean = false,
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
@@ -13831,6 +13850,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     githubLogin = preferences.githubLogin,
                     languageCode = AppStrings.languageCode(getApplication()),
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+                    autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -14992,8 +15012,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptyList()
             }
-            val finalApk = builtApk ?: if (task != "clean") {
-                withContext(Dispatchers.IO) { findDebugApk(androidRoot) }
+            val finalApk = builtApk ?: if (!cancelled && task != "clean") {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(androidRoot) }
             } else {
                 null
             }
@@ -15735,7 +15755,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setInteractiveHighRiskApprovals(enabled: Boolean) {
         preferences.interactiveHighRiskApprovals = enabled
-        _state.update { it.copy(interactiveHighRiskApprovals = enabled) }
+        if (enabled && preferences.autoApproveAllTools) {
+            preferences.autoApproveAllTools = false
+        }
+        _state.update {
+            it.copy(
+                interactiveHighRiskApprovals = enabled,
+                autoApproveAllTools = preferences.autoApproveAllTools,
+            )
+        }
+    }
+
+    fun setAutoApproveAllTools(enabled: Boolean) {
+        preferences.autoApproveAllTools = enabled
+        if (enabled && preferences.interactiveHighRiskApprovals) {
+            preferences.interactiveHighRiskApprovals = false
+        }
+        _state.update {
+            it.copy(
+                autoApproveAllTools = enabled,
+                interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+            )
+        }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {
@@ -15879,7 +15920,7 @@ enum class AppLanguage(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (92 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15936,11 +15977,7 @@ object LocaleHelper {
                 @Suppress("DEPRECATION")
                 Resources.getSystem().configuration.locale
             }
-            if (systemLocale != null) {
-                Locale.setDefault(systemLocale)
-                context.resources.configuration.setLayoutDirection(systemLocale)
-            }
-            return context
+            systemLocale ?: return context
         }
 
         Locale.setDefault(targetLocale)
@@ -15969,7 +16006,7 @@ object AppStrings {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_LANGUAGE, code.trim().ifEmpty { "system" })
-            .apply()
+            .commit()
     }
 
     fun context(context: Context): Context =
@@ -17255,17 +17292,17 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
    - Mengelola konfigurasi penyedia AI & kunci API terenkripsi (`ApiKeyVault`) beserta rotasi multi-kunci dan pengambilan katalog model langsung dari server, pengelolaan bundle runtime (impor `.tar.zst` lokal, unduh dari rilis resmi, *Verify & Repair Rootfs*, bersihkan *staging* atau *reset runtime*), integrasi penuh akun & repositori GitHub (`Connect Token`, `Create Repo`, `Clone`, `Push`, `Pull`, dan *Auto-Sync*), pemilih tema & bahasa antarmuka, kebijakan persetujuan perintah berisiko tinggi, serta pemeriksaan dan instalasi pembaruan aplikasi (`AppUpdater`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (835 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (771 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (529 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (872 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (791 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (596 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (241 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (664 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (828 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (291 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (947 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (328 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (835 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (872 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17457,6 +17494,10 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         },
                         onNewProject = { showNewProjectDialog = true },
                         onDeleteProject = viewModel::deleteProject,
+                        onNewQuickProject = {
+                            viewModel.createQuickProject()
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
                     )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
@@ -17493,9 +17534,42 @@ private fun ForgeTopBar(
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
     var themeMenuExpanded by remember { mutableStateOf(false) }
+    var pendingDeleteProjectId by remember { mutableStateOf<String?>(null) }
     val activeProject = state.activeProject
     val tokens = LocalForgeThemeTokens.current
     val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+    val canDeleteProject = state.projects.size > 1 &&
+        !state.sessionRunning &&
+        state.androidBuild.phase != com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING &&
+        !state.terminalRunning
+
+    pendingDeleteProjectId?.let { targetId ->
+        val target = state.projects.firstOrNull { it.id == targetId }
+        if (target != null) {
+            AlertDialog(
+                onDismissRequest = { pendingDeleteProjectId = null },
+                title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+                text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            onDeleteProject(target.id)
+                            pendingDeleteProjectId = null
+                        },
+                    ) {
+                        Text(stringResource(R.string.shell_confirm_delete))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteProjectId = null }) {
+                        Text(stringResource(R.string.agent_cancel))
+                    }
+                },
+            )
+        } else {
+            pendingDeleteProjectId = null
+        }
+    }
 
     Surface(
         color = tokens.topBarContainerColor,
@@ -17581,11 +17655,11 @@ private fun ForgeTopBar(
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1) {
+                                    if (canDeleteProject) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
-                                                onDeleteProject(project.id)
+                                                pendingDeleteProjectId = project.id
                                             },
                                         ) {
                                             Icon(
@@ -18107,7 +18181,7 @@ private fun NewProjectDialog(
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (771 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (791 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -18226,9 +18300,21 @@ fun AgentScreen(
         }
     }
 
+    var previousMessageCount by remember { mutableStateOf(state.messages.size) }
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+            val lastIdx = state.messages.lastIndex
+            if (state.messages.size != previousMessageCount) {
+                previousMessageCount = state.messages.size
+                listState.animateScrollToItem(lastIdx)
+            } else {
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                if (lastVisible >= lastIdx - 1) {
+                    listState.scrollToItem(lastIdx)
+                }
+            }
+        } else {
+            previousMessageCount = 0
         }
     }
 
@@ -18238,6 +18324,7 @@ fun AgentScreen(
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
+            onClearChat = viewModel::clearActiveChat,
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -18432,6 +18519,7 @@ private fun ChatTabsRow(
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
+    onClearChat: () -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     Surface(
@@ -18488,6 +18576,12 @@ private fun ChatTabsRow(
                         )
                     },
                 )
+                if (state.messages.isNotEmpty() && !state.sessionRunning) {
+                    AssistChip(
+                        onClick = onClearChat,
+                        label = { Text(stringResource(R.string.agent_clear_chat)) },
+                    )
+                }
             }
             Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -18885,7 +18979,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 
 ---
 
-## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (529 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (596 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -18961,9 +19055,15 @@ fun FilesAndDiffScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
 ) {
-    var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
+    var mode by rememberSaveable { mutableStateOf(if (state.selectedFilePath != null) "editor" else "files") } // "files" | "editor" | "diff"
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
-    val tokens = LocalForgeThemeTokens.current
+    var pendingDeletePath by rememberSaveable { mutableStateOf<String?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(state.selectedFilePath) {
+        if (state.selectedFilePath != null) {
+            mode = "editor"
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -18981,6 +19081,7 @@ fun FilesAndDiffScreen(
                 ForgePillIcon(
                     icon = Icons.Default.Add,
                     description = stringResource(R.string.files_new_file),
+                    enabled = !state.sessionRunning,
                     onClick = { showNewFileDialog = true },
                 )
                 ForgePillIcon(
@@ -19016,14 +19117,19 @@ fun FilesAndDiffScreen(
             "editor" -> WorkspaceFileEditor(
                 selectedPath = state.selectedFilePath,
                 content = state.selectedFileContent,
+                editable = state.selectedFileEditable,
+                dirty = state.selectedFileDirty,
+                sessionRunning = state.sessionRunning,
                 savedBanner = state.fileSavedBanner,
                 onContentChange = viewModel::updateSelectedFileContent,
                 onSave = viewModel::saveSelectedFile,
+                onRequestDelete = { path -> pendingDeletePath = path },
                 onBackToExplorer = { mode = "files" },
                 modifier = Modifier.weight(1f),
             )
             else -> WorkspaceDiffReviewList(
                 changes = state.changedItems,
+                sessionRunning = state.sessionRunning,
                 onOpenFile = { path ->
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
@@ -19044,6 +19150,30 @@ fun FilesAndDiffScreen(
                 viewModel.createNewWorkspaceFile(relPath)
                 showNewFileDialog = false
                 mode = "editor"
+            },
+        )
+    }
+
+    pendingDeletePath?.let { targetPath ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletePath = null },
+            title = { Text(stringResource(R.string.files_delete_file_confirm_title)) },
+            text = { Text(stringResource(R.string.files_delete_file_confirm_message, targetPath)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteWorkspaceFile(targetPath)
+                        pendingDeletePath = null
+                        mode = "files"
+                    },
+                ) {
+                    Text(stringResource(R.string.shell_confirm_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletePath = null }) {
+                    Text(stringResource(R.string.agent_cancel))
+                }
             },
         )
     }
@@ -19147,9 +19277,13 @@ private fun WorkspaceTreeList(
 private fun WorkspaceFileEditor(
     selectedPath: String?,
     content: String,
+    editable: Boolean,
+    dirty: Boolean,
+    sessionRunning: Boolean,
     savedBanner: String?,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onRequestDelete: (String) -> Unit,
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -19185,7 +19319,7 @@ private fun WorkspaceFileEditor(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selectedPath,
+                text = if (dirty) "$selectedPath *" else selectedPath,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontFamily = FontFamily.Monospace,
@@ -19194,6 +19328,15 @@ private fun WorkspaceFileEditor(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (!editable) {
+                Text(
+                    text = stringResource(R.string.files_read_only_badge),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tokens.warningText,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             savedBanner?.let { msg ->
                 Text(
                     text = msg,
@@ -19203,7 +19346,21 @@ private fun WorkspaceFileEditor(
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }
-            Button(onClick = onSave) {
+            IconButton(
+                onClick = { onRequestDelete(selectedPath) },
+                enabled = !sessionRunning,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.files_delete_file),
+                    tint = tokens.dangerText,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Button(
+                onClick = onSave,
+                enabled = editable && dirty && !sessionRunning,
+            ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(stringResource(R.string.files_save))
@@ -19212,7 +19369,8 @@ private fun WorkspaceFileEditor(
 
         OutlinedTextField(
             value = content,
-            onValueChange = onContentChange,
+            onValueChange = { if (editable) onContentChange(it) },
+            readOnly = !editable,
             textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
@@ -19224,6 +19382,7 @@ private fun WorkspaceFileEditor(
 @Composable
 private fun WorkspaceDiffReviewList(
     changes: List<ChangeItem>,
+    sessionRunning: Boolean,
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
@@ -19261,8 +19420,8 @@ private fun WorkspaceDiffReviewList(
                 fontWeight = FontWeight.SemiBold,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onKeepAll) { Text(stringResource(R.string.files_keep_all)) }
-                OutlinedButton(onClick = onRevertAll) {
+                Button(onClick = onKeepAll, enabled = !sessionRunning) { Text(stringResource(R.string.files_keep_all)) }
+                OutlinedButton(onClick = onRevertAll, enabled = !sessionRunning) {
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(stringResource(R.string.files_undo_all))
@@ -19312,6 +19471,7 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
@@ -19323,6 +19483,7 @@ private fun WorkspaceDiffReviewList(
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
@@ -19669,7 +19830,7 @@ fun TerminalScreen(
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (664 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -20008,6 +20169,12 @@ fun AndroidBuildScreen(
 
             2 -> {
                 val consoleShape = RoundedCornerShape(12.dp)
+                val logScrollState = rememberScrollState()
+                LaunchedEffect(build.log.length) {
+                    if (busy) {
+                        logScrollState.scrollTo(logScrollState.maxValue)
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -20015,7 +20182,7 @@ fun AndroidBuildScreen(
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                         .clip(consoleShape)
                         .background(tokens.terminalBackground)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(logScrollState)
                         .padding(12.dp),
                 ) {
                     SelectionContainer {
@@ -20034,6 +20201,9 @@ fun AndroidBuildScreen(
                 state = state,
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
+                onClearLogcat = viewModel::clearProjectLogcat,
+                onSetMinLevel = viewModel::setLogcatMinimumLevel,
+                onSetQuery = viewModel::setLogcatQuery,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -20132,18 +20302,30 @@ private fun LogcatPanel(
     state: ForgeUiState,
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
+    onClearLogcat: () -> Unit,
+    onSetMinLevel: (AndroidLogLevel) -> Unit,
+    onSetQuery: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
     val tokens = LocalForgeThemeTokens.current
+    val filteredLines = remember(logcat.lines, logcat.minimumLevel, logcat.query) {
+        val q = logcat.query.trim()
+        logcat.lines.filter { line ->
+            line.level.ordinal >= logcat.minimumLevel.ordinal &&
+                (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+        }
+    }
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
@@ -20151,6 +20333,11 @@ private fun LogcatPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
+            if (logcat.lines.isNotEmpty()) {
+                OutlinedButton(onClick = onClearLogcat) {
+                    Text(stringResource(R.string.launch_clear_logcat))
+                }
+            }
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
                     Text(stringResource(R.string.launch_pause))
@@ -20161,6 +20348,30 @@ private fun LogcatPanel(
                 }
             }
         }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AndroidLogLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = logcat.minimumLevel == level,
+                    onClick = { onSetMinLevel(level) },
+                    label = { Text(level.name) },
+                )
+            }
+        }
+
+        OutlinedTextField(
+            value = logcat.query,
+            onValueChange = onSetQuery,
+            placeholder = { Text(stringResource(R.string.launch_filter_logcat)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         val logcatShape = RoundedCornerShape(10.dp)
         LazyColumn(
@@ -20173,7 +20384,7 @@ private fun LogcatPanel(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(logcat.lines, key = { it.id }) { line ->
+            items(filteredLines, key = { it.id }) { line ->
                 val color = when (line.level) {
                     AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
                     AndroidLogLevel.WARNING -> tokens.warningText
@@ -20211,12 +20422,29 @@ fun WebPreviewScreen(
         }
     }
 
+    LaunchedEffect(state.previewUrl) {
+        val target = state.previewUrl.trim()
+        if (target.isNotEmpty() && webViewRef?.url != target) {
+            webViewRef?.loadUrl(target)
+        }
+    }
+
     fun openUrl(raw: String) {
-        val clean = raw.trim()
-        val uriScheme = android.net.Uri.parse(clean).scheme?.lowercase()
-        if (clean.isNotEmpty() && (uriScheme == "http" || uriScheme == "https")) {
-            viewModel.updatePreviewUrl(clean)
-            webViewRef?.loadUrl(clean)
+        val trimmed = raw.trim()
+        val normalized = when {
+            trimmed.startsWith(":") && trimmed.drop(1).all { it.isDigit() } ->
+                "http://127.0.0.1$trimmed"
+            trimmed.isNotEmpty() && trimmed.all { it.isDigit() } ->
+                "http://127.0.0.1:$trimmed"
+            trimmed.startsWith("localhost", ignoreCase = true) || trimmed.startsWith("127.0.0.1") ->
+                "http://$trimmed"
+            else -> trimmed
+        }
+        val uriScheme = android.net.Uri.parse(normalized).scheme?.lowercase()
+        if (normalized.isNotEmpty() && (uriScheme == "http" || uriScheme == "https")) {
+            urlInput = normalized
+            viewModel.updatePreviewUrl(normalized)
+            webViewRef?.loadUrl(normalized)
         }
     }
 
@@ -20340,7 +20568,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (828 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (947 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -20475,6 +20703,12 @@ fun SettingsScreenModern(
                     subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
                     checked = state.interactiveHighRiskApprovals,
                     onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
+                )
+                ForgeToggleRow(
+                    title = stringResource(R.string.settings_auto_approve_all_tools),
+                    subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
+                    checked = state.autoApproveAllTools,
+                    onCheckedChange = viewModel::setAutoApproveAllTools,
                 )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -20627,6 +20861,7 @@ fun SettingsScreenModern(
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
+                    var agyVerificationCode by rememberSaveable { mutableStateOf("") }
                     Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         text = stringResource(R.string.settings_antigravity_cli_configuration),
@@ -20655,7 +20890,10 @@ fun SettingsScreenModern(
                             )
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Button(
                             onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
                         ) {
@@ -20675,8 +20913,83 @@ fun SettingsScreenModern(
                         } else {
                             OutlinedButton(
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                                enabled = agyAuth.status != AntigravityAuthStatus.STARTING && agyAuth.status != AntigravityAuthStatus.COMPLETING,
                             ) {
                                 Text(stringResource(R.string.settings_sign_in_with_google))
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateAntigravityConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text(stringResource(R.string.settings_validate))
+                        }
+                    }
+                    if (agyAuth.status == AntigravityAuthStatus.STARTING ||
+                        agyAuth.status == AntigravityAuthStatus.COMPLETING ||
+                        state.apiBusy
+                    ) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    agyAuth.message?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    agyAuth.authorizationUrl?.let { url ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.agent_open_google_sign_in))
+                            }
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(url)) },
+                            ) {
+                                Text(stringResource(R.string.agent_copy_link))
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.antigravityAuth.cancel() },
+                            ) {
+                                Text(stringResource(R.string.agent_cancel))
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = agyVerificationCode,
+                                onValueChange = { agyVerificationCode = it },
+                                label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = {
+                                    if (agyVerificationCode.isNotBlank()) {
+                                        runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }
+                                        agyVerificationCode = ""
+                                    }
+                                },
+                                enabled = agyVerificationCode.isNotBlank(),
+                            ) {
+                                Text(stringResource(R.string.agent_verify))
                             }
                         }
                     }
@@ -21103,6 +21416,7 @@ fun SettingsScreenModern(
         ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp)
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            val isProvisioning = state.setupSnapshot.status == com.nextcraft.forge.runtime.RuntimeSetupStatus.RUNNING
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -21119,7 +21433,26 @@ fun SettingsScreenModern(
                         title = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
                         subtitle = stack.displayDescription(),
                         checked = selected,
-                        onCheckedChange = { viewModel.toggleDevStack(stack) },
+                        onCheckedChange = { if (!isProvisioning) viewModel.toggleDevStack(stack) },
+                    )
+                }
+                if (state.setupSnapshot.status != com.nextcraft.forge.runtime.RuntimeSetupStatus.IDLE) {
+                    Text(
+                        text = state.setupSnapshot.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    state.setupSnapshot.errorMessage?.let { err ->
+                        Text(
+                            text = err,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.dangerText,
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = state.setupSnapshot.progress.coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 Row(
@@ -21128,15 +21461,22 @@ fun SettingsScreenModern(
                 ) {
                     Button(
                         onClick = viewModel::startRuntimeSetup,
+                        enabled = !isProvisioning,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(stringResource(R.string.settings_apply_provision_stacks))
                     }
-                    OutlinedButton(
-                        onClick = viewModel::repairRootfs,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.settings_repair_chroot))
+                    if (isProvisioning) {
+                        OutlinedButton(onClick = viewModel::pauseRuntimeSetup) {
+                            Text(stringResource(R.string.launch_pause))
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = viewModel::repairRootfs,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.settings_repair_chroot))
+                        }
                     }
                 }
             }
@@ -21162,8 +21502,15 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
-                Button(onClick = { viewModel.checkForAppUpdates() }) {
-                    Text(stringResource(R.string.settings_check_for_app_updates))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { viewModel.checkForAppUpdates() }) {
+                        Text(stringResource(R.string.settings_check_for_app_updates))
+                    }
+                    state.updateInfo?.let { info ->
+                        OutlinedButton(onClick = viewModel::downloadAndInstallAppUpdate) {
+                            Text(stringResource(R.string.settings_download_install_update, info.versionName))
+                        }
+                    }
                 }
             }
         }
@@ -21175,7 +21522,7 @@ fun SettingsScreenModern(
 
 ---
 
-## 7. `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (291 baris)
+## 7. `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (328 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -21245,6 +21592,7 @@ fun ProjectsScreen(
     onOpenProject: (String) -> Unit,
     onNewProject: () -> Unit,
     onDeleteProject: (String) -> Unit,
+    onNewQuickProject: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val regular = state.projects
@@ -21253,11 +21601,18 @@ fun ProjectsScreen(
     val quick = state.projects
         .filter { it.kind == ProjectKind.QUICK_PROJECT }
         .sortedByDescending { it.updatedAtMillis }
-    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project.
-    val canDelete = state.projects.size > 1 && !state.sessionRunning
+    val busy = state.sessionRunning ||
+        state.androidBuild.phase == com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING ||
+        state.terminalRunning
+    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while tasks run.
+    val canDelete = state.projects.size > 1 && !busy
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        ProjectsHeader(onNewProject = onNewProject)
+        ProjectsHeader(
+            onNewProject = onNewProject,
+            onNewQuickProject = onNewQuickProject,
+        )
         Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 
         if (state.projects.isEmpty()) {
@@ -21270,11 +21625,11 @@ fun ProjectsScreen(
                         ProjectRow(
                             project = project,
                             active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while the agent streams.
-                            locked = state.sessionRunning && project.id != state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while active tasks run.
+                            locked = busy && project.id != state.activeProjectId,
                             canDelete = canDelete,
                             onOpen = { onOpenProject(project.id) },
-                            onDelete = { onDeleteProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
                         )
                     }
                 }
@@ -21284,21 +21639,47 @@ fun ProjectsScreen(
                         ProjectRow(
                             project = project,
                             active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while the agent streams.
-                            locked = state.sessionRunning && project.id != state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while active tasks run.
+                            locked = busy && project.id != state.activeProjectId,
                             canDelete = canDelete,
                             onOpen = { onOpenProject(project.id) },
-                            onDelete = { onDeleteProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
                         )
                     }
                 }
             }
         }
     }
+
+    pendingDeleteProject?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+            text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteProject(target.id)
+                        pendingDeleteProject = null
+                    },
+                ) {
+                    Text(stringResource(R.string.shell_confirm_delete))
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text(stringResource(R.string.agent_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun ProjectsHeader(onNewProject: () -> Unit) {
+private fun ProjectsHeader(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -21312,6 +21693,9 @@ private fun ProjectsHeader(onNewProject: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
+        androidx.compose.material3.TextButton(onClick = onNewQuickProject) {
+            Text(stringResource(R.string.projects_new_quick_chat), fontSize = 12.sp)
+        }
         // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
         IconButton(onClick = onNewProject) {
             Icon(
@@ -21494,8 +21878,8 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `gradle.properties` (5 baris)
 - `app/build.gradle.kts` (126 baris)
 - `app/src/main/AndroidManifest.xml` (61 baris)
-- `app/src/main/res/values/strings.xml` (206 baris)
-- `app/src/main/res/values-in/strings.xml` (206 baris)
+- `app/src/main/res/values/strings.xml` (220 baris)
+- `app/src/main/res/values-in/strings.xml` (220 baris)
 - `app/src/main/res/values-es/strings.xml` (5 baris)
 - `app/src/main/res/values-zh-rCN/strings.xml` (5 baris)
 - `app/src/main/res/values-ar/strings.xml` (5 baris)
@@ -21762,7 +22146,7 @@ dependencies {
 
 ---
 
-## 6. `app/src/main/res/values/strings.xml` (206 baris)
+## 6. `app/src/main/res/values/strings.xml` (220 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -21970,12 +22354,26 @@ dependencies {
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
+    <string name="settings_auto_approve_all_tools">Auto-approve all tools</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Skip confirmation prompts for all tool executions</string>
+    <string name="settings_download_install_update">Download &amp; Install v%1$s</string>
+    <string name="files_read_only_badge">Read-Only</string>
+    <string name="files_delete_file">Delete file</string>
+    <string name="files_delete_file_confirm_title">Delete File</string>
+    <string name="files_delete_file_confirm_message">Are you sure you want to delete %1$s from this workspace?</string>
+    <string name="shell_delete_project_confirm_title">Delete Project</string>
+    <string name="shell_delete_project_confirm_message">Permanently delete %1$s and all files inside /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Delete</string>
+    <string name="projects_new_quick_chat">New quick chat</string>
+    <string name="agent_clear_chat">Clear Chat</string>
+    <string name="launch_clear_logcat">Clear</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
 </resources>
 ```
 
 ---
 
-## 7. `app/src/main/res/values-in/strings.xml` (206 baris)
+## 7. `app/src/main/res/values-in/strings.xml` (220 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -22183,6 +22581,20 @@ dependencies {
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
+    <string name="settings_auto_approve_all_tools">Setujui semua alat otomatis</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Lewati konfirmasi untuk semua eksekusi alat</string>
+    <string name="settings_download_install_update">Unduh &amp; pasang v%1$s</string>
+    <string name="files_read_only_badge">Baca-Saja</string>
+    <string name="files_delete_file">Hapus file</string>
+    <string name="files_delete_file_confirm_title">Hapus File</string>
+    <string name="files_delete_file_confirm_message">Yakin ingin menghapus %1$s dari workspace ini?</string>
+    <string name="shell_delete_project_confirm_title">Hapus Proyek</string>
+    <string name="shell_delete_project_confirm_message">Hapus permanen %1$s beserta seluruh file di /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Hapus</string>
+    <string name="projects_new_quick_chat">Obrolan cepat baru</string>
+    <string name="agent_clear_chat">Bersihkan obrolan</string>
+    <string name="launch_clear_logcat">Bersihkan</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
 </resources>
 ```
 

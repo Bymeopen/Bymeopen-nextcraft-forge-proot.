@@ -114,9 +114,21 @@ fun AgentScreen(
         }
     }
 
+    var previousMessageCount by remember { mutableStateOf(state.messages.size) }
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+            val lastIdx = state.messages.lastIndex
+            if (state.messages.size != previousMessageCount) {
+                previousMessageCount = state.messages.size
+                listState.animateScrollToItem(lastIdx)
+            } else {
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                if (lastVisible >= lastIdx - 1) {
+                    listState.scrollToItem(lastIdx)
+                }
+            }
+        } else {
+            previousMessageCount = 0
         }
     }
 
@@ -126,6 +138,7 @@ fun AgentScreen(
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
+            onClearChat = viewModel::clearActiveChat,
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -320,6 +333,7 @@ private fun ChatTabsRow(
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
+    onClearChat: () -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     Surface(
@@ -376,6 +390,12 @@ private fun ChatTabsRow(
                         )
                     },
                 )
+                if (state.messages.isNotEmpty() && !state.sessionRunning) {
+                    AssistChip(
+                        onClick = onClearChat,
+                        label = { Text(stringResource(R.string.agent_clear_chat)) },
+                    )
+                }
             }
             Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }

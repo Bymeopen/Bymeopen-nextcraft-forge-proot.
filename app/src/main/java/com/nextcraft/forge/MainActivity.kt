@@ -55,7 +55,9 @@ class MainActivity : ComponentActivity() {
             val state by viewModel.state.collectAsState()
             // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
             LaunchedEffect(state.languageCode) {
-                if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+                if (state.languageCode != appliedLanguage || AppStrings.languageCode(this@MainActivity) != appliedLanguage) {
+                    recreate()
+                }
             }
             LaunchedEffect(state.themeMode) {
                 applyWindowTheme(state.themeMode)

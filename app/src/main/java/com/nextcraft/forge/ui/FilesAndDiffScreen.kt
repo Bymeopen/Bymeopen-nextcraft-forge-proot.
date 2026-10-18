@@ -71,9 +71,15 @@ fun FilesAndDiffScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
 ) {
-    var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
+    var mode by rememberSaveable { mutableStateOf(if (state.selectedFilePath != null) "editor" else "files") } // "files" | "editor" | "diff"
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
-    val tokens = LocalForgeThemeTokens.current
+    var pendingDeletePath by rememberSaveable { mutableStateOf<String?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(state.selectedFilePath) {
+        if (state.selectedFilePath != null) {
+            mode = "editor"
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -91,6 +97,7 @@ fun FilesAndDiffScreen(
                 ForgePillIcon(
                     icon = Icons.Default.Add,
                     description = stringResource(R.string.files_new_file),
+                    enabled = !state.sessionRunning,
                     onClick = { showNewFileDialog = true },
                 )
                 ForgePillIcon(
@@ -126,14 +133,19 @@ fun FilesAndDiffScreen(
             "editor" -> WorkspaceFileEditor(
                 selectedPath = state.selectedFilePath,
                 content = state.selectedFileContent,
+                editable = state.selectedFileEditable,
+                dirty = state.selectedFileDirty,
+                sessionRunning = state.sessionRunning,
                 savedBanner = state.fileSavedBanner,
                 onContentChange = viewModel::updateSelectedFileContent,
                 onSave = viewModel::saveSelectedFile,
+                onRequestDelete = { path -> pendingDeletePath = path },
                 onBackToExplorer = { mode = "files" },
                 modifier = Modifier.weight(1f),
             )
             else -> WorkspaceDiffReviewList(
                 changes = state.changedItems,
+                sessionRunning = state.sessionRunning,
                 onOpenFile = { path ->
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
@@ -154,6 +166,30 @@ fun FilesAndDiffScreen(
                 viewModel.createNewWorkspaceFile(relPath)
                 showNewFileDialog = false
                 mode = "editor"
+            },
+        )
+    }
+
+    pendingDeletePath?.let { targetPath ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletePath = null },
+            title = { Text(stringResource(R.string.files_delete_file_confirm_title)) },
+            text = { Text(stringResource(R.string.files_delete_file_confirm_message, targetPath)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteWorkspaceFile(targetPath)
+                        pendingDeletePath = null
+                        mode = "files"
+                    },
+                ) {
+                    Text(stringResource(R.string.shell_confirm_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletePath = null }) {
+                    Text(stringResource(R.string.agent_cancel))
+                }
             },
         )
     }
@@ -257,9 +293,13 @@ private fun WorkspaceTreeList(
 private fun WorkspaceFileEditor(
     selectedPath: String?,
     content: String,
+    editable: Boolean,
+    dirty: Boolean,
+    sessionRunning: Boolean,
     savedBanner: String?,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onRequestDelete: (String) -> Unit,
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -295,7 +335,7 @@ private fun WorkspaceFileEditor(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selectedPath,
+                text = if (dirty) "$selectedPath *" else selectedPath,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontFamily = FontFamily.Monospace,
@@ -304,6 +344,15 @@ private fun WorkspaceFileEditor(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (!editable) {
+                Text(
+                    text = stringResource(R.string.files_read_only_badge),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tokens.warningText,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             savedBanner?.let { msg ->
                 Text(
                     text = msg,
@@ -313,7 +362,21 @@ private fun WorkspaceFileEditor(
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }
-            Button(onClick = onSave) {
+            IconButton(
+                onClick = { onRequestDelete(selectedPath) },
+                enabled = !sessionRunning,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.files_delete_file),
+                    tint = tokens.dangerText,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Button(
+                onClick = onSave,
+                enabled = editable && dirty && !sessionRunning,
+            ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(stringResource(R.string.files_save))
@@ -322,7 +385,8 @@ private fun WorkspaceFileEditor(
 
         OutlinedTextField(
             value = content,
-            onValueChange = onContentChange,
+            onValueChange = { if (editable) onContentChange(it) },
+            readOnly = !editable,
             textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
@@ -334,6 +398,7 @@ private fun WorkspaceFileEditor(
 @Composable
 private fun WorkspaceDiffReviewList(
     changes: List<ChangeItem>,
+    sessionRunning: Boolean,
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
@@ -371,8 +436,8 @@ private fun WorkspaceDiffReviewList(
                 fontWeight = FontWeight.SemiBold,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onKeepAll) { Text(stringResource(R.string.files_keep_all)) }
-                OutlinedButton(onClick = onRevertAll) {
+                Button(onClick = onKeepAll, enabled = !sessionRunning) { Text(stringResource(R.string.files_keep_all)) }
+                OutlinedButton(onClick = onRevertAll, enabled = !sessionRunning) {
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(stringResource(R.string.files_undo_all))
@@ -422,6 +487,7 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
@@ -433,6 +499,7 @@ private fun WorkspaceDiffReviewList(
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(

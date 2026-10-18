@@ -267,11 +267,27 @@ class RuntimeInstaller(private val context: Context) {
         if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
         if (!nextcraftReadyMarker.exists()) nextcraftReadyMarker.writeText(CORE_TOOLS_VERSION)
 
+        val removedStacks = if (selectedStacks.isNotEmpty()) {
+            (installedStacks() - selectedStacks) - DevStack.WEB
+        } else {
+            emptySet()
+        }
         val missingStacks = selectedStacks.filterNot(::isStackInstalled)
-        missingStacks.forEachIndexed { index, stack ->
-            val slice = 0.26f / maxOf(1, missingStacks.size)
-            val from = 0.72f + index * slice
+        val totalStackOps = maxOf(1, removedStacks.size + missingStacks.size)
+        var opIndex = 0
+        removedStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
+            removeStack(stack) { p ->
+                onProgress(p.copy(fraction = from + p.fraction.coerceIn(0f, 1f) * slice))
+            }
+            opIndex++
+        }
+        missingStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
             applyStack(chrootExec, stack, from, from + slice, onProgress)
+            opIndex++
         }
 
         when (agent) {

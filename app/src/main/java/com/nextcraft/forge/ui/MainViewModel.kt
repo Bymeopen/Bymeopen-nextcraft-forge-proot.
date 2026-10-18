@@ -143,6 +143,7 @@ data class ForgeUiState(
     val githubStatusMessage: String? = null,
     val languageCode: String = "system",
     val interactiveHighRiskApprovals: Boolean = true,
+    val autoApproveAllTools: Boolean = false,
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
@@ -348,6 +349,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     githubLogin = preferences.githubLogin,
                     languageCode = AppStrings.languageCode(getApplication()),
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+                    autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -1509,8 +1511,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptyList()
             }
-            val finalApk = builtApk ?: if (task != "clean") {
-                withContext(Dispatchers.IO) { findDebugApk(androidRoot) }
+            val finalApk = builtApk ?: if (!cancelled && task != "clean") {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(androidRoot) }
             } else {
                 null
             }
@@ -2252,7 +2254,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setInteractiveHighRiskApprovals(enabled: Boolean) {
         preferences.interactiveHighRiskApprovals = enabled
-        _state.update { it.copy(interactiveHighRiskApprovals = enabled) }
+        if (enabled && preferences.autoApproveAllTools) {
+            preferences.autoApproveAllTools = false
+        }
+        _state.update {
+            it.copy(
+                interactiveHighRiskApprovals = enabled,
+                autoApproveAllTools = preferences.autoApproveAllTools,
+            )
+        }
+    }
+
+    fun setAutoApproveAllTools(enabled: Boolean) {
+        preferences.autoApproveAllTools = enabled
+        if (enabled && preferences.interactiveHighRiskApprovals) {
+            preferences.interactiveHighRiskApprovals = false
+        }
+        _state.update {
+            it.copy(
+                autoApproveAllTools = enabled,
+                interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+            )
+        }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {

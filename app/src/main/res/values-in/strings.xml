@@ -203,4 +203,18 @@
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
+    <string name="settings_auto_approve_all_tools">Setujui semua alat otomatis</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Lewati konfirmasi untuk semua eksekusi alat</string>
+    <string name="settings_download_install_update">Unduh &amp; pasang v%1$s</string>
+    <string name="files_read_only_badge">Baca-Saja</string>
+    <string name="files_delete_file">Hapus file</string>
+    <string name="files_delete_file_confirm_title">Hapus File</string>
+    <string name="files_delete_file_confirm_message">Yakin ingin menghapus %1$s dari workspace ini?</string>
+    <string name="shell_delete_project_confirm_title">Hapus Proyek</string>
+    <string name="shell_delete_project_confirm_message">Hapus permanen %1$s beserta seluruh file di /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Hapus</string>
+    <string name="projects_new_quick_chat">Obrolan cepat baru</string>
+    <string name="agent_clear_chat">Bersihkan obrolan</string>
+    <string name="launch_clear_logcat">Bersihkan</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
 </resources>
