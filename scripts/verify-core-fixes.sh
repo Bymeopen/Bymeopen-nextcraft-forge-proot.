@@ -1371,6 +1371,79 @@ fun main() {
             check(File(tmp, "runtime-bridge-responses/req-timeout.response").readText() == "deny") {
                 "UPGRADE-004: Timed-out high-risk tool request must auto-write 'deny'"
             }
+
+            // BUG-042: Verify RuntimeInstaller safeChild & resolveSafeSymlinkTarget handle:
+            // 1) Android /data/user/0 -> /data/data symlinked parent path
+            // 2) Relative symlinks (bin -> usr/bin) and guest-absolute symlinks (/usr/bin/mawk)
+            // 3) Blocking escaping relative and absolute symlinks
+            val installer = unsafe.allocateInstance(RuntimeInstaller::class.java) as RuntimeInstaller
+            val safeChildMethod = RuntimeInstaller::class.java.getDeclaredMethod("safeChild", File::class.java, String::class.java).apply {
+                isAccessible = true
+            }
+            val resolveSymMethod = RuntimeInstaller::class.java.getDeclaredMethod(
+                "resolveSafeSymlinkTarget",
+                java.nio.file.Path::class.java,
+                java.nio.file.Path::class.java,
+                String::class.java,
+                String::class.java,
+            ).apply {
+                isAccessible = true
+            }
+            val realDataDir = File(tmp, "data_data/files/runtime/ubuntu.installing").apply { mkdirs() }
+            val userZeroDir = File(tmp, "data_user_0").apply { parentFile?.mkdirs() }
+            Files.createSymbolicLink(userZeroDir.toPath(), File(tmp, "data_data").toPath())
+            val viaSymlinkRoot = File(userZeroDir, "files/runtime/ubuntu.installing")
+            val rootPath = viaSymlinkRoot.canonicalFile.toPath()
+
+            val targetAwk = safeChildMethod.invoke(installer, viaSymlinkRoot, "etc/alternatives/awk") as File
+            check(targetAwk.toPath().startsWith(rootPath)) {
+                "BUG-042: safeChild must return canonicalized path under rootPath even when destination has symlinked parent"
+            }
+            // Valid guest-absolute symlink (/usr/bin/mawk)
+            val resolvedAbs = resolveSymMethod.invoke(
+                installer,
+                rootPath,
+                targetAwk.toPath().parent,
+                "/usr/bin/mawk",
+                "Archive symlink escapes runtime",
+            ) as java.nio.file.Path
+            check(resolvedAbs == rootPath.resolve("usr/bin/mawk")) {
+                "BUG-042: Guest-absolute symlink /usr/bin/mawk must resolve inside rootPath"
+            }
+            // Valid relative symlink (../lib/nodejs/bin/node)
+            val targetNode = safeChildMethod.invoke(installer, viaSymlinkRoot, "usr/local/bin/node") as File
+            val resolvedRel = resolveSymMethod.invoke(
+                installer,
+                rootPath,
+                targetNode.toPath().parent,
+                "../lib/nodejs/bin/node",
+                "Archive symlink escapes runtime",
+            ) as java.nio.file.Path
+            check(resolvedRel == rootPath.resolve("usr/local/lib/nodejs/bin/node")) {
+                "BUG-042: Relative symlink ../lib/nodejs/bin/node must resolve inside rootPath"
+            }
+            // Escaping relative symlink must fail
+            val escapedRel = runCatching {
+                resolveSymMethod.invoke(
+                    installer,
+                    rootPath,
+                    targetAwk.toPath().parent,
+                    "../../../../outside",
+                    "Archive symlink escapes runtime",
+                )
+            }.isFailure
+            check(escapedRel) { "BUG-042: Escaping relative symlink must be rejected" }
+            // Escaping guest-absolute symlink must fail
+            val escapedAbs = runCatching {
+                resolveSymMethod.invoke(
+                    installer,
+                    rootPath,
+                    targetAwk.toPath().parent,
+                    "/../../../outside",
+                    "Archive symlink escapes runtime",
+                )
+            }.isFailure
+            check(escapedAbs) { "BUG-042: Escaping guest-absolute symlink must be rejected" }
         }
     } finally {
         tmp.deleteRecursively()
