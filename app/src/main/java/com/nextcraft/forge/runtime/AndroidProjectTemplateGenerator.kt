@@ -71,7 +71,9 @@ object AndroidProjectTemplateGenerator {
             include(":app")
             """,
         )
-        // AGP 9 has built-in Kotlin: org.jetbrains.kotlin.android is not applied. Compose only needs the compiler plugin.
+        // AGP 9 has built-in Kotlin: org.jetbrains.kotlin.android is never applied to a module. Declaring it at the root
+        // with `apply false` only puts KGP on the classpath, which is how AGP 9 is told which Kotlin version to use
+        // (otherwise it falls back to the one it bundles). Compose additionally needs the compiler plugin.
         val composePlugin = "org.jetbrains.kotlin.plugin.compose"
         write(
             root,
@@ -79,6 +81,7 @@ object AndroidProjectTemplateGenerator {
             block(
                 "plugins {",
                 "    id(\"com.android.application\") version \"${AndroidToolchain.AGP_VERSION}\" apply false",
+                "    id(\"org.jetbrains.kotlin.android\") version \"${AndroidToolchain.KOTLIN_VERSION}\" apply false",
                 if (compose) "    id(\"$composePlugin\") version \"${AndroidToolchain.KOTLIN_VERSION}\" apply false" else null,
                 "}",
             ),

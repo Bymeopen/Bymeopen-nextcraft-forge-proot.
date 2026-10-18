@@ -60,9 +60,10 @@ internal object AndroidToolchain {
             "ARM64 Build Tools $BUILD_TOOLS_VERSION, Gradle $GRADLE_VERSION, and an offline Maven repository.",
         "For newly created Android projects, use AGP $AGP_VERSION, Kotlin $KOTLIN_VERSION, compileSdk $COMPILE_SDK " +
             "(minorApiLevel $COMPILE_SDK_MINOR), and Java $JAVA_TARGET bytecode so the preinstalled offline toolchain can build immediately.",
-        "AGP 9 has built-in Kotlin: do not apply org.jetbrains.kotlin.android, do not use kotlinOptions {} " +
-            "(use kotlin { compilerOptions {} } if needed), and enable Compose with the org.jetbrains.kotlin.plugin.compose " +
-            "plugin instead of composeOptions.kotlinCompilerExtensionVersion.",
+        "AGP 9 has built-in Kotlin: declare org.jetbrains.kotlin.android version $KOTLIN_VERSION only in the root " +
+            "build.gradle.kts with `apply false` (that selects the Kotlin version), never apply it to a module, do not use " +
+            "kotlinOptions {} (use kotlin { compilerOptions {} } if needed), and enable Compose with the " +
+            "org.jetbrains.kotlin.plugin.compose plugin instead of composeOptions.kotlinCompilerExtensionVersion.",
         "Projects created with older toolchains (AGP 8.x, Kotlin 1.9) do not resolve offline anymore: migrate them to " +
             "AGP $AGP_VERSION / Kotlin $KOTLIN_VERSION, or build them online once so Gradle can download the old artifacts.",
         "The bundled Maven cache handles the base toolchain; Gradle may download project-specific libraries normally. " +
