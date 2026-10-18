@@ -18,3 +18,6 @@ Thumbs.db
 # PocketDev workspace transient attachments & secrets
 attachments/
 .git/forge_github_device.json
+
+# Runtime bundles produced by scripts/runtime-bundles (published as release assets, not committed)
+dist/
