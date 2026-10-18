@@ -14,10 +14,12 @@ import androidx.core.app.NotificationCompat
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.net.UnknownHostException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -51,22 +53,29 @@ object RuntimeSetupController {
     fun restore(context: Context) {
         val file = stateFile(context)
         if (!file.isFile) return
+        // A live run in this process is newer than the file; never overwrite it.
+        if (mutableSnapshot.value.status == RuntimeSetupStatus.RUNNING) return
         runCatching {
             val json = JSONObject(file.readText())
             val logsJson = json.optJSONArray("logs") ?: JSONArray()
             val logs = (0 until logsJson.length()).map { logsJson.optString(it) }
             val rawProgress = json.optDouble("progress", 0.0).toFloat()
             val safeProgress = if (rawProgress.isFinite()) rawProgress.coerceIn(0f, 1f) else 0f
+            val persisted = runCatching { RuntimeSetupStatus.valueOf(json.optString("status")) }
+                .getOrDefault(RuntimeSetupStatus.IDLE)
+            // RUNNING read from disk in a fresh process means the app was killed mid-setup: there is
+            // no service behind it, so show it as paused instead of spinning forever.
+            val interrupted = persisted == RuntimeSetupStatus.RUNNING
             mutableSnapshot.value = RuntimeSetupSnapshot(
-                status = runCatching { RuntimeSetupStatus.valueOf(json.optString("status")) }
-                    .getOrDefault(RuntimeSetupStatus.IDLE),
-                message = json.optString("message", DEFAULT_PREPARING_MESSAGE).ifBlank { DEFAULT_PREPARING_MESSAGE },
+                status = if (interrupted) RuntimeSetupStatus.CANCELLED else persisted,
+                message = if (interrupted) "Runtime setup was interrupted" else
+                    json.stringOrEmpty("message", DEFAULT_PREPARING_MESSAGE).ifBlank { DEFAULT_PREPARING_MESSAGE },
                 progress = safeProgress,
                 downloadedBytes = json.optLongOrNull("downloadedBytes"),
                 totalBytes = json.optLongOrNull("totalBytes"),
                 indeterminate = json.optBoolean("indeterminate"),
                 logs = logs.takeLast(MAX_LOG_LINES),
-                errorMessage = json.optString("errorMessage").takeIf(String::isNotBlank),
+                errorMessage = json.stringOrEmpty("errorMessage").takeIf(String::isNotBlank),
                 offline = json.optBoolean("offline"),
             )
         }
@@ -271,14 +280,17 @@ class RuntimeSetupService : Service() {
         }
         startForeground(NOTIFICATION_ID, setupNotification(RuntimeSetupController.snapshot.value))
         acquireWakeLock()
-        if (installJob?.isActive != true) {
+        val previousJob = installJob
+        // A cancelled job can still be winding down; start the new one after it instead of dropping the request.
+        if (previousJob?.isActive != true || previousJob.isCancelled) {
             val stacks = intent?.getStringExtra(EXTRA_STACKS).orEmpty().split(',')
                 .mapNotNull { name -> runCatching { DevStack.valueOf(name.trim()) }.getOrNull() }
                 .toSet()
             val agent = AgentKind.fromStored(intent?.getStringExtra(EXTRA_AGENT)?.trim())
             RuntimeSetupController.begin(this)
-            installJob = scope.launch {
+            val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
+                    previousJob?.join()
                     RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
                         RuntimeSetupController.update(this@RuntimeSetupService, progress)
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
@@ -292,11 +304,16 @@ class RuntimeSetupService : Service() {
                     RuntimeSetupController.fail(this@RuntimeSetupService, error)
                     showFinishedNotification(success = false)
                 } finally {
-                    releaseWakeLock()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    // Only the newest job may tear the service down, or a resumed setup would be killed by the old one.
+                    if (installJob === coroutineContext[Job]) {
+                        releaseWakeLock()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
                 }
             }
+            installJob = job
+            job.start()
         }
         return START_REDELIVER_INTENT
     }
