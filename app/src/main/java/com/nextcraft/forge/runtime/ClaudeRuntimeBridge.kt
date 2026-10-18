@@ -703,6 +703,7 @@ class ClaudeRuntimeBridge(
         pushForegroundProgress("Running $name: $compactDetail")
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun terminalStatus(line: String): Pair<String, String>? = null
 
     private suspend fun emitCompletedOnce(sessionId: String) {

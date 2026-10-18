@@ -30,12 +30,14 @@ object RuntimeTaskController {
 
     @Synchronized
     fun stopCurrentTask() {
-        stopAction?.invoke()
+        val action = stopAction
+        stopAction = null
+        action?.invoke()
     }
 
     @Synchronized
     fun requestStop() {
-        stopAction?.invoke()
+        stopCurrentTask()
     }
 }
 

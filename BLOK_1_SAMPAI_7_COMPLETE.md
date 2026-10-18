@@ -35,7 +35,7 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2605 baris)
 - `app/src/main/cpp/forge_spawn.c` (297 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
@@ -1130,7 +1130,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2605 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -1770,9 +1770,30 @@ class RuntimeInstaller(private val context: Context) {
             val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
             if (comparison != 0) return comparison > 0
         }
-        val candidatePre = '-' in candidate.substringBefore('+')
-        val currentPre = '-' in current.substringBefore('+')
-        return !candidatePre && currentPre
+        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+        }
+        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+        val candidateIds = candidatePreTag.split('.')
+        val currentIds = currentPreTag.split('.')
+        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+            val candidateId = candidateIds.getOrNull(index)
+            val currentId = currentIds.getOrNull(index)
+            if (candidateId == null) return false
+            if (currentId == null) return true
+            val candidateNum = candidateId.toIntOrNull()
+            val currentNum = currentId.toIntOrNull()
+            val comparison = if (candidateNum != null && currentNum != null) {
+                candidateNum.compareTo(currentNum)
+            } else {
+                candidateId.compareTo(currentId)
+            }
+            if (comparison != 0) return comparison > 0
+        }
+        return false
     }
 
     private fun migrateLegacyClaudeMarker() {
@@ -1812,6 +1833,7 @@ class RuntimeInstaller(private val context: Context) {
             onProgress = onProgress,
         )
         verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
+        migrateLegacyClaudeMarker()
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
@@ -2117,6 +2139,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installComposer(
         chrootExec: File,
         fraction: Float,
@@ -2369,15 +2392,26 @@ class RuntimeInstaller(private val context: Context) {
         .filter(::isStackInstalled)
         .toSet()
 
+    private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
+        val file = File(rootfs, relativePath.removePrefix("/"))
+        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+    }
+
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        return when (stack) {
+            DevStack.WEB -> true
+            DevStack.PYTHON -> guestExecutableOrSymlinkExists("usr/bin/python3") && guestExecutableOrSymlinkExists("usr/bin/pip3")
+            DevStack.CPP -> guestExecutableOrSymlinkExists("usr/bin/gcc") && guestExecutableOrSymlinkExists("usr/bin/g++")
+            DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
+            DevStack.ANDROID ->
+                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
+                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
+                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
+                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
+                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        }
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {
@@ -2399,6 +2433,7 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.writeText(obj.toString())
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installNodeIfNeeded(
         chrootExec: File,
         from: Float,
@@ -2784,6 +2819,7 @@ class RuntimeInstaller(private val context: Context) {
      * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
      * No PRoot binary or ptrace translation is used.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
         rootfs: File,
@@ -3090,7 +3126,8 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
     @Suppress("DEPRECATION")
     private fun extractZstdTar(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(openZstdInputStream(archive)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -3098,23 +3135,49 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val cleanName = currentEntry.name.removePrefix("./").trimEnd('/')
                 if (cleanName.isNotBlank()) {
-                    val target = safeChild(destination, cleanName)
+                    val target = safeChild(rootDir, cleanName)
                     when {
                         currentEntry.isDirectory -> {
-                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            target.mkdirs()
+                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                val resolvedDir = runCatching {
+                                    resolveSafeSymlinkTarget(
+                                        rootPath = rootPath,
+                                        parentDir = target.toPath().parent ?: rootPath,
+                                        linkName = java.nio.file.Files.readSymbolicLink(target.toPath()).toString(),
+                                        errorMessage = "Archive path escapes runtime via symlink",
+                                    ).toFile()
+                                }.getOrNull()
+                                if (resolvedDir != null) {
+                                    resolvedDir.mkdirs()
+                                } else {
+                                    target.delete()
+                                    target.mkdirs()
+                                }
+                            } else {
+                                target.mkdirs()
+                            }
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
-                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
+                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                if (target.isDirectory && !java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                    target.deleteRecursively()
+                                } else {
+                                    target.delete()
+                                }
+                            }
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             target.parentFile?.mkdirs()
-                            val linkTarget = safeChild(destination, currentEntry.linkName.removePrefix("./").trimEnd('/'))
-                            if (linkTarget.exists()) {
+                            val linkTarget = safeChild(rootDir, currentEntry.linkName.removePrefix("./").trimEnd('/'))
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -3132,18 +3195,21 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun extractNodeArchive(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(archive.inputStream()))).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -3151,7 +3217,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val relative = currentEntry.name.removePrefix("./").substringAfter('/', "").trimEnd('/')
                 if (relative.isNotBlank()) {
-                    val target = safeChild(destination, relative)
+                    val target = safeChild(rootDir, relative)
                     when {
                         currentEntry.isDirectory -> {
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
@@ -3159,16 +3225,20 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
                             if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             val relativeLink = currentEntry.linkName.removePrefix("./").substringAfter('/', "").trimEnd('/')
-                            val linkTarget = safeChild(destination, relativeLink)
+                            val linkTarget = safeChild(rootDir, relativeLink)
                             target.parentFile?.mkdirs()
-                            if (linkTarget.exists()) {
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -3186,24 +3256,50 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Node.js archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     private fun linkOrCopyFile(source: File, destination: File) {
         if (destination.exists() || java.nio.file.Files.isSymbolicLink(destination.toPath())) destination.delete()
+        if (java.nio.file.Files.isSymbolicLink(source.toPath())) {
+            val symTarget = java.nio.file.Files.readSymbolicLink(source.toPath()).toString()
+            Os.symlink(symTarget, destination.absolutePath)
+            return
+        }
         val linked = runCatching {
             Os.link(source.absolutePath, destination.absolutePath)
             true
         }.getOrDefault(false)
         if (!linked) {
             source.inputStream().use { input -> FileOutputStream(destination).use { input.copyTo(it) } }
+            runCatching { Os.chmod(destination.absolutePath, Os.stat(source.absolutePath).st_mode and 0b111111111) }
         }
+    }
+
+    private fun resolveSafeSymlinkTarget(
+        rootPath: java.nio.file.Path,
+        parentDir: java.nio.file.Path,
+        linkName: String,
+        errorMessage: String = "Archive symlink escapes runtime",
+    ): java.nio.file.Path {
+        require(linkName.isNotBlank() && !linkName.contains('\u0000')) { errorMessage }
+        val normalizedLink = linkName.replace('\\', '/')
+        val resolved = if (normalizedLink.startsWith('/')) {
+            val relFromRoot = normalizedLink.trimStart('/')
+            if (relFromRoot.isEmpty()) rootPath else rootPath.resolve(relFromRoot).normalize()
+        } else {
+            parentDir.resolve(normalizedLink).normalize()
+        }
+        require(resolved.startsWith(rootPath)) { errorMessage }
+        return resolved
     }
 
     private fun safeChild(root: File, relative: String): File {
@@ -3218,29 +3314,32 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         ) {
             "Unsafe archive path"
         }
-        val file = File(root, normalized)
         val rootCanonical = root.canonicalFile
         val rootPath = rootCanonical.toPath()
-        var cursor: File? = file.parentFile
-        while (cursor != null && cursor != root && cursor.canonicalFile != rootCanonical) {
-            val cursorPath = cursor.toPath()
-            if (java.nio.file.Files.isSymbolicLink(cursorPath)) {
-                val linkTarget = java.nio.file.Files.readSymbolicLink(cursorPath)
-                val resolved = cursorPath.parent.resolve(linkTarget).normalize()
-                require(resolved.startsWith(rootPath)) { "Archive path escapes runtime via symlink" }
+        var currentDir = rootPath
+        for (index in 0 until segments.lastIndex) {
+            val segment = segments[index]
+            var candidate = currentDir.resolve(segment).normalize()
+            require(candidate.startsWith(rootPath) && candidate != rootPath) { "Archive path escapes runtime" }
+            var hops = 0
+            while (java.nio.file.Files.isSymbolicLink(candidate)) {
+                check(++hops <= 16) { "Archive symlink loop detected" }
+                val linkTarget = java.nio.file.Files.readSymbolicLink(candidate).toString()
+                val parent = candidate.parent ?: rootPath
+                candidate = resolveSafeSymlinkTarget(
+                    rootPath = rootPath,
+                    parentDir = parent,
+                    linkName = linkTarget,
+                    errorMessage = "Archive path escapes runtime via symlink",
+                )
             }
-            require(cursor.canonicalFile.toPath().startsWith(rootPath)) { "Archive path escapes runtime" }
-            cursor = cursor.parentFile
+            currentDir = candidate
         }
-        val parentPath = (file.parentFile ?: root).canonicalFile.toPath()
-        require(parentPath.startsWith(rootPath)) { "Archive path escapes runtime" }
-        if (!java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            val canonicalFile = file.canonicalFile.toPath()
-            require(canonicalFile.startsWith(rootPath) && canonicalFile != rootPath) {
-                "Archive path escapes runtime"
-            }
+        val finalPath = currentDir.resolve(segments.last()).normalize()
+        require(finalPath.startsWith(rootPath) && finalPath != rootPath) {
+            "Archive path escapes runtime"
         }
-        return file
+        return finalPath.toFile()
     }
 
     private suspend fun downloadVerified(
@@ -3336,7 +3435,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09"
+        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
@@ -4489,7 +4588,7 @@ Blok 2 menangani **keamanan penyimpanan kredensial**, **sistem snapshot/undo fil
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (260 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (253 baris)
 - `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
@@ -5038,7 +5137,7 @@ class WorkspaceCheckpoints(
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (260 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5073,12 +5172,14 @@ object RuntimeTaskController {
 
     @Synchronized
     fun stopCurrentTask() {
-        stopAction?.invoke()
+        val action = stopAction
+        stopAction = null
+        action?.invoke()
     }
 
     @Synchronized
     fun requestStop() {
-        stopAction?.invoke()
+        stopCurrentTask()
     }
 }
 
@@ -7157,14 +7258,14 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (983 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (983 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7869,6 +7970,7 @@ class ClaudeRuntimeBridge(
         pushForegroundProgress("Running $name: $compactDetail")
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun terminalStatus(line: String): Pair<String, String>? = null
 
     private suspend fun emitCompletedOnce(sessionId: String) {
@@ -10210,7 +10312,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (342 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (242 baris)
@@ -10535,7 +10637,7 @@ object AndroidProjectTemplateGenerator {
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (342 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10860,7 +10962,11 @@ internal fun startPackageLogcatProcess(
     packageName: String,
     sinceMillis: Long? = null,
 ): Process {
-    val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
+    val uid = try {
+        context.packageManager.getApplicationInfo(packageName, 0).uid
+    } catch (_: PackageManager.NameNotFoundException) {
+        throw IllegalStateException("App '$packageName' is not installed on this device yet. Build & Install the APK first.")
+    }
     require(uid > 0) { "Invalid application UID for $packageName" }
     val since = sinceMillis?.takeIf { it > 0L }?.let {
         SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date(it))
@@ -12898,18 +13004,18 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1899 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (119 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2322 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (560 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/ModelLabels.kt` (74 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidBuildText.kt` (62 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (478 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (119 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -12961,7 +13067,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        applyPreComposeWindowTheme()
+        applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
@@ -12970,6 +13076,9 @@ class MainActivity : ComponentActivity() {
             // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
             LaunchedEffect(state.languageCode) {
                 if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+            }
+            LaunchedEffect(state.themeMode) {
+                applyWindowTheme(state.themeMode)
             }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 val tokens = LocalForgeThemeTokens.current
@@ -12984,14 +13093,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun applyPreComposeWindowTheme() {
-        val savedTheme = AppPreferences(this).themeMode
+    @Suppress("DEPRECATION")
+    private fun applyWindowTheme(themeMode: String) {
         val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
-        val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
+        val (_, tokens) = resolveThemeTokens(themeMode, isNight)
         window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
         window.statusBarColor = tokens.topBarContainerColor.toArgb()
-        window.navigationBarColor = tokens.bottomBarContainerColor.toArgb()
+        window.navigationBarColor = if (tokens.isGlass) {
+            android.graphics.Color.parseColor("#0B1324")
+        } else {
+            tokens.bottomBarContainerColor.toArgb()
+        }
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.isAppearanceLightStatusBars = !tokens.isDark
         controller.isAppearanceLightNavigationBars = !tokens.isDark
@@ -13028,7 +13141,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1899 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2322 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13123,6 +13236,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ForgeTab(val title: String) {
+    PROJECTS("Projects"),
     AGENT("Agent"),
     FILES("Files"),
     TERMINAL("Terminal"),
@@ -13154,6 +13268,7 @@ data class ForgeUiState(
     val selectedFilePath: String? = null,
     val selectedFileContent: String = "",
     val selectedFileEditable: Boolean = true,
+    val selectedFileDirty: Boolean = false,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -13269,6 +13384,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
+    /** Bridge actually running the current session; approvals must go here, not to whatever agentKind is selected now. */
+    private var activeRuntimeBridge: RuntimeBridge? = null
     private val logLineIdCounter = AtomicLong(1L)
     /** Session whose events may touch the active chat; late events from older sessions are dropped. */
     private val activeRuntimeSessionId = AtomicReference<String?>(null)
@@ -13277,9 +13394,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         RuntimeSetupController.restore(application)
         viewModelScope.launch {
             RuntimeSetupController.snapshot.collect { snap ->
-                val justCompleted = snap.status == RuntimeSetupStatus.COMPLETE && !_state.value.runtimeInstalled
+                val completed = snap.status == RuntimeSetupStatus.COMPLETE
                 _state.update { it.copy(setupSnapshot = snap) }
-                if (justCompleted) {
+                if (completed) {
                     refreshRuntimeStatus()
                 }
             }
@@ -13338,6 +13455,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val loadedProfile = preferences.loadProvider(vault, savedAgent)
             val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
+            val initialBuildRecord = withContext(Dispatchers.IO) {
+                val ws = checkpoints.ensureWorkspace(firstProject.id)
+                val androidRoot = findAndroidProjectRoot(ws)
+                val existingApk = androidRoot?.let { findDebugApk(it) }
+                if (existingApk != null) {
+                    AndroidBuildRecord(
+                        phase = AndroidBuildPhase.SUCCEEDED,
+                        stage = AndroidBuildStage.COMPLETE,
+                        apkPath = existingApk.absolutePath,
+                        apkSizeBytes = existingApk.length(),
+                        message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                    )
+                } else {
+                    AndroidBuildRecord()
+                }
+            }
 
             _state.update {
                 it.copy(
@@ -13353,6 +13486,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     chats = chats,
                     activeChatId = activeChatId,
                     messages = messages,
+                    androidBuild = if (it.androidBuild.phase == AndroidBuildPhase.BUILDING) it.androidBuild else initialBuildRecord,
                     providerProfile = profile,
                     savedApiKeys = keys,
                     githubLogin = preferences.githubLogin,
@@ -13409,6 +13543,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun configureAllProjectRoots(projects: List<Project>) {
         projects.forEach { project ->
             checkpoints.configureProjectRoot(project.id, project.rootPath)
+            claudeRuntime.configureProjectRoot(project.id, project.rootPath)
+            dshRuntime.configureProjectRoot(project.id, project.rootPath)
             antigravityRuntime.configureProjectRoot(project.id, project.rootPath)
         }
     }
@@ -13495,6 +13631,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectAgent(agent: AgentKind) {
+        // Switching bridges mid-run would desync providerProfile/hasSecret from the session that is
+        // still streaming, and would misroute any pending tool approval to the newly selected bridge.
+        if (_state.value.sessionRunning) return
         preferences.agentKind = agent.stableId
         val loadedProfile = preferences.loadProvider(vault, agent)
         val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
@@ -13511,8 +13650,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
-        // Switching mid-run would append streamed output to, and save over, another project's chat.
-        if (_state.value.sessionRunning && projectId != _state.value.activeProjectId) return
+        val switchingProject = projectId != _state.value.activeProjectId
+        // Switching mid-run would append streamed output to, and save over, another project's chat or race with a build/terminal process.
+        if (switchingProject) {
+            if (_state.value.sessionRunning) {
+                _state.update { it.copy(bannerMessage = "Stop the running agent session before switching projects.") }
+                return
+            }
+            if (_state.value.androidBuild.phase == AndroidBuildPhase.BUILDING) {
+                _state.update { it.copy(bannerMessage = "Wait for the Android APK build to finish or stop it before switching projects.") }
+                return
+            }
+            if (_state.value.terminalRunning) {
+                _state.update { it.copy(bannerMessage = "Wait for the active terminal command to finish before switching projects.") }
+                return
+            }
+            activeLogcatProcess?.destroyForcibly()
+            activeLogcatProcess = null
+            activeLogcatJob?.cancel()
+        }
         val chats = preferences.loadProjectChats(project.id)
         val chatId = chats.firstOrNull()?.id ?: "main"
         val messages = preferences.loadMessages(project.id, chatId)
@@ -13524,7 +13680,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 messages = messages,
                 selectedFilePath = null,
                 selectedFileContent = "",
+                selectedFileDirty = false,
+                fileSavedBanner = null,
+                androidLogcat = if (switchingProject) AndroidLogcatState() else it.androidLogcat,
             )
+        }
+        if (_state.value.androidBuild.phase != AndroidBuildPhase.BUILDING) {
+            viewModelScope.launch {
+                val buildRecord = withContext(Dispatchers.IO) {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val androidRoot = findAndroidProjectRoot(ws)
+                    val existingApk = androidRoot?.let { findDebugApk(it) }
+                    if (existingApk != null) {
+                        AndroidBuildRecord(
+                            phase = AndroidBuildPhase.SUCCEEDED,
+                            stage = AndroidBuildStage.COMPLETE,
+                            apkPath = existingApk.absolutePath,
+                            apkSizeBytes = existingApk.length(),
+                            message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                        )
+                    } else {
+                        AndroidBuildRecord()
+                    }
+                }
+                if (_state.value.activeProjectId == project.id && _state.value.androidBuild.phase != AndroidBuildPhase.BUILDING) {
+                    _state.update { it.copy(androidBuild = buildRecord) }
+                }
+            }
         }
         refreshWorkspaceFilesAndChanges(project.id)
     }
@@ -13535,6 +13717,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isAndroid: Boolean,
         androidTemplate: AndroidTemplate = AndroidTemplate.COMPOSE,
     ) {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before creating and switching to a new project.") }
+            return
+        }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
             val newProject = withContext(Dispatchers.IO) {
@@ -13570,18 +13756,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val updated = listOf(newProject) + _state.value.projects
             preferences.saveProjects(updated)
             configureAllProjectRoots(updated)
-            _state.update { it.copy(projects = updated) }
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
+                )
+            }
             selectProject(newProject.id)
         }
     }
 
+    fun createQuickProject() {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before starting a new Quick Chat.") }
+            return
+        }
+        viewModelScope.launch {
+            val quickProject = withContext(Dispatchers.IO) {
+                val quickCount = _state.value.projects.count { it.kind == ProjectKind.QUICK_PROJECT } + 1
+                val cleanName = if (quickCount == 1) "Quick Chat" else "Quick Chat $quickCount"
+                val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                val baseSlug = projectSlug(cleanName)
+                var slug = baseSlug
+                var suffix = 2
+                while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                val project = Project(
+                    name = cleanName,
+                    description = "Lightweight scratchpad & instant agent session",
+                    language = "Multi-language",
+                    slug = slug,
+                    type = ProjectType.GENERAL,
+                    kind = ProjectKind.QUICK_PROJECT,
+                )
+                val wsDir = checkpoints.ensureWorkspace(project.id)
+                val readme = File(wsDir, "README.md")
+                if (!readme.exists()) {
+                    readme.writeText("# $cleanName\n\nQuick scratchpad workspace.\n")
+                }
+                project
+            }
+            val updated = listOf(quickProject) + _state.value.projects
+            preferences.saveProjects(updated)
+            configureAllProjectRoots(updated)
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = ForgeTab.AGENT,
+                )
+            }
+            selectProject(quickProject.id)
+        }
+    }
+
     fun deleteProject(projectId: String) {
-        // The workspace would be wiped under a running agent, and the active-project switch is blocked mid-run.
-        if (_state.value.sessionRunning) return
+        // The workspace would be wiped under a running agent, build, or terminal process.
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Cannot delete a project while an agent session, build, or terminal command is running.") }
+            return
+        }
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
         if (updated.size == currentProjects.size) return
+        val oldChats = runCatching { preferences.loadProjectChats(projectId) }.getOrDefault(emptyList())
+        oldChats.forEach { chat ->
+            AgentKind.entries.forEach { agent ->
+                preferences.saveAgentConversation(agent, projectId, chat.id, null)
+            }
+        }
         preferences.saveProjects(updated)
         preferences.deleteProjectChats(projectId)
         viewModelScope.launch(Dispatchers.IO) {
@@ -13635,6 +13877,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
         preferences.saveProjectChats(project.id, updatedChats)
         runCatching {
             File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
@@ -13654,11 +13899,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearActiveChat() {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
+        preferences.saveMessages(project.id, chatId, emptyList())
+        _state.update {
+            it.copy(
+                messages = emptyList(),
+                activeStatusLine = null,
+            )
+        }
+    }
+
     fun sendPrompt(promptText: String) {
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() || _state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        val now = System.currentTimeMillis()
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
@@ -13669,8 +13931,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updatedMessages = historyBefore + userMsg + assistantPlaceholder
         preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
 
+        val autoTitle = cleanPrompt.lineSequence().firstOrNull()?.trim().orEmpty().let { firstLine ->
+            if (firstLine.length > 34) firstLine.take(34).trimEnd() + "…" else firstLine
+        }
+        val updatedChats = _state.value.chats.map { chat ->
+            if (chat.id == chatId) {
+                val shouldRetitle = historyBefore.isEmpty() &&
+                    (chat.title == "Main chat" || chat.title.matches(Regex("""^Chat \d+$"""))) &&
+                    autoTitle.isNotEmpty()
+                chat.copy(
+                    title = if (shouldRetitle) autoTitle else chat.title,
+                    updatedAtMillis = now,
+                )
+            } else {
+                chat
+            }
+        }
+        val updatedProjects = _state.value.projects.map { proj ->
+            if (proj.id == project.id) proj.copy(updatedAtMillis = now) else proj
+        }
+        preferences.saveProjectChats(project.id, updatedChats)
+        preferences.saveProjects(updatedProjects)
+
         _state.update {
             it.copy(
+                projects = updatedProjects,
+                chats = updatedChats,
                 messages = updatedMessages,
                 sessionRunning = true,
                 activeStatusLine = "Starting ${_state.value.agentKind.title}…",
@@ -13683,6 +13969,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AgentKind.DEEPSEEK_HARNESS -> dshRuntime
             AgentKind.ANTIGRAVITY -> antigravityRuntime
         }
+        activeRuntimeBridge = bridge
 
         activeAgentJob = viewModelScope.launch {
             try {
@@ -13704,27 +13991,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopActiveTask() {
+        val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
+        val pendingApproval = _state.value.pendingToolRequest
+        val bridge = activeRuntimeBridge
         RuntimeTaskController.requestStop()
         val agentJob = activeAgentJob
         agentJob?.cancel()
         activeBuildProcess?.destroyForcibly()
         activeBuildJob?.cancel()
-        _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
-        // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
-        // otherwise a new prompt could race with it over shared bridge state.
-        viewModelScope.launch {
-            agentJob?.join()
-            _state.update {
-                it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+        if (wasSessionRunning) {
+            _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+            // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
+            // otherwise a new prompt could race with it over shared bridge state.
+            viewModelScope.launch {
+                if (pendingApproval != null) {
+                    runCatching { (bridge ?: claudeRuntime).respondToApproval(pendingApproval, false) }
+                }
+                agentJob?.join()
+                activeRuntimeBridge = null
+                _state.update {
+                    it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+                }
             }
         }
     }
 
     fun respondToToolRequest(approved: Boolean) {
         val req = _state.value.pendingToolRequest ?: return
+        val bridge = activeRuntimeBridge ?: claudeRuntime
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            claudeRuntime.respondToApproval(req, approved)
+            bridge.respondToApproval(req, approved)
         }
     }
 
@@ -13823,12 +14120,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishAgentTurn(projectId: String) {
+        activeRuntimeBridge = null
         val chatId = _state.value.activeChatId
+        val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->
             if (msg.id == "streaming-assistant") {
+                val elapsed = (now - msg.createdAt.toEpochMilli()).coerceAtLeast(0L)
                 msg.copy(
                     id = UUID.randomUUID().toString(),
                     text = msg.text.ifBlank { "Task finished." },
+                    workedMillis = elapsed,
                 )
             } else {
                 msg
@@ -13881,6 +14182,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         .toList()
+                        .sortedWith { a, b ->
+                            val aParts = a.path.split('/')
+                            val bParts = b.path.split('/')
+                            val minLen = minOf(aParts.size, bParts.size)
+                            var cmp = 0
+                            for (i in 0 until minLen) {
+                                if (aParts[i] != bParts[i]) {
+                                    val aDir = (i < aParts.lastIndex) || a.isDirectory
+                                    val bDir = (i < bParts.lastIndex) || b.isDirectory
+                                    cmp = if (aDir != bDir) {
+                                        if (aDir) -1 else 1
+                                    } else {
+                                        val ci = aParts[i].compareTo(bParts[i], ignoreCase = true)
+                                        if (ci != 0) ci else aParts[i].compareTo(bParts[i])
+                                    }
+                                    break
+                                }
+                            }
+                            if (cmp != 0) cmp else aParts.size.compareTo(bParts.size)
+                        }
                 }
                 val changedPaths = checkpoints.readChangedPaths(projectId)
                 val changeDetails = if (changedPaths.isNotEmpty()) {
@@ -13926,6 +14247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedFilePath = relativePath,
                     selectedFileContent = content,
                     selectedFileEditable = editable,
+                    selectedFileDirty = false,
                     fileSavedBanner = null,
                 )
             }
@@ -13933,7 +14255,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateSelectedFileContent(newContent: String) {
-        _state.update { it.copy(selectedFileContent = newContent, fileSavedBanner = null) }
+        _state.update {
+            it.copy(
+                selectedFileContent = newContent,
+                selectedFileDirty = true,
+                fileSavedBanner = null,
+            )
+        }
     }
 
     fun saveSelectedFile() {
@@ -13955,7 +14283,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrDefault(false)
             }
             _state.update {
-                it.copy(fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path")
+                it.copy(
+                    selectedFileDirty = if (saved) false else it.selectedFileDirty,
+                    fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path",
+                )
             }
             refreshWorkspaceFilesAndChanges(project.id)
             if (saved && preferences.autoSyncGitHub) {
@@ -13981,6 +14312,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (ok) {
                 refreshWorkspaceFilesAndChanges(project.id)
                 openWorkspaceFile(cleanPath)
+            }
+        }
+    }
+
+    fun deleteWorkspaceFile(relativePath: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/')
+        if (cleanPath.isEmpty()) return
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val target = checkpoints.safeWorkspaceFile(ws, cleanPath)
+                    target.exists() && target.deleteRecursively()
+                }.getOrDefault(false)
+            }
+            if (deleted) {
+                if (_state.value.selectedFilePath == cleanPath || _state.value.selectedFilePath?.startsWith("$cleanPath/") == true) {
+                    _state.update {
+                        it.copy(
+                            selectedFilePath = null,
+                            selectedFileContent = "",
+                            selectedFileDirty = false,
+                            fileSavedBanner = "Deleted $cleanPath",
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(fileSavedBanner = "Deleted $cleanPath") }
+                }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }
@@ -14044,20 +14406,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         activeTerminalJob = viewModelScope.launch {
+            var streamedAny = false
             var output = ""
             try {
                 output = withContext(Dispatchers.IO) {
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    runCommandInChrootOrHost(project.slug, ws, cleanCmd)
+                    runCommandInChrootOrHost(project.slug, ws, cleanCmd) { chunkText ->
+                        streamedAny = true
+                        _state.update { current ->
+                            current.copy(
+                                terminalOutput = (current.terminalOutput + chunkText).takeLast(MAX_TERMINAL_CHARS),
+                            )
+                        }
+                    }
                 }
             } finally {
                 activeTerminalProcess = null
                 _state.update {
+                    val tail = if (streamedAny) "\n" else (output + "\n")
                     it.copy(
                         terminalRunning = false,
-                        terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
+                        terminalOutput = (it.terminalOutput + tail).takeLast(MAX_TERMINAL_CHARS),
                     )
                 }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }
@@ -14099,7 +14471,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
+    private fun runCommandInChrootOrHost(
+        projectSlug: String,
+        workspaceDir: File,
+        command: String,
+        onOutputChunk: ((String) -> Unit)? = null,
+    ): String {
         return runCatching {
             val process = if (installer.isInstalled() && isRootAccessAvailable()) {
                 val installed = installer.installedRuntime()
@@ -14129,12 +14506,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 while (buffer.length < MAX_TERMINAL_CHARS) {
                     val n = reader.read(chunk)
                     if (n <= 0) break
-                    buffer.append(chunk, 0, n)
+                    val text = String(chunk, 0, n)
+                    buffer.append(text)
+                    onOutputChunk?.invoke(text)
                 }
             }
             if (process.isAlive && !timedOut.get()) process.destroyForcibly()
             watchdog.interrupt()
-            if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
+            if (timedOut.get()) {
+                val timeoutNotice = "\n[Command timed out after 60s]"
+                buffer.append(timeoutNotice)
+                onOutputChunk?.invoke(timeoutNotice)
+            }
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
     }
@@ -14192,10 +14575,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "Running $task in ${project.name}")
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
-        RuntimeTaskController.stopAction = { stopActiveTask() }
+        RuntimeTaskController.stopAction = {
+            activeBuildProcess?.destroyForcibly()
+            activeBuildJob?.cancel()
+        }
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
+            var cancelled = false
             var builtApk: File? = null
             var fullLog = ""
             var exitCode = -1
@@ -14229,28 +14616,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     builtApk = if (exitCode == 0) findDebugApk(androidRoot) else null
                     succeeded = exitCode == 0 && (task == "clean" || builtApk != null)
                 }
+            } catch (e: CancellationException) {
+                cancelled = true
             } catch (e: Throwable) {
-                fullLog += "\nBuild exception: ${e.message}"
+                if (!isActive) {
+                    cancelled = true
+                } else {
+                    fullLog += "\nBuild exception: ${e.message}"
+                }
             } finally {
+                if (!isActive) cancelled = true
                 activeBuildProcess = null
                 RuntimeTaskController.stopAction = null
             }
 
-            val issues = if (!succeeded && task != "clean") {
+            val issues = if (!succeeded && !cancelled && task != "clean") {
                 parseAndroidBuildIssues(fullLog, androidRoot, exitCode)
             } else {
                 emptyList()
             }
-            val finalApk = builtApk
+            val finalApk = builtApk ?: if (task != "clean") {
+                withContext(Dispatchers.IO) { findDebugApk(androidRoot) }
+            } else {
+                null
+            }
             _state.update {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
-                        phase = if (succeeded) AndroidBuildPhase.SUCCEEDED else AndroidBuildPhase.FAILED,
-                        stage = if (succeeded) AndroidBuildStage.COMPLETE else AndroidBuildStage.FAILED,
+                        phase = when {
+                            cancelled -> AndroidBuildPhase.CANCELLED
+                            succeeded -> AndroidBuildPhase.SUCCEEDED
+                            else -> AndroidBuildPhase.FAILED
+                        },
+                        stage = when {
+                            cancelled -> AndroidBuildStage.CANCELLED
+                            succeeded -> AndroidBuildStage.COMPLETE
+                            else -> AndroidBuildStage.FAILED
+                        },
                         finishedAtMillis = System.currentTimeMillis(),
                         apkPath = finalApk?.absolutePath,
                         apkSizeBytes = finalApk?.length(),
                         message = when {
+                            cancelled -> "Build cancelled by user."
                             succeeded && finalApk != null -> "APK ready: ${finalApk.name} (${finalApk.length() / 1024} KB)"
                             succeeded -> "Gradle $task completed."
                             else -> issues.firstOrNull()?.detail ?: "Build failed (exit $exitCode)"
@@ -14261,14 +14668,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             getApplication<Application>().startService(
                 Intent(getApplication(), RuntimeExecutionService::class.java)
-                    .setAction(if (succeeded) RuntimeExecutionService.ACTION_COMPLETE else RuntimeExecutionService.ACTION_FAILED)
+                    .setAction(
+                        when {
+                            cancelled -> RuntimeExecutionService.ACTION_CANCELLED
+                            succeeded -> RuntimeExecutionService.ACTION_COMPLETE
+                            else -> RuntimeExecutionService.ACTION_FAILED
+                        },
+                    )
                     .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
                     .putExtra(
                         RuntimeExecutionService.EXTRA_DETAIL,
-                        if (succeeded) "Android build succeeded" else "Android build failed",
+                        when {
+                            cancelled -> "Android build cancelled"
+                            succeeded -> "Android build succeeded"
+                            else -> "Android build failed"
+                        },
                     ),
             )
-            if (succeeded && installAfterBuild && finalApk != null) {
+            if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
         }
@@ -14311,12 +14728,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun resolveProjectAndroidPackageName(project: Project): String {
+        val builtApkPath = _state.value.androidBuild.apkPath
+        if (!builtApkPath.isNullOrBlank()) {
+            val apkFile = File(builtApkPath)
+            if (apkFile.isFile) {
+                val apkPkg = AndroidAppInstaller.packageName(getApplication(), apkFile)
+                if (!apkPkg.isNullOrBlank()) return apkPkg
+            }
+        }
+        val ws = runCatching { checkpoints.ensureWorkspace(project.id) }.getOrNull()
+        val androidRoot = ws?.let { findAndroidProjectRoot(it) ?: it }
+        if (androidRoot != null) {
+            val existingApk = findDebugApk(androidRoot)
+            if (existingApk != null) {
+                val apkPkg = AndroidAppInstaller.packageName(getApplication(), existingApk)
+                if (!apkPkg.isNullOrBlank()) return apkPkg
+            }
+            val candidates = listOf(
+                File(androidRoot, "app/build.gradle.kts"),
+                File(androidRoot, "app/build.gradle"),
+                File(androidRoot, "build.gradle.kts"),
+                File(androidRoot, "build.gradle"),
+                File(androidRoot, "app/src/main/AndroidManifest.xml"),
+            )
+            val appIdRegex = Regex("""(?:applicationId|namespace|package)\s*=?\s*["']([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)+)["']""")
+            for (file in candidates) {
+                if (file.isFile) {
+                    val text = runCatching { file.readBoundedText(64 * 1024) }.getOrNull().orEmpty()
+                    val match = appIdRegex.find(text)?.groupValues?.getOrNull(1)
+                    if (!match.isNullOrBlank()) return match
+                }
+            }
+        }
+        return AndroidProjectTemplateGenerator.packageName(project.name)
+    }
+
     fun startProjectLogcat() {
         val project = _state.value.activeProject ?: return
         activeLogcatProcess?.destroyForcibly()
         activeLogcatJob?.cancel()
-        val pkg = AndroidProjectTemplateGenerator.packageName(project.name)
         activeLogcatJob = viewModelScope.launch {
+            val pkg = withContext(Dispatchers.IO) { resolveProjectAndroidPackageName(project) }
             val canRead = withContext(Dispatchers.IO) { hasAndroidLogcatAccess(getApplication()) }
             if (!canRead) {
                 _state.update {
@@ -14370,6 +14823,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                     }
+                    if (isActive) {
+                        _state.update {
+                            it.copy(
+                                androidLogcat = it.androidLogcat.copy(
+                                    running = false,
+                                    message = "Logcat stream ended for $pkg.",
+                                ),
+                            )
+                        }
+                    }
                 }.onFailure { err ->
                     _state.update {
                         it.copy(
@@ -14390,6 +14853,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeLogcatJob?.cancel()
         _state.update {
             it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = "Logcat paused"))
+        }
+    }
+
+    fun clearProjectLogcat() {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(lines = emptyList()))
+        }
+    }
+
+    fun setLogcatMinimumLevel(level: AndroidLogLevel) {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(minimumLevel = level))
+        }
+    }
+
+    fun setLogcatQuery(query: String) {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(query = query))
         }
     }
 
@@ -14429,16 +14910,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateProviderConfig(baseUrl: String, model: String, openRouterOrder: String = "") {
+    fun updateProviderConfig(
+        baseUrl: String,
+        model: String,
+        openRouterOrder: String = _state.value.providerProfile.openRouterProviderOrder,
+        openRouterAllowFallbacks: Boolean = _state.value.providerProfile.openRouterAllowFallbacks,
+        dshApi: String = _state.value.providerProfile.dshApi,
+    ) {
         val current = _state.value.providerProfile
         val updated = current.copy(
             baseUrl = baseUrl.trim(),
             model = model.trim(),
             openRouterProviderOrder = openRouterOrder.trim(),
+            openRouterAllowFallbacks = openRouterAllowFallbacks,
+            dshApi = dshApi.trim().ifBlank { current.dshApi },
             hasSecret = !resolveProviderSecret(current).isNullOrBlank(),
         )
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update { it.copy(providerProfile = updated) }
+    }
+
+    fun validateAntigravityConnection() {
+        _state.update { it.copy(apiBusy = true, apiStatusMessage = "Probing Antigravity CLI inside chroot…") }
+        viewModelScope.launch {
+            val msg = runCatching {
+                val reply = antigravityRuntime.hello(45_000L)
+                "✓ Antigravity CLI verified: ${reply.take(100)}"
+            }.getOrElse { err ->
+                "✕ Antigravity probe failed: ${err.message ?: "CLI error"}"
+            }
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = msg) }
+        }
     }
 
     fun addApiKey(label: String, secret: String) {
@@ -14821,7 +15323,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         runCheckedCommand(project.slug, ws, cloneCmd)
                     }
-                    project
+                    val isAndroidRepo = findAndroidProjectRoot(ws) != null
+                    project.copy(
+                        type = if (isAndroidRepo) ProjectType.ANDROID else ProjectType.GENERAL,
+                        language = if (isAndroidRepo) "Kotlin / Android" else "Git Repository",
+                    )
                 }
             }
             clonedProject.onSuccess { newProject ->
@@ -14858,7 +15364,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setAntigravityConfig(model: String, effort: String) {
-        val cleanModel = model.trim().ifEmpty { "gemini-2.5-pro" }
+        val cleanModel = model.trim()
         val cleanEffort = effort.trim().ifEmpty { "high" }
         preferences.antigravityModel = cleanModel
         preferences.antigravityEffort = cleanEffort
@@ -14897,6 +15403,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         "NextCraft Forge is up to date."
                     },
                 )
+            }
+        }
+    }
+
+    fun downloadAndInstallAppUpdate() {
+        val info = _state.value.updateInfo ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(updateStatusMessage = "Downloading v${info.versionName}…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val apk = AppUpdater(getApplication()).download(info) { downloaded, total ->
+                        val pct = if (total > 0) ((downloaded * 100L) / total).coerceIn(0L, 100L) else -1L
+                        val msg = if (pct >= 0) {
+                            "Downloading v${info.versionName} ($pct%)…"
+                        } else {
+                            "Downloading v${info.versionName} (${downloaded / 1024} KB)…"
+                        }
+                        _state.update { it.copy(updateStatusMessage = msg) }
+                    }
+                    AndroidAppInstaller.install(
+                        context = getApplication(),
+                        apk = apk,
+                        launchAfterInstall = false,
+                    )
+                }
+            }
+            result.onSuccess {
+                _state.update { it.copy(updateStatusMessage = "Update v${info.versionName} verified & installing…") }
+            }.onFailure { err ->
+                _state.update { it.copy(updateStatusMessage = "Update install failed: ${err.message}") }
             }
         }
     }
@@ -15065,7 +15601,7 @@ object AppStrings {
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (560 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15451,7 +15987,59 @@ val ForgeCodeTextStyle = TextStyle(
     lineHeight = 19.sp,
 )
 
-private val ForgeTypography = Typography()
+private val ForgeTypography = Typography(
+    headlineLarge = TextStyle(
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
+        letterSpacing = (-0.5).sp,
+    ),
+    headlineSmall = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 21.sp,
+        lineHeight = 27.sp,
+        letterSpacing = (-0.3).sp,
+    ),
+    titleLarge = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
+        letterSpacing = (-0.2).sp,
+    ),
+    titleMedium = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 15.sp,
+        lineHeight = 21.sp,
+        letterSpacing = (-0.1).sp,
+    ),
+    titleSmall = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 13.5.sp,
+        lineHeight = 19.sp,
+    ),
+    bodyMedium = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+    ),
+    bodySmall = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+    ),
+    labelMedium = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.2.sp,
+    ),
+    labelSmall = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 15.sp,
+        letterSpacing = 0.2.sp,
+    ),
+)
 
 @Composable
 fun NextCraftForgeTheme(
@@ -15470,11 +16058,14 @@ fun NextCraftForgeTheme(
             val activity = view.context.findActivity() ?: return@SideEffect
             val window = activity.window
             window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
-            window.statusBarColor = tokens.topBarContainerColor.toArgb()
-            window.navigationBarColor = if (tokens.isGlass) {
-                Color(0xFF0B1324).toArgb()
-            } else {
-                tokens.bottomBarContainerColor.toArgb()
+            @Suppress("DEPRECATION")
+            run {
+                window.statusBarColor = tokens.topBarContainerColor.toArgb()
+                window.navigationBarColor = if (tokens.isGlass) {
+                    Color(0xFF0B1324).toArgb()
+                } else {
+                    tokens.bottomBarContainerColor.toArgb()
+                }
             }
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !tokens.isDark
@@ -15727,7 +16318,7 @@ fun AndroidBuildIssue.formatForAgentPrompt(): String = buildString {
 
 ---
 
-## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (478 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15788,6 +16379,7 @@ private sealed interface MarkdownBlock {
     data class BulletItem(val depth: Int, val text: String) : MarkdownBlock
     data class NumberedItem(val number: String, val text: String) : MarkdownBlock
     data class BlockQuote(val text: String) : MarkdownBlock
+    data class Table(val rows: List<List<String>>) : MarkdownBlock
     object HorizontalRule : MarkdownBlock
     data class Paragraph(val text: String) : MarkdownBlock
 }
@@ -15812,6 +16404,7 @@ fun MarkdownText(
                     is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
+                    is MarkdownBlock.Table -> TableBlockView(block, resolvedColor, tokens)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
@@ -16031,7 +16624,71 @@ private fun CodeSnippetBlock(
     }
 }
 
+@Composable
+private fun TableBlockView(
+    block: MarkdownBlock.Table,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
+    if (block.rows.isEmpty()) return
+    val shape = RoundedCornerShape(10.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
+        color = tokens.cardContainerColor,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            block.rows.forEachIndexed { rowIdx, cells ->
+                val isHeader = rowIdx == 0 && block.rows.size > 1
+                Row(
+                    modifier = Modifier
+                        .background(
+                            if (isHeader) {
+                                tokens.cardElevatedColor.copy(alpha = 0.78f)
+                            } else if (rowIdx % 2 == 1) {
+                                Color.Transparent
+                            } else {
+                                tokens.cardElevatedColor.copy(alpha = 0.25f)
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    cells.forEach { cellText ->
+                        Text(
+                            text = parseInlineMarkdown(
+                                text = cellText,
+                                accentColor = tokens.accentText,
+                                inlineCodeBg = tokens.inlineCodeBackground,
+                            ),
+                            color = color,
+                            style = if (isHeader) {
+                                MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            } else {
+                                MaterialTheme.typography.bodySmall
+                            },
+                            modifier = Modifier
+                                .width(136.dp)
+                                .padding(end = 10.dp),
+                        )
+                    }
+                }
+                if (rowIdx < block.rows.lastIndex) {
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                }
+            }
+        }
+    }
+}
+
 private val NUMBERED_ITEM_REGEX = Regex("""^(\d+)\.\s+(.*)$""")
+private val TABLE_DIVIDER_REGEX = Regex("""^\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$""")
 
 private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     if (raw.isBlank()) return emptyList()
@@ -16041,6 +16698,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     var codeLang = ""
     val codeBuf = StringBuilder()
     val paraBuf = StringBuilder()
+    val tableRows = ArrayList<List<String>>()
 
     fun flushParagraph() {
         if (paraBuf.isNotEmpty()) {
@@ -16049,9 +16707,21 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
         }
     }
 
+    fun flushTable() {
+        if (tableRows.isNotEmpty()) {
+            blocks += MarkdownBlock.Table(tableRows.toList())
+            tableRows.clear()
+        }
+    }
+
     for (line in lines) {
         val trimmed = line.trimStart()
-        if (trimmed.startsWith("```")) {
+        val fencePrefix = when {
+            trimmed.startsWith("```") -> "```"
+            trimmed.startsWith("~~~") -> "~~~"
+            else -> null
+        }
+        if (fencePrefix != null) {
             if (inCodeBlock) {
                 blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
                 codeBuf.setLength(0)
@@ -16059,8 +16729,9 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 inCodeBlock = false
             } else {
                 flushParagraph()
+                flushTable()
                 inCodeBlock = true
-                codeLang = trimmed.removePrefix("```").trim()
+                codeLang = trimmed.removePrefix(fencePrefix).trim()
             }
             continue
         }
@@ -16068,6 +16739,25 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             codeBuf.append(line).append('\n')
             continue
         }
+        val trimmedBoth = trimmed.trimEnd()
+        val isTableRow = trimmedBoth.startsWith("|") && trimmedBoth.endsWith("|") && trimmedBoth.count { it == '|' } >= 2
+        if (isTableRow) {
+            flushParagraph()
+            if (!TABLE_DIVIDER_REGEX.matches(trimmedBoth)) {
+                val cells = trimmedBoth
+                    .removePrefix("|")
+                    .removeSuffix("|")
+                    .split("|")
+                    .map { it.trim() }
+                if (cells.isNotEmpty()) {
+                    tableRows += cells
+                }
+            }
+            continue
+        } else {
+            flushTable()
+        }
+
         when {
             line.isBlank() -> flushParagraph()
             trimmed == "---" || trimmed == "***" -> {
@@ -16089,9 +16779,9 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 val leadingSpaces = line.length - trimmed.length
                 blocks += MarkdownBlock.BulletItem(leadingSpaces / 2, trimmed.substring(2).trim())
             }
-            trimmed.startsWith("> ") -> {
+            trimmed.startsWith("> ") || trimmed == ">" -> {
                 flushParagraph()
-                blocks += MarkdownBlock.BlockQuote(trimmed.removePrefix("> ").trim())
+                blocks += MarkdownBlock.BlockQuote(trimmed.removePrefix(">").trim())
             }
             else -> {
                 val numMatch = NUMBERED_ITEM_REGEX.matchEntire(trimmed)
@@ -16105,9 +16795,10 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             }
         }
     }
-    if (inCodeBlock && codeBuf.isNotEmpty()) {
+    if (inCodeBlock) {
         blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
     }
+    flushTable()
     flushParagraph()
     return blocks
 }
@@ -16237,23 +16928,26 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
    - Mengelola konfigurasi penyedia AI & kunci API terenkripsi (`ApiKeyVault`) beserta rotasi multi-kunci dan pengambilan katalog model langsung dari server, pengelolaan bundle runtime (impor `.tar.zst` lokal, unduh dari rilis resmi, *Verify & Repair Rootfs*, bersihkan *staging* atau *reset runtime*), integrasi penuh akun & repositori GitHub (`Connect Token`, `Create Repo`, `Clone`, `Push`, `Pull`, dan *Auto-Sync*), pemilih tema & bahasa antarmuka, kebijakan persetujuan perintah berisiko tinggi, serta pemeriksaan dan instalasi pembaruan aplikasi (`AppUpdater`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (199 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1128 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (1182 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (864 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (291 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1180 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (385 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1128 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.nextcraft.forge.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16263,6 +16957,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -16279,6 +16976,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -16286,8 +16984,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -16297,8 +16995,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -16319,12 +17015,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
+import com.nextcraft.forge.model.Project
+import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 
 @Composable
@@ -16336,6 +17035,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     if (!state.runtimeInstalled && !bypassSetupGate) {
         RuntimeOnboardingScreen(
             state = state,
+            onSelectAgent = viewModel::selectAgent,
+            onSelectThemeMode = viewModel::setThemeMode,
             onToggleStack = viewModel::toggleDevStack,
             onStartSetup = viewModel::startRuntimeSetup,
             onPauseSetup = viewModel::pauseRuntimeSetup,
@@ -16381,7 +17082,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -16395,6 +17096,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 text = banner,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                fontWeight = FontWeight.Medium,
                                 modifier = Modifier.weight(1f),
                             )
                             IconButton(
@@ -16416,6 +17118,16 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.activeTab) {
+                    ForgeTab.PROJECTS -> ProjectsScreen(
+                        state = state,
+                        onOpenProject = { id ->
+                            viewModel.selectProject(id)
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onNewProject = { showNewProjectDialog = true },
+                        onDeleteProject = viewModel::deleteProject,
+                        onNewQuickProject = viewModel::createQuickProject,
+                    )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
@@ -16450,13 +17162,56 @@ private fun ForgeTopBar(
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
     var themeMenuExpanded by remember { mutableStateOf(false) }
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
     val activeProject = state.activeProject
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
     val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+    val runtimeReady = state.rootAvailable && state.runtimeInstalled
+
+    pendingDeleteProject?.let { targetProject ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            containerColor = tokens.cardElevatedColor,
+            title = {
+                Text(
+                    text = "Delete '${targetProject.name}'?",
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = "This permanently deletes /workspace/${targetProject.slug}, all local files, checkpoints, and chat history for this project.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = targetProject.id
+                        pendingDeleteProject = null
+                        onDeleteProject(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete Project", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 
     Surface(
         color = tokens.topBarContainerColor,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        contentColor = scheme.onSurface,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -16465,89 +17220,123 @@ private fun ForgeTopBar(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (state.rootAvailable && state.runtimeInstalled) {
-                                tokens.successText
-                            } else {
-                                tokens.warningText
-                            },
-                        ),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Box {
-                    Row(
+                // BUG-UI-001 Fix: Constrain Project Switcher with weight(1f) so right-side pills never overflow
+                Box(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = tokens.cardElevatedColor,
+                        border = tokens.elevatedBorderStroke,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { projectMenuExpanded = true }
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { projectMenuExpanded = true },
                     ) {
-                        Column {
-                            Text(
-                                text = activeProject?.name ?: "NextCraft Forge",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = "/workspace/${activeProject?.slug ?: "sandbox"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontFamily = FontFamily.Monospace,
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(
+                                        if (runtimeReady) {
+                                            tokens.successText.copy(alpha = 0.16f)
+                                        } else {
+                                            tokens.warningText.copy(alpha = 0.16f)
+                                        },
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(9.dp)
+                                        .clip(CircleShape)
+                                        .background(if (runtimeReady) tokens.successText else tokens.warningText),
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = activeProject?.name ?: "NextCraft Forge",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = scheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = "/workspace/${activeProject?.slug ?: "sandbox"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = scheme.onSurfaceVariant,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Switch project",
+                                tint = scheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Switch project",
-                        )
                     }
 
                     DropdownMenu(
                         expanded = projectMenuExpanded,
                         onDismissRequest = { projectMenuExpanded = false },
                     ) {
+                        val taskBusy = state.sessionRunning ||
+                            state.androidBuild.phase == AndroidBuildPhase.BUILDING ||
+                            state.terminalRunning
                         state.projects.forEach { project ->
+                            val isCurrent = project.id == state.activeProjectId
                             DropdownMenuItem(
+                                enabled = !taskBusy || isCurrent,
                                 text = {
                                     Column {
                                         Text(
                                             text = project.name,
-                                            fontWeight = if (project.id == state.activeProjectId) {
-                                                FontWeight.Bold
-                                            } else {
-                                                FontWeight.Normal
-                                            },
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                         Text(
-                                            text = "${project.language} • /workspace/${project.slug}",
+                                            text = "${project.language} • /workspace/${project.slug} • ${project.relativeUpdatedAt()}",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = scheme.onSurfaceVariant,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                 },
                                 leadingIcon = {
-                                    if (project.id == state.activeProjectId) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    if (isCurrent) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = tokens.successText,
+                                        )
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1) {
+                                    if (state.projects.size > 1 && !taskBusy) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
-                                                onDeleteProject(project.id)
+                                                pendingDeleteProject = project
                                             },
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Delete,
                                                 contentDescription = "Delete project",
+                                                tint = tokens.dangerText,
                                                 modifier = Modifier.size(18.dp),
                                             )
                                         }
@@ -16559,10 +17348,23 @@ private fun ForgeTopBar(
                                 },
                             )
                         }
-                        Divider()
+                        Divider(color = scheme.outlineVariant)
                         DropdownMenuItem(
-                            text = { Text("New Workspace Project…", fontWeight = FontWeight.SemiBold) },
-                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                            enabled = !taskBusy,
+                            text = {
+                                Text(
+                                    text = "New Workspace Project…",
+                                    fontWeight = FontWeight.Bold,
+                                    color = tokens.accentText,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    tint = tokens.accentText,
+                                )
+                            },
                             onClick = {
                                 projectMenuExpanded = false
                                 onOpenNewProject()
@@ -16571,44 +17373,71 @@ private fun ForgeTopBar(
                     }
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
-
+                // Compact Agent Selector Pill
                 Box {
-                    AssistChip(
-                        onClick = { agentMenuExpanded = true },
-                        label = {
-                            Text(
-                                text = state.agentKind.displayTitle(),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        },
-                        leadingIcon = {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = scheme.primaryContainer,
+                        contentColor = scheme.onPrimaryContainer,
+                        border = BorderStroke(1.dp, scheme.primary.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { agentMenuExpanded = true },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Star,
                                 contentDescription = null,
+                                tint = scheme.onPrimaryContainer,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = state.agentKind.shortBadge(),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = scheme.onPrimaryContainer,
+                                maxLines = 1,
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                tint = scheme.onPrimaryContainer,
                                 modifier = Modifier.size(16.dp),
                             )
-                        },
-                    )
+                        }
+                    }
+
                     DropdownMenu(
                         expanded = agentMenuExpanded,
                         onDismissRequest = { agentMenuExpanded = false },
                     ) {
                         AgentKind.entries.forEach { kind ->
+                            val isSelected = kind == state.agentKind
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(kind.displayTitle(), fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = kind.displayTitle(),
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        )
                                         Text(
                                             text = kind.displaySubtitle(),
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = scheme.onSurfaceVariant,
                                         )
                                     }
                                 },
                                 leadingIcon = {
-                                    if (kind == state.agentKind) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = tokens.successText,
+                                        )
                                     }
                                 },
                                 onClick = {
@@ -16620,42 +17449,74 @@ private fun ForgeTopBar(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
-                IconButton(onClick = onOpenNewProject) {
-                    Icon(Icons.Default.Add, contentDescription = "New Project")
+                // Quick New Project Squircle Button
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = tokens.cardElevatedColor,
+                    contentColor = scheme.onSurface,
+                    border = tokens.elevatedBorderStroke,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClick = onOpenNewProject),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "New Project",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
 
-                // Perbaikan THEME-BUG-021: Lencana pemilih 4 mode tema langsung di Top Bar
+                // 4-Mode Theme Badge Pill
                 Box {
-                    AssistChip(
-                        onClick = { themeMenuExpanded = true },
-                        label = {
-                            Text(
-                                text = activeThemeMode.badge,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        },
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = tokens.cardElevatedColor,
+                        contentColor = tokens.accentText,
+                        border = tokens.elevatedBorderStroke,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { themeMenuExpanded = true },
+                    ) {
+                        Text(
+                            text = activeThemeMode.badge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = tokens.accentText,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 8.dp),
+                        )
+                    }
+
                     DropdownMenu(
                         expanded = themeMenuExpanded,
                         onDismissRequest = { themeMenuExpanded = false },
                     ) {
                         ForgeThemeMode.entries.forEach { mode ->
+                            val isSelected = mode == activeThemeMode
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(mode.title, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = mode.title,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        )
                                         Text(
                                             text = mode.subtitle,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = scheme.onSurfaceVariant,
                                         )
                                     }
                                 },
                                 leadingIcon = {
-                                    if (mode == activeThemeMode) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = tokens.successText,
+                                        )
                                     }
                                 },
                                 onClick = {
@@ -16667,11 +17528,23 @@ private fun ForgeTopBar(
                     }
                 }
             }
-            Divider(color = MaterialTheme.colorScheme.outlineVariant)
+            Divider(color = scheme.outlineVariant)
         }
     }
 }
 
+private fun AgentKind.shortBadge(): String = when (this) {
+    AgentKind.CLAUDE_CODE -> "Claude"
+    AgentKind.DEEPSEEK_HARNESS -> "DeepSeek"
+    AgentKind.ANTIGRAVITY -> "Antigravity"
+}
+
+/**
+ * BUG-UI-002 Fix: Custom 6-Tab Expressive Dock & Liquid Glass Capsule Navigation Bar.
+ * Standard M3 NavigationBar only supports 3–5 items and truncates 6 items on 360dp phones.
+ * This custom dock gives all 6 tabs equal weight, a squircle pill active indicator, crisp
+ * non-truncating 10.5.sp labels, and a floating numeric badge for modified files.
+ */
 @Composable
 private fun ForgeBottomBar(
     activeTab: ForgeTab,
@@ -16679,38 +17552,42 @@ private fun ForgeBottomBar(
     onSelectTab: (ForgeTab) -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
     val shape = if (tokens.isGlass) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                horizontal = if (tokens.isGlass) 16.dp else 0.dp,
-                vertical = if (tokens.isGlass) 10.dp else 0.dp,
+                horizontal = if (tokens.isGlass) 12.dp else 0.dp,
+                vertical = if (tokens.isGlass) 8.dp else 0.dp,
             ),
     ) {
         Surface(
             shape = shape,
             color = tokens.bottomBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+            contentColor = scheme.onSurface,
             border = if (tokens.isGlass) tokens.cardBorderStroke else null,
             shadowElevation = if (tokens.isGlass) 12.dp else 0.dp,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 if (!tokens.isGlass) {
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                    Divider(color = scheme.outlineVariant, thickness = 1.dp)
                 }
-                NavigationBar(
-                    containerColor = Color.Transparent,
-                    tonalElevation = 0.dp,
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = if (tokens.isGlass) 8.dp else 4.dp,
+                            vertical = 6.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ForgeTab.entries.forEach { tab ->
-                        val label = when (tab) {
-                            ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
-                            else -> tab.title
-                        }
+                        val selected = activeTab == tab
                         val icon = when (tab) {
+                            ForgeTab.PROJECTS -> Icons.Default.Home
                             ForgeTab.AGENT -> Icons.Default.Star
                             ForgeTab.FILES -> Icons.Default.Edit
                             ForgeTab.TERMINAL -> Icons.Default.List
@@ -16718,19 +17595,79 @@ private fun ForgeBottomBar(
                             ForgeTab.PREVIEW -> Icons.Default.PlayArrow
                             ForgeTab.SETTINGS -> Icons.Default.Settings
                         }
-                        NavigationBarItem(
-                            selected = activeTab == tab,
-                            onClick = { onSelectTab(tab) },
-                            icon = { Icon(icon, contentDescription = label) },
-                            label = {
-                                Text(
-                                    text = label,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontSize = 11.sp,
-                                )
-                            },
-                        )
+                        val itemColor = if (selected) {
+                            scheme.onPrimaryContainer
+                        } else {
+                            scheme.onSurfaceVariant
+                        }
+                        val labelColor = if (selected) {
+                            if (tokens.isWhite) scheme.primary else tokens.accentText
+                        } else {
+                            scheme.onSurfaceVariant
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onSelectTab(tab) }
+                                .padding(vertical = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(36.dp)
+                                        .height(28.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(
+                                            if (selected) {
+                                                scheme.primaryContainer
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = tab.title,
+                                        tint = itemColor,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+
+                                if (tab == ForgeTab.FILES && changedCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 4.dp, y = (-3).dp)
+                                            .clip(RoundedCornerShape(100))
+                                            .background(scheme.primary)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = if (changedCount > 99) "99+" else changedCount.toString(),
+                                            color = scheme.onPrimary,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = tab.title,
+                                color = labelColor,
+                                fontSize = 9.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
             }
@@ -16741,6 +17678,8 @@ private fun ForgeBottomBar(
 @Composable
 private fun RuntimeOnboardingScreen(
     state: ForgeUiState,
+    onSelectAgent: (AgentKind) -> Unit,
+    onSelectThemeMode: (String) -> Unit,
     onToggleStack: (DevStack) -> Unit,
     onStartSetup: () -> Unit,
     onPauseSetup: () -> Unit,
@@ -16751,6 +17690,8 @@ private fun RuntimeOnboardingScreen(
     val snap = state.setupSnapshot
     val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
 
     Column(
         modifier = Modifier
@@ -16759,23 +17700,61 @@ private fun RuntimeOnboardingScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(
-            text = "NextCraft Forge",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "Ubuntu 24.04 LTS ARM64 Root Chroot (`su -mm`) Environment Setup",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "NextCraft Forge",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = scheme.onBackground,
+                )
+                Text(
+                    text = "Ubuntu 24.04 LTS ARM64 Root Chroot (`su -mm`) Studio",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ForgeThemeMode.entries.forEach { mode ->
+                    val selected = mode == activeThemeMode
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selected) scheme.primaryContainer else tokens.cardElevatedColor,
+                        border = if (selected) {
+                            BorderStroke(1.dp, scheme.primary)
+                        } else {
+                            tokens.elevatedBorderStroke
+                        },
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onSelectThemeMode(mode.id) },
+                    ) {
+                        Text(
+                            text = mode.badge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
 
+        // System Readiness Card
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                Text(
+                    text = "Environment Readiness",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 StatusCheckRow(
                     label = "ARM64 Device Architecture (aarch64)",
                     ok = state.arm64Supported,
@@ -16794,22 +17773,79 @@ private fun RuntimeOnboardingScreen(
             }
         }
 
+        // BUG-UI-010 Fix: Allow choosing the primary Coding Agent Engine right on Onboarding
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Select Development Stacks to Provision",
+                    text = "1. Select Primary Coding Agent Engine",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                )
+                AgentKind.entries.forEach { kind ->
+                    val selected = state.agentKind == kind
+                    ForgeElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        selected = selected,
+                        onClick = { if (!isInstalling) onSelectAgent(kind) },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(kind.displayTitle(), fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = kind.downloadNote,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = tokens.accentText,
+                                    )
+                                }
+                                Text(
+                                    text = kind.displaySubtitle(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (selected) {
+                                        scheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                    } else {
+                                        scheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = tokens.successText,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Development Stacks Selection Card
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "2. Select Development Stacks to Provision",
+                    style = MaterialTheme.typography.titleMedium,
                 )
                 DevStack.entries.forEach { stack ->
                     val selected = stack in state.selectedDevStacks
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable(enabled = !isInstalling) { onToggleStack(stack) }
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -16825,7 +17861,7 @@ private fun RuntimeOnboardingScreen(
                             Text(
                                 text = stack.displayDescription(),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = scheme.onSurfaceVariant,
                             )
                             Text(
                                 text = stack.installsSummary,
@@ -16862,6 +17898,27 @@ private fun RuntimeOnboardingScreen(
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                     )
+                    if (snap.logs.isNotEmpty()) {
+                        val logShape = RoundedCornerShape(10.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 160.dp)
+                                .clip(logShape)
+                                .background(tokens.terminalBackground)
+                                .border(1.dp, scheme.outlineVariant, logShape)
+                                .verticalScroll(rememberScrollState())
+                                .padding(10.dp),
+                        ) {
+                            Text(
+                                text = snap.logs.takeLast(25).joinToString("\n"),
+                                color = tokens.terminalText,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -17016,7 +18073,7 @@ private fun NewProjectDialog(
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (1182 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17042,21 +18099,28 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -17077,6 +18141,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -17087,11 +18152,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -17101,6 +18168,7 @@ import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.runtime.AntigravityAuthState
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -17113,6 +18181,8 @@ fun AgentScreen(
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+
     // hasOfficialCredential() may spawn `su` and block for seconds; never call it during composition.
     val hasAgyCredential by produceState(
         initialValue = true,
@@ -17128,9 +18198,31 @@ fun AgentScreen(
         }
     }
 
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
+    // BUG-UI-004 Fix: Track if user is near the bottom so streaming deltas don't yank scroll position
+    val isNearBottom by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val total = layoutInfo.totalItemsCount
+            if (total == 0) {
+                true
+            } else {
+                val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                lastVisible >= total - 2
+            }
+        }
+    }
+
+    LaunchedEffect(state.messages.size) {
         if (state.messages.isNotEmpty()) {
             listState.animateScrollToItem(state.messages.lastIndex)
+        }
+    }
+
+    val lastMessageLength = state.messages.lastOrNull()?.text?.length ?: 0
+    val lastWorkItemsSize = state.messages.lastOrNull()?.workItems?.size ?: 0
+    LaunchedEffect(lastMessageLength, lastWorkItemsSize) {
+        if (state.messages.isNotEmpty() && isNearBottom) {
+            listState.scrollToItem(state.messages.lastIndex)
         }
     }
 
@@ -17140,6 +18232,7 @@ fun AgentScreen(
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
+            onClearChat = viewModel::clearActiveChat,
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -17152,12 +18245,52 @@ fun AgentScreen(
                 onSubmitCode = { code -> runCatching { viewModel.antigravityAuth.submitCode(code) } },
                 onCancel = { viewModel.antigravityAuth.cancel() },
             )
+        } else if (state.agentKind != AgentKind.ANTIGRAVITY && !state.providerProfile.hasSecret) {
+            Surface(
+                color = tokens.cardElevatedColor,
+                contentColor = scheme.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = tokens.warningText,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = "No API key saved for ${state.providerProfile.kind.title} (${state.providerProfile.model})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tokens.warningText,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(
+                            onClick = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp),
+                        ) {
+                            Text("Configure Key", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Divider(color = scheme.outlineVariant)
+                }
+            }
         }
 
         state.activeStatusLine?.let { statusLine ->
             Surface(
                 color = tokens.cardElevatedColor,
-                contentColor = MaterialTheme.colorScheme.onSurface,
+                contentColor = scheme.onSurface,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -17170,6 +18303,13 @@ fun AgentScreen(
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (state.sessionRunning) tokens.accentText else tokens.successText),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = statusLine,
                             style = MaterialTheme.typography.labelMedium,
@@ -17185,11 +18325,11 @@ fun AgentScreen(
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                 modifier = Modifier.height(28.dp),
                             ) {
-                                Text("Stop", fontSize = 11.sp)
+                                Text("Stop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Divider(color = scheme.outlineVariant)
                 }
             }
         }
@@ -17211,60 +18351,152 @@ fun AgentScreen(
                 modifier = Modifier.weight(1f),
             )
         } else {
-            LazyColumn(
-                state = listState,
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(state.messages, key = { it.id }) { message ->
-                    ChatMessageCard(
-                        message = message,
-                        agentName = state.agentKind.displayTitle(),
-                        onRunSnippet = { cmd ->
-                            viewModel.runTerminalCommand(cmd)
-                            viewModel.selectTab(ForgeTab.TERMINAL)
-                        },
-                    )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(state.messages, key = { it.id }) { message ->
+                        ChatMessageCard(
+                            message = message,
+                            agentName = state.agentKind.displayTitle(),
+                            onRunSnippet = { cmd ->
+                                viewModel.runTerminalCommand(cmd)
+                                viewModel.selectTab(ForgeTab.TERMINAL)
+                            },
+                        )
+                    }
+                }
+
+                if (!isNearBottom) {
+                    Surface(
+                        shape = RoundedCornerShape(100),
+                        color = scheme.primaryContainer,
+                        contentColor = scheme.onPrimaryContainer,
+                        border = BorderStroke(1.dp, scheme.primary.copy(alpha = 0.5f)),
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(14.dp)
+                            .clip(RoundedCornerShape(100))
+                            .clickable {
+                                scope.launch {
+                                    if (state.messages.isNotEmpty()) {
+                                        listState.animateScrollToItem(state.messages.lastIndex)
+                                    }
+                                }
+                            },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Scroll to bottom",
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Latest",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (state.changedItems.isNotEmpty() && !state.sessionRunning) {
+            val totalAdded = state.changedItems.sumOf { it.additions }
+            val totalRemoved = state.changedItems.sumOf { it.deletions }
+            Divider(color = scheme.outlineVariant)
+            Surface(
+                color = tokens.cardElevatedColor,
+                contentColor = scheme.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = tokens.accentText,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = "${state.changedItems.size} file(s) changed",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = scheme.onSurface,
+                    )
+                    Text(
+                        text = "+$totalAdded / -$totalRemoved",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = tokens.successText,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(
+                        onClick = { viewModel.selectTab(ForgeTab.FILES) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp),
+                    ) {
+                        Text("Review Diff →", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Divider(color = scheme.outlineVariant)
         Surface(
             color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+            contentColor = scheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Bottom,
             ) {
                 OutlinedTextField(
                     value = promptInput,
                     onValueChange = { promptInput = it },
+                    shape = RoundedCornerShape(20.dp),
                     placeholder = {
                         Text(
-                            "Ask ${state.agentKind.displayTitle()} to build, refactor, or fix…",
+                            text = "Ask ${state.agentKind.displayTitle()} to build, refactor, or fix…",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
                     modifier = Modifier.weight(1f),
-                    maxLines = 4,
+                    maxLines = 5,
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 if (state.sessionRunning) {
                     Button(
                         onClick = viewModel::stopActiveTask,
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(0.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
+                            containerColor = scheme.error,
+                            contentColor = scheme.onError,
                         ),
+                        modifier = Modifier.size(48.dp),
                     ) {
                         Icon(Icons.Default.Close, contentDescription = "Stop")
                     }
@@ -17278,6 +18510,9 @@ fun AgentScreen(
                             }
                         },
                         enabled = promptInput.isNotBlank(),
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(48.dp),
                     ) {
                         Icon(Icons.Default.Send, contentDescription = "Send")
                     }
@@ -17293,6 +18528,7 @@ private fun ChatTabsRow(
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
+    onClearChat: () -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     Surface(
@@ -17305,7 +18541,7 @@ private fun ChatTabsRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -17313,15 +18549,17 @@ private fun ChatTabsRow(
                     val selected = chat.id == state.activeChatId
                     FilterChip(
                         selected = selected,
-                        onClick = { onSelectChat(chat.id) },
+                        enabled = !state.sessionRunning || selected,
+                        onClick = { if (!state.sessionRunning) onSelectChat(chat.id) },
                         label = {
                             Text(
                                 text = chat.displayTitle(),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 175.dp),
                             )
                         },
-                        trailingIcon = if (state.chats.size > 1 && selected) {
+                        trailingIcon = if (state.chats.size > 1 && selected && !state.sessionRunning) {
                             {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -17336,7 +18574,21 @@ private fun ChatTabsRow(
                         },
                     )
                 }
+                if (state.chats.size == 1 && state.messages.isNotEmpty() && !state.sessionRunning) {
+                    AssistChip(
+                        onClick = onClearChat,
+                        label = { Text("Clear") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        },
+                    )
+                }
                 AssistChip(
+                    enabled = !state.sessionRunning,
                     onClick = onCreateChat,
                     label = { Text("New Chat") },
                     leadingIcon = {
@@ -17396,7 +18648,10 @@ private fun AntigravityOAuthBanner(
                 )
             }
             authState.authorizationUrl?.let { url ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Button(
                         onClick = {
                             runCatching {
@@ -17544,54 +18799,190 @@ private fun ToolApprovalCard(
     }
 }
 
+private data class QuickPromptCardInfo(
+    val title: String,
+    val subtitle: String,
+    val prompt: String,
+    val icon: ImageVector,
+)
+
 @Composable
 private fun EmptyAgentWelcome(
     state: ForgeUiState,
     onQuickPrompt: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val suggestions = listOf(
-        "Inspect this workspace and summarize its architecture.",
-        "Create a responsive Jetpack Compose screen with clean state management.",
-        "Run the test suite or verify scripts inside the Ubuntu Root Chroot.",
-        "Audit the codebase for concurrency, security, and edge-case bugs.",
-    )
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val activeModelLabel = if (state.agentKind == AgentKind.ANTIGRAVITY) {
+        state.antigravityModel.ifBlank { "default (auto)" }
+    } else {
+        state.providerProfile.model.ifBlank { "default" }
+    }
+    val cards = remember {
+        listOf(
+            QuickPromptCardInfo(
+                title = "Architecture Overview",
+                subtitle = "Map modules, entry points & data flow",
+                prompt = "Inspect this workspace and summarize its architecture.",
+                icon = Icons.Default.Star,
+            ),
+            QuickPromptCardInfo(
+                title = "UI / Compose Feature",
+                subtitle = "Build responsive screens & clean state",
+                prompt = "Create a responsive Jetpack Compose screen with clean state management.",
+                icon = Icons.Default.Edit,
+            ),
+            QuickPromptCardInfo(
+                title = "Build & Verify",
+                subtitle = "Run tests or verification scripts in Chroot",
+                prompt = "Run the test suite or verify scripts inside the Ubuntu Root Chroot.",
+                icon = Icons.Default.PlayArrow,
+            ),
+            QuickPromptCardInfo(
+                title = "Deep Bug Audit",
+                subtitle = "Find & fix concurrency, UI/UX & edge-case bugs",
+                prompt = "Audit the codebase for concurrency, security, and edge-case bugs.",
+                icon = Icons.Default.Build,
+            ),
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.Center,
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = state.agentKind.displayTitle(),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "Active Workspace: /workspace/${state.activeProject?.slug ?: "sandbox"} • Model: ${
-                if (state.agentKind == AgentKind.ANTIGRAVITY) state.antigravityModel else state.providerProfile.model
-            }",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        // Expressive Hero Studio Header Card
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(scheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = null,
+                        tint = scheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+                Text(
+                    text = state.agentKind.displayTitle(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = scheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = state.agentKind.displaySubtitle(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = tokens.cardElevatedColor,
+                        border = tokens.elevatedBorderStroke,
+                    ) {
+                        Text(
+                            text = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = tokens.cardElevatedColor,
+                        border = tokens.elevatedBorderStroke,
+                    ) {
+                        Text(
+                            text = "Model: $activeModelLabel",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = scheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2x2 Bento Quick-Action Grid
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            suggestions.forEach { prompt ->
-                ForgeThemedCard(
+            Text(
+                text = "QUICK STUDIO ACTIONS",
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+                fontWeight = FontWeight.Bold,
+            )
+            cards.chunked(2).forEach { rowItems ->
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { onQuickPrompt(prompt) },
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(
-                        text = prompt,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(12.dp),
-                    )
+                    rowItems.forEach { item ->
+                        ForgeThemedCard(
+                            modifier = Modifier.weight(1f),
+                            onClick = { onQuickPrompt(item.prompt) },
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(scheme.primaryContainer.copy(alpha = 0.75f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = item.icon,
+                                        contentDescription = null,
+                                        tint = scheme.onPrimaryContainer,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = item.subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = scheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -17605,29 +18996,86 @@ private fun ChatMessageCard(
     onRunSnippet: (String) -> Unit,
 ) {
     var expandTools by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val bgColor = if (message.fromUser) {
-        scheme.primaryContainer
-    } else {
-        tokens.cardContainerColor
-    }
-    val textColor = if (message.fromUser) {
-        scheme.onPrimaryContainer
-    } else {
-        scheme.onSurface
-    }
-    val border = if (message.fromUser) {
-        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.35f))
-    } else {
-        tokens.cardBorderStroke
+
+    if (message.fromUser) {
+        // BUG-UI-015 Fix: Right-aligned distinct user prompt bubble
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            val userShape = RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 6.dp,
+                bottomStart = 18.dp,
+                bottomEnd = 18.dp,
+            )
+            Card(
+                modifier = Modifier.fillMaxWidth(0.88f),
+                shape = userShape,
+                border = BorderStroke(1.dp, scheme.primary.copy(alpha = 0.4f)),
+                colors = CardDefaults.cardColors(
+                    containerColor = scheme.primaryContainer,
+                    contentColor = scheme.onPrimaryContainer,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "You",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = scheme.onPrimaryContainer,
+                        )
+                        if (message.text.isNotBlank()) {
+                            IconButton(
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(message.text))
+                                    copied = true
+                                    scope.launch {
+                                        delay(1400)
+                                        copied = false
+                                    }
+                                },
+                                modifier = Modifier.size(22.dp),
+                            ) {
+                                Icon(
+                                    imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
+                                    contentDescription = "Copy prompt",
+                                    tint = scheme.onPrimaryContainer.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                    }
+                    MarkdownText(
+                        markdown = message.text,
+                        color = scheme.onPrimaryContainer,
+                        onRunCode = onRunSnippet,
+                    )
+                }
+            }
+        }
+        return
     }
 
+    // Assistant Studio Response Card
     ForgeThemedCard(
         modifier = Modifier.fillMaxWidth(),
-        containerColor = bgColor,
-        contentColor = textColor,
-        border = border,
+        containerColor = tokens.cardContainerColor,
+        contentColor = scheme.onSurface,
+        border = tokens.cardBorderStroke,
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -17638,39 +19086,93 @@ private fun ChatMessageCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = if (message.fromUser) "You" else agentName,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (message.fromUser) {
-                        scheme.onPrimaryContainer
-                    } else {
-                        tokens.accentText
-                    },
-                )
-                if (message.workItems.isNotEmpty()) {
-                    Row(
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { expandTools = !expandTools }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(scheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = "${message.workItems.size} tool steps",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = textColor,
-                        )
                         Icon(
-                            imageVector = if (expandTools) {
-                                Icons.Default.KeyboardArrowUp
-                            } else {
-                                Icons.Default.KeyboardArrowDown
-                            },
+                            imageVector = Icons.Default.Star,
                             contentDescription = null,
-                            tint = textColor,
-                            modifier = Modifier.size(16.dp),
+                            tint = scheme.onPrimaryContainer,
+                            modifier = Modifier.size(14.dp),
                         )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = agentName,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = tokens.accentText,
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (message.workItems.isNotEmpty()) {
+                        val completed = message.workItems.count { it.isComplete }
+                        val total = message.workItems.size
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = tokens.cardElevatedColor,
+                            border = tokens.elevatedBorderStroke,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { expandTools = !expandTools },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (completed == total) tokens.successText else tokens.warningText,
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "$completed/$total tools",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = scheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Icon(
+                                    imageVector = if (expandTools) {
+                                        Icons.Default.KeyboardArrowUp
+                                    } else {
+                                        Icons.Default.KeyboardArrowDown
+                                    },
+                                    contentDescription = null,
+                                    tint = scheme.onSurfaceVariant,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                            }
+                        }
+                    }
+                    if (message.text.isNotBlank()) {
+                        IconButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(message.text))
+                                copied = true
+                                scope.launch {
+                                    delay(1400)
+                                    copied = false
+                                }
+                            },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
+                                contentDescription = "Copy response",
+                                tint = if (copied) tokens.successText else scheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -17682,15 +19184,26 @@ private fun ChatMessageCard(
             if (message.text.isNotBlank()) {
                 MarkdownText(
                     markdown = message.text,
-                    color = textColor,
+                    color = scheme.onSurface,
                     onRunCode = onRunSnippet,
                 )
-            } else if (!message.fromUser) {
-                Text(
-                    text = "Thinking…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
-                )
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(tokens.accentText),
+                    )
+                    Text(
+                        text = "Thinking & analyzing workspace…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -17699,14 +19212,14 @@ private fun ChatMessageCard(
 @Composable
 private fun ToolActivityList(items: List<ActivityItem>) {
     val tokens = LocalForgeThemeTokens.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(10.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(tokens.cardElevatedColor)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-            .padding(8.dp),
+            .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items.forEach { item ->
@@ -17749,7 +19262,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 
 ---
 
-## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (864 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17783,9 +19296,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -17798,14 +19315,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -17814,6 +19335,7 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.DiffLineType
 import com.nextcraft.forge.model.WorkspaceEntry
+import kotlinx.coroutines.delay
 
 @Composable
 fun FilesAndDiffScreen(
@@ -17821,8 +19343,20 @@ fun FilesAndDiffScreen(
     viewModel: MainViewModel,
 ) {
     var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
+    var lastAutoOpenedPath by rememberSaveable { mutableStateOf<String?>(null) }
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
     val tokens = LocalForgeThemeTokens.current
+
+    // BUG-UI-014 Fix: Automatically switch to editor tab when a file is opened externally (e.g. from Build Diagnostics)
+    LaunchedEffect(state.selectedFilePath) {
+        val currentPath = state.selectedFilePath
+        if (currentPath != null && currentPath != lastAutoOpenedPath) {
+            lastAutoOpenedPath = currentPath
+            mode = "editor"
+        } else if (currentPath == null) {
+            lastAutoOpenedPath = null
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -17833,43 +19367,64 @@ fun FilesAndDiffScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(
-                    selected = mode == "files",
-                    onClick = { mode = "files" },
-                    label = { Text("Explorer (${state.workspaceFiles.size})") },
-                    leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                )
-                FilterChip(
-                    selected = mode == "editor",
-                    onClick = { mode = "editor" },
-                    label = {
-                        Text(
-                            text = state.selectedFilePath?.substringAfterLast('/') ?: "Editor",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                )
-                FilterChip(
-                    selected = mode == "diff",
-                    onClick = { mode = "diff" },
-                    label = { Text("Changes (${state.changedItems.size})") },
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { showNewFileDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "New File")
+                // BUG-UI-006 Fix: Scrollable sub-tab chips so long filenames never push action icons off-screen
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = mode == "files",
+                        onClick = { mode = "files" },
+                        label = { Text("Explorer (${state.workspaceFiles.size})") },
+                        leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                    val baseEditorLabel = state.selectedFilePath
+                        ?.substringAfterLast('/')
+                        ?.let { if (it.length > 18) it.take(16) + "…" else it }
+                        ?: "Editor"
+                    val editorFileLabel = if (state.selectedFileDirty && state.selectedFilePath != null) {
+                        "$baseEditorLabel •"
+                    } else {
+                        baseEditorLabel
+                    }
+                    FilterChip(
+                        selected = mode == "editor",
+                        onClick = { mode = "editor" },
+                        label = {
+                            Text(
+                                text = editorFileLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                    FilterChip(
+                        selected = mode == "diff",
+                        onClick = { mode = "diff" },
+                        label = { Text("Changes (${state.changedItems.size})") },
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = { showNewFileDialog = true },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "New File", modifier = Modifier.size(20.dp))
                 }
                 IconButton(
                     onClick = {
                         state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) }
                     },
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -17880,6 +19435,7 @@ fun FilesAndDiffScreen(
                 entries = state.workspaceFiles,
                 selectedPath = state.selectedFilePath,
                 onSelectFile = { path ->
+                    lastAutoOpenedPath = path
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
                 },
@@ -17888,15 +19444,24 @@ fun FilesAndDiffScreen(
             "editor" -> WorkspaceFileEditor(
                 selectedPath = state.selectedFilePath,
                 content = state.selectedFileContent,
+                editable = state.selectedFileEditable,
+                dirty = state.selectedFileDirty,
+                sessionRunning = state.sessionRunning,
                 savedBanner = state.fileSavedBanner,
                 onContentChange = viewModel::updateSelectedFileContent,
                 onSave = viewModel::saveSelectedFile,
+                onDeleteFile = { path ->
+                    viewModel.deleteWorkspaceFile(path)
+                    mode = "files"
+                },
                 onBackToExplorer = { mode = "files" },
                 modifier = Modifier.weight(1f),
             )
             else -> WorkspaceDiffReviewList(
                 changes = state.changedItems,
+                sessionRunning = state.sessionRunning,
                 onOpenFile = { path ->
+                    lastAutoOpenedPath = path
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
                 },
@@ -17928,6 +19493,8 @@ private fun WorkspaceTreeList(
     onSelectFile: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var filterQuery by rememberSaveable { mutableStateOf("") }
+    var collapsedDirs by remember { mutableStateOf(setOf<String>()) }
     if (entries.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -17943,69 +19510,137 @@ private fun WorkspaceTreeList(
         return
     }
 
-    val scheme = MaterialTheme.colorScheme
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items(entries, key = { it.path }) { entry ->
-            val isSelected = entry.path == selectedPath
-            val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
-            val secondaryTextColor = if (isSelected) {
-                scheme.onPrimaryContainer.copy(alpha = 0.78f)
-            } else {
-                scheme.onSurfaceVariant
+    val filteredEntries = remember(entries, filterQuery, collapsedDirs) {
+        val q = filterQuery.trim()
+        if (q.isEmpty()) {
+            entries.filterNot { entry ->
+                collapsedDirs.any { collapsed -> entry.path.startsWith("$collapsed/") }
             }
-            Row(
+        } else {
+            entries.filter { it.path.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+        }
+    }
+
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier = modifier.fillMaxSize()) {
+        if (entries.size > 6) {
+            OutlinedTextField(
+                value = filterQuery,
+                onValueChange = { filterQuery = it },
+                placeholder = { Text("Filter workspace files by name or path…") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                trailingIcon = if (filterQuery.isNotEmpty()) {
+                    {
+                        IconButton(
+                            onClick = { filterQuery = "" },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear filter",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (isSelected) {
-                            scheme.primaryContainer
-                        } else {
-                            Color.Transparent
-                        },
-                    )
-                    .clickable(enabled = !entry.isDirectory) { onSelectFile(entry.path) }
-                    .padding(
-                        start = (12 + entry.depth * 14).dp,
-                        end = 12.dp,
-                        top = 8.dp,
-                        bottom = 8.dp,
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (entry.isDirectory) "📁" else "📄",
-                    fontSize = 14.sp,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = entry.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = primaryTextColor,
-                        fontWeight = if (entry.isDirectory || isSelected) FontWeight.Bold else FontWeight.Normal,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = entry.path,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = secondaryTextColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items(filteredEntries, key = { it.path }) { entry ->
+                val isSelected = entry.path == selectedPath
+                val isCollapsed = entry.isDirectory && entry.path in collapsedDirs
+                val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
+                val secondaryTextColor = if (isSelected) {
+                    scheme.onPrimaryContainer.copy(alpha = 0.78f)
+                } else {
+                    scheme.onSurfaceVariant
                 }
-                if (!entry.isDirectory) {
+                val indentDepth = if (filterQuery.isBlank()) entry.depth.coerceAtMost(6) else 0
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isSelected) {
+                                scheme.primaryContainer
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .clickable {
+                            if (entry.isDirectory) {
+                                collapsedDirs = if (isCollapsed) {
+                                    collapsedDirs - entry.path
+                                } else {
+                                    collapsedDirs + entry.path
+                                }
+                            } else {
+                                onSelectFile(entry.path)
+                            }
+                        }
+                        .padding(
+                            start = (10 + indentDepth * 14).dp,
+                            end = 10.dp,
+                            top = 8.dp,
+                            bottom = 8.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = secondaryTextColor,
+                        text = when {
+                            entry.isDirectory && isCollapsed -> "▸ 📁"
+                            entry.isDirectory -> "▾ 📂"
+                            else -> "📄"
+                        },
+                        fontSize = 13.sp,
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = entry.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = primaryTextColor,
+                            fontWeight = if (entry.isDirectory || isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = entry.path,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = secondaryTextColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (!entry.isDirectory) {
+                        Text(
+                            text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = secondaryTextColor,
+                        )
+                    }
                 }
             }
         }
@@ -18016,13 +19651,29 @@ private fun WorkspaceTreeList(
 private fun WorkspaceFileEditor(
     selectedPath: String?,
     content: String,
+    editable: Boolean,
+    dirty: Boolean,
+    sessionRunning: Boolean,
     savedBanner: String?,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onDeleteFile: (String) -> Unit,
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500)
+            copied = false
+        }
+    }
+
     if (selectedPath == null) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -18032,7 +19683,7 @@ private fun WorkspaceFileEditor(
                 Text(
                     text = "Select a file from Explorer to view or edit.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(onClick = onBackToExplorer) {
@@ -18043,46 +19694,171 @@ private fun WorkspaceFileEditor(
         return
     }
 
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = tokens.cardElevatedColor,
+            title = { Text("Delete '$selectedPath'?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This file will be deleted from the active workspace.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeleteFile(selectedPath)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    val lineCount = remember(content) {
+        if (content.isEmpty()) 1 else content.count { it == '\n' } + 1
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = selectedPath,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            savedBanner?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tokens.successText,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-            }
-            Button(onClick = onSave) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedPath,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = scheme.onSurface,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "$lineCount lines • ${content.length} chars",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = scheme.onSurfaceVariant,
+                        )
+                        if (dirty) {
+                            Text(
+                                text = "UNSAVED",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = tokens.warningText,
+                            )
+                        }
+                        if (!editable) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = tokens.warningText,
+                                    modifier = Modifier.size(12.dp),
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "READ-ONLY",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = tokens.warningText,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (copied) {
+                    Text(
+                        text = "Copied!",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tokens.successText,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                } else {
+                    savedBanner?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(content))
+                        copied = true
+                    },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Copy file content",
+                        tint = scheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    enabled = !sessionRunning,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete file",
+                        tint = tokens.dangerText,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Save")
+                Button(
+                    onClick = onSave,
+                    enabled = editable && dirty,
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save")
+                }
             }
         }
 
         OutlinedTextField(
             value = content,
-            onValueChange = onContentChange,
-            textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+            onValueChange = { if (editable) onContentChange(it) },
+            readOnly = !editable,
+            shape = RoundedCornerShape(14.dp),
+            textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -18093,6 +19869,7 @@ private fun WorkspaceFileEditor(
 @Composable
 private fun WorkspaceDiffReviewList(
     changes: List<ChangeItem>,
+    sessionRunning: Boolean,
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
@@ -18101,6 +19878,43 @@ private fun WorkspaceDiffReviewList(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    var showRevertAllConfirm by remember { mutableStateOf(false) }
+
+    if (showRevertAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRevertAllConfirm = false },
+            containerColor = tokens.cardElevatedColor,
+            title = { Text("Undo all ${changes.size} modified file(s)?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This will revert all modified files in this workspace back to the last checkpoint.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRevertAllConfirm = false
+                        onRevertAll()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Undo All", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRevertAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     if (changes.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -18116,26 +19930,36 @@ private fun WorkspaceDiffReviewList(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        // BUG-UI-006 Fix: Constrain summary text with weight(1f) so Keep All / Undo All buttons never wrap/overflow
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "${changes.size} modified file(s) since last checkpoint",
+                text = "${changes.size} modified file(s) since checkpoint",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onKeepAll) { Text("Keep All") }
-                OutlinedButton(onClick = onRevertAll) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Undo All")
-                }
+            Button(
+                onClick = onKeepAll,
+                enabled = !sessionRunning,
+            ) {
+                Text("Keep All", maxLines = 1)
+            }
+            OutlinedButton(
+                onClick = { showRevertAllConfirm = true },
+                enabled = !sessionRunning,
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Undo All", maxLines = 1)
             }
         }
 
@@ -18159,10 +19983,13 @@ private fun WorkspaceDiffReviewList(
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
                                     .weight(1f)
                                     .clickable { onOpenFile(item.path) },
                             )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "+${item.additions}",
                                 color = tokens.successText,
@@ -18178,9 +20005,10 @@ private fun WorkspaceDiffReviewList(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(
@@ -18192,6 +20020,7 @@ private fun WorkspaceDiffReviewList(
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(
@@ -18214,7 +20043,8 @@ private fun WorkspaceDiffReviewList(
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            item.diffLines.take(80).forEach { line ->
+                            val maxPreviewLines = 80
+                            item.diffLines.take(maxPreviewLines).forEach { line ->
                                 val prefix = when (line.type) {
                                     DiffLineType.ADDITION -> "+ "
                                     DiffLineType.DELETION -> "- "
@@ -18243,6 +20073,18 @@ private fun WorkspaceDiffReviewList(
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(lineBg)
                                         .padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                            if (item.diffLines.size > maxPreviewLines) {
+                                Text(
+                                    text = "… +${item.diffLines.size - maxPreviewLines} more lines (tap file path above to open in Editor)",
+                                    color = tokens.accentText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clickable { onOpenFile(item.path) }
+                                        .padding(top = 4.dp, start = 4.dp),
                                 )
                             }
                         }
@@ -18291,7 +20133,7 @@ private fun NewWorkspaceFileDialog(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (199 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (291 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -18311,9 +20153,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
@@ -18333,16 +20180,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun TerminalScreen(
@@ -18350,19 +20204,32 @@ fun TerminalScreen(
     viewModel: MainViewModel,
 ) {
     var commandInput by rememberSaveable { mutableStateOf("") }
+    var copied by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
 
-    val quickCommands = listOf(
-        "uname -a",
-        "git status",
-        "ls -la",
-        "node -v && npm -v",
-        "python3 --version",
-        "gradle -v",
-        "df -h",
-    )
+    val quickCommands = remember {
+        listOf(
+            "git status",
+            "ls -la",
+            "uname -a",
+            "node -v && npm -v",
+            "python3 --version",
+            "gradle -v",
+            "df -h",
+        )
+    }
+
+    val executeCurrentCommand = {
+        val cmd = commandInput.trim()
+        if (cmd.isNotEmpty() && !state.terminalRunning) {
+            commandInput = ""
+            viewModel.runTerminalCommand(cmd)
+        }
+    }
 
     LaunchedEffect(state.terminalOutput.length) {
         scrollState.animateScrollTo(scrollState.maxValue)
@@ -18371,7 +20238,7 @@ fun TerminalScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
             color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+            contentColor = scheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -18381,25 +20248,90 @@ fun TerminalScreen(
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = "Root Chroot Shell (`su -mm` • /workspace/${state.activeProject?.slug ?: "sandbox"})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(if (state.terminalRunning) tokens.warningText else tokens.successText),
                     )
-                    IconButton(
-                        onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Root Chroot Shell (`su -mm`)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (state.terminalRunning) {
+                            tokens.inlineCodeBackground
+                        } else {
+                            tokens.diffAddedBackground
+                        },
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = "Copy terminal output", modifier = Modifier.size(18.dp))
+                        Text(
+                            text = if (state.terminalRunning) "RUNNING" else "READY",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (state.terminalRunning) tokens.accentText else tokens.successText,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(state.terminalOutput))
+                            copied = true
+                            scope.launch {
+                                delay(1400)
+                                copied = false
+                            }
+                        },
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
+                            contentDescription = "Copy terminal output",
+                            tint = if (copied) tokens.successText else scheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
                     if (state.terminalRunning) {
-                        IconButton(onClick = viewModel::stopTerminal) {
-                            Icon(Icons.Default.Close, contentDescription = "Stop command", modifier = Modifier.size(18.dp))
+                        IconButton(
+                            onClick = viewModel::stopTerminal,
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Stop command",
+                                tint = tokens.dangerText,
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
                     }
-                    IconButton(onClick = viewModel::clearTerminal) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear terminal", modifier = Modifier.size(18.dp))
+                    IconButton(
+                        onClick = viewModel::clearTerminal,
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Clear terminal",
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
                 }
                 Row(
@@ -18428,7 +20360,7 @@ fun TerminalScreen(
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        Divider(color = scheme.outlineVariant)
 
         Box(
             modifier = Modifier
@@ -18440,7 +20372,9 @@ fun TerminalScreen(
         ) {
             SelectionContainer {
                 Text(
-                    text = state.terminalOutput.ifEmpty { "Ready.\n" },
+                    text = state.terminalOutput.ifEmpty {
+                        "root@nextcraft-forge:/workspace/${state.activeProject?.slug ?: "sandbox"}# Ready.\n"
+                    },
                     color = tokens.terminalText,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -18449,10 +20383,10 @@ fun TerminalScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        Divider(color = scheme.outlineVariant)
         Surface(
             color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+            contentColor = scheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -18464,26 +20398,26 @@ fun TerminalScreen(
                 OutlinedTextField(
                     value = commandInput,
                     onValueChange = { commandInput = it },
+                    shape = RoundedCornerShape(16.dp),
                     placeholder = {
                         Text(
-                            text = "Run command in Ubuntu Root Chroot…",
+                            text = "$ Run command in Ubuntu Root Chroot…",
                             fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     },
-                    textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+                    textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { executeCurrentCommand() }),
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
-                    onClick = {
-                        val cmd = commandInput.trim()
-                        if (cmd.isNotEmpty()) {
-                            commandInput = ""
-                            viewModel.runTerminalCommand(cmd)
-                        }
-                    },
+                    onClick = executeCurrentCommand,
                     enabled = commandInput.isNotBlank() && !state.terminalRunning,
+                    shape = RoundedCornerShape(14.dp),
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Execute")
                     Spacer(modifier = Modifier.width(4.dp))
@@ -18497,7 +20431,7 @@ fun TerminalScreen(
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -18505,10 +20439,13 @@ fun TerminalScreen(
 package com.nextcraft.forge.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18523,15 +20460,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -18547,6 +20490,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18556,14 +20500,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nextcraft.forge.runtime.AndroidBuildIssue
 import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidLogLevel
+import kotlinx.coroutines.delay
 
 @Composable
 fun AndroidBuildScreen(
@@ -18573,7 +20524,33 @@ fun AndroidBuildScreen(
     val build = state.androidBuild
     val isBuilding = build.phase == AndroidBuildPhase.BUILDING
     var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
+    val gradleScrollState = rememberScrollState()
     val tokens = LocalForgeThemeTokens.current
+    val clipboard = LocalClipboardManager.current
+    var logCopied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(logCopied) {
+        if (logCopied) {
+            delay(1500)
+            logCopied = false
+        }
+    }
+
+    // BUG-UI-008 Fix: Auto-scroll Gradle output as build log streams in
+    LaunchedEffect(build.log.length, isBuilding) {
+        if (isBuilding && build.log.isNotEmpty()) {
+            gradleScrollState.animateScrollTo(gradleScrollState.maxValue)
+        }
+    }
+
+    // BUG-UI-026 Fix: Auto-switch to Diagnostics when a build fails with parsed compiler/resource issues
+    LaunchedEffect(build.phase, build.issues.size) {
+        if (build.phase == AndroidBuildPhase.BUILDING) {
+            activeConsoleTab = "gradle"
+        } else if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+            activeConsoleTab = "issues"
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -18596,13 +20573,18 @@ fun AndroidBuildScreen(
                             text = "Android APK Builder (SDK 35 • Bionic aapt2)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = build.message ?: build.stage.displayLabel(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     val (badgeBg, badgeFg) = when (build.phase) {
                         AndroidBuildPhase.SUCCEEDED -> tokens.diffAddedBackground to tokens.successText
                         AndroidBuildPhase.FAILED -> tokens.diffRemovedBackground to tokens.dangerText
@@ -18612,12 +20594,13 @@ fun AndroidBuildScreen(
                     Surface(
                         color = badgeBg,
                         contentColor = badgeFg,
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(8.dp),
                     ) {
                         Text(
                             text = build.phase.displayBadge(),
                             color = badgeFg,
                             style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         )
@@ -18675,9 +20658,13 @@ fun AndroidBuildScreen(
             }
         }
 
+        // BUG-UI-008 Fix: Horizontally scrollable FilterChip row so 3 console tabs never overflow on narrow phones
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             FilterChip(
                 selected = activeConsoleTab == "gradle",
@@ -18694,11 +20681,27 @@ fun AndroidBuildScreen(
                 onClick = { activeConsoleTab = "logcat" },
                 label = { Text("Live Logcat (${state.androidLogcat.lines.size})") },
             )
+            if (activeConsoleTab == "gradle" && build.log.isNotBlank()) {
+                AssistChip(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(build.log))
+                        logCopied = true
+                    },
+                    label = { Text(if (logCopied) "Copied!" else "Copy Log") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    },
+                )
+            }
         }
 
         when (activeConsoleTab) {
             "gradle" -> {
-                val consoleShape = RoundedCornerShape(10.dp)
+                val consoleShape = RoundedCornerShape(12.dp)
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -18706,7 +20709,7 @@ fun AndroidBuildScreen(
                         .clip(consoleShape)
                         .background(tokens.terminalBackground)
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, consoleShape)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(gradleScrollState)
                         .padding(12.dp),
                 ) {
                     SelectionContainer {
@@ -18738,6 +20741,9 @@ fun AndroidBuildScreen(
                 state = state,
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
+                onClearLogcat = viewModel::clearProjectLogcat,
+                onSetMinimumLevel = viewModel::setLogcatMinimumLevel,
+                onSetQuery = viewModel::setLogcatQuery,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -18801,6 +20807,8 @@ private fun BuildIssuesList(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = tokens.accentText,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable { onOpenFile(path) },
                         )
                     }
                     Text(
@@ -18836,10 +20844,30 @@ private fun LogcatPanel(
     state: ForgeUiState,
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
+    onClearLogcat: () -> Unit,
+    onSetMinimumLevel: (AndroidLogLevel) -> Unit,
+    onSetQuery: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
+    val listState = rememberLazyListState()
     val tokens = LocalForgeThemeTokens.current
+
+    val filteredLines = remember(logcat.lines, logcat.minimumLevel, logcat.query) {
+        val q = logcat.query.trim()
+        logcat.lines.filter { line ->
+            line.level.ordinal >= logcat.minimumLevel.ordinal &&
+                (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+        }
+    }
+
+    val lastLogId = filteredLines.lastOrNull()?.id ?: 0L
+    LaunchedEffect(lastLogId) {
+        if (filteredLines.isNotEmpty() && logcat.running) {
+            listState.scrollToItem(filteredLines.lastIndex)
+        }
+    }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -18847,14 +20875,28 @@ private fun LogcatPanel(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (logcat.lines.isNotEmpty()) {
+                IconButton(
+                    onClick = onClearLogcat,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear logcat",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
                     Text("Pause")
@@ -18866,8 +20908,62 @@ private fun LogcatPanel(
             }
         }
 
-        val logcatShape = RoundedCornerShape(10.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val levels = listOf(
+                AndroidLogLevel.VERBOSE to "ALL",
+                AndroidLogLevel.INFO to "I+",
+                AndroidLogLevel.WARNING to "W+",
+                AndroidLogLevel.ERROR to "E+",
+            )
+            levels.forEach { (level, label) ->
+                FilterChip(
+                    selected = logcat.minimumLevel == level,
+                    onClick = { onSetMinimumLevel(level) },
+                    label = { Text(label, fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
+                )
+            }
+            OutlinedTextField(
+                value = logcat.query,
+                onValueChange = onSetQuery,
+                placeholder = { Text("Filter tag/text…", fontSize = 12.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                    )
+                },
+                trailingIcon = if (logcat.query.isNotEmpty()) {
+                    {
+                        IconButton(
+                            onClick = { onSetQuery("") },
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear logcat filter",
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.width(200.dp),
+            )
+        }
+
+        val logcatShape = RoundedCornerShape(12.dp)
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -18877,7 +20973,7 @@ private fun LogcatPanel(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(logcat.lines, key = { it.id }) { line ->
+            items(filteredLines, key = { it.id }) { line ->
                 val color = when (line.level) {
                     AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
                     AndroidLogLevel.WARNING -> tokens.warningText
@@ -18896,6 +20992,22 @@ private fun LogcatPanel(
     }
 }
 
+private fun normalizePreviewUrlInput(raw: String): String {
+    val clean = raw.trim()
+    if (clean.isEmpty()) return ""
+    if (clean.startsWith(":")) {
+        return "http://127.0.0.1$clean"
+    }
+    if (clean.all { it.isDigit() }) {
+        return "http://127.0.0.1:$clean"
+    }
+    val lower = clean.lowercase()
+    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+        return clean
+    }
+    return "http://$clean"
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebPreviewScreen(
@@ -18903,9 +21015,30 @@ fun WebPreviewScreen(
     viewModel: MainViewModel,
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
+    var lastLoadedUrl by remember { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val tokens = LocalForgeThemeTokens.current
+    val context = LocalContext.current
     val webViewBgArgb = tokens.terminalBackground.toArgb()
+
+    val navigateToInputUrl = {
+        val normalized = normalizePreviewUrlInput(urlInput)
+        val scheme = Uri.parse(normalized).scheme?.lowercase()
+        if (normalized.isNotEmpty() && (scheme == "http" || scheme == "https")) {
+            urlInput = normalized
+            lastLoadedUrl = normalized
+            viewModel.updatePreviewUrl(normalized)
+            webViewRef?.loadUrl(normalized)
+        }
+    }
+
+    // BUG-UI-008 Fix: Automatically navigate WebView when state.previewUrl changes externally (e.g. PreviewStarted event or port scan)
+    LaunchedEffect(state.previewUrl) {
+        if (state.previewUrl.isNotBlank() && state.previewUrl != lastLoadedUrl) {
+            lastLoadedUrl = state.previewUrl
+            webViewRef?.loadUrl(state.previewUrl)
+        }
+    }
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
@@ -18934,19 +21067,17 @@ fun WebPreviewScreen(
                         value = urlInput,
                         onValueChange = { urlInput = it },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         label = { Text("Local Dev Server URL (Host NetNS)") },
+                        placeholder = { Text("http://127.0.0.1:3000 or :5173") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { navigateToInputUrl() }),
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = {
-                            val clean = urlInput.trim()
-                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
-                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
-                                viewModel.updatePreviewUrl(clean)
-                                webViewRef?.loadUrl(clean)
-                            }
-                        },
+                        onClick = { navigateToInputUrl() },
+                        shape = RoundedCornerShape(12.dp),
                     ) {
                         Text("Go")
                     }
@@ -18957,6 +21088,19 @@ fun WebPreviewScreen(
                         },
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Scan & Reload")
+                    }
+                    IconButton(
+                        onClick = {
+                            val target = normalizePreviewUrlInput(urlInput).ifBlank { state.previewUrl }
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(target))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Open in external browser")
                     }
                 }
 
@@ -18979,6 +21123,7 @@ fun WebPreviewScreen(
                             AssistChip(
                                 onClick = {
                                     urlInput = portUrl
+                                    lastLoadedUrl = portUrl
                                     viewModel.updatePreviewUrl(portUrl)
                                     webViewRef?.loadUrl(portUrl)
                                 },
@@ -18995,8 +21140,8 @@ fun WebPreviewScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            factory = { context ->
-                WebView(context).apply {
+            factory = { ctx ->
+                WebView(ctx).apply {
                     setBackgroundColor(webViewBgArgb)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -19008,6 +21153,7 @@ fun WebPreviewScreen(
                             request: android.webkit.WebResourceRequest,
                         ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
                     }
+                    lastLoadedUrl = state.previewUrl
                     loadUrl(state.previewUrl)
                     webViewRef = this
                 }
@@ -19023,7 +21169,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1180 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -19032,9 +21178,12 @@ package com.nextcraft.forge.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19045,6 +21194,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -19079,18 +21229,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
+import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import kotlinx.coroutines.launch
 
 @Composable
@@ -19123,6 +21277,7 @@ fun SettingsScreenModern(
     var agyEffortInput by rememberSaveable(state.antigravityEffort) {
         mutableStateOf(state.antigravityEffort)
     }
+    var agyCodeInput by remember { mutableStateOf("") }
 
     var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
@@ -19193,10 +21348,32 @@ fun SettingsScreenModern(
                     OutlinedTextField(
                         value = agyModelInput,
                         onValueChange = { agyModelInput = it },
-                        label = { Text("Antigravity Model") },
+                        label = { Text("Antigravity Model (blank = default auto)") },
+                        placeholder = { Text("default (auto) — e.g. gemini-2.5-pro") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf(
+                            "" to "default (auto)",
+                            "gemini-2.5-pro" to "gemini-2.5-pro",
+                            "gemini-2.5-flash" to "gemini-2.5-flash",
+                        ).forEach { (modelVal, label) ->
+                            FilterChip(
+                                selected = agyModelInput.trim() == modelVal,
+                                onClick = {
+                                    agyModelInput = modelVal
+                                    viewModel.setAntigravityConfig(modelVal, agyEffortInput)
+                                },
+                                label = { Text(label, fontFamily = FontFamily.Monospace) },
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -19212,7 +21389,12 @@ fun SettingsScreenModern(
                             )
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Button(
                             onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
                         ) {
@@ -19223,6 +21405,9 @@ fun SettingsScreenModern(
                                 viewModel.antigravityAuth.hasOfficialCredential()
                             }
                         }
+                        val authInFlight = agyAuth.status == AntigravityAuthStatus.STARTING ||
+                            agyAuth.status == AntigravityAuthStatus.AWAITING_CODE ||
+                            agyAuth.status == AntigravityAuthStatus.COMPLETING
                         if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
@@ -19232,10 +21417,104 @@ fun SettingsScreenModern(
                         } else {
                             OutlinedButton(
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                                enabled = !authInFlight,
                             ) {
                                 Text("Sign In with Google")
                             }
                         }
+                        if (authInFlight) {
+                            OutlinedButton(
+                                onClick = { viewModel.antigravityAuth.cancel() },
+                            ) {
+                                Text("Cancel Sign-In")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateAntigravityConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text("Validate CLI")
+                        }
+                    }
+
+                    agyAuth.accountEmail?.takeIf { it.isNotBlank() }?.let { email ->
+                        Text(
+                            text = "Signed in as $email",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    agyAuth.message?.takeIf { it.isNotBlank() }?.let { authMsg ->
+                        Text(
+                            text = authMsg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (agyAuth.status == AntigravityAuthStatus.ERROR) {
+                                tokens.dangerText
+                            } else {
+                                tokens.accentText
+                            },
+                        )
+                    }
+                    agyAuth.authorizationUrl?.takeIf { it.isNotBlank() }?.let { authUrl ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
+                                    }
+                                },
+                            ) {
+                                Text("Open Google Sign-In")
+                            }
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(authUrl)) },
+                            ) {
+                                Text("Copy OAuth URL")
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedTextField(
+                                value = agyCodeInput,
+                                onValueChange = { agyCodeInput = it },
+                                label = { Text("Google Verification Code") },
+                                placeholder = { Text("Paste authorization code…") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        viewModel.antigravityAuth.submitCode(agyCodeInput)
+                                        agyCodeInput = ""
+                                    }
+                                },
+                                enabled = agyCodeInput.isNotBlank(),
+                            ) {
+                                Text("Verify")
+                            }
+                        }
+                    }
+
+                    if (state.apiBusy) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }
@@ -19303,10 +21582,71 @@ fun SettingsScreenModern(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Allow Provider Fallbacks", fontWeight = FontWeight.Medium)
+                                Text(
+                                    text = "Automatically fail over to backup OpenRouter upstreams when rate-limited",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = state.providerProfile.openRouterAllowFallbacks,
+                                onCheckedChange = { allow ->
+                                    viewModel.updateProviderConfig(
+                                        baseUrl = baseUrlInput,
+                                        model = modelInput,
+                                        openRouterOrder = openRouterOrderInput,
+                                        openRouterAllowFallbacks = allow,
+                                    )
+                                },
+                            )
+                        }
+                    }
+
+                    if (state.providerProfile.kind == ProviderKind.CUSTOM ||
+                        state.providerProfile.kind == ProviderKind.KIMI
+                    ) {
+                        Text(
+                            text = "Wire Protocol Format:",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(
+                                "anthropic-messages" to "Anthropic Messages",
+                                "openai-completions" to "OpenAI Chat",
+                                "openai-responses" to "OpenAI Responses",
+                            ).forEach { (apiFormat, label) ->
+                                FilterChip(
+                                    selected = state.providerProfile.dshApi == apiFormat,
+                                    onClick = {
+                                        viewModel.updateProviderConfig(
+                                            baseUrl = baseUrlInput,
+                                            model = modelInput,
+                                            openRouterOrder = openRouterOrderInput,
+                                            dshApi = apiFormat,
+                                        )
+                                    },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
                     }
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Button(
@@ -19479,7 +21819,12 @@ fun SettingsScreenModern(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 Button(
                                     onClick = {
                                         clipboard.setText(AnnotatedString(dc.userCode))
@@ -19663,6 +22008,8 @@ fun SettingsScreenModern(
 
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            val snap = state.setupSnapshot
+            val isProvisioning = snap.status == RuntimeSetupStatus.RUNNING
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -19681,6 +22028,7 @@ fun SettingsScreenModern(
                     ) {
                         Switch(
                             checked = selected,
+                            enabled = !isProvisioning,
                             onCheckedChange = { viewModel.toggleDevStack(stack) },
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -19697,18 +22045,71 @@ fun SettingsScreenModern(
                         }
                     }
                 }
+                if (snap.status != RuntimeSetupStatus.IDLE) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (isProvisioning) {
+                            LinearProgressIndicator(
+                                progress = snap.progress.coerceIn(0f, 1f),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Text(
+                            text = "${snap.status.name} (${(snap.progress * 100).toInt()}%) — ${snap.errorMessage ?: snap.message}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when (snap.status) {
+                                RuntimeSetupStatus.ERROR -> tokens.dangerText
+                                RuntimeSetupStatus.COMPLETE -> tokens.successText
+                                else -> tokens.accentText
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (snap.logs.isNotEmpty() && (isProvisioning || snap.status == RuntimeSetupStatus.ERROR)) {
+                            val logShape = RoundedCornerShape(10.dp)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(logShape)
+                                    .background(tokens.terminalBackground)
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, logShape)
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                snap.logs.takeLast(6).forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = tokens.terminalText,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(
-                        onClick = viewModel::startRuntimeSetup,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Apply / Provision Stacks")
+                    if (isProvisioning) {
+                        OutlinedButton(
+                            onClick = viewModel::pauseRuntimeSetup,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Pause Provisioning")
+                        }
+                    } else {
+                        Button(
+                            onClick = viewModel::startRuntimeSetup,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Apply / Provision Stacks")
+                        }
                     }
                     OutlinedButton(
                         onClick = viewModel::repairRootfs,
+                        enabled = !isProvisioning,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Repair Chroot")
@@ -19779,67 +22180,109 @@ fun SettingsScreenModern(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ForgeThemeMode.entries.forEach { mode ->
-                        val selected = mode == activeThemeMode
-                        ForgeElevatedCard(
+                    ForgeThemeMode.entries.chunked(2).forEach { rowModes ->
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            selected = selected,
-                            onClick = { viewModel.setThemeMode(mode.id) },
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = mode.title,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (selected) {
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                            } else {
-                                                tokens.cardContainerColor
-                                            },
+                            rowModes.forEach { mode ->
+                                val selected = mode == activeThemeMode
+                                val (canvasSwatch, accentSwatch) = when (mode) {
+                                    ForgeThemeMode.SYSTEM -> Color(0xFF1E293B) to Color(0xFF38BDF8)
+                                    ForgeThemeMode.DARK -> Color(0xFF090C10) to Color(0xFF3B82F6)
+                                    ForgeThemeMode.GLASS -> Color(0xFF060B16) to Color(0xFF38BDF8)
+                                    ForgeThemeMode.WHITE -> Color(0xFFFFFFFF) to Color(0xFFFF385C)
+                                }
+                                ForgeElevatedCard(
+                                    modifier = Modifier.weight(1f),
+                                    selected = selected,
+                                    onClick = { viewModel.setThemeMode(mode.id) },
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(11.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(canvasSwatch)
+                                                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), CircleShape),
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(accentSwatch),
+                                                )
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (selected) {
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                                } else {
+                                                    tokens.cardContainerColor
+                                                },
+                                            ) {
+                                                Text(
+                                                    text = mode.badge,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (selected) {
+                                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                                    } else {
+                                                        tokens.accentText
+                                                    },
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                )
+                                            }
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
                                         ) {
                                             Text(
-                                                text = mode.badge,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
+                                                text = mode.title,
+                                                style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (selected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    tokens.accentText
-                                                },
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
                                             )
+                                            if (selected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = tokens.successText,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            }
                                         }
+                                        Text(
+                                            text = mode.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = mode.subtitle,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (selected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                }
-                                if (selected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = tokens.successText,
-                                    )
                                 }
                             }
                         }
@@ -19867,13 +22310,438 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
-                Button(onClick = { viewModel.checkForAppUpdates() }) {
-                    Text("Check for App Updates")
+                state.updateInfo?.let { info ->
+                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "Release v${info.versionName} (code ${info.versionCode})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            if (info.notes.isNotBlank()) {
+                                Text(
+                                    text = info.notes,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = { viewModel.checkForAppUpdates() }) {
+                        Text("Check for App Updates")
+                    }
+                    if (state.updateInfo != null) {
+                        Button(onClick = { viewModel.downloadAndInstallAppUpdate() }) {
+                            Text("Download & Install v${state.updateInfo.versionName}")
+                        }
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+```
+
+---
+
+## 7. `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (385 baris)
+
+```kotlin
+package com.nextcraft.forge.ui
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nextcraft.forge.model.Project
+import com.nextcraft.forge.model.ProjectKind
+import com.nextcraft.forge.model.ProjectType
+import com.nextcraft.forge.runtime.AndroidBuildPhase
+
+/**
+ * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
+ * a single accent for the primary action and the active project, and header actions.
+ */
+@Composable
+fun ProjectsScreen(
+    state: ForgeUiState,
+    onOpenProject: (String) -> Unit,
+    onNewProject: () -> Unit,
+    onDeleteProject: (String) -> Unit,
+    onNewQuickProject: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
+
+    val regular = state.projects
+        .filter { it.kind == ProjectKind.PROJECT }
+        .sortedByDescending { it.updatedAtMillis }
+    val quick = state.projects
+        .filter { it.kind == ProjectKind.QUICK_PROJECT }
+        .sortedByDescending { it.updatedAtMillis }
+    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while a task is running.
+    val canDelete = state.projects.size > 1 &&
+        !state.sessionRunning &&
+        state.androidBuild.phase != AndroidBuildPhase.BUILDING &&
+        !state.terminalRunning
+
+    pendingDeleteProject?.let { targetProject ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            containerColor = tokens.cardElevatedColor,
+            title = {
+                Text(
+                    text = "Delete '${targetProject.name}'?",
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = "This permanently deletes /workspace/${targetProject.slug}, all local files, checkpoints, and chat history for this project.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = targetProject.id
+                        pendingDeleteProject = null
+                        onDeleteProject(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete Project", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        ProjectsHeader(
+            onNewProject = onNewProject,
+            onNewQuickProject = onNewQuickProject,
+        )
+        Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+
+        if (state.projects.isEmpty()) {
+            ProjectsEmptyState(
+                onNewProject = onNewProject,
+                onNewQuickProject = onNewQuickProject,
+            )
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (regular.isNotEmpty()) {
+                    item(key = "header-recent") { SectionLabel("RECENT") }
+                    items(regular, key = { it.id }) { project ->
+                        ProjectRow(
+                            project = project,
+                            active = project.id == state.activeProjectId,
+                            canDelete = canDelete,
+                            onOpen = { onOpenProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
+                        )
+                    }
+                }
+                if (quick.isNotEmpty()) {
+                    item(key = "header-quick") { SectionLabel("QUICK") }
+                    items(quick, key = { it.id }) { project ->
+                        ProjectRow(
+                            project = project,
+                            active = project.id == state.activeProjectId,
+                            canDelete = canDelete,
+                            onOpen = { onOpenProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectsHeader(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Projects",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onNewQuickProject) {
+            Text(
+                text = "Quick Chat",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = tokens.accentText,
+            )
+        }
+        // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
+        IconButton(onClick = onNewProject) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "New project",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ProjectRow(
+    project: Project,
+    active: Boolean,
+    canDelete: Boolean,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val rowBg = if (active) tokens.accentText.copy(alpha = 0.08f) else Color.Transparent
+
+    Box {
+        Column(modifier = Modifier.background(rowBg)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .combinedClickable(
+                        role = Role.Button,
+                        onClick = onOpen,
+                        onLongClick = { if (canDelete) menuOpen = true },
+                    )
+                    .padding(start = 16.dp, end = if (canDelete) 6.dp else 16.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusDot(active = active)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = project.name,
+                        fontSize = 14.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = project.subtitle(),
+                        fontSize = 12.5.sp,
+                        color = muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = project.formattedUpdatedAt,
+                    fontSize = 12.sp,
+                    color = muted,
+                    maxLines = 1,
+                )
+                if (canDelete) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete ${project.name}",
+                            tint = muted.copy(alpha = 0.75f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+            Divider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(start = 16.dp),
+            )
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("Delete project") },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    onDelete()
+                },
+            )
+        }
+    }
+}
+
+/** Filled accent dot = active project, hollow ring = the rest. Shape (not only colour) carries the state. */
+@Composable
+private fun StatusDot(active: Boolean) {
+    val tokens = LocalForgeThemeTokens.current
+    val accent = tokens.accentText
+    val ring = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = Modifier
+            .size(16.dp)
+            .semantics { contentDescription = if (active) "Active project" else "Project" },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (active) {
+            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(accent))
+        } else {
+            Box(modifier = Modifier.size(10.dp).border(1.5.dp, ring, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun ProjectsEmptyState(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "No projects yet",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Create a project or start a quick chat to begin building.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = onNewProject,
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+            ) {
+                Text("New project", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = onNewQuickProject,
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+            ) {
+                Text("Quick Chat", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private fun Project.subtitle(): String {
+    val base = when {
+        kind == ProjectKind.QUICK_PROJECT -> "Quick chat"
+        type == ProjectType.ANDROID -> "Android" + (androidTemplate?.let { " · ${it.label}" } ?: "")
+        else -> "General"
+    }
+    val cleanDesc = description.trim()
+    return if (cleanDesc.isNotBlank() && !cleanDesc.equals(base, ignoreCase = true)) {
+        "$base · $cleanDesc"
+    } else {
+        base
     }
 }
 ```

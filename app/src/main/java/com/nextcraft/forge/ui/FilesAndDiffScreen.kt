@@ -29,9 +29,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -44,14 +48,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.DiffLineType
 import com.nextcraft.forge.model.WorkspaceEntry
+import kotlinx.coroutines.delay
 
 @Composable
 fun FilesAndDiffScreen(
@@ -67,8 +76,20 @@ fun FilesAndDiffScreen(
     viewModel: MainViewModel,
 ) {
     var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
+    var lastAutoOpenedPath by rememberSaveable { mutableStateOf<String?>(null) }
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
     val tokens = LocalForgeThemeTokens.current
+
+    // BUG-UI-014 Fix: Automatically switch to editor tab when a file is opened externally (e.g. from Build Diagnostics)
+    LaunchedEffect(state.selectedFilePath) {
+        val currentPath = state.selectedFilePath
+        if (currentPath != null && currentPath != lastAutoOpenedPath) {
+            lastAutoOpenedPath = currentPath
+            mode = "editor"
+        } else if (currentPath == null) {
+            lastAutoOpenedPath = null
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -79,43 +100,64 @@ fun FilesAndDiffScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(
-                    selected = mode == "files",
-                    onClick = { mode = "files" },
-                    label = { Text("Explorer (${state.workspaceFiles.size})") },
-                    leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                )
-                FilterChip(
-                    selected = mode == "editor",
-                    onClick = { mode = "editor" },
-                    label = {
-                        Text(
-                            text = state.selectedFilePath?.substringAfterLast('/') ?: "Editor",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                )
-                FilterChip(
-                    selected = mode == "diff",
-                    onClick = { mode = "diff" },
-                    label = { Text("Changes (${state.changedItems.size})") },
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { showNewFileDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "New File")
+                // BUG-UI-006 Fix: Scrollable sub-tab chips so long filenames never push action icons off-screen
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = mode == "files",
+                        onClick = { mode = "files" },
+                        label = { Text("Explorer (${state.workspaceFiles.size})") },
+                        leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                    val baseEditorLabel = state.selectedFilePath
+                        ?.substringAfterLast('/')
+                        ?.let { if (it.length > 18) it.take(16) + "…" else it }
+                        ?: "Editor"
+                    val editorFileLabel = if (state.selectedFileDirty && state.selectedFilePath != null) {
+                        "$baseEditorLabel •"
+                    } else {
+                        baseEditorLabel
+                    }
+                    FilterChip(
+                        selected = mode == "editor",
+                        onClick = { mode = "editor" },
+                        label = {
+                            Text(
+                                text = editorFileLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                    FilterChip(
+                        selected = mode == "diff",
+                        onClick = { mode = "diff" },
+                        label = { Text("Changes (${state.changedItems.size})") },
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = { showNewFileDialog = true },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "New File", modifier = Modifier.size(20.dp))
                 }
                 IconButton(
                     onClick = {
                         state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) }
                     },
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -126,6 +168,7 @@ fun FilesAndDiffScreen(
                 entries = state.workspaceFiles,
                 selectedPath = state.selectedFilePath,
                 onSelectFile = { path ->
+                    lastAutoOpenedPath = path
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
                 },
@@ -134,15 +177,24 @@ fun FilesAndDiffScreen(
             "editor" -> WorkspaceFileEditor(
                 selectedPath = state.selectedFilePath,
                 content = state.selectedFileContent,
+                editable = state.selectedFileEditable,
+                dirty = state.selectedFileDirty,
+                sessionRunning = state.sessionRunning,
                 savedBanner = state.fileSavedBanner,
                 onContentChange = viewModel::updateSelectedFileContent,
                 onSave = viewModel::saveSelectedFile,
+                onDeleteFile = { path ->
+                    viewModel.deleteWorkspaceFile(path)
+                    mode = "files"
+                },
                 onBackToExplorer = { mode = "files" },
                 modifier = Modifier.weight(1f),
             )
             else -> WorkspaceDiffReviewList(
                 changes = state.changedItems,
+                sessionRunning = state.sessionRunning,
                 onOpenFile = { path ->
+                    lastAutoOpenedPath = path
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
                 },
@@ -174,6 +226,8 @@ private fun WorkspaceTreeList(
     onSelectFile: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var filterQuery by rememberSaveable { mutableStateOf("") }
+    var collapsedDirs by remember { mutableStateOf(setOf<String>()) }
     if (entries.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -189,69 +243,137 @@ private fun WorkspaceTreeList(
         return
     }
 
-    val scheme = MaterialTheme.colorScheme
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items(entries, key = { it.path }) { entry ->
-            val isSelected = entry.path == selectedPath
-            val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
-            val secondaryTextColor = if (isSelected) {
-                scheme.onPrimaryContainer.copy(alpha = 0.78f)
-            } else {
-                scheme.onSurfaceVariant
+    val filteredEntries = remember(entries, filterQuery, collapsedDirs) {
+        val q = filterQuery.trim()
+        if (q.isEmpty()) {
+            entries.filterNot { entry ->
+                collapsedDirs.any { collapsed -> entry.path.startsWith("$collapsed/") }
             }
-            Row(
+        } else {
+            entries.filter { it.path.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+        }
+    }
+
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier = modifier.fillMaxSize()) {
+        if (entries.size > 6) {
+            OutlinedTextField(
+                value = filterQuery,
+                onValueChange = { filterQuery = it },
+                placeholder = { Text("Filter workspace files by name or path…") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                trailingIcon = if (filterQuery.isNotEmpty()) {
+                    {
+                        IconButton(
+                            onClick = { filterQuery = "" },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear filter",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (isSelected) {
-                            scheme.primaryContainer
-                        } else {
-                            Color.Transparent
-                        },
-                    )
-                    .clickable(enabled = !entry.isDirectory) { onSelectFile(entry.path) }
-                    .padding(
-                        start = (12 + entry.depth * 14).dp,
-                        end = 12.dp,
-                        top = 8.dp,
-                        bottom = 8.dp,
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (entry.isDirectory) "📁" else "📄",
-                    fontSize = 14.sp,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = entry.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = primaryTextColor,
-                        fontWeight = if (entry.isDirectory || isSelected) FontWeight.Bold else FontWeight.Normal,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = entry.path,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = secondaryTextColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items(filteredEntries, key = { it.path }) { entry ->
+                val isSelected = entry.path == selectedPath
+                val isCollapsed = entry.isDirectory && entry.path in collapsedDirs
+                val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
+                val secondaryTextColor = if (isSelected) {
+                    scheme.onPrimaryContainer.copy(alpha = 0.78f)
+                } else {
+                    scheme.onSurfaceVariant
                 }
-                if (!entry.isDirectory) {
+                val indentDepth = if (filterQuery.isBlank()) entry.depth.coerceAtMost(6) else 0
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isSelected) {
+                                scheme.primaryContainer
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .clickable {
+                            if (entry.isDirectory) {
+                                collapsedDirs = if (isCollapsed) {
+                                    collapsedDirs - entry.path
+                                } else {
+                                    collapsedDirs + entry.path
+                                }
+                            } else {
+                                onSelectFile(entry.path)
+                            }
+                        }
+                        .padding(
+                            start = (10 + indentDepth * 14).dp,
+                            end = 10.dp,
+                            top = 8.dp,
+                            bottom = 8.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = secondaryTextColor,
+                        text = when {
+                            entry.isDirectory && isCollapsed -> "▸ 📁"
+                            entry.isDirectory -> "▾ 📂"
+                            else -> "📄"
+                        },
+                        fontSize = 13.sp,
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = entry.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = primaryTextColor,
+                            fontWeight = if (entry.isDirectory || isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = entry.path,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = secondaryTextColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (!entry.isDirectory) {
+                        Text(
+                            text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = secondaryTextColor,
+                        )
+                    }
                 }
             }
         }
@@ -262,13 +384,29 @@ private fun WorkspaceTreeList(
 private fun WorkspaceFileEditor(
     selectedPath: String?,
     content: String,
+    editable: Boolean,
+    dirty: Boolean,
+    sessionRunning: Boolean,
     savedBanner: String?,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onDeleteFile: (String) -> Unit,
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500)
+            copied = false
+        }
+    }
+
     if (selectedPath == null) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -278,7 +416,7 @@ private fun WorkspaceFileEditor(
                 Text(
                     text = "Select a file from Explorer to view or edit.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(onClick = onBackToExplorer) {
@@ -289,46 +427,171 @@ private fun WorkspaceFileEditor(
         return
     }
 
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = tokens.cardElevatedColor,
+            title = { Text("Delete '$selectedPath'?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This file will be deleted from the active workspace.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeleteFile(selectedPath)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    val lineCount = remember(content) {
+        if (content.isEmpty()) 1 else content.count { it == '\n' } + 1
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = selectedPath,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            savedBanner?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tokens.successText,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-            }
-            Button(onClick = onSave) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedPath,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = scheme.onSurface,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "$lineCount lines • ${content.length} chars",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = scheme.onSurfaceVariant,
+                        )
+                        if (dirty) {
+                            Text(
+                                text = "UNSAVED",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = tokens.warningText,
+                            )
+                        }
+                        if (!editable) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = tokens.warningText,
+                                    modifier = Modifier.size(12.dp),
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "READ-ONLY",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = tokens.warningText,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (copied) {
+                    Text(
+                        text = "Copied!",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tokens.successText,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                } else {
+                    savedBanner?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(content))
+                        copied = true
+                    },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Copy file content",
+                        tint = scheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    enabled = !sessionRunning,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete file",
+                        tint = tokens.dangerText,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Save")
+                Button(
+                    onClick = onSave,
+                    enabled = editable && dirty,
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save")
+                }
             }
         }
 
         OutlinedTextField(
             value = content,
-            onValueChange = onContentChange,
-            textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+            onValueChange = { if (editable) onContentChange(it) },
+            readOnly = !editable,
+            shape = RoundedCornerShape(14.dp),
+            textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -339,6 +602,7 @@ private fun WorkspaceFileEditor(
 @Composable
 private fun WorkspaceDiffReviewList(
     changes: List<ChangeItem>,
+    sessionRunning: Boolean,
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
@@ -347,6 +611,43 @@ private fun WorkspaceDiffReviewList(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    var showRevertAllConfirm by remember { mutableStateOf(false) }
+
+    if (showRevertAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRevertAllConfirm = false },
+            containerColor = tokens.cardElevatedColor,
+            title = { Text("Undo all ${changes.size} modified file(s)?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This will revert all modified files in this workspace back to the last checkpoint.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRevertAllConfirm = false
+                        onRevertAll()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Undo All", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRevertAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     if (changes.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -362,26 +663,36 @@ private fun WorkspaceDiffReviewList(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        // BUG-UI-006 Fix: Constrain summary text with weight(1f) so Keep All / Undo All buttons never wrap/overflow
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "${changes.size} modified file(s) since last checkpoint",
+                text = "${changes.size} modified file(s) since checkpoint",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onKeepAll) { Text("Keep All") }
-                OutlinedButton(onClick = onRevertAll) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Undo All")
-                }
+            Button(
+                onClick = onKeepAll,
+                enabled = !sessionRunning,
+            ) {
+                Text("Keep All", maxLines = 1)
+            }
+            OutlinedButton(
+                onClick = { showRevertAllConfirm = true },
+                enabled = !sessionRunning,
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Undo All", maxLines = 1)
             }
         }
 
@@ -405,10 +716,13 @@ private fun WorkspaceDiffReviewList(
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
                                     .weight(1f)
                                     .clickable { onOpenFile(item.path) },
                             )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "+${item.additions}",
                                 color = tokens.successText,
@@ -424,9 +738,10 @@ private fun WorkspaceDiffReviewList(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(
@@ -438,6 +753,7 @@ private fun WorkspaceDiffReviewList(
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(
@@ -460,7 +776,8 @@ private fun WorkspaceDiffReviewList(
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            item.diffLines.take(80).forEach { line ->
+                            val maxPreviewLines = 80
+                            item.diffLines.take(maxPreviewLines).forEach { line ->
                                 val prefix = when (line.type) {
                                     DiffLineType.ADDITION -> "+ "
                                     DiffLineType.DELETION -> "- "
@@ -489,6 +806,18 @@ private fun WorkspaceDiffReviewList(
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(lineBg)
                                         .padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                            if (item.diffLines.size > maxPreviewLines) {
+                                Text(
+                                    text = "… +${item.diffLines.size - maxPreviewLines} more lines (tap file path above to open in Editor)",
+                                    color = tokens.accentText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clickable { onOpenFile(item.path) }
+                                        .padding(top = 4.dp, start = 4.dp),
                                 )
                             }
                         }

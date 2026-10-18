@@ -3,10 +3,13 @@
 package com.nextcraft.forge.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,15 +24,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -45,6 +54,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,14 +64,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nextcraft.forge.runtime.AndroidBuildIssue
 import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidLogLevel
+import kotlinx.coroutines.delay
 
 @Composable
 fun AndroidBuildScreen(
@@ -71,7 +88,33 @@ fun AndroidBuildScreen(
     val build = state.androidBuild
     val isBuilding = build.phase == AndroidBuildPhase.BUILDING
     var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
+    val gradleScrollState = rememberScrollState()
     val tokens = LocalForgeThemeTokens.current
+    val clipboard = LocalClipboardManager.current
+    var logCopied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(logCopied) {
+        if (logCopied) {
+            delay(1500)
+            logCopied = false
+        }
+    }
+
+    // BUG-UI-008 Fix: Auto-scroll Gradle output as build log streams in
+    LaunchedEffect(build.log.length, isBuilding) {
+        if (isBuilding && build.log.isNotEmpty()) {
+            gradleScrollState.animateScrollTo(gradleScrollState.maxValue)
+        }
+    }
+
+    // BUG-UI-026 Fix: Auto-switch to Diagnostics when a build fails with parsed compiler/resource issues
+    LaunchedEffect(build.phase, build.issues.size) {
+        if (build.phase == AndroidBuildPhase.BUILDING) {
+            activeConsoleTab = "gradle"
+        } else if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+            activeConsoleTab = "issues"
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -94,13 +137,18 @@ fun AndroidBuildScreen(
                             text = "Android APK Builder (SDK 35 • Bionic aapt2)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = build.message ?: build.stage.displayLabel(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     val (badgeBg, badgeFg) = when (build.phase) {
                         AndroidBuildPhase.SUCCEEDED -> tokens.diffAddedBackground to tokens.successText
                         AndroidBuildPhase.FAILED -> tokens.diffRemovedBackground to tokens.dangerText
@@ -110,12 +158,13 @@ fun AndroidBuildScreen(
                     Surface(
                         color = badgeBg,
                         contentColor = badgeFg,
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(8.dp),
                     ) {
                         Text(
                             text = build.phase.displayBadge(),
                             color = badgeFg,
                             style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         )
@@ -173,9 +222,13 @@ fun AndroidBuildScreen(
             }
         }
 
+        // BUG-UI-008 Fix: Horizontally scrollable FilterChip row so 3 console tabs never overflow on narrow phones
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             FilterChip(
                 selected = activeConsoleTab == "gradle",
@@ -192,11 +245,27 @@ fun AndroidBuildScreen(
                 onClick = { activeConsoleTab = "logcat" },
                 label = { Text("Live Logcat (${state.androidLogcat.lines.size})") },
             )
+            if (activeConsoleTab == "gradle" && build.log.isNotBlank()) {
+                AssistChip(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(build.log))
+                        logCopied = true
+                    },
+                    label = { Text(if (logCopied) "Copied!" else "Copy Log") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    },
+                )
+            }
         }
 
         when (activeConsoleTab) {
             "gradle" -> {
-                val consoleShape = RoundedCornerShape(10.dp)
+                val consoleShape = RoundedCornerShape(12.dp)
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -204,7 +273,7 @@ fun AndroidBuildScreen(
                         .clip(consoleShape)
                         .background(tokens.terminalBackground)
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, consoleShape)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(gradleScrollState)
                         .padding(12.dp),
                 ) {
                     SelectionContainer {
@@ -236,6 +305,9 @@ fun AndroidBuildScreen(
                 state = state,
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
+                onClearLogcat = viewModel::clearProjectLogcat,
+                onSetMinimumLevel = viewModel::setLogcatMinimumLevel,
+                onSetQuery = viewModel::setLogcatQuery,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -299,6 +371,8 @@ private fun BuildIssuesList(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = tokens.accentText,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable { onOpenFile(path) },
                         )
                     }
                     Text(
@@ -334,10 +408,30 @@ private fun LogcatPanel(
     state: ForgeUiState,
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
+    onClearLogcat: () -> Unit,
+    onSetMinimumLevel: (AndroidLogLevel) -> Unit,
+    onSetQuery: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
+    val listState = rememberLazyListState()
     val tokens = LocalForgeThemeTokens.current
+
+    val filteredLines = remember(logcat.lines, logcat.minimumLevel, logcat.query) {
+        val q = logcat.query.trim()
+        logcat.lines.filter { line ->
+            line.level.ordinal >= logcat.minimumLevel.ordinal &&
+                (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+        }
+    }
+
+    val lastLogId = filteredLines.lastOrNull()?.id ?: 0L
+    LaunchedEffect(lastLogId) {
+        if (filteredLines.isNotEmpty() && logcat.running) {
+            listState.scrollToItem(filteredLines.lastIndex)
+        }
+    }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -345,14 +439,28 @@ private fun LogcatPanel(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (logcat.lines.isNotEmpty()) {
+                IconButton(
+                    onClick = onClearLogcat,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear logcat",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
                     Text("Pause")
@@ -364,8 +472,62 @@ private fun LogcatPanel(
             }
         }
 
-        val logcatShape = RoundedCornerShape(10.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val levels = listOf(
+                AndroidLogLevel.VERBOSE to "ALL",
+                AndroidLogLevel.INFO to "I+",
+                AndroidLogLevel.WARNING to "W+",
+                AndroidLogLevel.ERROR to "E+",
+            )
+            levels.forEach { (level, label) ->
+                FilterChip(
+                    selected = logcat.minimumLevel == level,
+                    onClick = { onSetMinimumLevel(level) },
+                    label = { Text(label, fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
+                )
+            }
+            OutlinedTextField(
+                value = logcat.query,
+                onValueChange = onSetQuery,
+                placeholder = { Text("Filter tag/text…", fontSize = 12.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                    )
+                },
+                trailingIcon = if (logcat.query.isNotEmpty()) {
+                    {
+                        IconButton(
+                            onClick = { onSetQuery("") },
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear logcat filter",
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.width(200.dp),
+            )
+        }
+
+        val logcatShape = RoundedCornerShape(12.dp)
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -375,7 +537,7 @@ private fun LogcatPanel(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(logcat.lines, key = { it.id }) { line ->
+            items(filteredLines, key = { it.id }) { line ->
                 val color = when (line.level) {
                     AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
                     AndroidLogLevel.WARNING -> tokens.warningText
@@ -394,6 +556,22 @@ private fun LogcatPanel(
     }
 }
 
+private fun normalizePreviewUrlInput(raw: String): String {
+    val clean = raw.trim()
+    if (clean.isEmpty()) return ""
+    if (clean.startsWith(":")) {
+        return "http://127.0.0.1$clean"
+    }
+    if (clean.all { it.isDigit() }) {
+        return "http://127.0.0.1:$clean"
+    }
+    val lower = clean.lowercase()
+    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+        return clean
+    }
+    return "http://$clean"
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebPreviewScreen(
@@ -401,9 +579,30 @@ fun WebPreviewScreen(
     viewModel: MainViewModel,
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
+    var lastLoadedUrl by remember { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val tokens = LocalForgeThemeTokens.current
+    val context = LocalContext.current
     val webViewBgArgb = tokens.terminalBackground.toArgb()
+
+    val navigateToInputUrl = {
+        val normalized = normalizePreviewUrlInput(urlInput)
+        val scheme = Uri.parse(normalized).scheme?.lowercase()
+        if (normalized.isNotEmpty() && (scheme == "http" || scheme == "https")) {
+            urlInput = normalized
+            lastLoadedUrl = normalized
+            viewModel.updatePreviewUrl(normalized)
+            webViewRef?.loadUrl(normalized)
+        }
+    }
+
+    // BUG-UI-008 Fix: Automatically navigate WebView when state.previewUrl changes externally (e.g. PreviewStarted event or port scan)
+    LaunchedEffect(state.previewUrl) {
+        if (state.previewUrl.isNotBlank() && state.previewUrl != lastLoadedUrl) {
+            lastLoadedUrl = state.previewUrl
+            webViewRef?.loadUrl(state.previewUrl)
+        }
+    }
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
@@ -432,19 +631,17 @@ fun WebPreviewScreen(
                         value = urlInput,
                         onValueChange = { urlInput = it },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         label = { Text("Local Dev Server URL (Host NetNS)") },
+                        placeholder = { Text("http://127.0.0.1:3000 or :5173") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { navigateToInputUrl() }),
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = {
-                            val clean = urlInput.trim()
-                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
-                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
-                                viewModel.updatePreviewUrl(clean)
-                                webViewRef?.loadUrl(clean)
-                            }
-                        },
+                        onClick = { navigateToInputUrl() },
+                        shape = RoundedCornerShape(12.dp),
                     ) {
                         Text("Go")
                     }
@@ -455,6 +652,19 @@ fun WebPreviewScreen(
                         },
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Scan & Reload")
+                    }
+                    IconButton(
+                        onClick = {
+                            val target = normalizePreviewUrlInput(urlInput).ifBlank { state.previewUrl }
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(target))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Open in external browser")
                     }
                 }
 
@@ -477,6 +687,7 @@ fun WebPreviewScreen(
                             AssistChip(
                                 onClick = {
                                     urlInput = portUrl
+                                    lastLoadedUrl = portUrl
                                     viewModel.updatePreviewUrl(portUrl)
                                     webViewRef?.loadUrl(portUrl)
                                 },
@@ -493,8 +704,8 @@ fun WebPreviewScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            factory = { context ->
-                WebView(context).apply {
+            factory = { ctx ->
+                WebView(ctx).apply {
                     setBackgroundColor(webViewBgArgb)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -506,6 +717,7 @@ fun WebPreviewScreen(
                             request: android.webkit.WebResourceRequest,
                         ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
                     }
+                    lastLoadedUrl = state.previewUrl
                     loadUrl(state.previewUrl)
                     webViewRef = this
                 }

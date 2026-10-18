@@ -635,9 +635,30 @@ class RuntimeInstaller(private val context: Context) {
             val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
             if (comparison != 0) return comparison > 0
         }
-        val candidatePre = '-' in candidate.substringBefore('+')
-        val currentPre = '-' in current.substringBefore('+')
-        return !candidatePre && currentPre
+        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+        }
+        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+        val candidateIds = candidatePreTag.split('.')
+        val currentIds = currentPreTag.split('.')
+        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+            val candidateId = candidateIds.getOrNull(index)
+            val currentId = currentIds.getOrNull(index)
+            if (candidateId == null) return false
+            if (currentId == null) return true
+            val candidateNum = candidateId.toIntOrNull()
+            val currentNum = currentId.toIntOrNull()
+            val comparison = if (candidateNum != null && currentNum != null) {
+                candidateNum.compareTo(currentNum)
+            } else {
+                candidateId.compareTo(currentId)
+            }
+            if (comparison != 0) return comparison > 0
+        }
+        return false
     }
 
     private fun migrateLegacyClaudeMarker() {
@@ -677,6 +698,7 @@ class RuntimeInstaller(private val context: Context) {
             onProgress = onProgress,
         )
         verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
+        migrateLegacyClaudeMarker()
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
@@ -982,6 +1004,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installComposer(
         chrootExec: File,
         fraction: Float,
@@ -1234,15 +1257,26 @@ class RuntimeInstaller(private val context: Context) {
         .filter(::isStackInstalled)
         .toSet()
 
+    private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
+        val file = File(rootfs, relativePath.removePrefix("/"))
+        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+    }
+
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        return when (stack) {
+            DevStack.WEB -> true
+            DevStack.PYTHON -> guestExecutableOrSymlinkExists("usr/bin/python3") && guestExecutableOrSymlinkExists("usr/bin/pip3")
+            DevStack.CPP -> guestExecutableOrSymlinkExists("usr/bin/gcc") && guestExecutableOrSymlinkExists("usr/bin/g++")
+            DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
+            DevStack.ANDROID ->
+                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
+                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
+                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
+                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
+                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        }
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {
@@ -1264,6 +1298,7 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.writeText(obj.toString())
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installNodeIfNeeded(
         chrootExec: File,
         from: Float,
@@ -1649,6 +1684,7 @@ class RuntimeInstaller(private val context: Context) {
      * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
      * No PRoot binary or ptrace translation is used.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
         rootfs: File,
@@ -1955,7 +1991,8 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
     @Suppress("DEPRECATION")
     private fun extractZstdTar(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(openZstdInputStream(archive)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -1963,23 +2000,49 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val cleanName = currentEntry.name.removePrefix("./").trimEnd('/')
                 if (cleanName.isNotBlank()) {
-                    val target = safeChild(destination, cleanName)
+                    val target = safeChild(rootDir, cleanName)
                     when {
                         currentEntry.isDirectory -> {
-                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            target.mkdirs()
+                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                val resolvedDir = runCatching {
+                                    resolveSafeSymlinkTarget(
+                                        rootPath = rootPath,
+                                        parentDir = target.toPath().parent ?: rootPath,
+                                        linkName = java.nio.file.Files.readSymbolicLink(target.toPath()).toString(),
+                                        errorMessage = "Archive path escapes runtime via symlink",
+                                    ).toFile()
+                                }.getOrNull()
+                                if (resolvedDir != null) {
+                                    resolvedDir.mkdirs()
+                                } else {
+                                    target.delete()
+                                    target.mkdirs()
+                                }
+                            } else {
+                                target.mkdirs()
+                            }
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
-                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
+                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                if (target.isDirectory && !java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                    target.deleteRecursively()
+                                } else {
+                                    target.delete()
+                                }
+                            }
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             target.parentFile?.mkdirs()
-                            val linkTarget = safeChild(destination, currentEntry.linkName.removePrefix("./").trimEnd('/'))
-                            if (linkTarget.exists()) {
+                            val linkTarget = safeChild(rootDir, currentEntry.linkName.removePrefix("./").trimEnd('/'))
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -1997,18 +2060,21 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun extractNodeArchive(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(archive.inputStream()))).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -2016,7 +2082,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val relative = currentEntry.name.removePrefix("./").substringAfter('/', "").trimEnd('/')
                 if (relative.isNotBlank()) {
-                    val target = safeChild(destination, relative)
+                    val target = safeChild(rootDir, relative)
                     when {
                         currentEntry.isDirectory -> {
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
@@ -2024,16 +2090,20 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
                             if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             val relativeLink = currentEntry.linkName.removePrefix("./").substringAfter('/', "").trimEnd('/')
-                            val linkTarget = safeChild(destination, relativeLink)
+                            val linkTarget = safeChild(rootDir, relativeLink)
                             target.parentFile?.mkdirs()
-                            if (linkTarget.exists()) {
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -2051,24 +2121,50 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Node.js archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     private fun linkOrCopyFile(source: File, destination: File) {
         if (destination.exists() || java.nio.file.Files.isSymbolicLink(destination.toPath())) destination.delete()
+        if (java.nio.file.Files.isSymbolicLink(source.toPath())) {
+            val symTarget = java.nio.file.Files.readSymbolicLink(source.toPath()).toString()
+            Os.symlink(symTarget, destination.absolutePath)
+            return
+        }
         val linked = runCatching {
             Os.link(source.absolutePath, destination.absolutePath)
             true
         }.getOrDefault(false)
         if (!linked) {
             source.inputStream().use { input -> FileOutputStream(destination).use { input.copyTo(it) } }
+            runCatching { Os.chmod(destination.absolutePath, Os.stat(source.absolutePath).st_mode and 0b111111111) }
         }
+    }
+
+    private fun resolveSafeSymlinkTarget(
+        rootPath: java.nio.file.Path,
+        parentDir: java.nio.file.Path,
+        linkName: String,
+        errorMessage: String = "Archive symlink escapes runtime",
+    ): java.nio.file.Path {
+        require(linkName.isNotBlank() && !linkName.contains('\u0000')) { errorMessage }
+        val normalizedLink = linkName.replace('\\', '/')
+        val resolved = if (normalizedLink.startsWith('/')) {
+            val relFromRoot = normalizedLink.trimStart('/')
+            if (relFromRoot.isEmpty()) rootPath else rootPath.resolve(relFromRoot).normalize()
+        } else {
+            parentDir.resolve(normalizedLink).normalize()
+        }
+        require(resolved.startsWith(rootPath)) { errorMessage }
+        return resolved
     }
 
     private fun safeChild(root: File, relative: String): File {
@@ -2083,29 +2179,32 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         ) {
             "Unsafe archive path"
         }
-        val file = File(root, normalized)
         val rootCanonical = root.canonicalFile
         val rootPath = rootCanonical.toPath()
-        var cursor: File? = file.parentFile
-        while (cursor != null && cursor != root && cursor.canonicalFile != rootCanonical) {
-            val cursorPath = cursor.toPath()
-            if (java.nio.file.Files.isSymbolicLink(cursorPath)) {
-                val linkTarget = java.nio.file.Files.readSymbolicLink(cursorPath)
-                val resolved = cursorPath.parent.resolve(linkTarget).normalize()
-                require(resolved.startsWith(rootPath)) { "Archive path escapes runtime via symlink" }
+        var currentDir = rootPath
+        for (index in 0 until segments.lastIndex) {
+            val segment = segments[index]
+            var candidate = currentDir.resolve(segment).normalize()
+            require(candidate.startsWith(rootPath) && candidate != rootPath) { "Archive path escapes runtime" }
+            var hops = 0
+            while (java.nio.file.Files.isSymbolicLink(candidate)) {
+                check(++hops <= 16) { "Archive symlink loop detected" }
+                val linkTarget = java.nio.file.Files.readSymbolicLink(candidate).toString()
+                val parent = candidate.parent ?: rootPath
+                candidate = resolveSafeSymlinkTarget(
+                    rootPath = rootPath,
+                    parentDir = parent,
+                    linkName = linkTarget,
+                    errorMessage = "Archive path escapes runtime via symlink",
+                )
             }
-            require(cursor.canonicalFile.toPath().startsWith(rootPath)) { "Archive path escapes runtime" }
-            cursor = cursor.parentFile
+            currentDir = candidate
         }
-        val parentPath = (file.parentFile ?: root).canonicalFile.toPath()
-        require(parentPath.startsWith(rootPath)) { "Archive path escapes runtime" }
-        if (!java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            val canonicalFile = file.canonicalFile.toPath()
-            require(canonicalFile.startsWith(rootPath) && canonicalFile != rootPath) {
-                "Archive path escapes runtime"
-            }
+        val finalPath = currentDir.resolve(segments.last()).normalize()
+        require(finalPath.startsWith(rootPath) && finalPath != rootPath) {
+            "Archive path escapes runtime"
         }
-        return file
+        return finalPath.toFile()
     }
 
     private suspend fun downloadVerified(
@@ -2201,7 +2300,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09"
+        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
