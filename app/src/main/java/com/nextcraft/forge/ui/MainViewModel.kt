@@ -1023,9 +1023,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Runs a workspace/checkpoint operation on IO and turns a failure into a banner. These throw for paths the agent
+     * turned into symlinks or that escape the workspace, and for IO errors; uncaught in viewModelScope that kills
+     * the app.
+     */
+    private suspend fun <T> workspaceIo(failure: String, block: () -> T): T? = try {
+        withContext(Dispatchers.IO) { block() }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w("MainViewModel", failure, e)
+        _state.update { it.copy(bannerMessage = "$failure: ${e.message ?: e.javaClass.simpleName}") }
+        null
+    }
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         viewModelScope.launch {
-            val (entries, changes) = withContext(Dispatchers.IO) {
+            val (entries, changes) = workspaceIo("Could not read the project files") {
                 val ws = checkpoints.ensureWorkspace(projectId)
                 val rootCanonical = runCatching { ws.canonicalFile.toPath() }.getOrNull()
                 val ignored = setOf(".git", ".gradle", "build", "node_modules", "__pycache__")
@@ -1083,7 +1098,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     emptyList()
                 }
                 files to changeDetails
-            }
+            } ?: return@launch
             _state.update {
                 it.copy(
                     workspaceFiles = entries,
@@ -1230,10 +1245,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            workspaceIo("Could not revert $path") {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertFile(project.id, ws, path)
-            }
+            } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
             if (_state.value.selectedFilePath == path) {
                 openWorkspaceFile(path)
@@ -1245,10 +1260,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            workspaceIo("Could not keep $path") {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.acceptFile(project.id, ws, path)
-            }
+            } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1257,7 +1272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { checkpoints.acceptAll(project.id) }
+            workspaceIo("Could not keep the changes") { checkpoints.acceptAll(project.id) } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1266,10 +1281,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            workspaceIo("Could not revert the changes") {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertLatestTurn(project.id, ws)
-            }
+            } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }

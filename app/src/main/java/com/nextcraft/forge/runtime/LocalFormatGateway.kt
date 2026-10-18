@@ -78,7 +78,7 @@ internal class LocalFormatGateway(
             val split = line.indexOf(':')
             if (split > 0) headers[line.substring(0, split).lowercase()] = line.substring(split + 1).trim()
         }
-        val output = BufferedOutputStream(socket.getOutputStream())
+        val output = GatewayOutput(socket.getOutputStream())
         if (!isAuthorized(headers)) {
             writeJson(output, 401, errorJson("authentication_error", "Missing or invalid credentials"))
             return
@@ -127,8 +127,34 @@ internal class LocalFormatGateway(
                 if (wantsStream) writeStream(output, translated) else writeJson(output, 200, translated.toString())
             }
         }.onFailure { error ->
-            writeJson(output, 502, errorJson("api_error", error.message ?: "Provider request failed"))
+            writeFailure(output, error.message ?: "Provider request failed")
         }
+    }
+
+    /**
+     * Reports a failure on a response that may already be under way. Once the status line is out, a second HTTP
+     * response would land inside the event stream and break the client's parser, so an event stream gets an
+     * Anthropic `error` event instead, and any other partly written response is just closed.
+     */
+    internal fun writeFailure(output: GatewayOutput, message: String) {
+        runCatching {
+            when {
+                !output.committed -> writeJson(output, 502, errorJson("api_error", message))
+                output.eventStream -> writeStreamError(output, "api_error", message)
+                else -> Unit
+            }
+        }
+    }
+
+    private fun writeStreamError(output: BufferedOutputStream, type: String, message: String) {
+        val error = JSONObject().put("type", "error").put("error", JSONObject().put("type", type).put("message", message))
+        output.write("event: error\ndata: $error\n\n".toByteArray())
+        output.flush()
+    }
+
+    private fun writeEventStreamHeaders(output: BufferedOutputStream) {
+        (output as? GatewayOutput)?.eventStream = true
+        output.write(EVENT_STREAM_HEADERS.toByteArray())
     }
 
     private fun toOpenAi(source: JSONObject): JSONObject {
@@ -502,8 +528,7 @@ internal class LocalFormatGateway(
         output: BufferedOutputStream,
         requestedModel: String,
     ) {
-        val headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
-        output.write(headers.toByteArray())
+        writeEventStreamHeaders(output)
         fun emitEvent(name: String, data: JSONObject) {
             output.write("event: $name\ndata: $data\n\n".toByteArray())
             output.flush()
@@ -526,6 +551,8 @@ internal class LocalFormatGateway(
         val activeToolSlots = HashMap<Int, Int>()
         var sawToolCalls = false
         var truncated = false
+        // A stream that stops without [DONE] or a finish_reason was cut off (dropped connection, proxy timeout).
+        var finished = false
         var inputTokens = 0
         var outputTokens = 0
 
@@ -542,14 +569,28 @@ internal class LocalFormatGateway(
             if (!line.startsWith("data:")) continue
             val payload = line.removePrefix("data:").trim()
             if (payload.isEmpty()) continue
-            if (payload == "[DONE]") break
+            if (payload == "[DONE]") {
+                finished = true
+                break
+            }
             val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+            // OpenRouter, DeepSeek and vLLM report failures after the 200 as `data: {"error": {...}}`. Skipping it
+            // (no `choices`) turned a rate limit or context-length error into an empty, successful turn.
+            chunk.optJSONObject("error")?.let { error ->
+                closeOpenBlock()
+                val message = error.stringOrEmpty("message").ifEmpty { error.toString().take(500) }
+                Log.w("FormatGateway", "Provider reported an error mid-stream: ${message.take(200)}")
+                writeStreamError(output, "api_error", message)
+                return
+            }
             chunk.optJSONObject("usage")?.let { usage ->
                 inputTokens = usage.optInt("prompt_tokens", usage.optInt("input_tokens", inputTokens))
                 outputTokens = usage.optInt("completion_tokens", usage.optInt("output_tokens", outputTokens))
             }
             val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
-            if (choice.stringOrEmpty("finish_reason") == "length") truncated = true
+            val finishReason = choice.stringOrEmpty("finish_reason")
+            if (finishReason.isNotEmpty()) finished = true
+            if (finishReason == "length") truncated = true
             val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: continue
 
             val reasoningDelta = delta.stringOrEmpty("reasoning_content").ifEmpty { delta.stringOrEmpty("reasoning") }
@@ -646,6 +687,11 @@ internal class LocalFormatGateway(
         }
 
         closeOpenBlock()
+        if (!finished) {
+            Log.w("FormatGateway", "Provider stream ended before it finished")
+            writeStreamError(output, "api_error", "The provider closed the stream before the response finished")
+            return
+        }
         emitEvent(
             "message_delta",
             JSONObject()
@@ -665,8 +711,7 @@ internal class LocalFormatGateway(
         com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(url)
 
     private fun writeStream(output: BufferedOutputStream, message: JSONObject) {
-        val headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
-        output.write(headers.toByteArray())
+        writeEventStreamHeaders(output)
         fun event(name: String, data: JSONObject) {
             output.write("event: $name\ndata: $data\n\n".toByteArray())
             output.flush()
@@ -780,3 +825,23 @@ internal class LocalFormatGateway(
         const val SOCKET_TIMEOUT_MS = 30_000
     }
 }
+
+/** Socket output that remembers whether a response has started, so a late failure is reported the right way. */
+internal class GatewayOutput(out: java.io.OutputStream) : BufferedOutputStream(out) {
+    var committed = false
+        private set
+    var eventStream = false
+
+    override fun write(b: Int) {
+        committed = true
+        super.write(b)
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        if (len > 0) committed = true
+        super.write(b, off, len)
+    }
+}
+
+private const val EVENT_STREAM_HEADERS =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
