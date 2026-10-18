@@ -105,8 +105,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
-            // Projects and Tools draw their own large title; a second header would duplicate it.
-            if (state.activeTab != ForgeTab.PROJECTS && state.activeTab != ForgeTab.TOOLS) ForgeTopBar(
+            // Every screen except Agent now draws its own large title; Agent keeps the project/agent switcher bar.
+            if (state.activeTab == ForgeTab.AGENT) ForgeTopBar(
                 state = state,
                 onSelectProject = viewModel::selectProject,
                 onDeleteProject = viewModel::deleteProject,

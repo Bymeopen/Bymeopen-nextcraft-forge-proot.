@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.DiffLineType
 import com.nextcraft.forge.model.WorkspaceEntry
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 
 @Composable
 fun FilesAndDiffScreen(
@@ -71,55 +72,42 @@ fun FilesAndDiffScreen(
     val tokens = LocalForgeThemeTokens.current
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = mode == "files",
-                    onClick = { mode = "files" },
-                    label = { Text("Explorer (${state.workspaceFiles.size})") },
-                    leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            ForgeLargeTitle(
+                title = "Files",
+                subtitle = state.activeProject?.name,
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Add,
+                    description = "New file",
+                    onClick = { showNewFileDialog = true },
                 )
-                FilterChip(
-                    selected = mode == "editor",
-                    onClick = { mode = "editor" },
-                    label = {
-                        Text(
-                            text = state.selectedFilePath?.substringAfterLast('/') ?: "Editor",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                )
-                FilterChip(
-                    selected = mode == "diff",
-                    onClick = { mode = "diff" },
-                    label = { Text("Changes (${state.changedItems.size})") },
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { showNewFileDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "New File")
-                }
-                IconButton(
+                ForgePillIcon(
+                    icon = Icons.Default.Refresh,
+                    description = "Refresh",
                     onClick = {
                         state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) }
                     },
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                }
+                )
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        val modes = listOf("files", "editor", "diff")
+        ForgePillTabs(
+            items = listOf(
+                "Explorer (${state.workspaceFiles.size})",
+                state.selectedFilePath?.substringAfterLast('/') ?: "Editor",
+                "Changes (${state.changedItems.size})",
+            ),
+            selectedIndex = modes.indexOf(mode).coerceAtLeast(0),
+            onSelect = { mode = modes[it] },
+        )
 
         when (mode) {
             "files" -> WorkspaceTreeList(
@@ -192,24 +180,20 @@ private fun WorkspaceTreeList(
     val scheme = MaterialTheme.colorScheme
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         items(entries, key = { it.path }) { entry ->
             val isSelected = entry.path == selectedPath
-            val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
-            val secondaryTextColor = if (isSelected) {
-                scheme.onPrimaryContainer.copy(alpha = 0.78f)
-            } else {
-                scheme.onSurfaceVariant
-            }
+            val primaryTextColor = scheme.onSurface
+            val secondaryTextColor = scheme.onSurfaceVariant
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         if (isSelected) {
-                            scheme.primaryContainer
+                            scheme.onSurface.copy(alpha = 0.08f)
                         } else {
                             Color.Transparent
                         },
@@ -223,10 +207,17 @@ private fun WorkspaceTreeList(
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = if (entry.isDirectory) "📁" else "📄",
-                    fontSize = 14.sp,
-                )
+                // Folders get a chevron; files align under it with a blank slot (tree look, no emoji).
+                if (entry.isDirectory) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = secondaryTextColor,
+                        modifier = Modifier.size(18.dp),
+                    )
+                } else {
+                    Spacer(modifier = Modifier.width(18.dp))
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -387,13 +378,13 @@ private fun WorkspaceDiffReviewList(
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(changes, key = { it.path }) { item ->
-                ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier.padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Row(
@@ -427,7 +418,7 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
@@ -438,7 +429,7 @@ private fun WorkspaceDiffReviewList(
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -449,13 +440,12 @@ private fun WorkspaceDiffReviewList(
                             }
                         }
 
-                        val diffShape = RoundedCornerShape(8.dp)
+                        val diffShape = RoundedCornerShape(12.dp)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(diffShape)
                                 .background(tokens.terminalBackground)
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, diffShape)
                                 .horizontalScroll(rememberScrollState())
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
