@@ -1742,7 +1742,7 @@ class RuntimeInstaller(private val context: Context) {
             targetRootfs = rootfs,
         )
 
-        return try {
+        val spawned = try {
             NativeSpawnProcess.start(
                 argv = listOf("su", "-mm", "-c", suCommand),
                 environment = emptyMap(),
@@ -1756,6 +1756,13 @@ class RuntimeInstaller(private val context: Context) {
             envFile.delete()
             throw error
         }
+        // The `rm -f` inside suCommand never runs when su is denied or exec fails, which would leave API keys
+        // on disk until the next launch's 10-minute purge. Remove the file as soon as the process is gone.
+        Thread({
+            while (spawned.isAlive) Thread.sleep(ENV_CLEANUP_POLL_MS)
+            envFile.delete()
+        }, "forge-env-cleanup").apply { isDaemon = true; start() }
+        return spawned
     }
 
     /**
@@ -2420,6 +2427,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             compressedBytes = 41_870_025L,
         )
         private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
+        private const val ENV_CLEANUP_POLL_MS = 1_000L
         /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
         private const val BUNDLE_DOWNLOAD_SPACE_FACTOR = 4
         private const val BUNDLE_EXTRACT_SPACE_FACTOR = 3
