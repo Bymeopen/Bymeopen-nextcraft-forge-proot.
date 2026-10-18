@@ -89,6 +89,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.nextcraft.forge.model.generateQuickChatIdentity
+import com.nextcraft.forge.R
 
 enum class ForgeTab(val title: String) {
     PROJECTS("Projects"),
@@ -134,12 +135,12 @@ data class ForgeUiState(
     val providerProfile: ProviderProfile = ProviderProfile(ProviderKind.ANTHROPIC),
     val savedApiKeys: List<com.nextcraft.forge.data.ApiKeyInfo> = emptyList(),
     val discoveredModels: List<DiscoveredModel> = emptyList(),
-    val apiStatusMessage: String? = null,
+    val apiStatusMessage: UiText? = null,
     val apiBusy: Boolean = false,
     val githubLogin: String = "",
     val githubDeviceCode: GitHubDeviceCode? = null,
     val githubRepos: List<GitHubRepository> = emptyList(),
-    val githubStatusMessage: String? = null,
+    val githubStatusMessage: UiText? = null,
     val languageCode: String = "system",
     val interactiveHighRiskApprovals: Boolean = true,
     val autoSyncGitHub: Boolean = false,
@@ -147,7 +148,7 @@ data class ForgeUiState(
     val antigravityEffort: String = "high",
     val updateInfo: AppUpdateInfo? = null,
     val updateStatusMessage: String? = null,
-    val bannerMessage: String? = null,
+    val bannerMessage: UiText? = null,
 ) {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
@@ -271,7 +272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             message = statusMsg,
                             stage = if (event.success) AndroidBuildStage.COMPLETE else AndroidBuildStage.FAILED,
                         ),
-                        bannerMessage = statusMsg,
+                        bannerMessage = UiText.Raw(statusMsg),
                     )
                 }
             }
@@ -437,7 +438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun repairRootfs() {
         viewModelScope.launch {
-            _state.update { it.copy(bannerMessage = "Repairing chroot mounts & runtime scripts…") }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repairing_chroot)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val rootfs = File(getApplication<Application>().filesDir, "runtime/ubuntu")
@@ -450,7 +451,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrElse { "Chroot repair note: ${it.message}" }
             }
             refreshRuntimeStatus()
-            _state.update { it.copy(bannerMessage = result) }
+            _state.update { it.copy(bannerMessage = UiText.Raw(result)) }
         }
     }
 
@@ -1274,7 +1275,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             stage = AndroidBuildStage.FAILED,
                             message = errorMsg,
                         ),
-                        bannerMessage = errorMsg,
+                        bannerMessage = UiText.Raw(errorMsg),
                     )
                 }
             }
@@ -1417,7 +1418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val providerId = _state.value.providerProfile.kind.name
         runCatching { vault.add(providerId, label.trim().ifBlank { "Primary Key" }, cleanSecret) }
             .onFailure { err ->
-                _state.update { it.copy(apiStatusMessage = err.message ?: "Could not save the API key.") }
+                _state.update { it.copy(apiStatusMessage = err.message?.let { UiText.Raw(it) } ?: UiText.res(R.string.msg_api_key_save_failed)) }
                 return
             }
         val keys = vault.list(providerId)
@@ -1427,7 +1428,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 providerProfile = updatedProfile,
                 savedApiKeys = keys,
-                apiStatusMessage = "API key saved securely in Android Keystore.",
+                apiStatusMessage = UiText.res(R.string.msg_api_key_saved),
             )
         }
     }
@@ -1454,7 +1455,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val profile = _state.value.providerProfile
         val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
-        _state.update { it.copy(apiBusy = true, apiStatusMessage = "Fetching model catalog…") }
+        _state.update { it.copy(apiBusy = true, apiStatusMessage = UiText.res(R.string.msg_fetching_models)) }
         viewModelScope.launch {
             when (val res = providerApi.discoverModels(profile.resolvedBaseUrl, apiKey, protocol)) {
                 is ModelDiscoveryResult.Success -> {
@@ -1462,7 +1463,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             apiBusy = false,
                             discoveredModels = res.models,
-                            apiStatusMessage = "Discovered ${res.models.size} models from ${res.endpoint}",
+                            apiStatusMessage = UiText.res(R.string.msg_discovered_models, res.models.size, res.endpoint),
                         )
                     }
                 }
@@ -1470,7 +1471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update {
                         it.copy(
                             apiBusy = false,
-                            apiStatusMessage = listOfNotNull(res.message, res.providerMessage).joinToString(" — "),
+                            apiStatusMessage = UiText.Raw(listOfNotNull(res.message, res.providerMessage).joinToString(" — ")),
                         )
                     }
                 }
@@ -1482,7 +1483,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val profile = _state.value.providerProfile
         val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
-        _state.update { it.copy(apiBusy = true, apiStatusMessage = "Validating connection…") }
+        _state.update { it.copy(apiBusy = true, apiStatusMessage = UiText.res(R.string.msg_validating)) }
         viewModelScope.launch {
             var res = providerApi.validate(
                 baseUrl = profile.resolvedBaseUrl,
@@ -1507,7 +1508,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is ConnectionValidation.Success -> "✓ ${res.message}"
                 is ConnectionValidation.Failure -> "✕ ${res.label}: ${res.message} ${res.providerMessage.orEmpty()}".trim()
             }
-            _state.update { it.copy(apiBusy = false, apiStatusMessage = msg) }
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = UiText.Raw(msg)) }
         }
     }
 
@@ -1515,18 +1516,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanId = clientId.trim().ifEmpty { GitHubClient.DEFAULT_CLIENT_ID }
         githubPollJob?.cancel()
         githubPollJob = viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = "Requesting GitHub device code…") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_requesting_code)) }
             val codeResult = withContext(Dispatchers.IO) {
                 runCatching { githubClient.requestDeviceCode(cleanId) }
             }
             val deviceCode = codeResult.getOrElse { err ->
-                _state.update { it.copy(githubStatusMessage = "GitHub error: ${err.message}") }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_error, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
                 return@launch
             }
             _state.update {
                 it.copy(
                     githubDeviceCode = deviceCode,
-                    githubStatusMessage = "Open ${deviceCode.verificationUri} and enter code: ${deviceCode.userCode}",
+                    githubStatusMessage = UiText.res(R.string.msg_gh_open_and_enter, deviceCode.verificationUri, deviceCode.userCode),
                 )
             }
             var intervalSec = deviceCode.intervalSeconds
@@ -1541,7 +1542,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is GitHubTokenPoll.Success -> {
                         runCatching { vault.put("GITHUB_TOKEN", poll.accessToken) }.onFailure { err ->
                             _state.update {
-                                it.copy(githubDeviceCode = null, githubStatusMessage = err.message ?: "Could not store the GitHub token.")
+                                it.copy(githubDeviceCode = null, githubStatusMessage = err.message?.let { UiText.Raw(it) } ?: UiText.res(R.string.msg_gh_token_store_failed))
                             }
                             return@launch
                         }
@@ -1562,7 +1563,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 githubLogin = login,
                                 githubDeviceCode = null,
                                 githubRepos = repos,
-                                githubStatusMessage = "Connected as @${login.ifBlank { "GitHub user" }} (${repos.size} repos)",
+                                githubStatusMessage = UiText.res(R.string.msg_gh_connected, login.ifBlank { getApplication<Application>().getString(R.string.msg_gh_user) }, repos.size),
                             )
                         }
                         return@launch
@@ -1571,7 +1572,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (poll.slowDown) intervalSec += 5L
                     }
                     is GitHubTokenPoll.Failure -> {
-                        _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = poll.message) }
+                        _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = UiText.Raw(poll.message)) }
                         return@launch
                     }
                 }
@@ -1582,12 +1583,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun connectGitHubWithToken(personalAccessToken: String) {
         val cleanToken = personalAccessToken.trim()
         if (cleanToken.isEmpty()) {
-            _state.update { it.copy(githubStatusMessage = "Enter a valid GitHub Personal Access Token.") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_token_invalid)) }
             return
         }
         githubPollJob?.cancel()
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = "Verifying GitHub token…") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_verifying_token)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val account = githubClient.account(cleanToken)
@@ -1599,7 +1600,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             result.onSuccess { (account, repos) ->
                 runCatching { vault.put("GITHUB_TOKEN", cleanToken) }.onFailure { err ->
-                    _state.update { it.copy(githubStatusMessage = err.message ?: "Could not store the GitHub token.") }
+                    _state.update { it.copy(githubStatusMessage = err.message?.let { UiText.Raw(it) } ?: UiText.res(R.string.msg_gh_token_store_failed)) }
                     return@onSuccess
                 }
                 preferences.githubLogin = account.login
@@ -1608,11 +1609,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         githubLogin = account.login,
                         githubDeviceCode = null,
                         githubRepos = repos,
-                        githubStatusMessage = "Connected as @${account.login} (${repos.size} repos)",
+                        githubStatusMessage = UiText.res(R.string.msg_gh_connected, account.login, repos.size),
                     )
                 }
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = "GitHub token error: ${err.message}") }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_token_error, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
             }
         }
     }
@@ -1629,7 +1630,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 githubLogin = "",
                 githubDeviceCode = null,
                 githubRepos = emptyList(),
-                githubStatusMessage = "Disconnected from GitHub.",
+                githubStatusMessage = UiText.res(R.string.msg_gh_disconnected),
             )
         }
     }
@@ -1642,16 +1643,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val token = vault.get("GITHUB_TOKEN").orEmpty()
         if (token.isBlank()) {
-            _state.update { it.copy(githubStatusMessage = "Sign in to GitHub first before creating a repository.") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_sign_in_first_repo)) }
             return
         }
         val cleanName = name.trim()
         if (cleanName.isEmpty()) {
-            _state.update { it.copy(githubStatusMessage = "Repository name cannot be empty.") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_repo_name_empty)) }
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = "Creating GitHub repository '$cleanName'…") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_creating_repo, cleanName)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val repo = githubClient.createRepository(
@@ -1687,11 +1688,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         githubRepos = updatedRepos,
-                        githubStatusMessage = "Created & pushed to ${repo.fullName}",
+                        githubStatusMessage = UiText.res(R.string.msg_gh_created_pushed, repo.fullName),
                     )
                 }
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = "Failed to create repository: ${err.message}") }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_create_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
             }
         }
     }
@@ -1729,12 +1730,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun pullProjectFromGitHub(projectId: String = _state.value.activeProjectId) {
         val token = vault.get("GITHUB_TOKEN").orEmpty()
         if (token.isBlank()) {
-            _state.update { it.copy(githubStatusMessage = "Connect GitHub first before pulling.") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_connect_first_pull)) }
             return
         }
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: _state.value.activeProject ?: return
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = "Pulling latest changes from GitHub for ${project.name}…") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_pulling, project.name)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val ws = checkpoints.ensureWorkspace(project.id)
@@ -1754,8 +1755,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     githubStatusMessage = result.fold(
-                        onSuccess = { out -> "Pulled from GitHub: ${out.lines().lastOrNull { l -> l.isNotBlank() } ?: "up to date"}" },
-                        onFailure = { err -> "GitHub pull failed: ${err.message}" },
+                        onSuccess = { out ->
+                            val lastLine = out.lines().lastOrNull { l -> l.isNotBlank() }
+                                ?: getApplication<Application>().getString(R.string.msg_gh_up_to_date)
+                            UiText.res(R.string.msg_gh_pulled, lastLine)
+                        },
+                        onFailure = { err ->
+                            UiText.res(
+                                R.string.msg_gh_pull_failed,
+                                err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error),
+                            )
+                        },
                     ),
                 )
             }
@@ -1765,7 +1775,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun cloneGitHubRepository(repo: GitHubRepository) {
         val token = vault.get("GITHUB_TOKEN").orEmpty()
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = "Cloning ${repo.fullName}…") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_cloning, repo.fullName)) }
             val clonedProject = withContext(Dispatchers.IO) {
                 runCatching {
                     val cleanName = repo.fullName.substringAfterLast('/').ifBlank { repo.fullName }
@@ -1801,12 +1811,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         projects = updated,
-                        githubStatusMessage = "Cloned ${repo.fullName} into workspace '${newProject.name}'",
+                        githubStatusMessage = UiText.res(R.string.msg_gh_cloned, repo.fullName, newProject.name),
                     )
                 }
                 selectProject(newProject.id)
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = "Clone failed: ${err.message}") }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_clone_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
             }
         }
     }
@@ -1839,7 +1849,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val url = rawUrl.trim()
         val uriScheme = android.net.Uri.parse(url).scheme?.lowercase()
         if (url.isEmpty() || (uriScheme != "http" && uriScheme != "https")) {
-            _state.update { it.copy(githubStatusMessage = "Enter an http(s) git URL") }
+            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_git_url_invalid)) }
             return
         }
         val name = url.trimEnd('/').substringAfterLast('/').removeSuffix(".git").ifBlank { "repository" }
@@ -1910,10 +1920,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = listOf(newProject) + _state.value.projects
                 preferences.saveProjects(updated)
                 configureAllProjectRoots(updated)
-                _state.update { it.copy(projects = updated, bannerMessage = "Imported ${newProject.name}") }
+                _state.update { it.copy(projects = updated, bannerMessage = UiText.res(R.string.msg_imported, newProject.name)) }
                 selectProject(newProject.id)
             }.onFailure { err ->
-                _state.update { it.copy(bannerMessage = "Import failed: ${err.message}") }
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_import_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
             }
         }
     }

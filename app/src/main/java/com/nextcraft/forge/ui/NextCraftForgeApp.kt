@@ -134,7 +134,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            state.bannerMessage?.let { banner ->
+            state.bannerMessage?.asString()?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,

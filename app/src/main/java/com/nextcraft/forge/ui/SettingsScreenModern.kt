@@ -435,7 +435,7 @@ fun SettingsScreenModern(
                     if (state.apiBusy) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
-                    state.apiStatusMessage?.let { msg ->
+                    state.apiStatusMessage?.asString()?.let { msg ->
                         Text(
                             text = msg,
                             style = MaterialTheme.typography.bodySmall,
@@ -557,7 +557,7 @@ fun SettingsScreenModern(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                state.githubStatusMessage?.let { status ->
+                state.githubStatusMessage?.asString()?.let { status ->
                     Text(
                         text = status,
                         style = MaterialTheme.typography.bodySmall,

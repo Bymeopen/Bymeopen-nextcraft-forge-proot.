@@ -1,0 +1,32 @@
+package com.nextcraft.forge.ui
+
+import android.content.Context
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+
+/**
+ * Text produced outside a composable (ViewModel, enums) that still needs translating.
+ * [Res] carries a string id plus format args; [Raw] is for text that is already final
+ * (server replies, exception messages) and must not be looked up.
+ */
+sealed interface UiText {
+    data class Res(@StringRes val id: Int, val args: List<Any> = emptyList()) : UiText
+    data class Raw(val text: String) : UiText
+
+    /** [context] may be null only for [Raw], which needs no lookup; [Res] requires a real Context. */
+    fun asString(context: Context?): String = when (this) {
+        is Res -> requireNotNull(context) { "UiText.Res needs a Context" }.getString(id, *args.toTypedArray())
+        is Raw -> text
+    }
+
+    companion object {
+        fun res(@StringRes id: Int, vararg args: Any): UiText = Res(id, args.toList())
+    }
+}
+
+@Composable
+fun UiText.asString(): String = when (this) {
+    is UiText.Res -> stringResource(id, *args.toTypedArray())
+    is UiText.Raw -> text
+}
