@@ -91,6 +91,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -464,14 +466,14 @@ private fun ForgeTopBar(
     }
 }
 
-private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, @StringRes val label: Int)
+private data class NavEntry(val tab: ForgeTab, @StringRes val label: Int)
 
 private val navEntries = listOf(
-    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, R.string.nav_projects),
-    NavEntry(ForgeTab.TERMINAL, Icons.Default.List, R.string.nav_terminal),
-    NavEntry(ForgeTab.AGENT, Icons.Default.Star, R.string.nav_agent),
-    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, R.string.nav_tools),
-    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, R.string.nav_settings),
+    NavEntry(ForgeTab.PROJECTS, R.string.nav_projects),
+    NavEntry(ForgeTab.TERMINAL, R.string.nav_terminal),
+    NavEntry(ForgeTab.AGENT, R.string.nav_agent),
+    NavEntry(ForgeTab.TOOLS, R.string.nav_tools),
+    NavEntry(ForgeTab.SETTINGS, R.string.nav_settings),
 )
 
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
@@ -557,6 +559,17 @@ private fun ForgeBottomBar(
                             animationSpec = if (reduceMotion) snap() else tween(220),
                             label = "navTint",
                         )
+                        // Glyph morph follows the same spring as the pill so icon and pill arrive together.
+                        val morph by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0f,
+                            animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.72f, stiffness = 380f),
+                            label = "navMorph",
+                        )
+                        val live = when (entry.tab) {
+                            ForgeTab.AGENT -> agentRunning
+                            ForgeTab.TERMINAL -> terminalBusy
+                            else -> false
+                        }
                         val badge: String? = when (entry.tab) {
                             ForgeTab.AGENT -> if (agentRunning) stringResource(R.string.nav_badge_agent_running) else null
                             ForgeTab.TOOLS -> if (changedCount > 0) stringResource(R.string.nav_badge_files_changed, changedCount) else null
@@ -573,11 +586,15 @@ private fun ForgeBottomBar(
                             verticalArrangement = Arrangement.Center,
                         ) {
                             Box {
-                                Icon(
-                                    imageVector = entry.icon,
-                                    contentDescription = if (badge == null) label else "$label, $badge",
+                                NavGlyph(
+                                    tab = entry.tab,
+                                    progress = morph,
+                                    live = live,
                                     tint = tint,
-                                    modifier = Modifier.size(24.dp),
+                                    reduceMotion = reduceMotion,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = if (badge == null) label else "$label, $badge"
+                                    },
                                 )
                                 if (badge != null) {
                                     Box(
