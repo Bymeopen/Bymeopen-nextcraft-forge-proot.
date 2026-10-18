@@ -1450,13 +1450,16 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         require(packages.isNotEmpty()) { "No packages selected" }
         val packageNames = packages.joinToString(" ")
+        // The stack packages (php-cli, build-essential, gcc, ...) are metapackages: purging them alone leaves the real
+        // binaries (php8.3-cli, gcc-13, ...) installed, so autoremove the dependencies that were pulled in with them.
         val command = "export DEBIAN_FRONTEND=noninteractive; " +
             "apt-get -o DPkg::Lock::Timeout=120 purge -y $packageNames && " +
+            "apt-get -o DPkg::Lock::Timeout=120 autoremove --purge -y && " +
             "apt-get clean && rm -rf /var/lib/apt/lists/*"
         runGuestCommand(
             chrootExec = chrootExec,
             command = command,
-            displayCommand = "apt-get purge -y $packageNames",
+            displayCommand = "apt-get purge -y $packageNames && apt-get autoremove --purge -y",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
