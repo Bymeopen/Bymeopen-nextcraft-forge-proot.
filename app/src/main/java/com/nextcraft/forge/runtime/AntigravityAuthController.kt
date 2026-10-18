@@ -31,6 +31,9 @@ class AntigravityAuthController(
     private val logoutOutput = File(context.cacheDir, "antigravity-logout-output.log")
     @Volatile private var process: Process? = null
     @Volatile private var codeSubmitted = false
+    private val loginStarting = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** Signed-in state to return to when a re-login attempt is cancelled. */
+    @Volatile private var stateBeforeLogin: AntigravityAuthState? = null
 
     init {
         // Remove output left by an app/process crash before starting a new OAuth flow.
@@ -62,43 +65,68 @@ class AntigravityAuthController(
     }
 
     suspend fun beginLogin() = withContext(Dispatchers.IO) {
-        if (process?.isAlive == true) return@withContext
+        // process?.isAlive alone is check-then-act: two quick taps could each spawn an agy.
+        if (!loginStarting.compareAndSet(false, true)) return@withContext
+        try {
+            beginLoginLocked()
+        } finally {
+            loginStarting.set(false)
+        }
+    }
+
+    private suspend fun beginLoginLocked() {
+        if (process?.isAlive == true) return
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
                 message = "Install Antigravity CLI first in Settings.",
             )
-            return@withContext
+            return
         }
+        stateBeforeLogin = mutableState.value.takeIf { it.status == AntigravityAuthStatus.SIGNED_IN }
         mutableState.value = AntigravityAuthState(
             AntigravityAuthStatus.STARTING,
             message = "Starting Antigravity sign-in…",
         )
         codeSubmitted = false
         authOutput.delete()
-        val runtime = installer.installedRuntime()
-        val workspace = File(context.filesDir, "workspaces/antigravity-auth").apply { mkdirs() }
-        val running = installer.process(
-            runtime.chrootExec,
-            runtime.rootfs,
-            workspace,
-            // SSH_CONNECTION selects agy's official manual browser URL + one-time code flow.
-            // NativeSpawn supplies a real PTY bridged via /dev/pts inside Root Chroot.
-            mapOf(
-                "SSH_CONNECTION" to "127.0.0.1 1 127.0.0.1 1",
-                "TERM" to "xterm-256color",
-                "NO_COLOR" to "1",
-            ),
-            listOf(RuntimeInstaller.AGY_GUEST_PATH),
-            guestWorkspacePath = "/workspace/antigravity-auth",
-            emulateHardLinks = false,
-            outputFile = authOutput,
-            pseudoTerminal = true,
-            ptyRows = 40,
-            ptyColumns = 120,
-        )
+        // Spawning can throw (missing runtime, no root); callers launch this unguarded, so report it as state.
+        val running = try {
+            val runtime = installer.installedRuntime()
+            val workspace = File(context.filesDir, "workspaces/antigravity-auth").apply { mkdirs() }
+            val spawned = installer.process(
+                runtime.chrootExec,
+                runtime.rootfs,
+                workspace,
+                // SSH_CONNECTION selects agy's official manual browser URL + one-time code flow.
+                // NativeSpawn supplies a real PTY bridged via /dev/pts inside Root Chroot.
+                mapOf(
+                    "SSH_CONNECTION" to "127.0.0.1 1 127.0.0.1 1",
+                    "TERM" to "xterm-256color",
+                    "NO_COLOR" to "1",
+                ),
+                listOf(RuntimeInstaller.AGY_GUEST_PATH),
+                guestWorkspacePath = "/workspace/antigravity-auth",
+                emulateHardLinks = false,
+                outputFile = authOutput,
+                pseudoTerminal = true,
+                ptyRows = 40,
+                ptyColumns = 120,
+            )
+            if (spawned !is NativeSpawnProcess) {
+                runCatching { spawned.destroyForcibly() }
+                error("Unsupported Antigravity authentication process")
+            }
+            spawned
+        } catch (error: Throwable) {
+            mutableState.value = AntigravityAuthState(
+                AntigravityAuthStatus.ERROR,
+                message = error.message?.take(240) ?: "Could not start Antigravity sign-in.",
+            )
+            return
+        }
         process = running
-        val native = running as? NativeSpawnProcess ?: error("Unsupported Antigravity authentication process")
+        val native = running
         var offset = 0L
         val output = StringBuilder()
         var handshakeReplies = 0
@@ -108,9 +136,14 @@ class AntigravityAuthController(
         var renderingScreenCompleted = false
         var privacyScreenCompleted = false
         var workspaceTrustCompleted = false
+        val deadline = android.os.SystemClock.elapsedRealtime() + LOGIN_TIMEOUT_MS
         try {
             RandomAccessFile(native.outputFile, "r").use { file ->
                 while (running.isAlive || native.outputFile.length() > offset) {
+                    // An abandoned flow would otherwise keep agy alive in the chroot indefinitely.
+                    if (android.os.SystemClock.elapsedRealtime() > deadline) {
+                        error("Sign-in timed out. Start sign-in again.")
+                    }
                     val available = native.outputFile.length() - offset
                     if (available <= 0) {
                         delay(80)
@@ -125,6 +158,12 @@ class AntigravityAuthController(
                     }
                     offset += safeLength
                     output.append(bytes.decodeToString(0, safeLength))
+                    if (output.length > MAX_AUTH_OUTPUT_CHARS) {
+                        // The TUI repaints constantly; only the recent tail is ever inspected (and re-sanitized per chunk).
+                        val drop = output.length - KEEP_AUTH_OUTPUT_CHARS
+                        output.delete(0, drop)
+                        lastHandshakeReplyLength = (lastHandshakeReplyLength - drop).coerceAtLeast(0)
+                    }
                     val clean = sanitizeTerminalOutput(output.toString()).takeLast(40_000)
                     // Antigravity's renderer asks a real terminal for DEC mode and
                     // Kitty keyboard-protocol status before it paints its UI.
@@ -223,9 +262,24 @@ class AntigravityAuthController(
                     }
                 }
             }
-            if (!codeSubmitted && mutableState.value.status == AntigravityAuthStatus.STARTING) {
-                val exit = running.waitFor()
-                error("Antigravity sign-in exited early (code $exit).")
+            when (mutableState.value.status) {
+                AntigravityAuthStatus.STARTING -> if (!codeSubmitted) {
+                    val exit = running.waitFor()
+                    error("Antigravity sign-in exited early (code $exit).")
+                }
+                AntigravityAuthStatus.AWAITING_CODE ->
+                    error("Sign-in session ended before a code was submitted. Start sign-in again.")
+                // agy can finish and exit without ever painting the screen we match on.
+                AntigravityAuthStatus.COMPLETING -> if (hasOfficialCredential()) {
+                    onSignedInChanged(true, null)
+                    mutableState.value = AntigravityAuthState(
+                        AntigravityAuthStatus.SIGNED_IN,
+                        message = "Google account connected",
+                    )
+                } else {
+                    error("Antigravity sign-in ended before completing. Please try again.")
+                }
+                else -> Unit
             }
         } catch (error: Throwable) {
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
@@ -253,10 +307,19 @@ class AntigravityAuthController(
     fun submitCode(code: String) {
         val value = code.trim()
         require(value.isNotBlank()) { "Paste the verification code from Google first." }
-        val running = process ?: error("Sign-in session is not active. Start sign-in again.")
-        check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
-        running.outputStream.write((value + "\r\n").toByteArray())
-        running.outputStream.flush()
+        try {
+            val running = process ?: error("Sign-in session is not active. Start sign-in again.")
+            check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
+            running.outputStream.write((value + "\r\n").toByteArray())
+            running.outputStream.flush()
+        } catch (error: Throwable) {
+            // Callers swallow this exception, so surface it through state or the user sees nothing happen.
+            mutableState.value = AntigravityAuthState(
+                AntigravityAuthStatus.ERROR,
+                message = error.message?.take(240) ?: "Could not submit the verification code.",
+            )
+            throw error
+        }
         codeSubmitted = true
         mutableState.value = mutableState.value.copy(
             status = AntigravityAuthStatus.COMPLETING,
@@ -321,7 +384,8 @@ class AntigravityAuthController(
                 }
             }.apply { isDaemon = true }.start()
         }
-        mutableState.value = AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
+        // Cancelling a re-login must not make an already connected account look signed out.
+        mutableState.value = stateBeforeLogin ?: AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
     }
 
     fun invalidateSession(message: String) {
@@ -329,6 +393,10 @@ class AntigravityAuthController(
         mutableState.value = AntigravityAuthState(AntigravityAuthStatus.ERROR, message = message)
     }
 }
+
+private const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
+private const val MAX_AUTH_OUTPUT_CHARS = 200_000
+private const val KEEP_AUTH_OUTPUT_CHARS = 100_000
 
 internal fun extractGoogleOAuthUrl(output: String): String? {
     val compact = output.replace(Regex("[\\r\\n\\t ]+"), "")

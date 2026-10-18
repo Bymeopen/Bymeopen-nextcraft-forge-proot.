@@ -16,13 +16,16 @@ internal object RootfsRepair {
 
     private fun runRootCommand(vararg command: String, timeoutSeconds: Long = 15L): Int =
         runCatching {
-            val proc = ProcessBuilder(*command).redirectErrorStream(true).start()
+            // Output is never used; discarding it avoids a full pipe blocking the child until the timeout.
+            val proc = ProcessBuilder(*command)
+                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.to(java.io.File("/dev/null")))
+                .start()
             val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
                 proc.destroyForcibly()
                 -1
             } else {
-                runCatching { proc.inputStream.bufferedReader().use { it.readText() } }
                 proc.exitValue()
             }
         }.getOrDefault(-1)

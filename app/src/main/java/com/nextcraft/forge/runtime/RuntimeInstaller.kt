@@ -17,6 +17,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
@@ -127,15 +128,27 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureChrootScripts(): File {
         runtimeBinDir.mkdirs()
         if (!chrootExecFile.isFile || chrootExecFile.readTextOrNull() != CHROOT_EXEC_SCRIPT.trim()) {
-            chrootExecFile.writeText(CHROOT_EXEC_SCRIPT)
+            writeScriptAtomically(chrootExecFile, CHROOT_EXEC_SCRIPT)
         }
         Os.chmod(chrootExecFile.absolutePath, 0b111101101)
 
         if (!unmountChrootFile.isFile || unmountChrootFile.readTextOrNull() != UNMOUNT_CHROOT_SCRIPT.trim()) {
-            unmountChrootFile.writeText(UNMOUNT_CHROOT_SCRIPT)
+            writeScriptAtomically(unmountChrootFile, UNMOUNT_CHROOT_SCRIPT)
         }
         Os.chmod(unmountChrootFile.absolutePath, 0b111101101)
         return chrootExecFile
+    }
+
+    /** Replaces the script via rename so a concurrent launch never executes a half-written file. */
+    private fun writeScriptAtomically(target: File, content: String) {
+        val staged = File(target.parentFile, "${target.name}.tmp")
+        try {
+            staged.writeText(content)
+            Os.rename(staged.absolutePath, target.absolutePath)
+        } catch (e: Throwable) {
+            staged.delete()
+            throw e
+        }
     }
 
     /** Unmounts all kernel mounts under [targetRootfs] before deleting or swapping rootfs directories. */
@@ -178,7 +191,8 @@ class RuntimeInstaller(private val context: Context) {
                 System.getProperty("os.arch"),
             ),
         ) { "NextCraft Forge requires an ARM64 (arm64-v8a / aarch64) Android device." }
-        require(isRootAccessAvailable()) {
+        // The first su call shows the Magisk/KernelSU/APatch grant dialog; the 8 s default kills su before the user can tap Allow.
+        require(isRootAccessAvailable(ROOT_GRANT_TIMEOUT_SECONDS)) {
             "Root access (su -mm) is required by NextCraft Forge's Ubuntu 24.04 LTS Chroot engine. Grant root permission in Magisk, KernelSU, or APatch and try again."
         }
         val chrootExec = ensureChrootScripts()
@@ -229,7 +243,9 @@ class RuntimeInstaller(private val context: Context) {
         ensureSettingsAndHooks()
 
         val coreNeeded = !File(rootfs, "usr/bin/git").exists() || !isSupportedCoreToolsVersion()
-        if (coreNeeded) {
+        // isInstalled() also requires Node; a missing/dangling node must be repaired even when git and the marker are fine.
+        val nodeMissing = !File(rootfs, "usr/local/bin/node").exists()
+        if (coreNeeded || nodeMissing) {
             installNodeIfNeeded(chrootExec, 0.58f, 0.66f, onProgress)
         }
         if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
@@ -1121,6 +1137,18 @@ class RuntimeInstaller(private val context: Context) {
             true
         }.getOrDefault(false)
 
+    /** Fails early with an actionable message instead of an opaque IOException halfway through extraction. */
+    private fun requireFreeSpaceForBundle(bundle: RuntimeBundle, alreadyDownloaded: Boolean) {
+        val free = context.filesDir.usableSpace
+        if (free <= 0L) return // unknown (some filesystems report 0); let the real write decide
+        val factor = if (alreadyDownloaded) BUNDLE_EXTRACT_SPACE_FACTOR else BUNDLE_DOWNLOAD_SPACE_FACTOR
+        val needed = bundle.compressedBytes * factor
+        check(free >= needed) {
+            "Not enough free storage for the ${bundle.label} bundle: about ${needed / MEGABYTE} MB needed, " +
+                "${free / MEGABYTE} MB available. Free some space and retry."
+        }
+    }
+
     private suspend fun obtainRuntimeBundle(
         bundle: RuntimeBundle,
         preferEmbedded: Boolean,
@@ -1130,6 +1158,7 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
+        requireFreeSpaceForBundle(bundle, alreadyDownloaded = destination.isFile)
         if (preferEmbedded && isAssetAvailable("runtime/${bundle.fileName}")) {
             val loadingLabel = "Loading ${bundle.label} bundle…"
             onProgress(RuntimeInstallProgress(loadingLabel, from, 0, bundle.compressedBytes))
@@ -1421,13 +1450,16 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         require(packages.isNotEmpty()) { "No packages selected" }
         val packageNames = packages.joinToString(" ")
+        // The stack packages (php-cli, build-essential, gcc, ...) are metapackages: purging them alone leaves the real
+        // binaries (php8.3-cli, gcc-13, ...) installed, so autoremove the dependencies that were pulled in with them.
         val command = "export DEBIAN_FRONTEND=noninteractive; " +
             "apt-get -o DPkg::Lock::Timeout=120 purge -y $packageNames && " +
+            "apt-get -o DPkg::Lock::Timeout=120 autoremove --purge -y && " +
             "apt-get clean && rm -rf /var/lib/apt/lists/*"
         runGuestCommand(
             chrootExec = chrootExec,
             command = command,
-            displayCommand = "apt-get purge -y $packageNames",
+            displayCommand = "apt-get purge -y $packageNames && apt-get autoremove --purge -y",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
@@ -1519,6 +1551,10 @@ class RuntimeInstaller(private val context: Context) {
                     onProgress(RuntimeInstallProgress(line, fraction, terminalLine = line, indeterminate = true, event = RuntimeInstallEvent.OUTPUT))
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            // TimeoutCancellationException is a CancellationException: left as-is the setup service would
+            // report "paused" instead of a failure.
+            throw IllegalStateException("$failureMessage: timed out after ${timeoutMs / 60_000L} min", e)
         } finally {
             if (running.isAlive) {
                 running.destroy()
@@ -1569,6 +1605,8 @@ class RuntimeInstaller(private val context: Context) {
                 .orEmpty()
                 .trim()
             check(exit == 0) { actionableProcessError(output, failureMessage) }
+        } catch (e: TimeoutCancellationException) {
+            throw IllegalStateException("$failureMessage: timed out", e)
         } finally {
             if (verify.isAlive) {
                 verify.destroy()
@@ -1707,7 +1745,7 @@ class RuntimeInstaller(private val context: Context) {
             targetRootfs = rootfs,
         )
 
-        return try {
+        val spawned = try {
             NativeSpawnProcess.start(
                 argv = listOf("su", "-mm", "-c", suCommand),
                 environment = emptyMap(),
@@ -1721,6 +1759,13 @@ class RuntimeInstaller(private val context: Context) {
             envFile.delete()
             throw error
         }
+        // The `rm -f` inside suCommand never runs when su is denied or exec fails, which would leave API keys
+        // on disk until the next launch's 10-minute purge. Remove the file as soon as the process is gone.
+        Thread({
+            while (spawned.isAlive) Thread.sleep(ENV_CLEANUP_POLL_MS)
+            envFile.delete()
+        }, "forge-env-cleanup").apply { isDaemon = true; start() }
+        return spawned
     }
 
     /**
@@ -2229,8 +2274,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
             val code = connection.responseCode
             if (code == 416 && existing > 0L) {
-                // Stale/complete .part cannot be resumed; discard so the next attempt starts clean.
+                // Stale/complete .part cannot be resumed; discard it and restart now (existing is 0 on the retry).
                 temporary.delete()
+                return downloadVerified(url, destination, expectedChecksum, algorithm, onBytes)
             }
             check(code in 200..299) { "Download failed with HTTP $code" }
             val resumed = code == HttpURLConnection.HTTP_PARTIAL && existing > 0L
@@ -2383,6 +2429,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
             compressedBytes = 41_870_025L,
         )
+        private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
+        private const val ENV_CLEANUP_POLL_MS = 1_000L
+        /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
+        private const val BUNDLE_DOWNLOAD_SPACE_FACTOR = 4
+        private const val BUNDLE_EXTRACT_SPACE_FACTOR = 3
+        private const val MEGABYTE = 1024L * 1024L
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
         private const val MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
@@ -2411,7 +2463,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
 
             case "${'$'}GUEST_WORKSPACE" in
-                *..*|/workspace/.|/workspace/*/*)
+                *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
                     echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
                     exit 65
                     ;;
@@ -2521,7 +2573,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
                 chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
             }
-            trap fix_workspace_ownership EXIT INT TERM
+            # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
+            # resume execution (keep mounting) and run the ownership fix twice.
+            trap fix_workspace_ownership EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
 
             unset ANDROID_ROOT ANDROID_DATA ANDROID_ART_ROOT ANDROID_I18N_ROOT ANDROID_TZDATA_ROOT
             unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_RUNTIME_ROOT ANDROID_STORAGE

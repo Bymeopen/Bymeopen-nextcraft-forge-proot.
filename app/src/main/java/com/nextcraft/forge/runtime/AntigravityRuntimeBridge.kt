@@ -1,6 +1,7 @@
 package com.nextcraft.forge.runtime
 
 import android.content.Context
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
@@ -46,29 +47,29 @@ internal sealed interface AntigravityParsedEvent {
 internal object AntigravityEventParser {
     fun parse(line: String): AntigravityParsedEvent? {
         val root = runCatching { JSONObject(line) }.getOrNull() ?: return null
-        return when (root.optString("event")) {
-            "init" -> root.optString("conversation_id")
+        return when (root.stringOrEmpty("event")) {
+            "init" -> root.stringOrEmpty("conversation_id")
                 .takeIf(String::isNotBlank)
                 ?.let(AntigravityParsedEvent::Initialized)
             "step_update" -> {
                 val step = root.optJSONObject("step_update") ?: return null
-                val delta = step.optString("text_delta")
+                val delta = step.stringOrEmpty("text_delta")
                 if (delta.isNotEmpty()) return AntigravityParsedEvent.Text(delta)
-                val type = step.optString("step_type")
+                val type = step.stringOrEmpty("step_type")
                 if (type.contains("tool", true) || type.contains("command", true)) {
-                    val rawName = step.optString("tool_name").ifBlank {
-                        step.optJSONObject("tool_info")?.optString("name").orEmpty()
+                    val rawName = step.stringOrEmpty("tool_name").ifBlank {
+                        step.optJSONObject("tool_info")?.stringOrEmpty("name").orEmpty()
                     }.ifBlank { type.ifBlank { "Tool" } }
                     val name = antigravityToolDisplayName(rawName)
                     val detail = antigravityToolDetail(step, rawName).ifBlank { name }
-                    if (step.optString("state") in setOf("DONE", "ERROR")) {
+                    if (step.stringOrEmpty("state") in setOf("DONE", "ERROR")) {
                         val output = step.optJSONObject("tool_info")
-                            ?.optString("output")
+                            ?.stringOrEmpty("output")
                             ?.takeIf(String::isNotBlank)
                             ?.let(::antigravityToolOutput)
                         val error = step.optJSONObject("tool_info")
                             ?.optJSONObject("error")
-                            ?.optString("message")
+                            ?.stringOrEmpty("message")
                             ?.takeIf(String::isNotBlank)
                             ?.let(::redactToolDetail)
                         AntigravityParsedEvent.ToolCompleted(name, output ?: error ?: detail)
@@ -80,10 +81,10 @@ internal object AntigravityEventParser {
             "result" -> {
                 val result = root.optJSONObject("result") ?: root
                 AntigravityParsedEvent.Result(
-                    result.optString("conversation_id").takeIf(String::isNotBlank),
-                    result.optString("status", "ERROR"),
-                    result.optString("response").takeIf(String::isNotBlank),
-                    result.optString("error").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("conversation_id").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("status", "ERROR"),
+                    result.stringOrEmpty("response").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("error").takeIf(String::isNotBlank),
                 )
             }
             else -> null // Forward compatible with new agy event types.
@@ -103,7 +104,7 @@ private fun antigravityToolDisplayName(name: String): String = when (name.lowerc
 }
 
 private fun antigravityToolDetail(step: JSONObject, rawName: String): String {
-    step.optString("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
+    step.stringOrEmpty("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
     val info = step.optJSONObject("tool_info")
     val parameters = info?.optJSONObject("parameters")
     val preferredKeys = when (rawName.lowercase()) {
@@ -323,12 +324,14 @@ class AntigravityRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             emitFailure(sessionId, "Antigravity CLI is not installed. Open Settings → Coding agent to install it.")
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -341,6 +344,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()
@@ -468,6 +472,8 @@ class AntigravityRuntimeBridge(
             finishForegroundRuntime(true, projectSlug, "Antigravity finished in $projectSlug")
         }.onFailure {
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = if (userStopRequested) {
                 "Stopped by user"
             } else {
@@ -482,7 +488,7 @@ class AntigravityRuntimeBridge(
         activeSessionId = null
         activeProjectSlug = ""
         taskStartedAtElapsedRealtime = 0L
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 

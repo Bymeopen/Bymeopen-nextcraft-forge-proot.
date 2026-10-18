@@ -1,6 +1,7 @@
 package com.nextcraft.forge.network
 
 import android.content.Context
+import com.nextcraft.forge.model.stringOrEmpty
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -50,7 +51,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return GitHubDeviceCode(
             deviceCode = json.getString("device_code"),
             userCode = json.getString("user_code"),
-            verificationUri = json.optString("verification_uri").ifBlank { "https://github.com/login/device" },
+            verificationUri = json.stringOrEmpty("verification_uri").ifBlank { "https://github.com/login/device" },
             expiresInSeconds = json.optLong("expires_in", 900L),
             intervalSeconds = json.optLong("interval", 5L).coerceAtLeast(5L),
         )
@@ -66,14 +67,14 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
                 "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
             ),
         )
-        json.optString("access_token").takeIf(String::isNotBlank)?.let { return GitHubTokenPoll.Success(it) }
-        return when (val error = json.optString("error")) {
+        json.stringOrEmpty("access_token").takeIf(String::isNotBlank)?.let { return GitHubTokenPoll.Success(it) }
+        return when (val error = json.stringOrEmpty("error")) {
             "authorization_pending" -> GitHubTokenPoll.Pending()
             "slow_down" -> GitHubTokenPoll.Pending(slowDown = true)
             "access_denied" -> GitHubTokenPoll.Failure("GitHub authorization was cancelled")
             "expired_token" -> GitHubTokenPoll.Failure("The GitHub sign-in code expired. Try again.")
             else -> GitHubTokenPoll.Failure(
-                json.optString("error_description").ifBlank {
+                json.stringOrEmpty("error_description").ifBlank {
                     error.ifBlank { "GitHub sign-in failed" }
                 },
             )
@@ -83,7 +84,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
     fun account(token: String): GitHubAccount {
         val json = getJson("https://api.github.com/user", token) as? JSONObject
             ?: error("Unexpected GitHub user profile response")
-        return GitHubAccount(json.getString("login"), json.optString("avatar_url"))
+        return GitHubAccount(json.getString("login"), json.stringOrEmpty("avatar_url"))
     }
 
     fun createRepository(
@@ -106,9 +107,9 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             fullName = item.getString("full_name"),
             cloneUrl = item.getString("clone_url"),
             private = item.optBoolean("private", private),
-            defaultBranch = item.optString("default_branch", "main").ifBlank { "main" },
-            description = item.optString("description"),
-            updatedAt = item.optString("updated_at"),
+            defaultBranch = item.stringOrEmpty("default_branch", "main").ifBlank { "main" },
+            description = item.stringOrEmpty("description"),
+            updatedAt = item.stringOrEmpty("updated_at"),
         )
     }
 
@@ -122,16 +123,16 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             ) as? JSONArray ?: error("Unexpected GitHub repository list response")
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
-                val fullName = item.optString("full_name")
-                val cloneUrl = item.optString("clone_url")
+                val fullName = item.stringOrEmpty("full_name")
+                val cloneUrl = item.stringOrEmpty("clone_url")
                 if (fullName.isBlank() || cloneUrl.isBlank()) continue
                 val repo = GitHubRepository(
                     fullName = fullName,
                     cloneUrl = cloneUrl,
                     private = item.optBoolean("private"),
-                    defaultBranch = item.optString("default_branch", "main").ifBlank { "main" },
-                    description = item.optString("description"),
-                    updatedAt = item.optString("updated_at"),
+                    defaultBranch = item.stringOrEmpty("default_branch", "main").ifBlank { "main" },
+                    description = item.stringOrEmpty("description"),
+                    updatedAt = item.stringOrEmpty("updated_at"),
                 )
                 result[repo.fullName] = repo
             }
@@ -214,7 +215,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             }
         }.orEmpty()
         if (status !in 200..299) {
-            val message = runCatching { JSONObject(text).optString("message") }.getOrNull()
+            val message = runCatching { JSONObject(text).stringOrEmpty("message") }.getOrNull()
             error(message?.takeIf(String::isNotBlank) ?: "GitHub returned HTTP $status")
         }
         return if (text.trimStart().startsWith("[")) JSONArray(text) else JSONObject(text)
