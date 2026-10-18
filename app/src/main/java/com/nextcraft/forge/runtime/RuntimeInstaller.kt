@@ -17,6 +17,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
@@ -127,15 +128,27 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureChrootScripts(): File {
         runtimeBinDir.mkdirs()
         if (!chrootExecFile.isFile || chrootExecFile.readTextOrNull() != CHROOT_EXEC_SCRIPT.trim()) {
-            chrootExecFile.writeText(CHROOT_EXEC_SCRIPT)
+            writeScriptAtomically(chrootExecFile, CHROOT_EXEC_SCRIPT)
         }
         Os.chmod(chrootExecFile.absolutePath, 0b111101101)
 
         if (!unmountChrootFile.isFile || unmountChrootFile.readTextOrNull() != UNMOUNT_CHROOT_SCRIPT.trim()) {
-            unmountChrootFile.writeText(UNMOUNT_CHROOT_SCRIPT)
+            writeScriptAtomically(unmountChrootFile, UNMOUNT_CHROOT_SCRIPT)
         }
         Os.chmod(unmountChrootFile.absolutePath, 0b111101101)
         return chrootExecFile
+    }
+
+    /** Replaces the script via rename so a concurrent launch never executes a half-written file. */
+    private fun writeScriptAtomically(target: File, content: String) {
+        val staged = File(target.parentFile, "${target.name}.tmp")
+        try {
+            staged.writeText(content)
+            Os.rename(staged.absolutePath, target.absolutePath)
+        } catch (e: Throwable) {
+            staged.delete()
+            throw e
+        }
     }
 
     /** Unmounts all kernel mounts under [targetRootfs] before deleting or swapping rootfs directories. */
@@ -1519,6 +1532,10 @@ class RuntimeInstaller(private val context: Context) {
                     onProgress(RuntimeInstallProgress(line, fraction, terminalLine = line, indeterminate = true, event = RuntimeInstallEvent.OUTPUT))
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            // TimeoutCancellationException is a CancellationException: left as-is the setup service would
+            // report "paused" instead of a failure.
+            throw IllegalStateException("$failureMessage: timed out after ${timeoutMs / 60_000L} min", e)
         } finally {
             if (running.isAlive) {
                 running.destroy()
@@ -1569,6 +1586,8 @@ class RuntimeInstaller(private val context: Context) {
                 .orEmpty()
                 .trim()
             check(exit == 0) { actionableProcessError(output, failureMessage) }
+        } catch (e: TimeoutCancellationException) {
+            throw IllegalStateException("$failureMessage: timed out", e)
         } finally {
             if (verify.isAlive) {
                 verify.destroy()
@@ -2229,8 +2248,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
             val code = connection.responseCode
             if (code == 416 && existing > 0L) {
-                // Stale/complete .part cannot be resumed; discard so the next attempt starts clean.
+                // Stale/complete .part cannot be resumed; discard it and restart now (existing is 0 on the retry).
                 temporary.delete()
+                return downloadVerified(url, destination, expectedChecksum, algorithm, onBytes)
             }
             check(code in 200..299) { "Download failed with HTTP $code" }
             val resumed = code == HttpURLConnection.HTTP_PARTIAL && existing > 0L
