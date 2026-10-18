@@ -91,6 +91,9 @@ class ClaudeRuntimeBridge(
     private val rotateSecretFor: (ProviderProfile) -> String? = { profile ->
         com.nextcraft.forge.data.ApiKeyVault(context).rotateNext(profile.kind.name)
     },
+    private val autoApproveAllTools: () -> Boolean = {
+        com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools
+    },
     private val interactiveHighRiskApprovals: () -> Boolean = {
         com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals
     },
@@ -479,7 +482,7 @@ class ClaudeRuntimeBridge(
 
             val risk = classifyRisk(toolName, command, paths)
             val response = responseFile(file, approvalId)
-            if (risk == RiskLevel.HIGH) {
+            if (risk == RiskLevel.HIGH && !autoApproveAllTools()) {
                 if (interactiveHighRiskApprovals()) {
                     val toolRequest = ToolRequest(
                         approvalId = approvalId,

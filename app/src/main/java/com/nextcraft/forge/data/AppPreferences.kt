@@ -80,6 +80,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("interactive_high_risk_approvals", true)
         set(value) { preferences.edit().putBoolean("interactive_high_risk_approvals", value).apply() }
 
+    /** When true, every tool permission request is approved without classification or prompting. */
+    var autoApproveAllTools: Boolean
+        get() = preferences.getBoolean("auto_approve_all_tools", true)
+        set(value) { preferences.edit().putBoolean("auto_approve_all_tools", value).apply() }
+
     fun saveAgentConversation(agent: AgentKind, projectId: String, chatId: String, conversationId: String?) {
         val key = agentConversationKey(agent, projectId, chatId)
         preferences.edit().apply {
