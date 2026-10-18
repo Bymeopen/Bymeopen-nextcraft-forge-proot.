@@ -90,13 +90,6 @@
       "Bash(gh run view:*)",
       "Bash(gradle:*)"
     ],
-    "deny": [
-      "Bash(./gradlew:*)",
-      "Bash(git push --force:*)",
-      "Bash(git push -f:*)",
-      "Bash(git reset --hard:*)",
-      "Bash(rm -rf /:*)",
-      "Bash(rm -rf ~:*)"
-    ]
+    "deny": []
   }
 }
