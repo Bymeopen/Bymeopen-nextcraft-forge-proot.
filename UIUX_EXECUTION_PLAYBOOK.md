@@ -330,3 +330,21 @@ Uji wajib: provider palsu (MockWebServer) untuk skenario 401, 429, 5xx, stream t
 2. E1: ekstrak 87 literal ke `strings.xml` (mulai dari `SettingsScreenModern.kt`), isi `en` + `id` dulu.
 3. Pasang `locales_config.xml`.
 4. Buka PR #1 (E0) lalu PR #2 (E1 Settings).
+
+---
+
+## Status & keputusan (ringkasan untuk melanjutkan sesi)
+
+Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :app:testDebugUnitTest` (12 tes hijau). Tidak ada PR.
+
+**Keputusan tetap**
+- Satu bahasa bentuk untuk 4 tema (Linear/System/White/Glass); tema hanya mengubah warna & permukaan.
+- Linear dark = abu netral `#0B0B0B/#131313`, aksen indigo `#5E6AD2`. White = koral `#D70F47` (AA). Glass = indigo `#7C8CFF`, transparan.
+- Nav: kapsul mengambang 4 tab (Projects, Agent, Tools, Settings) + tombol bulat Terminal. Kapsul hilang saat keyboard.
+- Back: alat → Tools; Agent/Tools/Settings → Projects; Projects keluar (`forgeBackTarget`).
+- Komponen bersama di `ForgeComponents.kt`: LargeTitle, SectionLabel, ToggleRow, StatusIcon, ActionPill, PillIcon, PillTabs, PrimaryButton.
+- Teks UI wajib lewat `strings.xml` (en + id); tes `NoHardcodedTextTest` (batas 13) dan `AccessibilityGuardTest` (role wajib; ikon dekoratif ≤ 29).
+
+**Selesai**: tema, nav, Projects (hero + Quick/New + kartu import ZIP/Git/GitHub), Tools, Launch, Agent (composer), Files, Terminal, Preview, Settings (seksi), toggle, i18n, a11y pass.
+
+**Belum**: UiText untuk teks di ViewModel/enum; locale es/ar/hi/ru/zh; editor file & dialog New file gaya lama; banner OAuth Agent; blur Glass + fallback; uji di perangkat (keyboard, Back, TalkBack, font 200%, MIME ZIP).
