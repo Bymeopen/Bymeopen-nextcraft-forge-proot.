@@ -123,10 +123,23 @@ kotlinc -nowarn -d "$work/gen/gen.jar" \
   "$SOURCES/model/Models.kt" "$work/gen/Main.kt"
 java -cp "$work/gen/gen.jar:$work/tools/kotlinc/lib/kotlin-stdlib.jar" MainKt "$work/projects"
 
+# Maven Central and Google Maven rate-limit a fresh cache (HTTP 429). Every attempt resumes from what is cached, so a
+# few retries with a pause finish the resolution; the result is the same set of pinned artifacts.
+build_project() {
+  local project="$1" attempt
+  for attempt in 1 2 3 4 5 6; do
+    if (cd "$work/projects/$project" && gradle -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 --console=plain -q \
+        assembleDebug assembleRelease); then
+      return 0
+    fi
+    echo "Build of $project failed (attempt $attempt); retrying after a pause" >&2
+    sleep 90
+  done
+  return 1
+}
 for project in compose views; do
   echo "Building template $project (assembleDebug assembleRelease)"
-  (cd "$work/projects/$project" && gradle -Dorg.gradle.jvmargs= --no-daemon --max-workers=4 --console=plain -q \
-    assembleDebug assembleRelease)
+  build_project "$project"
   [[ -f "$work/projects/$project/app/build/outputs/apk/debug/app-debug.apk" ]] || { echo "No debug APK for $project" >&2; exit 1; }
 done
 
