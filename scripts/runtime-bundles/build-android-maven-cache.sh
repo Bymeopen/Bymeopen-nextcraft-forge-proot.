@@ -148,6 +148,7 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 python3 - "$GRADLE_USER_HOME/caches/modules-2/files-2.1" "$OUT_DIR" <<'EOF'
 import hashlib
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -163,14 +164,22 @@ for group_dir in sorted(cache.iterdir()):
         if f"{group_dir.name}/{artifact_dir.name}" in skipped_groups:
             continue
         for version_dir in sorted(artifact_dir.iterdir()):
-            for hash_dir in sorted(version_dir.iterdir()):
-                for file in sorted(hash_dir.iterdir()):
-                    if file.name.endswith(("-sources.jar", "-javadoc.jar")) or not file.is_file():
-                        continue
-                    target = out / group_dir.name.replace(".", "/") / artifact_dir.name / version_dir.name / file.name
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(file, target)
-                    manifest.append((target.relative_to(out).as_posix(), hashlib.sha256(file.read_bytes()).hexdigest()))
+            files = sorted(f for h in sorted(version_dir.iterdir()) for f in sorted(h.iterdir()) if f.is_file())
+            # Gradle caches a file under the artifact *name* from Gradle module metadata, which for multiplatform
+            # libraries differs from the file name a Maven repository serves (e.g. lifecycle-runtime.aar is published
+            # as lifecycle-runtime-android-2.10.0.aar). The repository needs the published name (the `url`).
+            published = {}
+            for module in (f for f in files if f.name.endswith(".module")):
+                for variant in json.loads(module.read_text()).get("variants", []):
+                    for entry in variant.get("files", []):
+                        published[entry["name"]] = entry["url"]
+            for file in files:
+                if file.name.endswith(("-sources.jar", "-javadoc.jar")):
+                    continue
+                target = out / group_dir.name.replace(".", "/") / artifact_dir.name / version_dir.name / published.get(file.name, file.name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(file, target)
+                manifest.append((target.relative_to(out).as_posix(), hashlib.sha256(file.read_bytes()).hexdigest()))
 manifest.sort()
 (out / "MANIFEST.sha256").write_text("".join(f"{sha}  {path}\n" for path, sha in manifest))
 print(f"{len(manifest)} files, {sum(f.stat().st_size for f in out.rglob('*') if f.is_file()) // 1_000_000} MB")
