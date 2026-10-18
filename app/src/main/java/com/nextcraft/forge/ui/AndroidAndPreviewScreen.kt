@@ -70,6 +70,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.LaunchedEffect
 import com.nextcraft.forge.runtime.AndroidBuildStage
 import com.nextcraft.forge.runtime.AndroidIssueSeverity
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 
 private data class StageRow(val title: String, val stages: List<AndroidBuildStage>)
 
@@ -514,6 +519,7 @@ fun WebPreviewScreen(
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val tokens = LocalForgeThemeTokens.current
+    val colors = MaterialTheme.colorScheme
     val webViewBgArgb = tokens.terminalBackground.toArgb()
 
     androidx.compose.runtime.DisposableEffect(Unit) {
@@ -523,87 +529,107 @@ fun WebPreviewScreen(
         }
     }
 
+    fun openUrl(raw: String) {
+        val clean = raw.trim()
+        val uriScheme = android.net.Uri.parse(clean).scheme?.lowercase()
+        if (clean.isNotEmpty() && (uriScheme == "http" || uriScheme == "https")) {
+            viewModel.updatePreviewUrl(clean)
+            webViewRef?.loadUrl(clean)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
+            ForgeLargeTitle(
+                title = "Preview",
+                subtitle = "Local dev server",
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Refresh,
+                    description = "Scan ports and reload",
+                    onClick = {
+                        viewModel.scanLocalPreviewPorts()
+                        webViewRef?.reload()
+                    },
+                )
+            }
+        }
+
+        // Address bar: one rounded surface with a text-style "Open" action.
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = tokens.cardContainerColor,
+            contentColor = colors.onSurface,
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 6.dp, end = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    singleLine = true,
+                    placeholder = { Text("http://127.0.0.1:3000") },
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "Open",
+                    color = tokens.accentText,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100))
+                        .clickable(role = Role.Button) { openUrl(urlInput) }
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                )
+            }
+        }
+
+        if (state.activeLocalPorts.isNotEmpty()) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = urlInput,
-                        onValueChange = { urlInput = it },
-                        singleLine = true,
-                        label = { Text("Local Dev Server URL (Host NetNS)") },
-                        modifier = Modifier.weight(1f),
+                state.activeLocalPorts.forEach { port ->
+                    val portUrl = "http://127.0.0.1:$port"
+                    AssistChip(
+                        onClick = {
+                            urlInput = portUrl
+                            openUrl(portUrl)
+                        },
+                        shape = RoundedCornerShape(100),
+                        label = { Text(":$port", fontFamily = FontFamily.Monospace) },
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            val clean = urlInput.trim()
-                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
-                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
-                                viewModel.updatePreviewUrl(clean)
-                                webViewRef?.loadUrl(clean)
-                            }
-                        },
-                    ) {
-                        Text("Go")
-                    }
-                    IconButton(
-                        onClick = {
-                            viewModel.scanLocalPreviewPorts()
-                            webViewRef?.reload()
-                        },
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Scan & Reload")
-                    }
-                }
-
-                if (state.activeLocalPorts.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Open Ports:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = tokens.successText,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        state.activeLocalPorts.forEach { port ->
-                            val portUrl = "http://127.0.0.1:$port"
-                            AssistChip(
-                                onClick = {
-                                    urlInput = portUrl
-                                    viewModel.updatePreviewUrl(portUrl)
-                                    webViewRef?.loadUrl(portUrl)
-                                },
-                                label = { Text(":$port", fontFamily = FontFamily.Monospace) },
-                            )
-                        }
-                    }
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         AndroidView(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(16.dp)),
             factory = { context ->
                 WebView(context).apply {
                     setBackgroundColor(webViewBgArgb)

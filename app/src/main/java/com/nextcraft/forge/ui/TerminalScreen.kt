@@ -47,6 +47,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun TerminalScreen(
@@ -57,6 +66,7 @@ fun TerminalScreen(
     val scrollState = rememberScrollState()
     val clipboard = LocalClipboardManager.current
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
 
     val quickCommands = listOf(
         "uname -a",
@@ -72,72 +82,64 @@ fun TerminalScreen(
         scrollState.animateScrollTo(scrollState.maxValue)
     }
 
+    fun runCommand() {
+        val cmd = commandInput.trim()
+        if (cmd.isNotEmpty() && !state.terminalRunning) {
+            commandInput = ""
+            viewModel.runTerminalCommand(cmd)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Root Chroot Shell (`su -mm` • /workspace/${state.activeProject?.slug ?: "sandbox"})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(
-                        onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = "Copy terminal output", modifier = Modifier.size(18.dp))
-                    }
-                    if (state.terminalRunning) {
-                        IconButton(onClick = viewModel::stopTerminal) {
-                            Icon(Icons.Default.Close, contentDescription = "Stop command", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    IconButton(onClick = viewModel::clearTerminal) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear terminal", modifier = Modifier.size(18.dp))
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    quickCommands.forEach { cmd ->
-                        AssistChip(
-                            onClick = { viewModel.runTerminalCommand(cmd) },
-                            enabled = !state.terminalRunning,
-                            label = {
-                                Text(
-                                    text = cmd,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                )
-                            },
-                        )
-                    }
-                }
+            ForgeLargeTitle(
+                title = "Terminal",
+                subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Share,
+                    description = "Copy terminal output",
+                    onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
+                )
                 if (state.terminalRunning) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    ForgePillIcon(
+                        icon = Icons.Default.Close,
+                        description = "Stop command",
+                        onClick = viewModel::stopTerminal,
+                        tint = scheme.error,
+                    )
+                } else {
+                    ForgePillIcon(
+                        icon = Icons.Default.Delete,
+                        description = "Clear terminal",
+                        onClick = viewModel::clearTerminal,
+                    )
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (state.terminalRunning) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(3.dp),
+            )
+        }
 
+        // Output: the deepest surface of the theme, rounded like every other panel.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(14.dp))
                 .background(tokens.terminalBackground)
                 .verticalScroll(scrollState)
                 .padding(12.dp),
@@ -153,45 +155,83 @@ fun TerminalScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            quickCommands.forEach { cmd ->
+                AssistChip(
+                    onClick = { viewModel.runTerminalCommand(cmd) },
+                    enabled = !state.terminalRunning,
+                    shape = RoundedCornerShape(100),
+                    label = {
+                        Text(
+                            text = cmd,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                        )
+                    },
+                )
+            }
+        }
+
+        // Command line: one rounded surface, prompt glyph, round run button.
         Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = tokens.cardContainerColor,
+            contentColor = scheme.onSurface,
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                Text(
+                    text = "$",
+                    fontFamily = FontFamily.Monospace,
+                    color = scheme.onSurfaceVariant,
+                )
+                TextField(
                     value = commandInput,
                     onValueChange = { commandInput = it },
                     placeholder = {
                         Text(
-                            text = "Run command in Ubuntu Root Chroot…",
+                            text = "Run command in the workspace",
                             fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
                         )
                     },
-                    textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+                    textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
                     singleLine = true,
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        val cmd = commandInput.trim()
-                        if (cmd.isNotEmpty()) {
-                            commandInput = ""
-                            viewModel.runTerminalCommand(cmd)
-                        }
-                    },
-                    enabled = commandInput.isNotBlank() && !state.terminalRunning,
+                val canRun = commandInput.isNotBlank() && !state.terminalRunning
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (canRun) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
+                        .clickable(enabled = canRun, role = Role.Button, onClickLabel = "Run") { runCommand() },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Execute")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Run")
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Run",
+                        tint = if (canRun) scheme.onPrimary else scheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
         }
