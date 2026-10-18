@@ -345,6 +345,6 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Komponen bersama di `ForgeComponents.kt`: LargeTitle, SectionLabel, ToggleRow, StatusIcon, ActionPill, PillIcon, PillTabs, PrimaryButton.
 - Teks UI wajib lewat `strings.xml` (en + id); tes `NoHardcodedTextTest` (batas 13) dan `AccessibilityGuardTest` (role wajib; ikon dekoratif ≤ 29).
 
-**Selesai**: tema, nav (study 5 tab + pil meluncur + glyph kustom + glow), Projects (hero + Quick/New + kartu import ZIP/Git/GitHub, Quick = QUICK_PROJECT), Tools, Launch, Agent (composer), Files, Terminal, Preview, Settings (seksi), toggle, i18n (layar + ViewModel via UiText + label enum), a11y pass.
+**Selesai**: tema, nav (study 5 tab + pil meluncur + glyph kustom + glow), Projects (hero + Quick/New + kartu import ZIP/Git/GitHub, Quick = QUICK_PROJECT), Tools, Launch, Agent (header + tab chat pil + kartu persetujuan + banner OAuth + composer; top bar lama dihapus), Files (header, pohon, perubahan, editor, dialog New file), Terminal, Preview, Settings (seksi + kulit kapsul/bulat), onboarding runtime, dialog New Project, toggle, i18n (layar + ViewModel via UiText + label enum), a11y pass. **Semua layar sudah di gaya baru di kode.**
 
-**Belum**: locale es/ar/hi/ru/zh; editor file & dialog New file gaya lama; banner OAuth Agent; blur Glass + fallback; bentuk glyph nav & glow perlu dilihat di perangkat; uji di perangkat (keyboard, Back, TalkBack, font 200%, reduce-motion, ZIP picker).
+**Belum**: locale es/ar/hi/ru/zh; blur Glass + fallback; isi form Settings masih form (bukan baris datar) meski kulitnya baru; durasi per tahap di Launch; **uji di perangkat** (bentuk glyph nav & glow, keyboard vs bar, Back, TalkBack, font 200%, reduce-motion, ZIP picker, transparansi Glass).
