@@ -1781,40 +1781,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val proc = startPackageLogcatProcess(getApplication(), pkg)
                     activeLogcatProcess = proc
-                    proc.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { raw ->
-                            if (!isActive) return@forEach
-                            val level = when {
-                                " F " in raw -> AndroidLogLevel.FATAL
-                                " E " in raw -> AndroidLogLevel.ERROR
-                                " W " in raw -> AndroidLogLevel.WARNING
-                                " I " in raw -> AndroidLogLevel.INFO
-                                " D " in raw -> AndroidLogLevel.DEBUG
-                                else -> AndroidLogLevel.VERBOSE
+                    // A cancel between starting the process and publishing it above would leave nobody to stop it.
+                    if (!isActive) proc.destroyForcibly()
+                    try {
+                        proc.inputStream.bufferedReader().useLines { lines ->
+                            for (raw in lines) {
+                                // return@forEach only skipped one line and kept blocking on the stream.
+                                if (!isActive) break
+                                val level = when {
+                                    " F " in raw -> AndroidLogLevel.FATAL
+                                    " E " in raw -> AndroidLogLevel.ERROR
+                                    " W " in raw -> AndroidLogLevel.WARNING
+                                    " I " in raw -> AndroidLogLevel.INFO
+                                    " D " in raw -> AndroidLogLevel.DEBUG
+                                    else -> AndroidLogLevel.VERBOSE
+                                }
+                                val entry = AndroidLogLine(
+                                    id = logLineIdCounter.getAndIncrement(),
+                                    text = raw,
+                                    level = level,
+                                )
+                                _state.update { current ->
+                                    current.copy(
+                                        androidLogcat = current.androidLogcat.copy(
+                                            lines = (current.androidLogcat.lines + entry).takeLast(300),
+                                        ),
+                                    )
+                                }
                             }
-                            val entry = AndroidLogLine(
-                                id = logLineIdCounter.getAndIncrement(),
-                                text = raw,
-                                level = level,
-                            )
-                            _state.update { current ->
-                                current.copy(
-                                    androidLogcat = current.androidLogcat.copy(
-                                        lines = (current.androidLogcat.lines + entry).takeLast(300),
+                        }
+                        if (isActive) {
+                            _state.update {
+                                it.copy(
+                                    androidLogcat = it.androidLogcat.copy(
+                                        running = false,
+                                        message = "Logcat stream ended for $pkg.",
                                     ),
                                 )
                             }
                         }
-                    }
-                    if (isActive) {
-                        _state.update {
-                            it.copy(
-                                androidLogcat = it.androidLogcat.copy(
-                                    running = false,
-                                    message = "Logcat stream ended for $pkg.",
-                                ),
-                            )
-                        }
+                    } finally {
+                        proc.destroyForcibly()
+                        if (activeLogcatProcess === proc) activeLogcatProcess = null
                     }
                 }.onFailure { err ->
                     _state.update {

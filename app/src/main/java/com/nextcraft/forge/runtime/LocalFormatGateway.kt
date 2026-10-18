@@ -135,7 +135,7 @@ internal class LocalFormatGateway(
             }
             val upstream = callProvider(toOpenAi(anthropic))
             if (upstream.first !in 200..299) {
-                Log.w("FormatGateway", "Provider returned HTTP ${upstream.first}: ${providerError(upstream.second)}")
+                Log.w("FormatGateway", "Provider returned HTTP ${upstream.first}: ${logSafe(providerError(upstream.second))}")
                 writeJson(output, upstream.first, errorJson("api_error", providerError(upstream.second)))
             } else {
                 val translated = fromOpenAi(JSONObject(upstream.second), requestedModel)
@@ -210,13 +210,20 @@ internal class LocalFormatGateway(
                     "tool_result" -> toolResults += JSONObject()
                         .put("role", "tool")
                         .put("tool_call_id", part.stringOrEmpty("tool_use_id"))
-                        .put("content", valueText(part.opt("content")))
+                        .put("content", toolResultText(part))
                 }
             }
             if (role == "user") {
                 toolResults.forEach(messages::put)
             }
-            if (text.isNotBlank() || toolCalls.length() > 0) {
+            val images = imageUrls(content)
+            if (images.isNotEmpty() && role == "user") {
+                // Image blocks (screenshots, pasted images) were dropped, so the model never saw them.
+                val parts = JSONArray()
+                if (text.isNotBlank()) parts.put(JSONObject().put("type", "text").put("text", text))
+                images.forEach { url -> parts.put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url))) }
+                messages.put(JSONObject().put("role", role).put("content", parts))
+            } else if (text.isNotBlank() || toolCalls.length() > 0) {
                 val converted = JSONObject().put("role", role).put("content", text.ifBlank { JSONObject.NULL })
                 if (toolCalls.length() > 0) converted.put("tool_calls", toolCalls)
                 messages.put(converted)
@@ -282,13 +289,19 @@ internal class LocalFormatGateway(
                     "tool_result" -> toolResults += JSONObject()
                         .put("type", "function_call_output")
                         .put("call_id", part.stringOrEmpty("tool_use_id"))
-                        .put("output", valueText(part.opt("content")))
+                        .put("output", toolResultText(part))
                 }
             }
             if (role == "user") {
                 toolResults.forEach(input::put)
             }
-            if (text.isNotBlank()) {
+            val images = imageUrls(content)
+            if (images.isNotEmpty() && role == "user") {
+                val parts = JSONArray()
+                if (text.isNotBlank()) parts.put(JSONObject().put("type", "input_text").put("text", text))
+                images.forEach { url -> parts.put(JSONObject().put("type", "input_image").put("image_url", url)) }
+                input.put(JSONObject().put("role", role).put("content", parts))
+            } else if (text.isNotBlank()) {
                 input.put(JSONObject().put("role", role).put("content", text))
             }
             toolCalls.forEach(input::put)
@@ -504,7 +517,7 @@ internal class LocalFormatGateway(
             }
             if (code !in 200..299) {
                 val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText().take(4096) }.orEmpty()
-                Log.w("FormatGateway", "Provider returned HTTP $code: ${providerError(errorText)}")
+                Log.w("FormatGateway", "Provider returned HTTP $code: ${logSafe(providerError(errorText))}")
                 writeJson(output, code, errorJson("api_error", providerError(errorText)))
                 return
             }
@@ -599,7 +612,7 @@ internal class LocalFormatGateway(
             chunk.optJSONObject("error")?.let { error ->
                 closeOpenBlock()
                 val message = error.stringOrEmpty("message").ifEmpty { error.toString().take(500) }
-                Log.w("FormatGateway", "Provider reported an error mid-stream: ${message.take(200)}")
+                Log.w("FormatGateway", "Provider reported an error mid-stream: ${logSafe(message)}")
                 writeStreamError(output, "api_error", message)
                 return
             }
@@ -846,6 +859,28 @@ internal class LocalFormatGateway(
         }
     }
 
+    /** Tool output text; a failed tool is marked so the model does not read the error as a normal result. */
+    private fun toolResultText(part: JSONObject): String {
+        val text = valueText(part.opt("content"))
+        return if (part.optBoolean("is_error", false)) "Error: $text" else text
+    }
+
+    /** Anthropic image blocks as URLs an OpenAI-compatible API accepts (data: URLs for inline base64). */
+    private fun imageUrls(content: JSONArray): List<String> = buildList {
+        for (index in 0 until content.length()) {
+            val part = content.optJSONObject(index) ?: continue
+            if (part.stringOrEmpty("type") != "image") continue
+            val source = part.optJSONObject("source") ?: continue
+            when (source.stringOrEmpty("type")) {
+                "base64" -> {
+                    val data = source.stringOrEmpty("data")
+                    if (data.isNotEmpty()) add("data:${source.stringOrEmpty("media_type", "image/png")};base64,$data")
+                }
+                "url" -> source.stringOrEmpty("url").takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }
+
     private fun valueText(value: Any?): String = when (value) {
         is String -> value
         is JSONArray -> contentText(value).ifBlank { value.toString() }
@@ -922,3 +957,15 @@ private fun responsesStopReason(source: JSONObject, hasToolUse: Boolean): String
         else -> "max_tokens" // max_output_tokens, and any other reason the answer was cut short
     }
 }
+
+/**
+ * Provider error bodies can echo the request (prompt, file contents) or key material; Logcat is readable by other
+ * tools on a debuggable or rooted device, so only a short, redacted excerpt is logged. The client still receives
+ * the full provider message in the response.
+ */
+private fun logSafe(text: String): String = text
+    .replace(Regex("(?i)(api[_-]?key|token|secret|password|authorization)(\\s*[=:]\\s*)(bearer\\s+)?[^\\s'\",}]+"), "$1$2••••")
+    .replace(Regex("\\b(sk|rk|pk)-[A-Za-z0-9_-]{8,}"), "$1-••••")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+    .take(200)

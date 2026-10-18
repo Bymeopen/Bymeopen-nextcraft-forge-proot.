@@ -1420,7 +1420,8 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.parentFile?.mkdirs()
         val obj = JSONObject()
         state.forEach { (name, value) -> obj.put(name, value) }
-        devStacksFile.writeText(obj.toString())
+        // A truncated file reads back as "no stacks installed" and makes the next setup reinstall everything.
+        writeRootfsFileAtomically(devStacksFile, obj.toString())
     }
 
     @Suppress("UNUSED_PARAMETER")
