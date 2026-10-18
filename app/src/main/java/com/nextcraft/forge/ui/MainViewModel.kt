@@ -23,6 +23,7 @@ import com.nextcraft.forge.model.ProviderProfile
 import com.nextcraft.forge.model.RuntimeEvent
 import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.model.WorkspaceEntry
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.projectSlug
 import com.nextcraft.forge.model.providerProtocolForAgent
 import com.nextcraft.forge.network.ConnectionValidation
@@ -181,7 +182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val guestToken = runCatching {
                 JSONObject(credsFile.readText())
                     .optJSONObject("claudeAiOauth")
-                    ?.optString("accessToken")
+                    ?.stringOrEmpty("accessToken")
                     ?.trim()
                     ?.takeIf { it.isNotEmpty() }
             }.getOrNull()
@@ -974,6 +975,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishAgentTurn(projectId: String) {
+        // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
+        if (!_state.value.sessionRunning) return
         activeRuntimeBridge = null
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
@@ -1429,10 +1432,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "Running $task in ${project.name}")
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
-        RuntimeTaskController.stopAction = {
+        val buildStopHook: () -> Unit = {
             activeBuildProcess?.destroyForcibly()
             activeBuildJob?.cancel()
         }
+        RuntimeTaskController.stopAction = buildStopHook
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
@@ -1481,7 +1485,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 if (!isActive) cancelled = true
                 activeBuildProcess = null
-                RuntimeTaskController.stopAction = null
+                RuntimeTaskController.release(buildStopHook)
             }
 
             val issues = if (!succeeded && !cancelled && task != "clean") {
@@ -1960,6 +1964,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = poll.message) }
                         return@launch
                     }
+                }
+            }
+            // Reached only when the code expired (success/failure return above); don't leave a dead code on screen.
+            if (isActive) {
+                _state.update {
+                    it.copy(
+                        githubDeviceCode = null,
+                        githubStatusMessage = "GitHub sign-in code expired. Start sign-in again.",
+                    )
                 }
             }
         }

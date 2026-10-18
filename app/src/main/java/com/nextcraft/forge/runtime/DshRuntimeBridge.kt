@@ -74,6 +74,7 @@ class DshRuntimeBridge(
         val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         if (secret.isBlank()) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
+            activeSessionId = null
             return@withContext sessionId
         }
         if (provider.kind == ProviderKind.CLAUDE) {
@@ -83,13 +84,15 @@ class DshRuntimeBridge(
                     "Claude subscription login is not supported by DeepSeek Harness. Pick a key-based provider in Settings.",
                 ),
             )
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var openRouterGateway: OpenRouterRoutingGateway? = null
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -102,6 +105,7 @@ class DshRuntimeBridge(
                     }, "forge-dsh-stop").apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             check(installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
@@ -176,6 +180,8 @@ class DshRuntimeBridge(
             }
         }.onFailure { error ->
             Log.e("DshBridge", "Session failed: ${error::class.simpleName}")
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = friendlyError(error)
             emitFailureOnce(sessionId, message)
             if (userStopRequested) {
@@ -192,7 +198,7 @@ class DshRuntimeBridge(
         runCatching { spawnedOutputFile?.delete() }
         activeProcess = null
         activeSessionId = null
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 

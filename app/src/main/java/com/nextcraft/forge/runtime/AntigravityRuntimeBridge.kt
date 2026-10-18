@@ -324,12 +324,14 @@ class AntigravityRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             emitFailure(sessionId, "Antigravity CLI is not installed. Open Settings → Coding agent to install it.")
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -342,6 +344,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()
@@ -469,6 +472,8 @@ class AntigravityRuntimeBridge(
             finishForegroundRuntime(true, projectSlug, "Antigravity finished in $projectSlug")
         }.onFailure {
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = if (userStopRequested) {
                 "Stopped by user"
             } else {
@@ -483,7 +488,7 @@ class AntigravityRuntimeBridge(
         activeSessionId = null
         activeProjectSlug = ""
         taskStartedAtElapsedRealtime = 0L
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 

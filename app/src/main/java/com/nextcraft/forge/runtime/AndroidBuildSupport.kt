@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -167,7 +168,7 @@ internal fun findDebugApk(projectRoot: File): File? {
             val json = JSONObject(metadata.readText())
             val elements = json.optJSONArray("elements") ?: return@runCatching null
             (0 until elements.length()).asSequence()
-                .mapNotNull { elements.optJSONObject(it)?.optString("outputFile") }
+                .mapNotNull { elements.optJSONObject(it)?.stringOrEmpty("outputFile") }
                 .filter { it.isNotBlank() && !it.contains('\u0000') }
                 .map { File(metadata.parentFile, it) }
                 .firstOrNull { candidate ->

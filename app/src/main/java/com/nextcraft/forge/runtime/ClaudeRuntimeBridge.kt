@@ -157,14 +157,16 @@ class ClaudeRuntimeBridge(
                 "No API key is saved for ${provider.kind.title}."
             }
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, message))
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var formatGateway: LocalFormatGateway? = null
         var openRouterGateway: OpenRouterRoutingGateway? = null
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -177,6 +179,7 @@ class ClaudeRuntimeBridge(
                     }, "forge-claude-stop").apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
@@ -293,6 +296,13 @@ class ClaudeRuntimeBridge(
             }
         }.onFailure { error ->
             Log.e("ClaudeBridge", "Session failed: ${error::class.simpleName}")
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
+            pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
+                runCatching { permission.response.writeText("deny") }
+                pending.remove(permission.request.approvalId)
+                eventBus.emit(RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId))
+            }
             val message = friendlyError(error)
             emitFailureOnce(sessionId, message)
             if (userStopRequested) {
@@ -310,7 +320,7 @@ class ClaudeRuntimeBridge(
         runCatching { spawnedOutputFile?.delete() }
         activeProcess = null
         activeSessionId = null
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 
@@ -901,6 +911,18 @@ private val SAFE_BASH_COMMANDS = setOf(
     "basename", "dirname", "realpath", "readlink", "cut", "tr", "awk", "sed", "find", "xargs", "jq", "du", "df",
     "env", "md5sum", "sha256sum", "cp", "mv", "gradle", "javac", "kotlinc",
 )
+private val ENV_ASSIGNMENT_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")
+
+// awk and sed are safe for plain text processing, but their scripts can run commands or write files.
+private val AWK_WORD_REGEX = Regex("\\bawk\\b")
+private val AWK_EXEC_REGEX = Regex("""\|\s*\\?"|system\s*\(|getline|\|&|\bpopen\b""")
+private val SED_WORD_REGEX = Regex("\\bsed\\b")
+private val SED_EXEC_OR_WRITE_REGEX = Regex("""(?:^|[;{}'"\s/0-9$,!])(?:e(?:['";}\s]|$)|[wWrR]\s)""")
+
+private fun scriptCanEscapeSandbox(text: String): Boolean =
+    (AWK_WORD_REGEX.containsMatchIn(text) && AWK_EXEC_REGEX.containsMatchIn(text)) ||
+        (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
+
 private val SAFE_GIT_SUBCOMMANDS = setOf(
     "status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "ls-tree", "blame",
     "remote", "fetch", "pull", "stash", "restore", "switch", "tag",
@@ -953,6 +975,13 @@ private fun isSafeBashSegment(segment: String): Boolean {
     val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
         .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
     val first = words.firstOrNull()?.trim('\'', '"')?.substringAfterLast('/') ?: return false
+    if (first == "env" || first == "xargs") {
+        // Wrappers run another command, so judge that command. A bare `env` dumps every exported
+        // variable (including provider API keys) into the model context and is never auto-approved.
+        val wrapped = words.drop(1).dropWhile { it.startsWith("-") || it.matches(ENV_ASSIGNMENT_REGEX) }
+        if (wrapped.isEmpty()) return first == "xargs"
+        return isSafeBashSegment(wrapped.joinToString(" "))
+    }
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
@@ -969,7 +998,8 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
     return when (tool) {
         "Bash" -> {
             val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
-            val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
+            val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains) ||
+                scriptCanEscapeSandbox(text)
             val masked = maskQuotedAndEscapedSeparators(text)
             val segments = masked.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
             if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {
