@@ -87,10 +87,10 @@
       "Bash(gh issue list:*)",
       "Bash(gh repo view:*)",
       "Bash(gh run list:*)",
-      "Bash(gh run view:*)"
+      "Bash(gh run view:*)",
+      "Bash(gradle:*)"
     ],
     "deny": [
-      "Bash(gradle:*)",
       "Bash(./gradlew:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",

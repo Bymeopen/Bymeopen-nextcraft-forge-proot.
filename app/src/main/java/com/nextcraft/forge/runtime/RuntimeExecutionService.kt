@@ -41,13 +41,23 @@ class RuntimeExecutionService : Service() {
         when (action) {
             ACTION_STOP, LEGACY_ACTION_STOP -> {
                 RuntimeTaskController.requestStop()
+                if (!taskRunning) {
+                    // Service was recreated without an active task; nothing to show or keep alive.
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 getSystemService(NotificationManager::class.java)?.notify(
                     RUNNING_NOTIFICATION_ID,
                     runningNotification("Stopping active task…", includeStop = false),
                 )
             }
             ACTION_PROGRESS, LEGACY_ACTION_PROGRESS -> {
-                if (!taskRunning) return START_NOT_STICKY
+                if (!taskRunning) {
+                    // Stray progress for a finished task must not leave an idle service running.
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 incomingTitle?.takeIf(String::isNotBlank)?.let { notificationTitleOverride = it }
                 if (intent?.hasExtra(EXTRA_CAN_STOP) == true) {
                     canStop = intent.getBooleanExtra(EXTRA_CAN_STOP, true)

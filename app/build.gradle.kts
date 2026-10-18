@@ -80,6 +80,12 @@ android {
     )
     val ndkAvailable = ndkCandidates.any { it.isDirectory && !it.listFiles().isNullOrEmpty() }
     if (ndkAvailable) {
+        // AGP prefers its own default NDK and fails when only another version is installed,
+        // so pin to the version found under <sdk>/ndk when there is exactly one.
+        ndkCandidates
+            .firstOrNull { it.name == "ndk" && it.listFiles()?.size == 1 }
+            ?.listFiles()?.single()?.name
+            ?.let { ndkVersion = it }
         externalNativeBuild {
             cmake {
                 path = file("src/main/cpp/CMakeLists.txt")
