@@ -217,4 +217,8 @@
     <string name="agent_clear_chat">Clear Chat</string>
     <string name="launch_clear_logcat">Clear</string>
     <string name="launch_filter_logcat">Filter logcat…</string>
+    <string name="files_unsaved_title">Unsaved changes</string>
+    <string name="files_unsaved_message">%1$s has unsaved changes. Save them before continuing?</string>
+    <string name="files_unsaved_save">Save</string>
+    <string name="files_unsaved_discard">Discard</string>
 </resources>

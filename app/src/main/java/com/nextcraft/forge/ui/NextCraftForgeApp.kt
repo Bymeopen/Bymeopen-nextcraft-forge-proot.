@@ -85,6 +85,24 @@ import androidx.annotation.StringRes
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
+
+    state.unsavedChangesPrompt?.let { path ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelLeavingFile,
+            title = { Text(stringResource(R.string.files_unsaved_title)) },
+            text = { Text(stringResource(R.string.files_unsaved_message, path)) },
+            confirmButton = {
+                Button(onClick = viewModel::saveAndContinue) { Text(stringResource(R.string.files_unsaved_save)) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = viewModel::discardAndContinue) { Text(stringResource(R.string.files_unsaved_discard)) }
+                    TextButton(onClick = viewModel::cancelLeavingFile) { Text(stringResource(R.string.agent_cancel)) }
+                }
+            },
+        )
+    }
+
     var bypassSetupGate by rememberSaveable { mutableStateOf(false) }
     var showNewProjectDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -181,10 +199,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 when (state.activeTab) {
                     ForgeTab.PROJECTS -> ProjectsScreen(
                         state = state,
-                        onOpenProject = { id ->
-                            viewModel.selectProject(id)
-                            viewModel.selectTab(ForgeTab.AGENT)
-                        },
+                        onOpenProject = viewModel::openProject,
                         onNewProject = { showNewProjectDialog = true },
                         onDeleteProject = viewModel::deleteProject,
                         onNewQuickProject = {

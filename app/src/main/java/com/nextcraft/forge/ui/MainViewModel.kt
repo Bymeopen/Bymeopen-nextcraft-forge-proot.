@@ -126,6 +126,8 @@ data class ForgeUiState(
     val selectedFileContent: String = "",
     val selectedFileEditable: Boolean = true,
     val selectedFileDirty: Boolean = false,
+    /** Set while the user is asked whether to save or discard unsaved editor changes before leaving the file. */
+    val unsavedChangesPrompt: String? = null,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -1110,7 +1112,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var openFileRequest = 0
 
+    /** What to do once the user has answered [UiState.unsavedChangesPrompt]. */
+    private var afterUnsavedChoice: (() -> Unit)? = null
+
+    /** Runs [action] now, or first asks to save or discard unsaved edits in the open file. */
+    private fun leaveOpenFile(action: () -> Unit) {
+        val current = _state.value
+        val path = current.selectedFilePath
+        if (path == null || !current.selectedFileDirty || !current.selectedFileEditable) {
+            action()
+            return
+        }
+        afterUnsavedChoice = action
+        _state.update { it.copy(unsavedChangesPrompt = path) }
+    }
+
+    fun saveAndContinue() {
+        val next = afterUnsavedChoice
+        afterUnsavedChoice = null
+        _state.update { it.copy(unsavedChangesPrompt = null) }
+        saveSelectedFile(onSaved = next)
+    }
+
+    fun discardAndContinue() {
+        val next = afterUnsavedChoice
+        afterUnsavedChoice = null
+        _state.update { it.copy(unsavedChangesPrompt = null, selectedFileDirty = false) }
+        next?.invoke()
+    }
+
+    fun cancelLeavingFile() {
+        afterUnsavedChoice = null
+        _state.update { it.copy(unsavedChangesPrompt = null) }
+    }
+
+    /** Opens a project from the project list, asking about unsaved edits first; shows the agent only if it switched. */
+    fun openProject(projectId: String) = leaveOpenFile {
+        selectProject(projectId)
+        if (_state.value.activeProjectId == projectId) selectTab(ForgeTab.AGENT)
+    }
+
     fun openWorkspaceFile(relativePath: String) {
+        if (relativePath == _state.value.selectedFilePath) {
+            // Tapping the file that is already open keeps its unsaved edits; otherwise it is re-read from disk.
+            if (!_state.value.selectedFileDirty) loadWorkspaceFile(relativePath)
+            return
+        }
+        leaveOpenFile { loadWorkspaceFile(relativePath) }
+    }
+
+    /** Loads [relativePath] into the editor, replacing whatever is open (callers decide about unsaved edits). */
+    private fun loadWorkspaceFile(relativePath: String) {
         val project = _state.value.activeProject ?: return
         val requestId = ++openFileRequest
         viewModelScope.launch {
@@ -1158,7 +1210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveSelectedFile() {
+    fun saveSelectedFile(onSaved: (() -> Unit)? = null) {
         val project = _state.value.activeProject ?: return
         val path = _state.value.selectedFilePath ?: return
         if (!_state.value.selectedFileEditable) {
@@ -1178,7 +1230,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _state.update {
                 it.copy(
-                    selectedFileDirty = if (saved) false else it.selectedFileDirty,
+                    // Only clear dirty when the editor still holds what was written; newer typing stays unsaved.
+                    selectedFileDirty = if (saved && it.selectedFilePath == path && it.selectedFileContent == content) {
+                        false
+                    } else {
+                        it.selectedFileDirty
+                    },
                     fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path",
                 )
             }
@@ -1186,6 +1243,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (saved && preferences.autoSyncGitHub) {
                 syncProjectWithGitHub(project.id, "Update $path")
             }
+            if (saved) onSaved?.invoke()
         }
     }
 
@@ -1251,7 +1309,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
             if (_state.value.selectedFilePath == path) {
-                openWorkspaceFile(path)
+                // The user asked to revert this file, so the editor follows the file on disk.
+                loadWorkspaceFile(path)
             }
         }
     }

@@ -217,4 +217,8 @@
     <string name="agent_clear_chat">Bersihkan obrolan</string>
     <string name="launch_clear_logcat">Bersihkan</string>
     <string name="launch_filter_logcat">Filter logcat…</string>
+    <string name="files_unsaved_title">Perubahan belum disimpan</string>
+    <string name="files_unsaved_message">%1$s punya perubahan yang belum disimpan. Simpan sebelum lanjut?</string>
+    <string name="files_unsaved_save">Simpan</string>
+    <string name="files_unsaved_discard">Buang</string>
 </resources>
