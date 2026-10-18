@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
@@ -114,4 +115,36 @@ fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
     ForgeTab.PROJECTS -> null
     ForgeTab.FILES, ForgeTab.TERMINAL, ForgeTab.ANDROID, ForgeTab.PREVIEW -> ForgeTab.TOOLS
     ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
+}
+
+/** Large left-aligned screen title (Linear style) with an optional quiet subtitle. */
+@Composable
+fun ForgeLargeTitle(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    horizontalPadding: Dp = 20.dp,
+) {
+    Column(modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 2.dp)) {
+        Text(text = title, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+        if (subtitle != null) {
+            Text(text = subtitle, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Quiet section label that groups the cards/rows below it. */
+@Composable
+fun ForgeSectionLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 20.dp,
+) {
+    Text(
+        text = text,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 10.dp),
+    )
 }

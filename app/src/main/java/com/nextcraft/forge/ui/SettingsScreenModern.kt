@@ -107,14 +107,137 @@ fun SettingsScreenModern(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // 1. Coding Agent Engine
+        ForgeLargeTitle(title = "Settings", subtitle = "Preferences & configuration", horizontalPadding = 6.dp)
+
+        ForgeSectionLabel("General", horizontalPadding = 6.dp)
+        // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Coding Agent Engine (Root Chroot)",
+                    text = "Security & appearance",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                ForgeToggleRow(
+                    title = "High-risk command approvals",
+                    subtitle = "Prompt before executing destructive shell or system commands",
+                    checked = state.interactiveHighRiskApprovals,
+                    onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
+                )
+
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                Text(
+                    text = "Interface Language",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    AppLanguage.entries.forEach { lang ->
+                        FilterChip(
+                            selected = state.languageCode.equals(lang.code, ignoreCase = true),
+                            onClick = { viewModel.setLanguageCode(lang.code) },
+                            label = { Text("${lang.nativeName} (${lang.displayName})") },
+                        )
+                    }
+                }
+
+                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+                Text(
+                    text = "Theme Mode (${activeThemeMode.title})",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ForgeThemeMode.entries.forEach { mode ->
+                        val selected = mode == activeThemeMode
+                        ForgeElevatedCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = selected,
+                            onClick = { viewModel.setThemeMode(mode.id) },
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = mode.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            } else {
+                                                tokens.cardContainerColor
+                                            },
+                                        ) {
+                                            Text(
+                                                text = mode.badge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (selected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    tokens.accentText
+                                                },
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = mode.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = tokens.successText,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ForgeSectionLabel("AI", horizontalPadding = 6.dp)
+        // AI: coding agent engine
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Coding agent engine",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -221,7 +344,7 @@ fun SettingsScreenModern(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        text = "Model Provider & Android Keystore Vault",
+                        text = "Model provider & key vault",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                     )
@@ -418,6 +541,7 @@ fun SettingsScreenModern(
             }
         }
 
+        ForgeSectionLabel("GitHub", horizontalPadding = 6.dp)
         // 3. GitHub Integration & Two-Way Repository Sync
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -425,7 +549,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "GitHub Integration & Repository Sync",
+                    text = "Repository sync",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -627,6 +751,7 @@ fun SettingsScreenModern(
             }
         }
 
+        ForgeSectionLabel("Runtime", horizontalPadding = 6.dp)
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -634,7 +759,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Ubuntu 24.04 Root Chroot & Dev Stacks",
+                    text = "Dev stacks",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -668,125 +793,7 @@ fun SettingsScreenModern(
             }
         }
 
-        // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Security, Language & Appearance",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                ForgeToggleRow(
-                    title = "High-risk command approvals",
-                    subtitle = "Prompt before executing destructive shell or system commands",
-                    checked = state.interactiveHighRiskApprovals,
-                    onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
-                )
-
-                Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                Text(
-                    text = "Interface Language",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    AppLanguage.entries.forEach { lang ->
-                        FilterChip(
-                            selected = state.languageCode.equals(lang.code, ignoreCase = true),
-                            onClick = { viewModel.setLanguageCode(lang.code) },
-                            label = { Text("${lang.nativeName} (${lang.displayName})") },
-                        )
-                    }
-                }
-
-                Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
-                Text(
-                    text = "Theme Mode (${activeThemeMode.title})",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ForgeThemeMode.entries.forEach { mode ->
-                        val selected = mode == activeThemeMode
-                        ForgeElevatedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            selected = selected,
-                            onClick = { viewModel.setThemeMode(mode.id) },
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = mode.title,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (selected) {
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                            } else {
-                                                tokens.cardContainerColor
-                                            },
-                                        ) {
-                                            Text(
-                                                text = mode.badge,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (selected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    tokens.accentText
-                                                },
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = mode.subtitle,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (selected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                }
-                                if (selected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = tokens.successText,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        ForgeSectionLabel("About", horizontalPadding = 6.dp)
         // 6. Application Self-Updater
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -794,7 +801,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "NextCraft Forge Updates",
+                    text = "App updates",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
