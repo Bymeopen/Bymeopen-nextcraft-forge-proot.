@@ -19,7 +19,7 @@ internal object RootfsRepair {
             // Output is never used; discarding it avoids a full pipe blocking the child until the timeout.
             val proc = ProcessBuilder(*command)
                 .redirectErrorStream(true)
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectOutput(ProcessBuilder.Redirect.to(java.io.File("/dev/null")))
                 .start()
             val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
