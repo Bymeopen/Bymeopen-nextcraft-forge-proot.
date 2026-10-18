@@ -73,4 +73,64 @@ class ThemeAndNavTest {
             assertNull("Back from $start never reaches exit", tab)
         }
     }
+
+    private val white = AirbnbWhiteColorScheme
+    private val whiteTokens = WhiteThemeTokens
+
+    @Test
+    fun white_textPairs_meetAA() {
+        listOf(white.background, white.surface, whiteTokens.cardContainerColor, whiteTokens.cardElevatedColor).forEach { bg ->
+            assertText("onSurface", white.onSurface, bg)
+            assertText("onSurfaceVariant", white.onSurfaceVariant, bg)
+            assertText("accentText", whiteTokens.accentText, bg)
+            assertText("success", whiteTokens.successText, bg)
+            assertText("warning", whiteTokens.warningText, bg)
+            assertText("danger", whiteTokens.dangerText, bg)
+        }
+        assertText("onPrimary/primary", white.onPrimary, white.primary)
+        assertText("diff added", whiteTokens.diffAddedText, whiteTokens.diffAddedBackground)
+        assertText("diff removed", whiteTokens.diffRemovedText, whiteTokens.diffRemovedBackground)
+        assertText("terminal", whiteTokens.terminalText, whiteTokens.terminalBackground)
+    }
+
+    @Test
+    fun systemLight_primary_meetsAA() {
+        assertText("onPrimary/primary", SystemLightColorScheme.onPrimary, SystemLightColorScheme.primary)
+    }
+
+    /** Alpha-composite [fg] over an opaque [bg] (what a translucent glass surface really shows). */
+    private fun over(fg: Color, bg: Color): Color {
+        val a = fg.alpha
+        return Color(
+            red = fg.red * a + bg.red * (1 - a),
+            green = fg.green * a + bg.green * (1 - a),
+            blue = fg.blue * a + bg.blue * (1 - a),
+        )
+    }
+
+    @Test
+    fun glass_textStaysReadable_overEveryCanvasColour() {
+        val g = ZuanGlassColorScheme
+        val tk = GlassThemeTokens
+        GlassCanvasColors.forEach { canvas ->
+            val card = over(tk.cardContainerColor, canvas)
+            val elevated = over(tk.cardElevatedColor, canvas)
+            val bar = over(tk.bottomBarContainerColor, canvas)
+            val terminal = over(tk.terminalBackground, canvas)
+            listOf(card, elevated, bar).forEach { surface ->
+                assertText("onSurface", g.onSurface, surface)
+                assertText("onSurfaceVariant", g.onSurfaceVariant, surface)
+                assertText("accentText", tk.accentText, surface)
+            }
+            assertText("terminal text", tk.terminalText, terminal)
+            assertText("onSurface/canvas", g.onSurface, canvas)
+        }
+        assertText("onPrimary/primary", g.onPrimary, g.primary)
+    }
+
+    @Test
+    fun allThemes_shareTheSameCardRadius() {
+        val radii = setOf(whiteTokens.cardCornerRadius, GlassThemeTokens.cardCornerRadius)
+        assertEquals("Glass and White must keep one shape language", 1, radii.size)
+    }
 }

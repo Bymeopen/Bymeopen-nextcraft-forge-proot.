@@ -154,11 +154,11 @@ internal val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
 )
 
 // 2. GLASS (Zuan Liquid Glassmorphism)
-private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
-    primary = Color(0xFF60A5FA),
-    onPrimary = Color(0xFF061830),
-    primaryContainer = Color(0x731E3A8A),
-    onPrimaryContainer = Color(0xFFE0F2FE),
+internal val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
+    primary = Color(0xFF7C8CFF),
+    onPrimary = Color(0xFF0B1030),
+    primaryContainer = Color(0x66343F9E),
+    onPrimaryContainer = Color(0xFFE0E4FF),
     secondary = Color(0xFF2DD4BF),
     onSecondary = Color(0xFF042F2E),
     secondaryContainer = Color(0x73115E59),
@@ -181,8 +181,8 @@ private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
 )
 
 // 3. WHITE (Airbnb Daylight 100% Pure White)
-private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
-    primary = Color(0xFFFF385C),
+internal val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFFD70F47), // Airbnb coral darkened: white text on #FF385C is only 3.5:1
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFFFF0F3),
     onPrimaryContainer = Color(0xFF8A0F28),
@@ -197,7 +197,7 @@ private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
     surface = Color(0xFFFFFFFF),
     onSurface = Color(0xFF222222),
     surfaceVariant = Color(0xFFF7F7F7),
-    onSurfaceVariant = Color(0xFF717171),
+    onSurfaceVariant = Color(0xFF666666),
     outline = Color(0xFFDDDDDD),
     outlineVariant = Color(0xFFEBEBEB),
     error = Color(0xFFC13515),
@@ -208,8 +208,8 @@ private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
 )
 
 // 4. SYSTEM LIGHT (Daylight Clean Blue-Slate when OS is in Light Mode)
-private val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
-    primary = Color(0xFF0284C7),
+internal val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
+    primary = Color(0xFF0369A1), // white on #0284C7 was 4.1:1
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFE0F2FE),
     onPrimaryContainer = Color(0xFF0C4A6E),
@@ -235,13 +235,10 @@ private val GlassInnerBorderBrush = Brush.linearGradient(
     ),
 )
 
-private val GlassCosmicCanvasBrush = Brush.verticalGradient(
-    colors = listOf(
-        Color(0xFF090D16),
-        Color(0xFF122038),
-        Color(0xFF0B1324),
-    ),
-)
+// Diagonal indigo-violet-teal wash: gives the translucent surfaces something coloured to show through.
+internal val GlassCanvasColors = listOf(Color(0xFF0D1326), Color(0xFF1A1038), Color(0xFF0B1B2E))
+
+private val GlassCosmicCanvasBrush = Brush.linearGradient(colors = GlassCanvasColors)
 
 private val DarkThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.DARK,
@@ -275,7 +272,7 @@ private val DarkThemeTokens = ForgeThemeTokens(
     ),
 )
 
-private val GlassThemeTokens = ForgeThemeTokens(
+internal val GlassThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.GLASS,
     isDark = true,
     isGlass = true,
@@ -286,44 +283,44 @@ private val GlassThemeTokens = ForgeThemeTokens(
     cardElevatedColor = Color(0xFF283750).copy(alpha = 0.42f),
     cardBorderStroke = BorderStroke(0.8.dp, GlassSpecularBorderBrush),
     elevatedBorderStroke = BorderStroke(0.8.dp, GlassInnerBorderBrush),
-    cardCornerRadius = 22.dp,
+    cardCornerRadius = 18.dp,
     topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.30f),
     bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.38f),
-    accentText = Color(0xFF60A5FA),
+    accentText = Color(0xFFC5CCFF),
     successText = Color(0xFF2DD4BF),
     warningText = Color(0xFFFBBF24),
     dangerText = Color(0xFFF87171),
     terminalBackground = Color(0xFF090D16).copy(alpha = 0.58f),
     terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.45f),
     terminalText = Color(0xFFF8FAFC),
-    inlineCodeBackground = Color(0x4060A5FA),
+    inlineCodeBackground = Color(0x407C8CFF),
     diffAddedBackground = Color(0x40064E3B),
     diffAddedText = Color(0xFFA7F3D0),
     diffRemovedBackground = Color(0x407F1D1D),
     diffRemovedText = Color(0xFFFECACA),
     selectionColors = TextSelectionColors(
-        handleColor = Color(0xFF60A5FA),
-        backgroundColor = Color(0xFF60A5FA).copy(alpha = 0.35f),
+        handleColor = Color(0xFF7C8CFF),
+        backgroundColor = Color(0xFF7C8CFF).copy(alpha = 0.35f),
     ),
 )
 
-private val WhiteThemeTokens = ForgeThemeTokens(
+internal val WhiteThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.WHITE,
     isDark = false,
     isGlass = false,
     isWhite = true,
     canvasBrush = SolidColor(Color(0xFFFFFFFF)),
     windowBackgroundArgb = Color(0xFFFFFFFF).toArgb(),
-    cardContainerColor = Color(0xFFFFFFFF),
-    cardElevatedColor = Color(0xFFF7F7F7),
-    cardBorderStroke = BorderStroke(1.dp, Color(0xFFDDDDDD)),
-    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFFE5E5E5)),
-    cardCornerRadius = 16.dp,
+    cardContainerColor = Color(0xFFF7F7F7),
+    cardElevatedColor = Color(0xFFEFEFEF),
+    cardBorderStroke = BorderStroke(0.5.dp, Color(0xFFE4E4E4)),
+    elevatedBorderStroke = BorderStroke(0.5.dp, Color(0xFFE4E4E4)),
+    cardCornerRadius = 18.dp,
     topBarContainerColor = Color(0xFFFFFFFF),
-    bottomBarContainerColor = Color(0xFFFFFFFF),
-    accentText = Color(0xFFD90B38),  // WCAG > 5.2:1 on White
-    successText = Color(0xFF008A05), // Airbnb Kazan Green (WCAG > 4.6:1)
-    warningText = Color(0xFFB45309), // Deep Amber (WCAG > 5.0:1)
+    bottomBarContainerColor = Color(0xFFF7F7F7),
+    accentText = Color(0xFFC70A32),  // >= 4.5:1 on every White surface
+    successText = Color(0xFF007505), // Kazan Green darkened (>= 4.5:1 on #F7F7F7)
+    warningText = Color(0xFFA04A07), // Deep Amber (>= 4.5:1 on #EFEFEF)
     dangerText = Color(0xFFC13515),  // Airbnb Arches Red
     terminalBackground = Color(0xFFF7F7F7),
     terminalHeaderBackground = Color(0xFFEBEBEB),
@@ -334,8 +331,8 @@ private val WhiteThemeTokens = ForgeThemeTokens(
     diffRemovedBackground = Color(0xFFFFF0F0),
     diffRemovedText = Color(0xFFC13515),
     selectionColors = TextSelectionColors(
-        handleColor = Color(0xFFFF385C),
-        backgroundColor = Color(0xFFFF385C).copy(alpha = 0.22f),
+        handleColor = Color(0xFFD70F47),
+        backgroundColor = Color(0xFFD70F47).copy(alpha = 0.22f),
     ),
 )
 
