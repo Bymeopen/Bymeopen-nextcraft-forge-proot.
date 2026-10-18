@@ -2480,8 +2480,8 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
             fileName = "nextcraft-android-arm64-2026.10.1.tar.zst",
-            sha256 = "TODO_ANDROID_BUNDLE_SHA256",
-            compressedBytes = 0L,
+            sha256 = "09adfedbb5c6a4c49e308835813beca11ab9fa7ba9cfc6a2c7341c0f021b6fa9",
+            compressedBytes = 584_528_900L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek Harness",
