@@ -80,6 +80,7 @@ import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
+import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 
 @Composable
@@ -182,6 +183,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         },
                         onNewProject = { showNewProjectDialog = true },
                         onDeleteProject = viewModel::deleteProject,
+                        onNewQuickProject = viewModel::createQuickProject,
                     )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
@@ -346,10 +348,13 @@ private fun ForgeTopBar(
                         expanded = projectMenuExpanded,
                         onDismissRequest = { projectMenuExpanded = false },
                     ) {
+                        val taskBusy = state.sessionRunning ||
+                            state.androidBuild.phase == AndroidBuildPhase.BUILDING ||
+                            state.terminalRunning
                         state.projects.forEach { project ->
                             val isCurrent = project.id == state.activeProjectId
                             DropdownMenuItem(
-                                enabled = !state.sessionRunning || isCurrent,
+                                enabled = !taskBusy || isCurrent,
                                 text = {
                                     Column {
                                         Text(
@@ -378,7 +383,7 @@ private fun ForgeTopBar(
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1 && !state.sessionRunning) {
+                                    if (state.projects.size > 1 && !taskBusy) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
@@ -402,7 +407,7 @@ private fun ForgeTopBar(
                         }
                         Divider(color = scheme.outlineVariant)
                         DropdownMenuItem(
-                            enabled = !state.sessionRunning,
+                            enabled = !taskBusy,
                             text = {
                                 Text(
                                     text = "New Workspace Project…",

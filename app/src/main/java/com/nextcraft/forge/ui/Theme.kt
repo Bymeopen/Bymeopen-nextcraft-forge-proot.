@@ -452,11 +452,14 @@ fun NextCraftForgeTheme(
             val activity = view.context.findActivity() ?: return@SideEffect
             val window = activity.window
             window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
-            window.statusBarColor = tokens.topBarContainerColor.toArgb()
-            window.navigationBarColor = if (tokens.isGlass) {
-                Color(0xFF0B1324).toArgb()
-            } else {
-                tokens.bottomBarContainerColor.toArgb()
+            @Suppress("DEPRECATION")
+            run {
+                window.statusBarColor = tokens.topBarContainerColor.toArgb()
+                window.navigationBarColor = if (tokens.isGlass) {
+                    Color(0xFF0B1324).toArgb()
+                } else {
+                    tokens.bottomBarContainerColor.toArgb()
+                }
             }
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !tokens.isDark

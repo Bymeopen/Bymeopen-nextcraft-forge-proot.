@@ -1003,6 +1003,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installComposer(
         chrootExec: File,
         fraction: Float,
@@ -1291,6 +1292,7 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.writeText(obj.toString())
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installNodeIfNeeded(
         chrootExec: File,
         from: Float,
@@ -1676,6 +1678,7 @@ class RuntimeInstaller(private val context: Context) {
      * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
      * No PRoot binary or ptrace translation is used.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
         rootfs: File,

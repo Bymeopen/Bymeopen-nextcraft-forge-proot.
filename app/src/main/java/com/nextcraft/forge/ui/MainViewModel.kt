@@ -504,10 +504,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
-        // Switching mid-run would append streamed output to, and save over, another project's chat.
-        if (_state.value.sessionRunning && projectId != _state.value.activeProjectId) return
         val switchingProject = projectId != _state.value.activeProjectId
+        // Switching mid-run would append streamed output to, and save over, another project's chat or race with a build/terminal process.
         if (switchingProject) {
+            if (_state.value.sessionRunning) {
+                _state.update { it.copy(bannerMessage = "Stop the running agent session before switching projects.") }
+                return
+            }
+            if (_state.value.androidBuild.phase == AndroidBuildPhase.BUILDING) {
+                _state.update { it.copy(bannerMessage = "Wait for the Android APK build to finish or stop it before switching projects.") }
+                return
+            }
+            if (_state.value.terminalRunning) {
+                _state.update { it.copy(bannerMessage = "Wait for the active terminal command to finish before switching projects.") }
+                return
+            }
             activeLogcatProcess?.destroyForcibly()
             activeLogcatProcess = null
             activeLogcatJob?.cancel()
@@ -560,6 +571,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isAndroid: Boolean,
         androidTemplate: AndroidTemplate = AndroidTemplate.COMPOSE,
     ) {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before creating and switching to a new project.") }
+            return
+        }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
             val newProject = withContext(Dispatchers.IO) {
@@ -595,14 +610,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val updated = listOf(newProject) + _state.value.projects
             preferences.saveProjects(updated)
             configureAllProjectRoots(updated)
-            _state.update { it.copy(projects = updated) }
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
+                )
+            }
             selectProject(newProject.id)
         }
     }
 
+    fun createQuickProject() {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before starting a new Quick Chat.") }
+            return
+        }
+        viewModelScope.launch {
+            val quickProject = withContext(Dispatchers.IO) {
+                val quickCount = _state.value.projects.count { it.kind == ProjectKind.QUICK_PROJECT } + 1
+                val cleanName = if (quickCount == 1) "Quick Chat" else "Quick Chat $quickCount"
+                val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                val baseSlug = projectSlug(cleanName)
+                var slug = baseSlug
+                var suffix = 2
+                while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                val project = Project(
+                    name = cleanName,
+                    description = "Lightweight scratchpad & instant agent session",
+                    language = "Multi-language",
+                    slug = slug,
+                    type = ProjectType.GENERAL,
+                    kind = ProjectKind.QUICK_PROJECT,
+                )
+                val wsDir = checkpoints.ensureWorkspace(project.id)
+                val readme = File(wsDir, "README.md")
+                if (!readme.exists()) {
+                    readme.writeText("# $cleanName\n\nQuick scratchpad workspace.\n")
+                }
+                project
+            }
+            val updated = listOf(quickProject) + _state.value.projects
+            preferences.saveProjects(updated)
+            configureAllProjectRoots(updated)
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = ForgeTab.AGENT,
+                )
+            }
+            selectProject(quickProject.id)
+        }
+    }
+
     fun deleteProject(projectId: String) {
-        // The workspace would be wiped under a running agent, and the active-project switch is blocked mid-run.
-        if (_state.value.sessionRunning) return
+        // The workspace would be wiped under a running agent, build, or terminal process.
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Cannot delete a project while an agent session, build, or terminal command is running.") }
+            return
+        }
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
@@ -781,6 +846,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopActiveTask() {
         val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
+        val pendingApproval = _state.value.pendingToolRequest
+        val bridge = activeRuntimeBridge
         RuntimeTaskController.requestStop()
         val agentJob = activeAgentJob
         agentJob?.cancel()
@@ -791,7 +858,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
             // otherwise a new prompt could race with it over shared bridge state.
             viewModelScope.launch {
+                if (pendingApproval != null) {
+                    runCatching { (bridge ?: claudeRuntime).respondToApproval(pendingApproval, false) }
+                }
                 agentJob?.join()
+                activeRuntimeBridge = null
                 _state.update {
                     it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
                 }

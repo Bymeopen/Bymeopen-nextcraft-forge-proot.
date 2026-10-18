@@ -35,7 +35,7 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2536 baris)
 - `app/src/main/cpp/forge_spawn.c` (297 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
@@ -1130,7 +1130,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2536 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -1770,9 +1770,30 @@ class RuntimeInstaller(private val context: Context) {
             val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
             if (comparison != 0) return comparison > 0
         }
-        val candidatePre = '-' in candidate.substringBefore('+')
-        val currentPre = '-' in current.substringBefore('+')
-        return !candidatePre && currentPre
+        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+        }
+        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+        val candidateIds = candidatePreTag.split('.')
+        val currentIds = currentPreTag.split('.')
+        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+            val candidateId = candidateIds.getOrNull(index)
+            val currentId = currentIds.getOrNull(index)
+            if (candidateId == null) return false
+            if (currentId == null) return true
+            val candidateNum = candidateId.toIntOrNull()
+            val currentNum = currentId.toIntOrNull()
+            val comparison = if (candidateNum != null && currentNum != null) {
+                candidateNum.compareTo(currentNum)
+            } else {
+                candidateId.compareTo(currentId)
+            }
+            if (comparison != 0) return comparison > 0
+        }
+        return false
     }
 
     private fun migrateLegacyClaudeMarker() {
@@ -2117,6 +2138,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installComposer(
         chrootExec: File,
         fraction: Float,
@@ -2371,13 +2393,19 @@ class RuntimeInstaller(private val context: Context) {
 
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        return when (stack) {
+            DevStack.WEB -> true
+            DevStack.PYTHON -> File(rootfs, "usr/bin/python3").exists() && File(rootfs, "usr/bin/pip3").exists()
+            DevStack.CPP -> File(rootfs, "usr/bin/gcc").exists() && File(rootfs, "usr/bin/g++").exists()
+            DevStack.PHP -> File(rootfs, "usr/bin/php").exists() && File(rootfs, "usr/local/bin/composer").isFile
+            DevStack.ANDROID ->
+                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
+                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
+                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
+                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
+                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        }
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {
@@ -2399,6 +2427,7 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.writeText(obj.toString())
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installNodeIfNeeded(
         chrootExec: File,
         from: Float,
@@ -2784,6 +2813,7 @@ class RuntimeInstaller(private val context: Context) {
      * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
      * No PRoot binary or ptrace translation is used.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
         rootfs: File,
@@ -3336,7 +3366,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09"
+        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
@@ -7159,14 +7189,14 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (983 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (983 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7871,6 +7901,7 @@ class ClaudeRuntimeBridge(
         pushForegroundProgress("Running $name: $compactDetail")
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun terminalStatus(line: String): Pair<String, String>? = null
 
     private suspend fun emitCompletedOnce(sessionId: String) {
@@ -12904,18 +12935,18 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (118 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2243 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (119 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2322 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (557 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (560 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/ModelLabels.kt` (74 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidBuildText.kt` (62 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (118 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (119 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -12993,6 +13024,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun applyWindowTheme(themeMode: String) {
         val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
@@ -13040,7 +13072,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2243 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2322 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13283,6 +13315,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
+    /** Bridge actually running the current session; approvals must go here, not to whatever agentKind is selected now. */
+    private var activeRuntimeBridge: RuntimeBridge? = null
     private val logLineIdCounter = AtomicLong(1L)
     /** Session whose events may touch the active chat; late events from older sessions are dropped. */
     private val activeRuntimeSessionId = AtomicReference<String?>(null)
@@ -13528,6 +13562,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectAgent(agent: AgentKind) {
+        // Switching bridges mid-run would desync providerProfile/hasSecret from the session that is
+        // still streaming, and would misroute any pending tool approval to the newly selected bridge.
+        if (_state.value.sessionRunning) return
         preferences.agentKind = agent.stableId
         val loadedProfile = preferences.loadProvider(vault, agent)
         val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
@@ -13544,10 +13581,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
-        // Switching mid-run would append streamed output to, and save over, another project's chat.
-        if (_state.value.sessionRunning && projectId != _state.value.activeProjectId) return
         val switchingProject = projectId != _state.value.activeProjectId
+        // Switching mid-run would append streamed output to, and save over, another project's chat or race with a build/terminal process.
         if (switchingProject) {
+            if (_state.value.sessionRunning) {
+                _state.update { it.copy(bannerMessage = "Stop the running agent session before switching projects.") }
+                return
+            }
+            if (_state.value.androidBuild.phase == AndroidBuildPhase.BUILDING) {
+                _state.update { it.copy(bannerMessage = "Wait for the Android APK build to finish or stop it before switching projects.") }
+                return
+            }
+            if (_state.value.terminalRunning) {
+                _state.update { it.copy(bannerMessage = "Wait for the active terminal command to finish before switching projects.") }
+                return
+            }
             activeLogcatProcess?.destroyForcibly()
             activeLogcatProcess = null
             activeLogcatJob?.cancel()
@@ -13600,6 +13648,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isAndroid: Boolean,
         androidTemplate: AndroidTemplate = AndroidTemplate.COMPOSE,
     ) {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before creating and switching to a new project.") }
+            return
+        }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
             val newProject = withContext(Dispatchers.IO) {
@@ -13635,14 +13687,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val updated = listOf(newProject) + _state.value.projects
             preferences.saveProjects(updated)
             configureAllProjectRoots(updated)
-            _state.update { it.copy(projects = updated) }
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
+                )
+            }
             selectProject(newProject.id)
         }
     }
 
+    fun createQuickProject() {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before starting a new Quick Chat.") }
+            return
+        }
+        viewModelScope.launch {
+            val quickProject = withContext(Dispatchers.IO) {
+                val quickCount = _state.value.projects.count { it.kind == ProjectKind.QUICK_PROJECT } + 1
+                val cleanName = if (quickCount == 1) "Quick Chat" else "Quick Chat $quickCount"
+                val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                val baseSlug = projectSlug(cleanName)
+                var slug = baseSlug
+                var suffix = 2
+                while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                val project = Project(
+                    name = cleanName,
+                    description = "Lightweight scratchpad & instant agent session",
+                    language = "Multi-language",
+                    slug = slug,
+                    type = ProjectType.GENERAL,
+                    kind = ProjectKind.QUICK_PROJECT,
+                )
+                val wsDir = checkpoints.ensureWorkspace(project.id)
+                val readme = File(wsDir, "README.md")
+                if (!readme.exists()) {
+                    readme.writeText("# $cleanName\n\nQuick scratchpad workspace.\n")
+                }
+                project
+            }
+            val updated = listOf(quickProject) + _state.value.projects
+            preferences.saveProjects(updated)
+            configureAllProjectRoots(updated)
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = ForgeTab.AGENT,
+                )
+            }
+            selectProject(quickProject.id)
+        }
+    }
+
     fun deleteProject(projectId: String) {
-        // The workspace would be wiped under a running agent, and the active-project switch is blocked mid-run.
-        if (_state.value.sessionRunning) return
+        // The workspace would be wiped under a running agent, build, or terminal process.
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Cannot delete a project while an agent session, build, or terminal command is running.") }
+            return
+        }
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
@@ -13798,6 +13900,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AgentKind.DEEPSEEK_HARNESS -> dshRuntime
             AgentKind.ANTIGRAVITY -> antigravityRuntime
         }
+        activeRuntimeBridge = bridge
 
         activeAgentJob = viewModelScope.launch {
             try {
@@ -13820,6 +13923,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopActiveTask() {
         val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
+        val pendingApproval = _state.value.pendingToolRequest
+        val bridge = activeRuntimeBridge
         RuntimeTaskController.requestStop()
         val agentJob = activeAgentJob
         agentJob?.cancel()
@@ -13830,7 +13935,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
             // otherwise a new prompt could race with it over shared bridge state.
             viewModelScope.launch {
+                if (pendingApproval != null) {
+                    runCatching { (bridge ?: claudeRuntime).respondToApproval(pendingApproval, false) }
+                }
                 agentJob?.join()
+                activeRuntimeBridge = null
                 _state.update {
                     it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
                 }
@@ -13840,9 +13949,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun respondToToolRequest(approved: Boolean) {
         val req = _state.value.pendingToolRequest ?: return
+        val bridge = activeRuntimeBridge ?: claudeRuntime
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            claudeRuntime.respondToApproval(req, approved)
+            bridge.respondToApproval(req, approved)
         }
     }
 
@@ -13941,6 +14051,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishAgentTurn(projectId: String) {
+        activeRuntimeBridge = null
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->
@@ -15421,7 +15532,7 @@ object AppStrings {
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (557 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (560 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15878,11 +15989,14 @@ fun NextCraftForgeTheme(
             val activity = view.context.findActivity() ?: return@SideEffect
             val window = activity.window
             window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
-            window.statusBarColor = tokens.topBarContainerColor.toArgb()
-            window.navigationBarColor = if (tokens.isGlass) {
-                Color(0xFF0B1324).toArgb()
-            } else {
-                tokens.bottomBarContainerColor.toArgb()
+            @Suppress("DEPRECATION")
+            run {
+                window.statusBarColor = tokens.topBarContainerColor.toArgb()
+                window.navigationBarColor = if (tokens.isGlass) {
+                    Color(0xFF0B1324).toArgb()
+                } else {
+                    tokens.bottomBarContainerColor.toArgb()
+                }
             }
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !tokens.isDark
@@ -16745,16 +16859,17 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
    - Mengelola konfigurasi penyedia AI & kunci API terenkripsi (`ApiKeyVault`) beserta rotasi multi-kunci dan pengambilan katalog model langsung dari server, pengelolaan bundle runtime (impor `.tar.zst` lokal, unduh dari rilis resmi, *Verify & Repair Rootfs*, bersihkan *staging* atau *reset runtime*), integrasi penuh akun & repositori GitHub (`Connect Token`, `Create Repo`, `Clone`, `Push`, `Pull`, dan *Auto-Sync*), pemilih tema & bahasa antarmuka, kebijakan persetujuan perintah berisiko tinggi, serta pemeriksaan dan instalasi pembaruan aplikasi (`AppUpdater`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1123 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1128 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (1182 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (864 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (291 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1180 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (385 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1123 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1128 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -16839,6 +16954,7 @@ import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
+import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 
 @Composable
@@ -16941,6 +17057,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         },
                         onNewProject = { showNewProjectDialog = true },
                         onDeleteProject = viewModel::deleteProject,
+                        onNewQuickProject = viewModel::createQuickProject,
                     )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
@@ -17105,10 +17222,13 @@ private fun ForgeTopBar(
                         expanded = projectMenuExpanded,
                         onDismissRequest = { projectMenuExpanded = false },
                     ) {
+                        val taskBusy = state.sessionRunning ||
+                            state.androidBuild.phase == AndroidBuildPhase.BUILDING ||
+                            state.terminalRunning
                         state.projects.forEach { project ->
                             val isCurrent = project.id == state.activeProjectId
                             DropdownMenuItem(
-                                enabled = !state.sessionRunning || isCurrent,
+                                enabled = !taskBusy || isCurrent,
                                 text = {
                                     Column {
                                         Text(
@@ -17137,7 +17257,7 @@ private fun ForgeTopBar(
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1 && !state.sessionRunning) {
+                                    if (state.projects.size > 1 && !taskBusy) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
@@ -17161,7 +17281,7 @@ private fun ForgeTopBar(
                         }
                         Divider(color = scheme.outlineVariant)
                         DropdownMenuItem(
-                            enabled = !state.sessionRunning,
+                            enabled = !taskBusy,
                             text = {
                                 Text(
                                     text = "New Workspace Project…",
@@ -22161,6 +22281,398 @@ fun SettingsScreenModern(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+```
+
+---
+
+## 7. `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (385 baris)
+
+```kotlin
+package com.nextcraft.forge.ui
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nextcraft.forge.model.Project
+import com.nextcraft.forge.model.ProjectKind
+import com.nextcraft.forge.model.ProjectType
+import com.nextcraft.forge.runtime.AndroidBuildPhase
+
+/**
+ * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
+ * a single accent for the primary action and the active project, and header actions.
+ */
+@Composable
+fun ProjectsScreen(
+    state: ForgeUiState,
+    onOpenProject: (String) -> Unit,
+    onNewProject: () -> Unit,
+    onDeleteProject: (String) -> Unit,
+    onNewQuickProject: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
+
+    val regular = state.projects
+        .filter { it.kind == ProjectKind.PROJECT }
+        .sortedByDescending { it.updatedAtMillis }
+    val quick = state.projects
+        .filter { it.kind == ProjectKind.QUICK_PROJECT }
+        .sortedByDescending { it.updatedAtMillis }
+    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while a task is running.
+    val canDelete = state.projects.size > 1 &&
+        !state.sessionRunning &&
+        state.androidBuild.phase != AndroidBuildPhase.BUILDING &&
+        !state.terminalRunning
+
+    pendingDeleteProject?.let { targetProject ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            containerColor = tokens.cardElevatedColor,
+            title = {
+                Text(
+                    text = "Delete '${targetProject.name}'?",
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = "This permanently deletes /workspace/${targetProject.slug}, all local files, checkpoints, and chat history for this project.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = targetProject.id
+                        pendingDeleteProject = null
+                        onDeleteProject(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete Project", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        ProjectsHeader(
+            onNewProject = onNewProject,
+            onNewQuickProject = onNewQuickProject,
+        )
+        Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+
+        if (state.projects.isEmpty()) {
+            ProjectsEmptyState(
+                onNewProject = onNewProject,
+                onNewQuickProject = onNewQuickProject,
+            )
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (regular.isNotEmpty()) {
+                    item(key = "header-recent") { SectionLabel("RECENT") }
+                    items(regular, key = { it.id }) { project ->
+                        ProjectRow(
+                            project = project,
+                            active = project.id == state.activeProjectId,
+                            canDelete = canDelete,
+                            onOpen = { onOpenProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
+                        )
+                    }
+                }
+                if (quick.isNotEmpty()) {
+                    item(key = "header-quick") { SectionLabel("QUICK") }
+                    items(quick, key = { it.id }) { project ->
+                        ProjectRow(
+                            project = project,
+                            active = project.id == state.activeProjectId,
+                            canDelete = canDelete,
+                            onOpen = { onOpenProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectsHeader(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Projects",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onNewQuickProject) {
+            Text(
+                text = "Quick Chat",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = tokens.accentText,
+            )
+        }
+        // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
+        IconButton(onClick = onNewProject) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "New project",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ProjectRow(
+    project: Project,
+    active: Boolean,
+    canDelete: Boolean,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val rowBg = if (active) tokens.accentText.copy(alpha = 0.08f) else Color.Transparent
+
+    Box {
+        Column(modifier = Modifier.background(rowBg)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .combinedClickable(
+                        role = Role.Button,
+                        onClick = onOpen,
+                        onLongClick = { if (canDelete) menuOpen = true },
+                    )
+                    .padding(start = 16.dp, end = if (canDelete) 6.dp else 16.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusDot(active = active)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = project.name,
+                        fontSize = 14.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = project.subtitle(),
+                        fontSize = 12.5.sp,
+                        color = muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = project.formattedUpdatedAt,
+                    fontSize = 12.sp,
+                    color = muted,
+                    maxLines = 1,
+                )
+                if (canDelete) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete ${project.name}",
+                            tint = muted.copy(alpha = 0.75f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+            Divider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(start = 16.dp),
+            )
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("Delete project") },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    onDelete()
+                },
+            )
+        }
+    }
+}
+
+/** Filled accent dot = active project, hollow ring = the rest. Shape (not only colour) carries the state. */
+@Composable
+private fun StatusDot(active: Boolean) {
+    val tokens = LocalForgeThemeTokens.current
+    val accent = tokens.accentText
+    val ring = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = Modifier
+            .size(16.dp)
+            .semantics { contentDescription = if (active) "Active project" else "Project" },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (active) {
+            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(accent))
+        } else {
+            Box(modifier = Modifier.size(10.dp).border(1.5.dp, ring, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun ProjectsEmptyState(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "No projects yet",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Create a project or start a quick chat to begin building.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = onNewProject,
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+            ) {
+                Text("New project", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = onNewQuickProject,
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+            ) {
+                Text("Quick Chat", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private fun Project.subtitle(): String {
+    val base = when {
+        kind == ProjectKind.QUICK_PROJECT -> "Quick chat"
+        type == ProjectType.ANDROID -> "Android" + (androidTemplate?.let { " · ${it.label}" } ?: "")
+        else -> "General"
+    }
+    val cleanDesc = description.trim()
+    return if (cleanDesc.isNotBlank() && !cleanDesc.equals(base, ignoreCase = true)) {
+        "$base · $cleanDesc"
+    } else {
+        base
     }
 }
 ```
