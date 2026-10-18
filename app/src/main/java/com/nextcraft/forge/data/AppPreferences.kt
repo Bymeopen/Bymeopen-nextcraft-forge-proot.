@@ -407,7 +407,7 @@ class AppPreferences(private val context: Context) {
         val projectDir = File(chatsDir, safeProject).also { it.mkdirs() }
         val index = File(projectDir, "index.json")
         if (index.exists()) {
-            return runCatching {
+            val parsed = runCatching {
                 val arr = JSONArray(index.readText())
                 // One malformed entry must not hide every other chat in the project.
                 (0 until arr.length()).mapNotNull { i ->
@@ -421,10 +421,12 @@ class AppPreferences(private val context: Context) {
                         )
                     }.getOrNull()
                 }.sortedByDescending { it.updatedAtMillis }
-            }.getOrElse {
-                quarantine(index)
-                emptyList()
-            }
+            }.getOrNull()
+            if (parsed != null) return parsed
+            // Unreadable index: keep it for inspection, then rebuild from the chat files that are still on disk.
+            quarantine(index)
+            val recovered = recoverChatIndex(safeProject, projectDir)
+            if (recovered.isNotEmpty()) return recovered
         }
 
         val legacy = File(chatsDir, "$safeProject.json")
@@ -439,6 +441,25 @@ class AppPreferences(private val context: Context) {
         saveProjectChats(safeProject, listOf(chat))
         if (legacyMessages.isNotEmpty()) saveMessages(safeProject, chat.id, legacyMessages)
         return listOf(chat)
+    }
+
+    /** Rebuilds the chat list from `<chatId>.json` files when `index.json` is lost or corrupt. */
+    private fun recoverChatIndex(projectId: String, projectDir: File): List<ProjectChat> {
+        val recovered = projectDir.listFiles { f ->
+            f.isFile && f.name.endsWith(".json") && f.name != "index.json" && !f.name.startsWith(".")
+        }.orEmpty().mapNotNull { file ->
+            val id = file.name.removeSuffix(".json")
+            if (runCatching { safeStorageId(id) }.isFailure) return@mapNotNull null
+            val modified = file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+            ProjectChat(
+                id = id,
+                title = loadLegacyMessages(file).firstOrNull { it.fromUser }?.text?.toChatTitle() ?: "Recovered chat",
+                createdAtMillis = modified,
+                updatedAtMillis = modified,
+            )
+        }.sortedByDescending { it.updatedAtMillis }
+        if (recovered.isNotEmpty()) saveProjectChats(projectId, recovered)
+        return recovered
     }
 
     @Synchronized
