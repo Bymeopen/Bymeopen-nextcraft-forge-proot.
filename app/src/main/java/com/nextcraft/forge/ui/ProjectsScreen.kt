@@ -51,6 +51,9 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectKind
 import com.nextcraft.forge.model.ProjectType
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 /**
  * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
@@ -82,7 +85,7 @@ fun ProjectsScreen(
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (regular.isNotEmpty()) {
-                    item(key = "header-recent") { SectionLabel("RECENT") }
+                    item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
                     items(regular, key = { it.id }) { project ->
                         ProjectRow(
                             project = project,
@@ -96,7 +99,7 @@ fun ProjectsScreen(
                     }
                 }
                 if (quick.isNotEmpty()) {
-                    item(key = "header-quick") { SectionLabel("QUICK") }
+                    item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
                     items(quick, key = { it.id }) { project ->
                         ProjectRow(
                             project = project,
@@ -124,7 +127,7 @@ private fun ProjectsHeader(onNewProject: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "Projects",
+            text = stringResource(R.string.projects_projects),
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
@@ -133,7 +136,7 @@ private fun ProjectsHeader(onNewProject: () -> Unit) {
         IconButton(onClick = onNewProject) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = "New project",
+                contentDescription = stringResource(R.string.projects_new_project),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp),
             )
@@ -176,7 +179,7 @@ private fun ProjectRow(
                         enabled = !locked,
                         role = Role.Button,
                         onClick = onOpen,
-                        onLongClickLabel = if (canDelete) "Delete project" else null,
+                        onLongClickLabel = if (canDelete) stringResource(R.string.shell_delete_project) else null,
                         onLongClick = if (canDelete) ({ menuOpen = true }) else null,
                     )
                     .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -193,7 +196,7 @@ private fun ProjectRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = if (locked) "Agent is running" else project.subtitle(),
+                        text = if (locked) stringResource(R.string.projects_agent_running) else project.subtitle(),
                         fontSize = 12.5.sp,
                         color = muted,
                         maxLines = 1,
@@ -216,7 +219,7 @@ private fun ProjectRow(
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
-                text = { Text("Delete project") },
+                text = { Text(stringResource(R.string.shell_delete_project)) },
                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                 onClick = {
                     menuOpen = false
@@ -232,10 +235,11 @@ private fun ProjectRow(
 private fun StatusDot(active: Boolean) {
     val accent = MaterialTheme.colorScheme.primary
     val ring = MaterialTheme.colorScheme.onSurfaceVariant
+    val description = stringResource(if (active) R.string.projects_active_project else R.string.projects_project)
     Box(
         modifier = Modifier
             .size(16.dp)
-            .semantics { contentDescription = if (active) "Active project" else "Project" },
+            .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
         if (active) {
@@ -256,14 +260,14 @@ private fun ProjectsEmptyState(onNewProject: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "No projects yet",
+            text = stringResource(R.string.projects_no_projects_yet),
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Create a project to start building.",
+            text = stringResource(R.string.projects_create_a_project_to),
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -274,13 +278,14 @@ private fun ProjectsEmptyState(onNewProject: () -> Unit) {
             shape = RoundedCornerShape(6.dp),
             modifier = Modifier.heightIn(min = 44.dp),
         ) {
-            Text("New project", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
+@Composable
 private fun Project.subtitle(): String = when {
-    kind == ProjectKind.QUICK_PROJECT -> "Quick chat"
-    type == ProjectType.ANDROID -> "Android" + (androidTemplate?.let { " · ${it.label}" } ?: "")
-    else -> "General"
+    kind == ProjectKind.QUICK_PROJECT -> stringResource(R.string.projects_quick_chat)
+    type == ProjectType.ANDROID -> stringResource(R.string.projects_android) + (androidTemplate?.let { " · ${it.label}" } ?: "")
+    else -> stringResource(R.string.projects_general)
 }

@@ -52,6 +52,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 /**
  * Linear-style toggle cell: label and optional description on the left, switch on the right.
@@ -173,12 +176,12 @@ fun ForgeSectionLabel(
     )
 }
 
-enum class ForgeStatus(val label: String) {
-    DONE("Done"),
-    RUNNING("Running"),
-    FAILED("Failed"),
-    TODO("Waiting"),
-    SKIPPED("Skipped"),
+enum class ForgeStatus(@StringRes val labelRes: Int) {
+    DONE(R.string.status_done),
+    RUNNING(R.string.status_running),
+    FAILED(R.string.status_failed),
+    TODO(R.string.status_waiting),
+    SKIPPED(R.string.status_skipped),
 }
 
 /** Status glyph whose shape (not only colour) carries the state: check, half-filled ring, cross, ring, dotted ring. */
@@ -196,10 +199,11 @@ fun ForgeStatusIcon(
     val failed = scheme.error
     val onFailed = scheme.onError
     val ring = scheme.onSurfaceVariant.copy(alpha = 0.55f)
+    val description = stringResource(status.labelRes)
     Canvas(
         modifier = modifier
             .size(iconSize)
-            .semantics { contentDescription = status.label },
+            .semantics { contentDescription = description },
     ) {
         val stroke = 2.dp.toPx()
         val w = this.size.width

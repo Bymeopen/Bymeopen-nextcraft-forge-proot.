@@ -86,6 +86,8 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 
 @Composable
 fun AgentScreen(
@@ -169,7 +171,7 @@ fun AgentScreen(
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                 modifier = Modifier.height(28.dp),
                             ) {
-                                Text("Stop", fontSize = 11.sp)
+                                Text(stringResource(R.string.agent_stop), fontSize = 11.sp)
                             }
                         }
                     }
@@ -234,7 +236,7 @@ fun AgentScreen(
                     onValueChange = { promptInput = it },
                     placeholder = {
                         Text(
-                            "Ask ${state.agentKind.displayTitle()} to build, refactor, or fix…",
+                            stringResource(R.string.agent_ask_to_build_refactor, state.agentKind.displayTitle()),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -281,7 +283,7 @@ fun AgentScreen(
                             .clickable(
                                 enabled = running || canSend,
                                 role = Role.Button,
-                                onClickLabel = if (running) "Stop" else "Send",
+                                onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
                             ) {
                                 if (running) {
                                     viewModel.stopActiveTask()
@@ -297,7 +299,7 @@ fun AgentScreen(
                     ) {
                         Icon(
                             imageVector = if (running) Icons.Default.Close else Icons.Default.Send,
-                            contentDescription = if (running) "Stop" else "Send",
+                            contentDescription = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
                             tint = when {
                                 running -> MaterialTheme.colorScheme.onError
                                 canSend -> MaterialTheme.colorScheme.onPrimary
@@ -350,7 +352,7 @@ private fun ChatTabsRow(
                             {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Delete chat",
+                                    contentDescription = stringResource(R.string.agent_delete_chat),
                                     modifier = Modifier
                                         .size(14.dp)
                                         .clickable { onDeleteChat(chat.id) },
@@ -363,7 +365,7 @@ private fun ChatTabsRow(
                 }
                 AssistChip(
                     onClick = onCreateChat,
-                    label = { Text("New Chat") },
+                    label = { Text(stringResource(R.string.agent_new_chat)) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Add,
@@ -408,7 +410,7 @@ private fun AntigravityOAuthBanner(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Antigravity CLI Google Account Sign-In",
+                    text = stringResource(R.string.agent_antigravity_cli_google_account),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                 )
@@ -429,14 +431,14 @@ private fun AntigravityOAuthBanner(
                             }
                         },
                     ) {
-                        Text("Open Google Sign-In")
+                        Text(stringResource(R.string.agent_open_google_sign_in))
                     }
                     OutlinedButton(
                         onClick = { clipboard.setText(AnnotatedString(url)) },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy Link")
+                        Text(stringResource(R.string.agent_copy_link))
                     }
                 }
                 Row(
@@ -447,7 +449,7 @@ private fun AntigravityOAuthBanner(
                     OutlinedTextField(
                         value = verificationCode,
                         onValueChange = { verificationCode = it },
-                        label = { Text("Paste Google Verification Code") },
+                        label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
@@ -459,7 +461,7 @@ private fun AntigravityOAuthBanner(
                             }
                         },
                     ) {
-                        Text("Verify")
+                        Text(stringResource(R.string.agent_verify))
                     }
                 }
             }
@@ -467,14 +469,14 @@ private fun AntigravityOAuthBanner(
                 authState.status == AntigravityAuthStatus.ERROR
             ) {
                 Button(onClick = onStartLogin) {
-                    Text("Sign In with Google (Official PTY OAuth)")
+                    Text(stringResource(R.string.agent_sign_in_with_google))
                 }
             } else if (authState.status == AntigravityAuthStatus.STARTING ||
                 authState.status == AntigravityAuthStatus.COMPLETING
             ) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 OutlinedButton(onClick = onCancel) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.agent_cancel))
                 }
             }
         }
@@ -512,7 +514,7 @@ private fun ToolApprovalCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "High-Risk Tool Approval: ${request.toolName} (${request.risk.name})",
+                    text = stringResource(R.string.agent_high_risk_tool_approval, request.toolName, request.risk.name),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     fontWeight = FontWeight.Bold,
@@ -550,7 +552,7 @@ private fun ToolApprovalCard(
                 ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Deny")
+                    Text(stringResource(R.string.agent_deny))
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
@@ -562,7 +564,7 @@ private fun ToolApprovalCard(
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Approve Execution")
+                    Text(stringResource(R.string.agent_approve_execution))
                 }
             }
         }
@@ -659,7 +661,7 @@ private fun ChatMessageCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "${message.workItems.size} tool steps",
+                            text = stringResource(R.string.agent_tool_steps, message.workItems.size),
                             style = MaterialTheme.typography.labelSmall,
                             color = textColor,
                         )
@@ -689,7 +691,7 @@ private fun ChatMessageCard(
                 )
             } else if (!message.fromUser) {
                 Text(
-                    text = "Thinking…",
+                    text = stringResource(R.string.agent_thinking),
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
                 )

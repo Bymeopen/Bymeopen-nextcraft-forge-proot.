@@ -56,6 +56,8 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 
 @Composable
 fun TerminalScreen(
@@ -98,27 +100,27 @@ fun TerminalScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ForgeLargeTitle(
-                title = "Terminal",
+                title = stringResource(R.string.shell_terminal),
                 subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
                 modifier = Modifier.weight(1f),
             )
             ForgeActionPill {
                 ForgePillIcon(
                     icon = Icons.Default.Share,
-                    description = "Copy terminal output",
+                    description = stringResource(R.string.terminal_copy_terminal_output),
                     onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
                 )
                 if (state.terminalRunning) {
                     ForgePillIcon(
                         icon = Icons.Default.Close,
-                        description = "Stop command",
+                        description = stringResource(R.string.terminal_stop_command),
                         onClick = viewModel::stopTerminal,
                         tint = scheme.error,
                     )
                 } else {
                     ForgePillIcon(
                         icon = Icons.Default.Delete,
-                        description = "Clear terminal",
+                        description = stringResource(R.string.terminal_clear_terminal),
                         onClick = viewModel::clearTerminal,
                     )
                 }
@@ -202,7 +204,7 @@ fun TerminalScreen(
                     onValueChange = { commandInput = it },
                     placeholder = {
                         Text(
-                            text = "Run command in the workspace",
+                            text = stringResource(R.string.terminal_run_command_in_the),
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
                         )
@@ -223,12 +225,12 @@ fun TerminalScreen(
                         .size(38.dp)
                         .clip(CircleShape)
                         .background(if (canRun) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
-                        .clickable(enabled = canRun, role = Role.Button, onClickLabel = "Run") { runCommand() },
+                        .clickable(enabled = canRun, role = Role.Button, onClickLabel = stringResource(R.string.terminal_run)) { runCommand() },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Run",
+                        contentDescription = stringResource(R.string.terminal_run),
                         tint = if (canRun) scheme.onPrimary else scheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )

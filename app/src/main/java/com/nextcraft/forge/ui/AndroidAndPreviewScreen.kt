@@ -75,16 +75,19 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
-private data class StageRow(val title: String, val stages: List<AndroidBuildStage>)
+private data class StageRow(@StringRes val title: Int, val stages: List<AndroidBuildStage>)
 
 private val stageRows = listOf(
-    StageRow("Prepare", listOf(AndroidBuildStage.PREPARING)),
-    StageRow("Resolve dependencies", listOf(AndroidBuildStage.RESOLVING)),
-    StageRow("Compile", listOf(AndroidBuildStage.COMPILING)),
-    StageRow("Resources", listOf(AndroidBuildStage.RESOURCES)),
-    StageRow("Package APK", listOf(AndroidBuildStage.PACKAGING, AndroidBuildStage.FINDING_APK)),
-    StageRow("Install", listOf(AndroidBuildStage.INSTALLING, AndroidBuildStage.LAUNCHING)),
+    StageRow(R.string.launch_stage_prepare, listOf(AndroidBuildStage.PREPARING)),
+    StageRow(R.string.launch_stage_resolve, listOf(AndroidBuildStage.RESOLVING)),
+    StageRow(R.string.launch_stage_compile, listOf(AndroidBuildStage.COMPILING)),
+    StageRow(R.string.launch_stage_resources, listOf(AndroidBuildStage.RESOURCES)),
+    StageRow(R.string.launch_stage_package, listOf(AndroidBuildStage.PACKAGING, AndroidBuildStage.FINDING_APK)),
+    StageRow(R.string.launch_stage_install, listOf(AndroidBuildStage.INSTALLING, AndroidBuildStage.LAUNCHING)),
 )
 
 private fun stageRowIndex(stage: AndroidBuildStage): Int = stageRows.indexOfFirst { stage in it.stages }
@@ -105,14 +108,15 @@ private fun stageRowStatus(row: Int, lastRow: Int, phase: AndroidBuildPhase): Fo
     }
 }
 
-private fun AndroidBuildPhase.headline(): String = when (this) {
-    AndroidBuildPhase.IDLE -> "Ready to build"
-    AndroidBuildPhase.PREPARING -> "Preparing"
-    AndroidBuildPhase.BUILDING -> "Building"
-    AndroidBuildPhase.CANCELLING -> "Cancelling"
-    AndroidBuildPhase.SUCCEEDED -> "Build succeeded"
-    AndroidBuildPhase.FAILED -> "Build failed"
-    AndroidBuildPhase.CANCELLED -> "Build cancelled"
+@StringRes
+private fun AndroidBuildPhase.headline(): Int = when (this) {
+    AndroidBuildPhase.IDLE -> R.string.launch_state_idle
+    AndroidBuildPhase.PREPARING -> R.string.launch_state_preparing
+    AndroidBuildPhase.BUILDING -> R.string.launch_state_building
+    AndroidBuildPhase.CANCELLING -> R.string.launch_state_cancelling
+    AndroidBuildPhase.SUCCEEDED -> R.string.launch_state_succeeded
+    AndroidBuildPhase.FAILED -> R.string.launch_state_failed
+    AndroidBuildPhase.CANCELLED -> R.string.launch_state_cancelled
 }
 
 private fun AndroidBuildPhase.overallStatus(): ForgeStatus = when (this) {
@@ -159,7 +163,7 @@ fun AndroidBuildScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ForgeLargeTitle(
-                title = "Launch",
+                title = stringResource(R.string.launch_launch),
                 subtitle = state.activeProject?.name,
                 modifier = Modifier.weight(1f),
             )
@@ -167,14 +171,14 @@ fun AndroidBuildScreen(
                 if (canStop) {
                     ForgePillIcon(
                         icon = Icons.Default.Close,
-                        description = "Cancel build",
+                        description = stringResource(R.string.launch_cancel_build),
                         onClick = viewModel::stopActiveTask,
                         tint = MaterialTheme.colorScheme.error,
                     )
                 } else {
                     ForgePillIcon(
                         icon = Icons.Default.PlayArrow,
-                        description = "Build and install APK",
+                        description = stringResource(R.string.launch_build_and_install_apk),
                         enabled = !busy,
                         onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
                     )
@@ -182,12 +186,12 @@ fun AndroidBuildScreen(
                 Box {
                     ForgePillIcon(
                         icon = Icons.Default.MoreVert,
-                        description = "More build actions",
+                        description = stringResource(R.string.launch_more_build_actions),
                         onClick = { menuOpen = true },
                     )
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Assemble debug (no install)") },
+                            text = { Text(stringResource(R.string.launch_assemble_debug_no_install)) },
                             enabled = !busy,
                             onClick = {
                                 menuOpen = false
@@ -196,7 +200,7 @@ fun AndroidBuildScreen(
                         )
                         if (build.apkPath != null) {
                             DropdownMenuItem(
-                                text = { Text("Install last APK") },
+                                text = { Text(stringResource(R.string.launch_install_last_apk)) },
                                 enabled = !busy,
                                 onClick = {
                                     menuOpen = false
@@ -205,7 +209,7 @@ fun AndroidBuildScreen(
                             )
                         }
                         DropdownMenuItem(
-                            text = { Text("Clean") },
+                            text = { Text(stringResource(R.string.launch_clean)) },
                             enabled = !busy,
                             onClick = {
                                 menuOpen = false
@@ -229,10 +233,10 @@ fun AndroidBuildScreen(
             ForgeStatusIcon(build.phase.overallStatus(), iconSize = 22.dp)
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(build.phase.headline(), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(build.phase.headline()), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
-                        "$errorCount errors · $warningCount warnings"
+                        stringResource(R.string.launch_errors_warnings, errorCount, warningCount)
                     } else {
                         build.message ?: build.stage.displayLabel()
                     },
@@ -252,7 +256,7 @@ fun AndroidBuildScreen(
         }
         if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
             ForgePrimaryButton(
-                text = "Fix with Agent",
+                text = stringResource(R.string.launch_fix_with_agent),
                 onClick = {
                     viewModel.sendPrompt(build.issues.joinToString("\n\n") { it.formatForAgentPrompt() })
                     viewModel.selectTab(ForgeTab.AGENT)
@@ -263,7 +267,7 @@ fun AndroidBuildScreen(
             )
         } else if (build.phase == AndroidBuildPhase.SUCCEEDED && build.apkPath != null) {
             ForgePrimaryButton(
-                text = "Install APK",
+                text = stringResource(R.string.launch_install_apk),
                 onClick = viewModel::installBuiltApk,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -273,10 +277,14 @@ fun AndroidBuildScreen(
 
         ForgePillTabs(
             items = listOf(
-                "Stages",
-                if (build.issues.isEmpty()) "Issues" else "Issues (${build.issues.size})",
-                "Log",
-                "Logcat",
+                stringResource(R.string.launch_tab_stages),
+                if (build.issues.isEmpty()) {
+                    stringResource(R.string.launch_tab_issues)
+                } else {
+                    stringResource(R.string.launch_tab_issues_count, build.issues.size)
+                },
+                stringResource(R.string.launch_tab_log),
+                stringResource(R.string.launch_tab_logcat),
             ),
             selectedIndex = activeTab,
             onSelect = { activeTab = it },
@@ -302,7 +310,7 @@ fun AndroidBuildScreen(
                         ForgeStatusIcon(status, iconSize = 20.dp)
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
-                            text = row.title,
+                            text = stringResource(row.title),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
                             color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
@@ -338,7 +346,7 @@ fun AndroidBuildScreen(
                 ) {
                     SelectionContainer {
                         Text(
-                            text = build.log.ifBlank { "No build output yet. Tap play to compile." },
+                            text = build.log.ifBlank { stringResource(R.string.launch_no_build_output) },
                             color = tokens.terminalText,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
@@ -372,7 +380,7 @@ private fun BuildIssuesList(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "Zero compiler or AAPT2 resource issues detected.",
+                text = stringResource(R.string.launch_zero_compiler_or_aapt2),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -431,11 +439,11 @@ private fun BuildIssuesList(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onAskAgentToFix(issue) }) {
-                            Text("Ask Agent to Fix")
+                            Text(stringResource(R.string.launch_ask_agent_to_fix))
                         }
                         issue.filePath?.let { path ->
                             OutlinedButton(onClick = { onOpenFile(path) }) {
-                                Text("Open File")
+                                Text(stringResource(R.string.launch_open_file))
                             }
                         }
                     }
@@ -471,11 +479,11 @@ private fun LogcatPanel(
             )
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
-                    Text("Pause")
+                    Text(stringResource(R.string.launch_pause))
                 }
             } else {
                 Button(onClick = onStartLogcat) {
-                    Text("Stream Logcat")
+                    Text(stringResource(R.string.launch_stream_logcat))
                 }
             }
         }
@@ -546,14 +554,14 @@ fun WebPreviewScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ForgeLargeTitle(
-                title = "Preview",
-                subtitle = "Local dev server",
+                title = stringResource(R.string.launch_preview),
+                subtitle = stringResource(R.string.launch_local_dev_server),
                 modifier = Modifier.weight(1f),
             )
             ForgeActionPill {
                 ForgePillIcon(
                     icon = Icons.Default.Refresh,
-                    description = "Scan ports and reload",
+                    description = stringResource(R.string.launch_scan_ports_and_reload),
                     onClick = {
                         viewModel.scanLocalPreviewPorts()
                         webViewRef?.reload()
@@ -590,7 +598,7 @@ fun WebPreviewScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = "Open",
+                    text = stringResource(R.string.launch_open),
                     color = tokens.accentText,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier

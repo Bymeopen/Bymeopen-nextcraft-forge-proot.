@@ -63,6 +63,9 @@ import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 @Composable
 fun SettingsScreenModern(
@@ -107,9 +110,9 @@ fun SettingsScreenModern(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        ForgeLargeTitle(title = "Settings", subtitle = "Preferences & configuration", horizontalPadding = 6.dp)
+        ForgeLargeTitle(title = stringResource(R.string.settings_settings), subtitle = stringResource(R.string.settings_preferences_configuration), horizontalPadding = 6.dp)
 
-        ForgeSectionLabel("General", horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_general), horizontalPadding = 6.dp)
         // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -117,20 +120,20 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Security & appearance",
+                    text = stringResource(R.string.settings_security_appearance),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 ForgeToggleRow(
-                    title = "High-risk command approvals",
-                    subtitle = "Prompt before executing destructive shell or system commands",
+                    title = stringResource(R.string.settings_high_risk_command_approvals),
+                    subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
                     checked = state.interactiveHighRiskApprovals,
                     onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
                 )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
-                    text = "Interface Language",
+                    text = stringResource(R.string.settings_interface_language),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -152,7 +155,7 @@ fun SettingsScreenModern(
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
                 Text(
-                    text = "Theme Mode (${activeThemeMode.title})",
+                    text = stringResource(R.string.settings_theme_mode, activeThemeMode.title),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -229,7 +232,7 @@ fun SettingsScreenModern(
             }
         }
 
-        ForgeSectionLabel("AI", horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_ai), horizontalPadding = 6.dp)
         // AI: coding agent engine
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -237,7 +240,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Coding agent engine",
+                    text = stringResource(R.string.settings_coding_agent_engine),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -280,14 +283,14 @@ fun SettingsScreenModern(
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
                     Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
-                        text = "Antigravity CLI Configuration",
+                        text = stringResource(R.string.settings_antigravity_cli_configuration),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     OutlinedTextField(
                         value = agyModelInput,
                         onValueChange = { agyModelInput = it },
-                        label = { Text("Antigravity Model") },
+                        label = { Text(stringResource(R.string.settings_antigravity_model)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -302,7 +305,7 @@ fun SettingsScreenModern(
                                     agyEffortInput = effort
                                     viewModel.setAntigravityConfig(agyModelInput, effort)
                                 },
-                                label = { Text("Effort: ${effort.uppercase()}") },
+                                label = { Text(stringResource(R.string.settings_effort, effort.uppercase())) },
                             )
                         }
                     }
@@ -310,7 +313,7 @@ fun SettingsScreenModern(
                         Button(
                             onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
                         ) {
-                            Text("Save Antigravity Model")
+                            Text(stringResource(R.string.settings_save_antigravity_model))
                         }
                         val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
                             value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -321,13 +324,13 @@ fun SettingsScreenModern(
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
                             ) {
-                                Text("Sign Out Google OAuth")
+                                Text(stringResource(R.string.settings_sign_out_google_oauth))
                             }
                         } else {
                             OutlinedButton(
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
                             ) {
-                                Text("Sign In with Google")
+                                Text(stringResource(R.string.settings_sign_in_with_google))
                             }
                         }
                     }
@@ -344,7 +347,7 @@ fun SettingsScreenModern(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        text = "Model provider & key vault",
+                        text = stringResource(R.string.settings_model_provider_key_vault),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                     )
@@ -374,7 +377,7 @@ fun SettingsScreenModern(
                         OutlinedTextField(
                             value = baseUrlInput,
                             onValueChange = { baseUrlInput = it },
-                            label = { Text("API Base URL") },
+                            label = { Text(stringResource(R.string.settings_api_base_url)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -383,7 +386,7 @@ fun SettingsScreenModern(
                     OutlinedTextField(
                         value = modelInput,
                         onValueChange = { modelInput = it },
-                        label = { Text("Model Identifier") },
+                        label = { Text(stringResource(R.string.settings_model_identifier)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -392,7 +395,7 @@ fun SettingsScreenModern(
                         OutlinedTextField(
                             value = openRouterOrderInput,
                             onValueChange = { openRouterOrderInput = it },
-                            label = { Text("OpenRouter Provider Order (comma-separated, optional)") },
+                            label = { Text(stringResource(R.string.settings_openrouter_provider_order_comma)) },
                             placeholder = { Text("anthropic,google-vertex,deepseek") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
@@ -412,19 +415,19 @@ fun SettingsScreenModern(
                                 )
                             },
                         ) {
-                            Text("Save Config")
+                            Text(stringResource(R.string.settings_save_config))
                         }
                         OutlinedButton(
                             onClick = viewModel::discoverProviderModels,
                             enabled = !state.apiBusy,
                         ) {
-                            Text("Discover Models")
+                            Text(stringResource(R.string.settings_discover_models))
                         }
                         OutlinedButton(
                             onClick = viewModel::validateProviderConnection,
                             enabled = !state.apiBusy,
                         ) {
-                            Text("Validate")
+                            Text(stringResource(R.string.settings_validate))
                         }
                     }
 
@@ -442,7 +445,7 @@ fun SettingsScreenModern(
 
                     if (state.discoveredModels.isNotEmpty()) {
                         Text(
-                            text = "Discovered Models (tap to select):",
+                            text = stringResource(R.string.settings_discovered_models_tap_to),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -470,7 +473,7 @@ fun SettingsScreenModern(
 
                     Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
-                        text = "API Keys for ${state.providerProfile.kind.displayTitle()} (Auto-Rotation Pool)",
+                        text = stringResource(R.string.settings_api_keys_for_auto, state.providerProfile.kind.displayTitle()),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -496,7 +499,7 @@ fun SettingsScreenModern(
                                 fontWeight = if (keyInfo.isActive) FontWeight.Bold else FontWeight.Normal,
                             )
                             IconButton(onClick = { viewModel.removeApiKey(keyInfo.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete key", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.settings_delete_key), modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -509,7 +512,7 @@ fun SettingsScreenModern(
                         OutlinedTextField(
                             value = keyLabelInput,
                             onValueChange = { keyLabelInput = it },
-                            label = { Text("Label") },
+                            label = { Text(stringResource(R.string.settings_label)) },
                             placeholder = { Text("Primary") },
                             singleLine = true,
                             modifier = Modifier.weight(0.35f),
@@ -517,7 +520,7 @@ fun SettingsScreenModern(
                         OutlinedTextField(
                             value = keySecretInput,
                             onValueChange = { keySecretInput = it },
-                            label = { Text("API Key / Token") },
+                            label = { Text(stringResource(R.string.settings_api_key_token)) },
                             visualTransformation = PasswordVisualTransformation(),
                             singleLine = true,
                             modifier = Modifier.weight(0.65f),
@@ -535,13 +538,13 @@ fun SettingsScreenModern(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Key to Android Keystore")
+                        Text(stringResource(R.string.settings_add_key_to_android))
                     }
                 }
             }
         }
 
-        ForgeSectionLabel("GitHub", horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_github), horizontalPadding = 6.dp)
         // 3. GitHub Integration & Two-Way Repository Sync
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -549,7 +552,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Repository sync",
+                    text = stringResource(R.string.settings_repository_sync),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -569,7 +572,7 @@ fun SettingsScreenModern(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text(
-                                text = "One-Time Device Code: ${dc.userCode}",
+                                text = stringResource(R.string.settings_one_time_device_code, dc.userCode),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -583,14 +586,14 @@ fun SettingsScreenModern(
                                         }
                                     },
                                 ) {
-                                    Text("Copy Code & Open GitHub")
+                                    Text(stringResource(R.string.settings_copy_code_open_github))
                                 }
                                 OutlinedButton(
                                     onClick = { clipboard.setText(AnnotatedString(dc.userCode)) },
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Copy Code")
+                                    Text(stringResource(R.string.settings_copy_code))
                                 }
                             }
                         }
@@ -602,7 +605,7 @@ fun SettingsScreenModern(
                         onClick = { viewModel.startGitHubDeviceSignIn() },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Sign In with GitHub (OAuth Device Flow)")
+                        Text(stringResource(R.string.settings_sign_in_with_github))
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -612,7 +615,7 @@ fun SettingsScreenModern(
                         OutlinedTextField(
                             value = githubTokenInput,
                             onValueChange = { githubTokenInput = it },
-                            label = { Text("Or Paste GitHub Personal Access Token") },
+                            label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
                             visualTransformation = PasswordVisualTransformation(),
                             singleLine = true,
                             modifier = Modifier.weight(1f),
@@ -625,7 +628,7 @@ fun SettingsScreenModern(
                                 }
                             },
                         ) {
-                            Text("Connect")
+                            Text(stringResource(R.string.settings_connect))
                         }
                     }
                 } else {
@@ -635,18 +638,18 @@ fun SettingsScreenModern(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = "Connected as @${state.githubLogin}",
+                            text = stringResource(R.string.settings_connected_as, state.githubLogin),
                             fontWeight = FontWeight.Bold,
                             color = tokens.successText,
                         )
                         OutlinedButton(onClick = viewModel::disconnectGitHub) {
-                            Text("Disconnect")
+                            Text(stringResource(R.string.settings_disconnect))
                         }
                     }
 
                     ForgeToggleRow(
-                        title = "Auto-commit & push",
-                        subtitle = "Commit and push the workspace after every Agent turn",
+                        title = stringResource(R.string.settings_auto_commit_push),
+                        subtitle = stringResource(R.string.settings_commit_and_push_the),
                         checked = state.autoSyncGitHub,
                         onCheckedChange = viewModel::setAutoSyncGitHub,
                     )
@@ -659,26 +662,26 @@ fun SettingsScreenModern(
                             onClick = { viewModel.syncProjectWithGitHub() },
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text("Push Workspace")
+                            Text(stringResource(R.string.settings_push_workspace))
                         }
                         OutlinedButton(
                             onClick = { viewModel.pullProjectFromGitHub() },
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text("Pull Latest")
+                            Text(stringResource(R.string.settings_pull_latest))
                         }
                     }
 
                     Divider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
-                        text = "Create & Push New GitHub Repository",
+                        text = stringResource(R.string.settings_create_push_new_github),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     OutlinedTextField(
                         value = newRepoName,
                         onValueChange = { newRepoName = it },
-                        label = { Text("Repository Name") },
+                        label = { Text(stringResource(R.string.settings_repository_name)) },
                         placeholder = { Text(state.activeProject?.slug ?: "my-forge-repo") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -686,13 +689,13 @@ fun SettingsScreenModern(
                     OutlinedTextField(
                         value = newRepoDesc,
                         onValueChange = { newRepoDesc = it },
-                        label = { Text("Description (optional)") },
+                        label = { Text(stringResource(R.string.settings_description_optional)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     ForgeToggleRow(
-                        title = if (newRepoPrivate) "Private repository" else "Public repository",
-                        subtitle = "Visibility of the new GitHub repository",
+                        title = stringResource(if (newRepoPrivate) R.string.settings_private_repository else R.string.settings_public_repository),
+                        subtitle = stringResource(R.string.settings_visibility_of_the_new),
                         checked = newRepoPrivate,
                         onCheckedChange = { newRepoPrivate = it },
                     )
@@ -713,14 +716,14 @@ fun SettingsScreenModern(
                                 }
                             },
                         ) {
-                            Text("Create & Push")
+                            Text(stringResource(R.string.settings_create_push))
                         }
                     }
 
                     if (state.githubRepos.isNotEmpty()) {
                         Divider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text(
-                            text = "Your Repositories (tap Clone to import into Workspace):",
+                            text = stringResource(R.string.settings_your_repositories_tap_clone),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -742,7 +745,7 @@ fun SettingsScreenModern(
                                     }
                                 }
                                 OutlinedButton(onClick = { viewModel.cloneGitHubRepository(repo) }) {
-                                    Text("Clone")
+                                    Text(stringResource(R.string.settings_clone))
                                 }
                             }
                         }
@@ -751,7 +754,7 @@ fun SettingsScreenModern(
             }
         }
 
-        ForgeSectionLabel("Runtime", horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp)
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -759,7 +762,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Dev stacks",
+                    text = stringResource(R.string.settings_dev_stacks),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -781,19 +784,19 @@ fun SettingsScreenModern(
                         onClick = viewModel::startRuntimeSetup,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Apply / Provision Stacks")
+                        Text(stringResource(R.string.settings_apply_provision_stacks))
                     }
                     OutlinedButton(
                         onClick = viewModel::repairRootfs,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Repair Chroot")
+                        Text(stringResource(R.string.settings_repair_chroot))
                     }
                 }
             }
         }
 
-        ForgeSectionLabel("About", horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_about), horizontalPadding = 6.dp)
         // 6. Application Self-Updater
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -801,7 +804,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "App updates",
+                    text = stringResource(R.string.settings_app_updates),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -814,7 +817,7 @@ fun SettingsScreenModern(
                     )
                 }
                 Button(onClick = { viewModel.checkForAppUpdates() }) {
-                    Text("Check for App Updates")
+                    Text(stringResource(R.string.settings_check_for_app_updates))
                 }
             }
         }

@@ -78,6 +78,9 @@ import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -163,7 +166,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss",
+                                    contentDescription = stringResource(R.string.shell_dismiss),
                                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -260,7 +263,7 @@ private fun ForgeTopBar(
                     ) {
                         Column {
                             Text(
-                                text = activeProject?.name ?: "NextCraft Forge",
+                                text = activeProject?.name ?: stringResource(R.string.shell_nextcraft_forge),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -275,7 +278,7 @@ private fun ForgeTopBar(
                         }
                         Icon(
                             imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Switch project",
+                            contentDescription = stringResource(R.string.shell_switch_project),
                         )
                     }
 
@@ -317,7 +320,7 @@ private fun ForgeTopBar(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Delete,
-                                                contentDescription = "Delete project",
+                                                contentDescription = stringResource(R.string.shell_delete_project),
                                                 modifier = Modifier.size(18.dp),
                                             )
                                         }
@@ -331,7 +334,7 @@ private fun ForgeTopBar(
                         }
                         Divider()
                         DropdownMenuItem(
-                            text = { Text("New Workspace Project…", fontWeight = FontWeight.SemiBold) },
+                            text = { Text(stringResource(R.string.shell_new_workspace_project), fontWeight = FontWeight.SemiBold) },
                             leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                             onClick = {
                                 projectMenuExpanded = false
@@ -392,7 +395,7 @@ private fun ForgeTopBar(
 
                 Spacer(modifier = Modifier.width(6.dp))
                 IconButton(onClick = onOpenNewProject) {
-                    Icon(Icons.Default.Add, contentDescription = "New Project")
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.shell_new_project))
                 }
 
                 // Perbaikan THEME-BUG-021: Lencana pemilih 4 mode tema langsung di Top Bar
@@ -442,13 +445,13 @@ private fun ForgeTopBar(
     }
 }
 
-private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, val label: String)
+private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, @StringRes val label: Int)
 
 private val navEntries = listOf(
-    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, "Projects"),
-    NavEntry(ForgeTab.AGENT, Icons.Default.Star, "Agent"),
-    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, "Tools"),
-    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, "Settings"),
+    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, R.string.nav_projects),
+    NavEntry(ForgeTab.AGENT, Icons.Default.Star, R.string.nav_agent),
+    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, R.string.nav_tools),
+    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, R.string.nav_settings),
 )
 
 // Screens reachable from the Tools launcher keep the Tools tab highlighted (Terminal has its own round button).
@@ -498,6 +501,7 @@ private fun ForgeBottomBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 navEntries.forEach { entry ->
+                    val label = stringResource(entry.label)
                     val selected = if (entry.tab == ForgeTab.TOOLS) activeTab in toolsGroup else activeTab == entry.tab
                     Box(
                         modifier = Modifier
@@ -505,12 +509,12 @@ private fun ForgeBottomBar(
                             .height(46.dp)
                             .clip(RoundedCornerShape(100))
                             .background(if (selected) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                            .clickable(role = Role.Tab, onClickLabel = entry.label) { onSelectTab(entry.tab) },
+                            .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = entry.icon,
-                            contentDescription = entry.label,
+                            contentDescription = label,
                             tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
                             modifier = Modifier.size(24.dp),
                         )
@@ -542,12 +546,12 @@ private fun ForgeBottomBar(
                     .fillMaxSize()
                     .clip(CircleShape)
                     .background(if (activeTab == ForgeTab.TERMINAL) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                    .clickable(role = Role.Button, onClickLabel = "Terminal") { onSelectTab(ForgeTab.TERMINAL) },
+                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_terminal)) { onSelectTab(ForgeTab.TERMINAL) },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = Icons.Default.List,
-                    contentDescription = "Terminal",
+                    contentDescription = stringResource(R.string.shell_terminal),
                     modifier = Modifier.size(22.dp),
                 )
             }
@@ -577,7 +581,7 @@ private fun RuntimeOnboardingScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = "NextCraft Forge",
+            text = stringResource(R.string.shell_nextcraft_forge),
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
@@ -594,19 +598,19 @@ private fun RuntimeOnboardingScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StatusCheckRow(
-                    label = "ARM64 Device Architecture (aarch64)",
+                    label = stringResource(R.string.shell_check_arm64),
                     ok = state.arm64Supported,
-                    detail = if (state.arm64Supported) "Supported" else "Requires 64-bit ARMv8 device",
+                    detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
                 )
                 StatusCheckRow(
-                    label = "Root Access (`su -mm` Mount Namespace)",
+                    label = stringResource(R.string.shell_check_root),
                     ok = state.rootAvailable,
-                    detail = if (state.rootAvailable) "Magisk / KernelSU / APatch granted" else "Root privileges required for chroot",
+                    detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
                 )
                 StatusCheckRow(
-                    label = "Ubuntu 24.04 Rootfs & Agent Toolchains",
+                    label = stringResource(R.string.shell_check_rootfs),
                     ok = state.runtimeInstalled,
-                    detail = if (state.runtimeInstalled) "Installed & ready" else snap.message,
+                    detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
                 )
             }
         }
@@ -617,7 +621,7 @@ private fun RuntimeOnboardingScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Select Development Stacks to Provision",
+                    text = stringResource(R.string.shell_select_development_stacks_to),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -692,11 +696,11 @@ private fun RuntimeOnboardingScreen(
                 enabled = state.arm64Supported && !isInstalling,
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (snap.status == RuntimeSetupStatus.CANCELLED) "Resume Setup" else "Install Chroot Runtime")
+                Text(stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime))
             }
             if (isInstalling) {
                 OutlinedButton(onClick = onPauseSetup) {
-                    Text("Pause")
+                    Text(stringResource(R.string.launch_pause))
                 }
             }
         }
@@ -709,13 +713,13 @@ private fun RuntimeOnboardingScreen(
                 onClick = onRepairRootfs,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Repair Mounts / dpkg")
+                Text(stringResource(R.string.shell_repair_mounts_dpkg))
             }
             OutlinedButton(
                 onClick = onRefreshStatus,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Re-check Root")
+                Text(stringResource(R.string.shell_re_check_root))
             }
         }
 
@@ -723,7 +727,7 @@ private fun RuntimeOnboardingScreen(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) {
-            Text("Continue to IDE Workspace (Host Fallback Mode)")
+            Text(stringResource(R.string.shell_continue_to_ide_workspace))
         }
     }
 }
@@ -769,22 +773,22 @@ private fun NewProjectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create Workspace Project") },
+        title = { Text(stringResource(R.string.shell_create_workspace_project)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Project Name") },
-                    placeholder = { Text("My Awesome App") },
+                    label = { Text(stringResource(R.string.shell_project_name)) },
+                    placeholder = { Text(stringResource(R.string.shell_my_awesome_app)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
-                    placeholder = { Text("Optional project summary") },
+                    label = { Text(stringResource(R.string.shell_description)) },
+                    placeholder = { Text(stringResource(R.string.shell_optional_project_summary)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -797,7 +801,7 @@ private fun NewProjectDialog(
                         onCheckedChange = { isAndroid = it },
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Generate Android App Template (SDK 35)")
+                    Text(stringResource(R.string.shell_generate_android_app_template))
                 }
                 if (isAndroid) {
                     Row(
@@ -819,12 +823,12 @@ private fun NewProjectDialog(
             Button(
                 onClick = { onCreate(name, description, isAndroid, template) },
             ) {
-                Text("Create")
+                Text(stringResource(R.string.files_create))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.agent_cancel))
             }
         },
     )

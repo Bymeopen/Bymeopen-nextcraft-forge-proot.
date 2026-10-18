@@ -30,22 +30,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 private data class ToolEntry(
     val tab: ForgeTab,
     val icon: ImageVector,
-    val title: String,
-    val subtitle: String,
+    @StringRes val title: Int,
+    @StringRes val subtitle: Int,
 )
 
 private val developmentTools = listOf(
-    ToolEntry(ForgeTab.FILES, Icons.Default.Edit, "Files", "Browse project files and review changes"),
-    ToolEntry(ForgeTab.TERMINAL, Icons.Default.List, "Terminal", "Linux terminal inside the private workspace"),
-    ToolEntry(ForgeTab.PREVIEW, Icons.Default.PlayArrow, "Web Preview", "Preview local dev servers"),
+    ToolEntry(ForgeTab.FILES, Icons.Default.Edit, R.string.tools_files, R.string.tools_files_desc),
+    ToolEntry(ForgeTab.TERMINAL, Icons.Default.List, R.string.shell_terminal, R.string.tools_terminal_desc),
+    ToolEntry(ForgeTab.PREVIEW, Icons.Default.PlayArrow, R.string.tools_web_preview, R.string.tools_web_preview_desc),
 )
 
 private val buildTools = listOf(
-    ToolEntry(ForgeTab.ANDROID, Icons.Default.Build, "Android Builder", "Compile, sign, and install APKs directly"),
+    ToolEntry(ForgeTab.ANDROID, Icons.Default.Build, R.string.tools_android_builder, R.string.tools_android_builder_desc),
 )
 
 /**
@@ -63,13 +66,13 @@ fun ToolsScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         Text(
-            text = "Tools",
+            text = stringResource(R.string.tools_tools),
             fontSize = 27.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 4.dp),
         )
-        ToolsSection("Development", developmentTools, onOpen)
-        ToolsSection("Build & Deploy", buildTools, onOpen)
+        ToolsSection(stringResource(R.string.tools_section_development), developmentTools, onOpen)
+        ToolsSection(stringResource(R.string.tools_section_build_deploy), buildTools, onOpen)
     }
 }
 
@@ -112,14 +115,14 @@ private fun ToolRow(entry: ToolEntry, onClick: () -> Unit) {
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = entry.title,
+                text = stringResource(entry.title),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = entry.subtitle,
+                text = stringResource(entry.subtitle),
                 fontSize = 14.sp,
                 color = muted,
                 maxLines = 1,

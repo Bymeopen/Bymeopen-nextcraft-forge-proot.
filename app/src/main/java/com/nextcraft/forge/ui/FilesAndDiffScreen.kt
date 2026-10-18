@@ -61,6 +61,9 @@ import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.DiffLineType
 import com.nextcraft.forge.model.WorkspaceEntry
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 @Composable
 fun FilesAndDiffScreen(
@@ -79,19 +82,19 @@ fun FilesAndDiffScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ForgeLargeTitle(
-                title = "Files",
+                title = stringResource(R.string.files_files),
                 subtitle = state.activeProject?.name,
                 modifier = Modifier.weight(1f),
             )
             ForgeActionPill {
                 ForgePillIcon(
                     icon = Icons.Default.Add,
-                    description = "New file",
+                    description = stringResource(R.string.files_new_file),
                     onClick = { showNewFileDialog = true },
                 )
                 ForgePillIcon(
                     icon = Icons.Default.Refresh,
-                    description = "Refresh",
+                    description = stringResource(R.string.files_refresh),
                     onClick = {
                         state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) }
                     },
@@ -101,9 +104,9 @@ fun FilesAndDiffScreen(
         val modes = listOf("files", "editor", "diff")
         ForgePillTabs(
             items = listOf(
-                "Explorer (${state.workspaceFiles.size})",
-                state.selectedFilePath?.substringAfterLast('/') ?: "Editor",
-                "Changes (${state.changedItems.size})",
+                stringResource(R.string.files_tab_explorer, state.workspaceFiles.size),
+                state.selectedFilePath?.substringAfterLast('/') ?: stringResource(R.string.files_tab_editor),
+                stringResource(R.string.files_tab_changes, state.changedItems.size),
             ),
             selectedIndex = modes.indexOf(mode).coerceAtLeast(0),
             onSelect = { mode = modes[it] },
@@ -168,7 +171,7 @@ private fun WorkspaceTreeList(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "Workspace is empty. Use + to create a file or ask the Agent to scaffold code.",
+                text = stringResource(R.string.files_workspace_is_empty_use),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
@@ -239,7 +242,7 @@ private fun WorkspaceTreeList(
                 }
                 if (!entry.isDirectory) {
                     Text(
-                        text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
+                        text = stringResource(R.string.files_kb, (entry.sizeBytes / 1024L).coerceAtLeast(1L)),
                         style = MaterialTheme.typography.labelSmall,
                         color = secondaryTextColor,
                     )
@@ -267,13 +270,13 @@ private fun WorkspaceFileEditor(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "Select a file from Explorer to view or edit.",
+                    text = stringResource(R.string.files_select_a_file_from),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(onClick = onBackToExplorer) {
-                    Text("Open File Explorer")
+                    Text(stringResource(R.string.files_open_file_explorer))
                 }
             }
         }
@@ -312,7 +315,7 @@ private fun WorkspaceFileEditor(
             Button(onClick = onSave) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Save")
+                Text(stringResource(R.string.files_save))
             }
         }
 
@@ -344,7 +347,7 @@ private fun WorkspaceDiffReviewList(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "No unreviewed checkpoint changes in this workspace.",
+                text = stringResource(R.string.files_no_unreviewed_checkpoint_changes),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -361,17 +364,17 @@ private fun WorkspaceDiffReviewList(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = "${changes.size} modified file(s) since last checkpoint",
+                text = stringResource(R.string.files_modified_file_s_since, changes.size),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onKeepAll) { Text("Keep All") }
+                Button(onClick = onKeepAll) { Text(stringResource(R.string.files_keep_all)) }
                 OutlinedButton(onClick = onRevertAll) {
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Undo All")
+                    Text(stringResource(R.string.files_undo_all))
                 }
             }
         }
@@ -422,7 +425,7 @@ private fun WorkspaceDiffReviewList(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
-                                    contentDescription = "Keep file",
+                                    contentDescription = stringResource(R.string.files_keep_file),
                                     tint = tokens.successText,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -433,7 +436,7 @@ private fun WorkspaceDiffReviewList(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Revert file",
+                                    contentDescription = stringResource(R.string.files_revert_file),
                                     tint = tokens.dangerText,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -497,12 +500,12 @@ private fun NewWorkspaceFileDialog(
     var path by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create New File") },
+        title = { Text(stringResource(R.string.files_create_new_file)) },
         text = {
             OutlinedTextField(
                 value = path,
                 onValueChange = { path = it },
-                label = { Text("Relative File Path") },
+                label = { Text(stringResource(R.string.files_relative_file_path)) },
                 placeholder = { Text("src/main.py or index.html") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -513,12 +516,12 @@ private fun NewWorkspaceFileDialog(
                 onClick = { if (path.isNotBlank()) onCreate(path.trim()) },
                 enabled = path.isNotBlank(),
             ) {
-                Text("Create")
+                Text(stringResource(R.string.files_create))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.agent_cancel))
             }
         },
     )
