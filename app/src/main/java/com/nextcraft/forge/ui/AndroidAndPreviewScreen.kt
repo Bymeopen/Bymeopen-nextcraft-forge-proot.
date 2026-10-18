@@ -62,164 +62,251 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.nextcraft.forge.runtime.AndroidBuildIssue
 import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidLogLevel
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.LaunchedEffect
+import com.nextcraft.forge.runtime.AndroidBuildStage
+import com.nextcraft.forge.runtime.AndroidIssueSeverity
 
+private data class StageRow(val title: String, val stages: List<AndroidBuildStage>)
+
+private val stageRows = listOf(
+    StageRow("Prepare", listOf(AndroidBuildStage.PREPARING)),
+    StageRow("Resolve dependencies", listOf(AndroidBuildStage.RESOLVING)),
+    StageRow("Compile", listOf(AndroidBuildStage.COMPILING)),
+    StageRow("Resources", listOf(AndroidBuildStage.RESOURCES)),
+    StageRow("Package APK", listOf(AndroidBuildStage.PACKAGING, AndroidBuildStage.FINDING_APK)),
+    StageRow("Install", listOf(AndroidBuildStage.INSTALLING, AndroidBuildStage.LAUNCHING)),
+)
+
+private fun stageRowIndex(stage: AndroidBuildStage): Int = stageRows.indexOfFirst { stage in it.stages }
+
+/** Status of stage row [row] given the last stage the build reached ([lastRow]) and the overall [phase]. */
+private fun stageRowStatus(row: Int, lastRow: Int, phase: AndroidBuildPhase): ForgeStatus {
+    if (phase == AndroidBuildPhase.IDLE || lastRow < 0) return ForgeStatus.TODO
+    return when {
+        row < lastRow -> ForgeStatus.DONE
+        row == lastRow -> when (phase) {
+            AndroidBuildPhase.SUCCEEDED -> ForgeStatus.DONE
+            AndroidBuildPhase.FAILED -> ForgeStatus.FAILED
+            AndroidBuildPhase.CANCELLED -> ForgeStatus.SKIPPED
+            else -> ForgeStatus.RUNNING
+        }
+        // Rows after the last reached one: skipped on success (e.g. no install), still waiting otherwise.
+        else -> if (phase == AndroidBuildPhase.SUCCEEDED) ForgeStatus.SKIPPED else ForgeStatus.TODO
+    }
+}
+
+private fun AndroidBuildPhase.headline(): String = when (this) {
+    AndroidBuildPhase.IDLE -> "Ready to build"
+    AndroidBuildPhase.PREPARING -> "Preparing"
+    AndroidBuildPhase.BUILDING -> "Building"
+    AndroidBuildPhase.CANCELLING -> "Cancelling"
+    AndroidBuildPhase.SUCCEEDED -> "Build succeeded"
+    AndroidBuildPhase.FAILED -> "Build failed"
+    AndroidBuildPhase.CANCELLED -> "Build cancelled"
+}
+
+private fun AndroidBuildPhase.overallStatus(): ForgeStatus = when (this) {
+    AndroidBuildPhase.IDLE -> ForgeStatus.TODO
+    AndroidBuildPhase.PREPARING, AndroidBuildPhase.BUILDING, AndroidBuildPhase.CANCELLING -> ForgeStatus.RUNNING
+    AndroidBuildPhase.SUCCEEDED -> ForgeStatus.DONE
+    AndroidBuildPhase.FAILED -> ForgeStatus.FAILED
+    AndroidBuildPhase.CANCELLED -> ForgeStatus.SKIPPED
+}
+
+/**
+ * Launch screen, Linear style: title + action pill, one status block, then tabs
+ * (Stages / Issues / Log / Logcat). A failed build jumps to Issues so the fix is one tap away.
+ */
 @Composable
 fun AndroidBuildScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
 ) {
     val build = state.androidBuild
-    val isBuilding = build.phase == AndroidBuildPhase.BUILDING
-    var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
+    val busy = build.phase == AndroidBuildPhase.PREPARING ||
+        build.phase == AndroidBuildPhase.BUILDING ||
+        build.phase == AndroidBuildPhase.CANCELLING
+    val canStop = build.phase == AndroidBuildPhase.PREPARING || build.phase == AndroidBuildPhase.BUILDING
     val tokens = LocalForgeThemeTokens.current
+    var activeTab by rememberSaveable { mutableStateOf(0) } // 0 stages, 1 issues, 2 log, 3 logcat
+    var menuOpen by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Android APK Builder (SDK 35 • Bionic aapt2)",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = build.message ?: build.stage.displayLabel(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    val (badgeBg, badgeFg) = when (build.phase) {
-                        AndroidBuildPhase.SUCCEEDED -> tokens.diffAddedBackground to tokens.successText
-                        AndroidBuildPhase.FAILED -> tokens.diffRemovedBackground to tokens.dangerText
-                        AndroidBuildPhase.BUILDING -> tokens.inlineCodeBackground to tokens.accentText
-                        else -> tokens.cardElevatedColor to MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    Surface(
-                        color = badgeBg,
-                        contentColor = badgeFg,
-                        shape = RoundedCornerShape(6.dp),
-                    ) {
-                        Text(
-                            text = build.phase.displayBadge(),
-                            color = badgeFg,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                }
+    // Stage events carry only the active stage, so remember the last real one to place success/failure.
+    var lastRow by remember { mutableStateOf(-1) }
+    LaunchedEffect(build.stage, build.phase) {
+        val index = stageRowIndex(build.stage)
+        if (build.phase == AndroidBuildPhase.IDLE) lastRow = -1 else if (index >= 0) lastRow = index
+    }
+    LaunchedEffect(build.phase) {
+        if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) activeTab = 1
+    }
 
-                if (isBuilding) {
-                    LinearProgressIndicator(
-                        progress = build.stage.progressFraction(),
-                        modifier = Modifier.fillMaxWidth(),
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ForgeLargeTitle(
+                title = "Launch",
+                subtitle = state.activeProject?.name,
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                if (canStop) {
+                    ForgePillIcon(
+                        icon = Icons.Default.Close,
+                        description = "Cancel build",
+                        onClick = viewModel::stopActiveTask,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    ForgePillIcon(
+                        icon = Icons.Default.PlayArrow,
+                        description = "Build and install APK",
+                        enabled = !busy,
+                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
                     )
                 }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
-                        enabled = !isBuilding,
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Build & Install APK")
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = false) },
-                        enabled = !isBuilding,
-                    ) {
-                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Assemble Debug")
-                    }
-                    if (build.apkPath != null && !isBuilding) {
-                        OutlinedButton(onClick = { viewModel.installBuiltApk() }) {
-                            Text("Install Last APK")
+                Box {
+                    ForgePillIcon(
+                        icon = Icons.Default.MoreVert,
+                        description = "More build actions",
+                        onClick = { menuOpen = true },
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Assemble debug (no install)") },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.runAndroidBuild("assembleDebug", installAfterBuild = false)
+                            },
+                        )
+                        if (build.apkPath != null) {
+                            DropdownMenuItem(
+                                text = { Text("Install last APK") },
+                                enabled = !busy,
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.installBuiltApk()
+                                },
+                            )
                         }
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.runAndroidBuild("clean", installAfterBuild = false) },
-                        enabled = !isBuilding,
-                    ) {
-                        Text("Clean")
-                    }
-                    if (isBuilding) {
-                        OutlinedButton(onClick = viewModel::stopActiveTask) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Cancel")
-                        }
+                        DropdownMenuItem(
+                            text = { Text("Clean") },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.runAndroidBuild("clean", installAfterBuild = false)
+                            },
+                        )
                     }
                 }
             }
         }
 
+        // Status block
+        val errorCount = build.issues.count { it.severity == AndroidIssueSeverity.ERROR }
+        val warningCount = build.issues.count { it.severity == AndroidIssueSeverity.WARNING }
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilterChip(
-                selected = activeConsoleTab == "gradle",
-                onClick = { activeConsoleTab = "gradle" },
-                label = { Text("Gradle Output") },
+            ForgeStatusIcon(build.phase.overallStatus(), iconSize = 22.dp)
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(build.phase.headline(), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+                        "$errorCount errors · $warningCount warnings"
+                    } else {
+                        build.message ?: build.stage.displayLabel()
+                    },
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (build.phase == AndroidBuildPhase.BUILDING) {
+            LinearProgressIndicator(
+                progress = build.stage.progressFraction(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(3.dp),
             )
-            FilterChip(
-                selected = activeConsoleTab == "issues",
-                onClick = { activeConsoleTab = "issues" },
-                label = { Text("Diagnostics (${build.issues.size})") },
+        }
+        if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+            ForgePrimaryButton(
+                text = "Fix with Agent",
+                onClick = {
+                    viewModel.sendPrompt(build.issues.joinToString("\n\n") { it.formatForAgentPrompt() })
+                    viewModel.selectTab(ForgeTab.AGENT)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
             )
-            FilterChip(
-                selected = activeConsoleTab == "logcat",
-                onClick = { activeConsoleTab = "logcat" },
-                label = { Text("Live Logcat (${state.androidLogcat.lines.size})") },
+        } else if (build.phase == AndroidBuildPhase.SUCCEEDED && build.apkPath != null) {
+            ForgePrimaryButton(
+                text = "Install APK",
+                onClick = viewModel::installBuiltApk,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
             )
         }
 
-        when (activeConsoleTab) {
-            "gradle" -> {
-                val consoleShape = RoundedCornerShape(10.dp)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .clip(consoleShape)
-                        .background(tokens.terminalBackground)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, consoleShape)
-                        .verticalScroll(rememberScrollState())
-                        .padding(12.dp),
-                ) {
-                    SelectionContainer {
+        ForgePillTabs(
+            items = listOf(
+                "Stages",
+                if (build.issues.isEmpty()) "Issues" else "Issues (${build.issues.size})",
+                "Log",
+                "Logcat",
+            ),
+            selectedIndex = activeTab,
+            onSelect = { activeTab = it },
+        )
+
+        when (activeTab) {
+            0 -> Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                stageRows.forEachIndexed { index, row ->
+                    val status = stageRowStatus(index, lastRow, build.phase)
+                    val muted = status == ForgeStatus.TODO || status == ForgeStatus.SKIPPED
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ForgeStatusIcon(status, iconSize = 20.dp)
+                        Spacer(modifier = Modifier.width(14.dp))
                         Text(
-                            text = build.log.ifBlank { "No Gradle build output yet. Tap 'Build & Install APK' to compile." },
-                            color = tokens.terminalText,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 17.sp,
+                            text = row.title,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
             }
 
-            "issues" -> BuildIssuesList(
+            1 -> BuildIssuesList(
                 issues = build.issues,
                 onAskAgentToFix = { issue ->
                     viewModel.sendPrompt(issue.formatForAgentPrompt())
@@ -231,6 +318,30 @@ fun AndroidBuildScreen(
                 },
                 modifier = Modifier.weight(1f),
             )
+
+            2 -> {
+                val consoleShape = RoundedCornerShape(12.dp)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .clip(consoleShape)
+                        .background(tokens.terminalBackground)
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = build.log.ifBlank { "No build output yet. Tap play to compile." },
+                            color = tokens.terminalText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                        )
+                    }
+                }
+            }
 
             else -> LogcatPanel(
                 state = state,

@@ -81,6 +81,11 @@ import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.runtime.AntigravityAuthState
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun AgentScreen(
@@ -211,19 +216,20 @@ fun AgentScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        // Linear-style composer: one rounded surface with the input, a provider chip and a round send/stop button.
+        val running = state.sessionRunning
+        val canSend = promptInput.isNotBlank()
         Surface(
-            color = tokens.topBarContainerColor,
+            shape = RoundedCornerShape(20.dp),
+            color = tokens.cardContainerColor,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
+            Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                TextField(
                     value = promptInput,
                     onValueChange = { promptInput = it },
                     placeholder = {
@@ -233,32 +239,72 @@ fun AgentScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 5,
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                if (state.sessionRunning) {
-                    Button(
-                        onClick = viewModel::stopActiveTask,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
-                        ),
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Stop")
-                    }
-                } else {
-                    Button(
-                        onClick = {
-                            val text = promptInput.trim()
-                            if (text.isNotEmpty()) {
-                                promptInput = ""
-                                viewModel.sendPrompt(text)
-                            }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 10.dp, end = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // The provider and model are configured in Settings, so the chip is the shortcut there.
+                    AssistChip(
+                        onClick = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                        label = {
+                            Text(
+                                state.agentKind.displayTitle(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         },
-                        enabled = promptInput.isNotBlank(),
+                        shape = RoundedCornerShape(100),
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    running -> MaterialTheme.colorScheme.error
+                                    canSend -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                                },
+                            )
+                            .clickable(
+                                enabled = running || canSend,
+                                role = Role.Button,
+                                onClickLabel = if (running) "Stop" else "Send",
+                            ) {
+                                if (running) {
+                                    viewModel.stopActiveTask()
+                                } else {
+                                    val text = promptInput.trim()
+                                    if (text.isNotEmpty()) {
+                                        promptInput = ""
+                                        viewModel.sendPrompt(text)
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "Send")
+                        Icon(
+                            imageVector = if (running) Icons.Default.Close else Icons.Default.Send,
+                            contentDescription = if (running) "Stop" else "Send",
+                            tint = when {
+                                running -> MaterialTheme.colorScheme.onError
+                                canSend -> MaterialTheme.colorScheme.onPrimary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
             }
@@ -586,28 +632,9 @@ private fun ChatMessageCard(
     var expandTools by remember { mutableStateOf(false) }
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val bgColor = if (message.fromUser) {
-        scheme.primaryContainer
-    } else {
-        tokens.cardContainerColor
-    }
-    val textColor = if (message.fromUser) {
-        scheme.onPrimaryContainer
-    } else {
-        scheme.onSurface
-    }
-    val border = if (message.fromUser) {
-        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.35f))
-    } else {
-        tokens.cardBorderStroke
-    }
+    val textColor = scheme.onSurface
 
-    ForgeThemedCard(
-        modifier = Modifier.fillMaxWidth(),
-        containerColor = bgColor,
-        contentColor = textColor,
-        border = border,
-    ) {
+    MessageContainer(fromUser = message.fromUser, contentColor = textColor) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -621,11 +648,7 @@ private fun ChatMessageCard(
                     text = if (message.fromUser) "You" else agentName,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (message.fromUser) {
-                        scheme.onPrimaryContainer
-                    } else {
-                        tokens.accentText
-                    },
+                    color = if (message.fromUser) scheme.onSurfaceVariant else tokens.accentText,
                 )
                 if (message.workItems.isNotEmpty()) {
                     Row(
@@ -675,17 +698,35 @@ private fun ChatMessageCard(
     }
 }
 
+/** User messages sit in a soft rounded surface; agent replies flow on the canvas without a card. */
+@Composable
+private fun MessageContainer(
+    fromUser: Boolean,
+    contentColor: Color,
+    content: @Composable () -> Unit,
+) {
+    if (fromUser) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = LocalForgeThemeTokens.current.cardElevatedColor,
+            contentColor = contentColor,
+            modifier = Modifier.fillMaxWidth(),
+        ) { content() }
+    } else {
+        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
+    }
+}
+
 @Composable
 private fun ToolActivityList(items: List<ActivityItem>) {
     val tokens = LocalForgeThemeTokens.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(12.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(tokens.cardElevatedColor)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-            .padding(8.dp),
+            .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items.forEach { item ->
@@ -693,13 +734,10 @@ private fun ToolActivityList(items: List<ActivityItem>) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,
             ) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = if (item.isComplete) tokens.successText else tokens.warningText,
-                    modifier = Modifier
-                        .size(15.dp)
-                        .padding(top = 2.dp),
+                ForgeStatusIcon(
+                    status = if (item.isComplete) ForgeStatus.DONE else ForgeStatus.RUNNING,
+                    iconSize = 15.dp,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Column(modifier = Modifier.weight(1f)) {

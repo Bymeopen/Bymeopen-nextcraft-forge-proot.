@@ -28,6 +28,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /**
  * Linear-style toggle cell: label and optional description on the left, switch on the right.
@@ -147,4 +171,169 @@ fun ForgeSectionLabel(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 10.dp),
     )
+}
+
+enum class ForgeStatus(val label: String) {
+    DONE("Done"),
+    RUNNING("Running"),
+    FAILED("Failed"),
+    TODO("Waiting"),
+    SKIPPED("Skipped"),
+}
+
+/** Status glyph whose shape (not only colour) carries the state: check, half-filled ring, cross, ring, dotted ring. */
+@Composable
+fun ForgeStatusIcon(
+    status: ForgeStatus,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 20.dp,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    val done = scheme.primary
+    val onDone = scheme.onPrimary
+    val running = tokens.warningText
+    val failed = scheme.error
+    val onFailed = scheme.onError
+    val ring = scheme.onSurfaceVariant.copy(alpha = 0.55f)
+    Canvas(
+        modifier = modifier
+            .size(iconSize)
+            .semantics { contentDescription = status.label },
+    ) {
+        val stroke = 2.dp.toPx()
+        val w = this.size.width
+        val h = this.size.height
+        val radius = (minOf(w, h) - stroke) / 2f
+        val c = center
+        when (status) {
+            ForgeStatus.DONE -> {
+                drawCircle(done, radius = minOf(w, h) / 2f)
+                val check = Path().apply {
+                    moveTo(w * 0.28f, h * 0.52f)
+                    lineTo(w * 0.44f, h * 0.68f)
+                    lineTo(w * 0.74f, h * 0.34f)
+                }
+                drawPath(check, onDone, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            ForgeStatus.RUNNING -> {
+                drawCircle(running, radius, style = Stroke(width = stroke))
+                val inner = radius * 0.55f
+                drawArc(running, -90f, 180f, true, Offset(c.x - inner, c.y - inner), Size(inner * 2, inner * 2))
+            }
+            ForgeStatus.FAILED -> {
+                drawCircle(failed, radius = minOf(w, h) / 2f)
+                val d = w * 0.17f
+                drawLine(onFailed, Offset(c.x - d, c.y - d), Offset(c.x + d, c.y + d), stroke, StrokeCap.Round)
+                drawLine(onFailed, Offset(c.x + d, c.y - d), Offset(c.x - d, c.y + d), stroke, StrokeCap.Round)
+            }
+            ForgeStatus.TODO -> drawCircle(ring, radius, style = Stroke(width = stroke))
+            ForgeStatus.SKIPPED -> drawCircle(
+                ring,
+                radius,
+                style = Stroke(
+                    width = stroke,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())),
+                ),
+            )
+        }
+    }
+}
+
+/** Capsule that groups 1-2 header actions at the top right of a screen (Linear style). */
+@Composable
+fun ForgeActionPill(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(100))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+@Composable
+fun ForgePillIcon(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Box(
+        modifier = modifier
+            .size(width = 44.dp, height = 38.dp)
+            .clip(RoundedCornerShape(100))
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = if (enabled) tint else tint.copy(alpha = 0.38f),
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** Text tabs; the selected one sits in a soft pill. */
+@Composable
+fun ForgePillTabs(
+    items: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+    ) {
+        items.forEachIndexed { index, label ->
+            val selected = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(100))
+                    .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
+                    .clickable(role = Role.Tab, onClickLabel = label) { onSelect(index) }
+                    .padding(horizontal = 15.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 15.sp,
+                    color = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** Capsule primary action, 44dp tall. */
+@Composable
+fun ForgePrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(100),
+        modifier = modifier.height(44.dp),
+    ) {
+        Text(text = text, fontWeight = FontWeight.SemiBold)
+    }
 }
