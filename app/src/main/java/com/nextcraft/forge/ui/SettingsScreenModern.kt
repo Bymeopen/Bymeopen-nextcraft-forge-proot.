@@ -103,6 +103,7 @@ fun SettingsScreenModern(
     var agyEffortInput by rememberSaveable(state.antigravityEffort) {
         mutableStateOf(state.antigravityEffort)
     }
+    var agyCodeInput by remember { mutableStateOf("") }
 
     var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
@@ -230,6 +231,9 @@ fun SettingsScreenModern(
                                 viewModel.antigravityAuth.hasOfficialCredential()
                             }
                         }
+                        val authInFlight = agyAuth.status == AntigravityAuthStatus.STARTING ||
+                            agyAuth.status == AntigravityAuthStatus.AWAITING_CODE ||
+                            agyAuth.status == AntigravityAuthStatus.COMPLETING
                         if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
@@ -239,10 +243,104 @@ fun SettingsScreenModern(
                         } else {
                             OutlinedButton(
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                                enabled = !authInFlight,
                             ) {
                                 Text("Sign In with Google")
                             }
                         }
+                        if (authInFlight) {
+                            OutlinedButton(
+                                onClick = { viewModel.antigravityAuth.cancel() },
+                            ) {
+                                Text("Cancel Sign-In")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateAntigravityConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text("Validate CLI")
+                        }
+                    }
+
+                    agyAuth.accountEmail?.takeIf { it.isNotBlank() }?.let { email ->
+                        Text(
+                            text = "Signed in as $email",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    agyAuth.message?.takeIf { it.isNotBlank() }?.let { authMsg ->
+                        Text(
+                            text = authMsg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (agyAuth.status == AntigravityAuthStatus.ERROR) {
+                                tokens.dangerText
+                            } else {
+                                tokens.accentText
+                            },
+                        )
+                    }
+                    agyAuth.authorizationUrl?.takeIf { it.isNotBlank() }?.let { authUrl ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
+                                    }
+                                },
+                            ) {
+                                Text("Open Google Sign-In")
+                            }
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(authUrl)) },
+                            ) {
+                                Text("Copy OAuth URL")
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedTextField(
+                                value = agyCodeInput,
+                                onValueChange = { agyCodeInput = it },
+                                label = { Text("Google Verification Code") },
+                                placeholder = { Text("Paste authorization code…") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        viewModel.antigravityAuth.submitCode(agyCodeInput)
+                                        agyCodeInput = ""
+                                    }
+                                },
+                                enabled = agyCodeInput.isNotBlank(),
+                            ) {
+                                Text("Verify")
+                            }
+                        }
+                    }
+
+                    if (state.apiBusy) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }
@@ -310,6 +408,65 @@ fun SettingsScreenModern(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Allow Provider Fallbacks", fontWeight = FontWeight.Medium)
+                                Text(
+                                    text = "Automatically fail over to backup OpenRouter upstreams when rate-limited",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = state.providerProfile.openRouterAllowFallbacks,
+                                onCheckedChange = { allow ->
+                                    viewModel.updateProviderConfig(
+                                        baseUrl = baseUrlInput,
+                                        model = modelInput,
+                                        openRouterOrder = openRouterOrderInput,
+                                        openRouterAllowFallbacks = allow,
+                                    )
+                                },
+                            )
+                        }
+                    }
+
+                    if (state.providerProfile.kind == ProviderKind.CUSTOM ||
+                        state.providerProfile.kind == ProviderKind.KIMI
+                    ) {
+                        Text(
+                            text = "Wire Protocol Format:",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(
+                                "anthropic-messages" to "Anthropic Messages",
+                                "openai-completions" to "OpenAI Chat",
+                                "openai-responses" to "OpenAI Responses",
+                            ).forEach { (apiFormat, label) ->
+                                FilterChip(
+                                    selected = state.providerProfile.dshApi == apiFormat,
+                                    onClick = {
+                                        viewModel.updateProviderConfig(
+                                            baseUrl = baseUrlInput,
+                                            model = modelInput,
+                                            openRouterOrder = openRouterOrderInput,
+                                            dshApi = apiFormat,
+                                        )
+                                    },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
                     }
 
                     Row(

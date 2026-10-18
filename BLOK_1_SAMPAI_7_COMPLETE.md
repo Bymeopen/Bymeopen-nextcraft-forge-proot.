@@ -4489,7 +4489,7 @@ Blok 2 menangani **keamanan penyimpanan kredensial**, **sistem snapshot/undo fil
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (260 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (253 baris)
 - `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
@@ -5038,7 +5038,7 @@ class WorkspaceCheckpoints(
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (260 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5073,12 +5073,14 @@ object RuntimeTaskController {
 
     @Synchronized
     fun stopCurrentTask() {
-        stopAction?.invoke()
+        val action = stopAction
+        stopAction = null
+        action?.invoke()
     }
 
     @Synchronized
     fun requestStop() {
-        stopAction?.invoke()
+        stopCurrentTask()
     }
 }
 
@@ -10210,7 +10212,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (342 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (242 baris)
@@ -10535,7 +10537,7 @@ object AndroidProjectTemplateGenerator {
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (342 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10860,7 +10862,11 @@ internal fun startPackageLogcatProcess(
     packageName: String,
     sinceMillis: Long? = null,
 ): Process {
-    val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
+    val uid = try {
+        context.packageManager.getApplicationInfo(packageName, 0).uid
+    } catch (_: PackageManager.NameNotFoundException) {
+        throw IllegalStateException("App '$packageName' is not installed on this device yet. Build & Install the APK first.")
+    }
     require(uid > 0) { "Invalid application UID for $packageName" }
     val since = sinceMillis?.takeIf { it > 0L }?.let {
         SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date(it))
@@ -12899,7 +12905,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (118 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2181 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2242 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (557 baris)
@@ -13034,7 +13040,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2181 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2242 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13812,18 +13818,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopActiveTask() {
+        val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
         RuntimeTaskController.requestStop()
         val agentJob = activeAgentJob
         agentJob?.cancel()
         activeBuildProcess?.destroyForcibly()
         activeBuildJob?.cancel()
-        _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
-        // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
-        // otherwise a new prompt could race with it over shared bridge state.
-        viewModelScope.launch {
-            agentJob?.join()
-            _state.update {
-                it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+        if (wasSessionRunning) {
+            _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+            // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
+            // otherwise a new prompt could race with it over shared bridge state.
+            viewModelScope.launch {
+                agentJob?.join()
+                _state.update {
+                    it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+                }
             }
         }
     }
@@ -14216,18 +14225,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         activeTerminalJob = viewModelScope.launch {
+            var streamedAny = false
             var output = ""
             try {
                 output = withContext(Dispatchers.IO) {
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    runCommandInChrootOrHost(project.slug, ws, cleanCmd)
+                    runCommandInChrootOrHost(project.slug, ws, cleanCmd) { chunkText ->
+                        streamedAny = true
+                        _state.update { current ->
+                            current.copy(
+                                terminalOutput = (current.terminalOutput + chunkText).takeLast(MAX_TERMINAL_CHARS),
+                            )
+                        }
+                    }
                 }
             } finally {
                 activeTerminalProcess = null
                 _state.update {
+                    val tail = if (streamedAny) "\n" else (output + "\n")
                     it.copy(
                         terminalRunning = false,
-                        terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
+                        terminalOutput = (it.terminalOutput + tail).takeLast(MAX_TERMINAL_CHARS),
                     )
                 }
                 refreshWorkspaceFilesAndChanges(project.id)
@@ -14272,7 +14290,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
+    private fun runCommandInChrootOrHost(
+        projectSlug: String,
+        workspaceDir: File,
+        command: String,
+        onOutputChunk: ((String) -> Unit)? = null,
+    ): String {
         return runCatching {
             val process = if (installer.isInstalled() && isRootAccessAvailable()) {
                 val installed = installer.installedRuntime()
@@ -14302,12 +14325,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 while (buffer.length < MAX_TERMINAL_CHARS) {
                     val n = reader.read(chunk)
                     if (n <= 0) break
-                    buffer.append(chunk, 0, n)
+                    val text = String(chunk, 0, n)
+                    buffer.append(text)
+                    onOutputChunk?.invoke(text)
                 }
             }
             if (process.isAlive && !timedOut.get()) process.destroyForcibly()
             watchdog.interrupt()
-            if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
+            if (timedOut.get()) {
+                val timeoutNotice = "\n[Command timed out after 60s]"
+                buffer.append(timeoutNotice)
+                onOutputChunk?.invoke(timeoutNotice)
+            }
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
     }
@@ -14365,7 +14394,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "Running $task in ${project.name}")
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
-        RuntimeTaskController.stopAction = { stopActiveTask() }
+        RuntimeTaskController.stopAction = {
+            activeBuildProcess?.destroyForcibly()
+            activeBuildJob?.cancel()
+        }
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
@@ -14422,7 +14454,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptyList()
             }
-            val finalApk = builtApk
+            val finalApk = builtApk ?: if (task != "clean") {
+                withContext(Dispatchers.IO) { findDebugApk(androidRoot) }
+            } else {
+                null
+            }
             _state.update {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
@@ -14606,6 +14642,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                     }
+                    if (isActive) {
+                        _state.update {
+                            it.copy(
+                                androidLogcat = it.androidLogcat.copy(
+                                    running = false,
+                                    message = "Logcat stream ended for $pkg.",
+                                ),
+                            )
+                        }
+                    }
                 }.onFailure { err ->
                     _state.update {
                         it.copy(
@@ -14683,16 +14729,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateProviderConfig(baseUrl: String, model: String, openRouterOrder: String = "") {
+    fun updateProviderConfig(
+        baseUrl: String,
+        model: String,
+        openRouterOrder: String = _state.value.providerProfile.openRouterProviderOrder,
+        openRouterAllowFallbacks: Boolean = _state.value.providerProfile.openRouterAllowFallbacks,
+        dshApi: String = _state.value.providerProfile.dshApi,
+    ) {
         val current = _state.value.providerProfile
         val updated = current.copy(
             baseUrl = baseUrl.trim(),
             model = model.trim(),
             openRouterProviderOrder = openRouterOrder.trim(),
+            openRouterAllowFallbacks = openRouterAllowFallbacks,
+            dshApi = dshApi.trim().ifBlank { current.dshApi },
             hasSecret = !resolveProviderSecret(current).isNullOrBlank(),
         )
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update { it.copy(providerProfile = updated) }
+    }
+
+    fun validateAntigravityConnection() {
+        _state.update { it.copy(apiBusy = true, apiStatusMessage = "Probing Antigravity CLI inside chroot…") }
+        viewModelScope.launch {
+            val msg = runCatching {
+                val reply = antigravityRuntime.hello(45_000L)
+                "✓ Antigravity CLI verified: ${reply.take(100)}"
+            }.getOrElse { err ->
+                "✕ Antigravity probe failed: ${err.message ?: "CLI error"}"
+            }
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = msg) }
+        }
     }
 
     fun addApiKey(label: String, secret: String) {
@@ -16682,7 +16749,7 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 - `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (864 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (291 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1023 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1180 baris)
 
 ---
 
@@ -20901,7 +20968,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1023 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (1180 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -21009,6 +21076,7 @@ fun SettingsScreenModern(
     var agyEffortInput by rememberSaveable(state.antigravityEffort) {
         mutableStateOf(state.antigravityEffort)
     }
+    var agyCodeInput by remember { mutableStateOf("") }
 
     var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
@@ -21136,6 +21204,9 @@ fun SettingsScreenModern(
                                 viewModel.antigravityAuth.hasOfficialCredential()
                             }
                         }
+                        val authInFlight = agyAuth.status == AntigravityAuthStatus.STARTING ||
+                            agyAuth.status == AntigravityAuthStatus.AWAITING_CODE ||
+                            agyAuth.status == AntigravityAuthStatus.COMPLETING
                         if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
                             OutlinedButton(
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
@@ -21145,10 +21216,104 @@ fun SettingsScreenModern(
                         } else {
                             OutlinedButton(
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                                enabled = !authInFlight,
                             ) {
                                 Text("Sign In with Google")
                             }
                         }
+                        if (authInFlight) {
+                            OutlinedButton(
+                                onClick = { viewModel.antigravityAuth.cancel() },
+                            ) {
+                                Text("Cancel Sign-In")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateAntigravityConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text("Validate CLI")
+                        }
+                    }
+
+                    agyAuth.accountEmail?.takeIf { it.isNotBlank() }?.let { email ->
+                        Text(
+                            text = "Signed in as $email",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    agyAuth.message?.takeIf { it.isNotBlank() }?.let { authMsg ->
+                        Text(
+                            text = authMsg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (agyAuth.status == AntigravityAuthStatus.ERROR) {
+                                tokens.dangerText
+                            } else {
+                                tokens.accentText
+                            },
+                        )
+                    }
+                    agyAuth.authorizationUrl?.takeIf { it.isNotBlank() }?.let { authUrl ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
+                                    }
+                                },
+                            ) {
+                                Text("Open Google Sign-In")
+                            }
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(authUrl)) },
+                            ) {
+                                Text("Copy OAuth URL")
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedTextField(
+                                value = agyCodeInput,
+                                onValueChange = { agyCodeInput = it },
+                                label = { Text("Google Verification Code") },
+                                placeholder = { Text("Paste authorization code…") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        viewModel.antigravityAuth.submitCode(agyCodeInput)
+                                        agyCodeInput = ""
+                                    }
+                                },
+                                enabled = agyCodeInput.isNotBlank(),
+                            ) {
+                                Text("Verify")
+                            }
+                        }
+                    }
+
+                    if (state.apiBusy) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }
@@ -21216,6 +21381,65 @@ fun SettingsScreenModern(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Allow Provider Fallbacks", fontWeight = FontWeight.Medium)
+                                Text(
+                                    text = "Automatically fail over to backup OpenRouter upstreams when rate-limited",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = state.providerProfile.openRouterAllowFallbacks,
+                                onCheckedChange = { allow ->
+                                    viewModel.updateProviderConfig(
+                                        baseUrl = baseUrlInput,
+                                        model = modelInput,
+                                        openRouterOrder = openRouterOrderInput,
+                                        openRouterAllowFallbacks = allow,
+                                    )
+                                },
+                            )
+                        }
+                    }
+
+                    if (state.providerProfile.kind == ProviderKind.CUSTOM ||
+                        state.providerProfile.kind == ProviderKind.KIMI
+                    ) {
+                        Text(
+                            text = "Wire Protocol Format:",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(
+                                "anthropic-messages" to "Anthropic Messages",
+                                "openai-completions" to "OpenAI Chat",
+                                "openai-responses" to "OpenAI Responses",
+                            ).forEach { (apiFormat, label) ->
+                                FilterChip(
+                                    selected = state.providerProfile.dshApi == apiFormat,
+                                    onClick = {
+                                        viewModel.updateProviderConfig(
+                                            baseUrl = baseUrlInput,
+                                            model = modelInput,
+                                            openRouterOrder = openRouterOrderInput,
+                                            dshApi = apiFormat,
+                                        )
+                                    },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
                     }
 
                     Row(

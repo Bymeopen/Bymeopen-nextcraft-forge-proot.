@@ -773,18 +773,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopActiveTask() {
+        val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
         RuntimeTaskController.requestStop()
         val agentJob = activeAgentJob
         agentJob?.cancel()
         activeBuildProcess?.destroyForcibly()
         activeBuildJob?.cancel()
-        _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
-        // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
-        // otherwise a new prompt could race with it over shared bridge state.
-        viewModelScope.launch {
-            agentJob?.join()
-            _state.update {
-                it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+        if (wasSessionRunning) {
+            _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+            // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
+            // otherwise a new prompt could race with it over shared bridge state.
+            viewModelScope.launch {
+                agentJob?.join()
+                _state.update {
+                    it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+                }
             }
         }
     }
@@ -1177,18 +1180,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         activeTerminalJob = viewModelScope.launch {
+            var streamedAny = false
             var output = ""
             try {
                 output = withContext(Dispatchers.IO) {
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    runCommandInChrootOrHost(project.slug, ws, cleanCmd)
+                    runCommandInChrootOrHost(project.slug, ws, cleanCmd) { chunkText ->
+                        streamedAny = true
+                        _state.update { current ->
+                            current.copy(
+                                terminalOutput = (current.terminalOutput + chunkText).takeLast(MAX_TERMINAL_CHARS),
+                            )
+                        }
+                    }
                 }
             } finally {
                 activeTerminalProcess = null
                 _state.update {
+                    val tail = if (streamedAny) "\n" else (output + "\n")
                     it.copy(
                         terminalRunning = false,
-                        terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
+                        terminalOutput = (it.terminalOutput + tail).takeLast(MAX_TERMINAL_CHARS),
                     )
                 }
                 refreshWorkspaceFilesAndChanges(project.id)
@@ -1233,7 +1245,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
+    private fun runCommandInChrootOrHost(
+        projectSlug: String,
+        workspaceDir: File,
+        command: String,
+        onOutputChunk: ((String) -> Unit)? = null,
+    ): String {
         return runCatching {
             val process = if (installer.isInstalled() && isRootAccessAvailable()) {
                 val installed = installer.installedRuntime()
@@ -1263,12 +1280,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 while (buffer.length < MAX_TERMINAL_CHARS) {
                     val n = reader.read(chunk)
                     if (n <= 0) break
-                    buffer.append(chunk, 0, n)
+                    val text = String(chunk, 0, n)
+                    buffer.append(text)
+                    onOutputChunk?.invoke(text)
                 }
             }
             if (process.isAlive && !timedOut.get()) process.destroyForcibly()
             watchdog.interrupt()
-            if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
+            if (timedOut.get()) {
+                val timeoutNotice = "\n[Command timed out after 60s]"
+                buffer.append(timeoutNotice)
+                onOutputChunk?.invoke(timeoutNotice)
+            }
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
     }
@@ -1326,7 +1349,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "Running $task in ${project.name}")
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
-        RuntimeTaskController.stopAction = { stopActiveTask() }
+        RuntimeTaskController.stopAction = {
+            activeBuildProcess?.destroyForcibly()
+            activeBuildJob?.cancel()
+        }
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
@@ -1383,7 +1409,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptyList()
             }
-            val finalApk = builtApk
+            val finalApk = builtApk ?: if (task != "clean") {
+                withContext(Dispatchers.IO) { findDebugApk(androidRoot) }
+            } else {
+                null
+            }
             _state.update {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
@@ -1567,6 +1597,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                     }
+                    if (isActive) {
+                        _state.update {
+                            it.copy(
+                                androidLogcat = it.androidLogcat.copy(
+                                    running = false,
+                                    message = "Logcat stream ended for $pkg.",
+                                ),
+                            )
+                        }
+                    }
                 }.onFailure { err ->
                     _state.update {
                         it.copy(
@@ -1644,16 +1684,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateProviderConfig(baseUrl: String, model: String, openRouterOrder: String = "") {
+    fun updateProviderConfig(
+        baseUrl: String,
+        model: String,
+        openRouterOrder: String = _state.value.providerProfile.openRouterProviderOrder,
+        openRouterAllowFallbacks: Boolean = _state.value.providerProfile.openRouterAllowFallbacks,
+        dshApi: String = _state.value.providerProfile.dshApi,
+    ) {
         val current = _state.value.providerProfile
         val updated = current.copy(
             baseUrl = baseUrl.trim(),
             model = model.trim(),
             openRouterProviderOrder = openRouterOrder.trim(),
+            openRouterAllowFallbacks = openRouterAllowFallbacks,
+            dshApi = dshApi.trim().ifBlank { current.dshApi },
             hasSecret = !resolveProviderSecret(current).isNullOrBlank(),
         )
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update { it.copy(providerProfile = updated) }
+    }
+
+    fun validateAntigravityConnection() {
+        _state.update { it.copy(apiBusy = true, apiStatusMessage = "Probing Antigravity CLI inside chroot…") }
+        viewModelScope.launch {
+            val msg = runCatching {
+                val reply = antigravityRuntime.hello(45_000L)
+                "✓ Antigravity CLI verified: ${reply.take(100)}"
+            }.getOrElse { err ->
+                "✕ Antigravity probe failed: ${err.message ?: "CLI error"}"
+            }
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = msg) }
+        }
     }
 
     fun addApiKey(label: String, secret: String) {
