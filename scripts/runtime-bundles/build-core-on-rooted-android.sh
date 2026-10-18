@@ -50,7 +50,7 @@ guest "printf 'nameserver $DNS_SERVER\\n' > /etc/resolv.conf; apt-get update && 
 guest "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates curl wget unzip zip xz-utils zstd jq ripgrep"
 
 # 3. Instal Node.js v24.19.0 ARM64 dengan verifikasi SHA256 resmi
-guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp; curl -fsSLO https://nodejs.org/dist/\${NODE_VERSION}/\${NODE_FILE}; curl -fsSL https://nodejs.org/dist/\${NODE_VERSION}/SHASUMS256.txt | grep \"  \${NODE_FILE}\" | sha256sum -c -; mkdir -p /usr/local/lib/nodejs; tar -xzf \${NODE_FILE} -C /usr/local/lib/nodejs; ln -sfn node-\${NODE_VERSION} /usr/local/lib/nodejs/current; for c in node npm npx corepack; do ln -sfn ../lib/nodejs/current/bin/\$c /usr/local/bin/\$c; done; rm -f /tmp/\${NODE_FILE}"
+guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp; curl -fsSLO https://nodejs.org/dist/\${NODE_VERSION}/\${NODE_FILE}; curl -fsSL https://nodejs.org/dist/\${NODE_VERSION}/SHASUMS256.txt | grep \"  \${NODE_FILE}\" | sha256sum -c -; mkdir -p /usr/local/lib/nodejs; tar -xzf \${NODE_FILE} -C /usr/local/lib/nodejs; ln -sfn node-\${NODE_VERSION}-linux-arm64 /usr/local/lib/nodejs/current; for c in node npm npx corepack; do ln -sfn ../lib/nodejs/current/bin/\$c /usr/local/bin/\$c; done; rm -f /tmp/\${NODE_FILE}"
 guest "apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /var/tmp/*"
 
 # 4. Siapkan direktori mount (/workspace/nextcraft, /nextcraft-bridge) & version markers

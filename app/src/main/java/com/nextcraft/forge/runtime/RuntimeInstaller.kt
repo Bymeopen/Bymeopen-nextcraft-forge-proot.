@@ -62,7 +62,14 @@ private data class RuntimeBundle(
     val fileName: String,
     val sha256: String,
     val compressedBytes: Long,
+    val baseUrl: String = RUNTIME_RELEASE_BASE_URL,
 )
+
+/** Release hosting the Ubuntu 24.04 bundles built from scripts/runtime-bundles. */
+private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.1"
+
+/** Release hosting the Ubuntu 20.04 bundles; still serves the Android bundle and the Python 3.8 overlay. */
+private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
 
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
@@ -707,8 +714,12 @@ class RuntimeInstaller(private val context: Context) {
     private fun isSupportedCoreToolsVersion(): Boolean = coreToolsMarker.readTextOrNull() in setOf(
         CORE_TOOLS_VERSION,
         LEGACY_CORE_TOOLS_VERSION,
+        PREVIOUS_CORE_TOOLS_VERSION,
         NEXTCRAFT_CORE_TOOLS_VERSION,
     )
+
+    private fun pythonBundle(): RuntimeBundle =
+        if (rootfsMarker.readTextOrNull() == LEGACY_ROOTFS_VERSION) LEGACY_PYTHON_BUNDLE else PYTHON_BUNDLE
 
     private fun isSupportedRootfsVersion(version: String?): Boolean = version in setOf(
         ROOTFS_VERSION,
@@ -916,17 +927,39 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePythonStack() {
+        // The overlay is unmanaged by dpkg, so it is removed by path. Covers the current Ubuntu 24.04 bundle
+        // (Python 3.12) and the legacy 20.04 bundle (Python 3.8). Shared libraries the overlay also ships
+        // (libsqlite3, libreadline, libhistory) and tzdata files are left in place: other tools may use them.
         listOf(
             ".pocket-python-tools-version",
+            ".nextcraft-python-tools-version",
             "usr/bin/python3",
+            "usr/bin/python3.12",
             "usr/bin/python3.8",
             "usr/bin/pip",
             "usr/bin/pip3",
+            "usr/bin/pip3.12",
+            "usr/bin/pdb3",
+            "usr/bin/pdb3.12",
+            "usr/bin/pydoc3",
+            "usr/bin/pydoc3.12",
+            "usr/bin/pygettext3",
+            "usr/bin/pygettext3.12",
+            "usr/bin/py3clean",
+            "usr/bin/py3compile",
+            "usr/bin/py3versions",
+            "usr/lib/aarch64-linux-gnu/libpython3.12.so.1",
+            "usr/lib/aarch64-linux-gnu/libpython3.12.so.1.0",
             "usr/lib/aarch64-linux-gnu/libpython3.8.so.1",
             "usr/lib/aarch64-linux-gnu/libpython3.8.so.1.0",
             "usr/lib/python3",
+            "usr/lib/python3.12",
             "usr/lib/python3.8",
+            "usr/lib/valgrind/python3.supp",
+            "usr/local/lib/python3.12",
             "usr/local/lib/python3.8",
+            "etc/python3",
+            "etc/python3.12",
             "usr/share/python3",
             "usr/share/python-wheels",
             "root/.cache/pip",
@@ -989,7 +1022,7 @@ class RuntimeInstaller(private val context: Context) {
                 verifyGuest(chrootExec, "node --version && npm --version", "Failed to verify Node.js")
             }
             DevStack.PYTHON -> {
-                installRuntimeOverlay(PYTHON_BUNDLE, "Installing Python toolchain…", from, to, onProgress)
+                installRuntimeOverlay(pythonBundle(), "Installing Python toolchain…", from, to, onProgress)
                 runCatching {
                     verifyGuest(chrootExec, "python3 --version && pip3 --version", "Failed to verify Python")
                 }.onFailure { error ->
@@ -1202,7 +1235,7 @@ class RuntimeInstaller(private val context: Context) {
             return destination
         }
 
-        val url = "$DEFAULT_RUNTIME_RELEASE_BASE_URL/${bundle.fileName}"
+        val url = "${bundle.baseUrl}/${bundle.fileName}"
         val downloadingLabel = "Downloading ${bundle.label} bundle…"
         downloadVerified(url, destination, bundle.sha256) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
@@ -2362,7 +2395,6 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
@@ -2385,8 +2417,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val COMPOSER_VERSION = "2.10.3"
         private const val COMPOSER_SHA256 = "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
-        private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
+        private const val CORE_TOOLS_VERSION = "core-bundle-2026.10.1"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
+        private const val PREVIOUS_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val NEXTCRAFT_CORE_TOOLS_VERSION = "nextcraft-core-2026.10.1"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
@@ -2409,41 +2442,50 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "pocketdev-core-arm64-2026.09.5.tar.zst",
-            sha256 = "df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012",
-            compressedBytes = 72_185_773L,
+            fileName = "nextcraft-core-arm64-2026.10.1.tar.zst",
+            sha256 = "fe63d1dececdcd5e861debe0936835d39c2eb6eb787bb7bd71bcab5c3db4d4cf",
+            compressedBytes = 74_269_605L,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
-            fileName = "pocketdev-claude-arm64-2026.09.1.tar.zst",
-            sha256 = "0f68e15630e8c0fc941afe3f61ab5a3eb4407b334018de6dbdabfa5eca627724",
-            compressedBytes = 75_289_800L,
+            fileName = "nextcraft-claude-arm64-2026.10.1.tar.zst",
+            sha256 = "bb993c0a80ff2ea8d9c994e03cf587bf7ef996bdecdab3d95ce51e1e0f04f2bd",
+            compressedBytes = 75_422_659L,
         )
         private val PYTHON_BUNDLE = RuntimeBundle(
+            label = "Python",
+            fileName = "nextcraft-python-arm64-2026.10.1.tar.zst",
+            sha256 = "43a23a3e2d73e46f5c242ac4e3d8f7adef356b987559e1474e4cc9072118a7f3",
+            compressedBytes = 15_053_684L,
+        )
+        /** Python 3.8 overlay for runtimes still on the Ubuntu 20.04 rootfs: the 3.12 overlay needs glibc 2.39. */
+        private val LEGACY_PYTHON_BUNDLE = RuntimeBundle(
             label = "Python",
             fileName = "pocketdev-python-arm64-2026.09.2.tar.zst",
             sha256 = "6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85",
             compressedBytes = 55_419_626L,
+            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
         )
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
             fileName = "pocketdev-android-arm64-2026.09.1.tar.zst",
             sha256 = "01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6",
             compressedBytes = 569_652_007L,
+            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek Harness",
-            fileName = "pocketdev-dsh-arm64-2026.09.1.tar.zst",
-            sha256 = "88e6a23ba74e1cd74a2c923b7e0d6bd78ba4b7e5f8a9b649f12bf4ffe158cce5",
-            compressedBytes = 27_752_194L,
+            fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
+            sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
+            compressedBytes = 28_066_921L,
         )
         private val AGY_BUNDLE = RuntimeBundle(
             label = "Antigravity CLI",
-            fileName = "pocketdev-agy-arm64-2026.09.1.tar.zst",
-            sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
-            compressedBytes = 41_870_025L,
+            fileName = "nextcraft-agy-arm64-2026.10.1.tar.zst",
+            sha256 = "001cbb373a1110ce32c939c2b27138b46b676b157c9329b50c34e790aa2b7eff",
+            compressedBytes = 42_003_928L,
         )
         private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
         private const val ENV_CLEANUP_POLL_MS = 1_000L
