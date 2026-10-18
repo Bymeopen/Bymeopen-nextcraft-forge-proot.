@@ -137,7 +137,7 @@ object AndroidProjectTemplateGenerator {
             root,
             "app/src/main/res/values/strings.xml",
             """
-            <resources><string name="app_name">${xmlEscape(appName)}</string></resources>
+            <resources><string name="app_name" formatted="false">${androidStringResource(appName)}</string></resources>
             """,
         )
     }
@@ -299,10 +299,21 @@ object AndroidProjectTemplateGenerator {
     private fun kotlinString(value: String): String =
         "\"${value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
 
-    private fun xmlEscape(value: String): String =
-        value.replace("&", "&amp;")
+    /**
+     * Escapes [value] for an Android string resource. XML escaping alone is not enough: aapt2 reads the decoded
+     * text, so an apostrophe (even as `&apos;`) or a double quote must be backslash-escaped, and a leading `@` or `?`
+     * would be parsed as a resource reference.
+     */
+    private fun androidStringResource(value: String): String {
+        val escaped = value.trim()
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\"", "\\\"")
+            .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&apos;")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+        return if (escaped.startsWith("@") || escaped.startsWith("?")) "\\$escaped" else escaped
+    }
 }

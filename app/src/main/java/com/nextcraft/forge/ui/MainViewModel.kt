@@ -404,6 +404,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var lastResumeRefreshAt = 0L
+
+    /** onResume fires on every return to the app; each refresh spawns `su`, so don't repeat it within a few seconds. */
+    fun refreshRuntimeStatusOnResume() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastResumeRefreshAt != 0L && now - lastResumeRefreshAt < RESUME_REFRESH_MIN_INTERVAL_MS) return
+        lastResumeRefreshAt = now
+        refreshRuntimeStatus()
+    }
+
     fun refreshRuntimeStatus() {
         viewModelScope.launch {
             val rootOk = withContext(Dispatchers.IO) { isRootAccessAvailable() }
@@ -1077,8 +1087,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var openFileRequest = 0
+
     fun openWorkspaceFile(relativePath: String) {
         val project = _state.value.activeProject ?: return
+        val requestId = ++openFileRequest
         viewModelScope.launch {
             // Saving a truncated, binary or unreadable file back as text would destroy it, so those open read-only.
             val (content, editable) = withContext(Dispatchers.IO) {
@@ -1099,6 +1112,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.getOrDefault("[Read-only: file could not be read]" to false)
             }
+            // A slower earlier read must not overwrite the file the user opened afterwards.
+            if (requestId != openFileRequest) return@launch
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
@@ -2061,6 +2076,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         autoInit = false,
                     )
                     val project = _state.value.activeProject
+                    var pushError: Throwable? = null
                     if (pushActiveProject && project != null) {
                         val ws = checkpoints.ensureWorkspace(project.id)
                         val login = _state.value.githubLogin.ifBlank { "x-access-token" }
@@ -2074,19 +2090,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             append("(git diff --cached --quiet || git commit -m 'Initial commit from NextCraft Forge') && ")
                             append("git push -u origin main")
                         }
-                        withGitHubCredentials(token, login) {
-                            runCheckedCommand(project.slug, ws, pushCmd)
-                        }
+                        pushError = runCatching {
+                            withGitHubCredentials(token, login) {
+                                runCheckedCommand(project.slug, ws, pushCmd)
+                            }
+                        }.exceptionOrNull()
                     }
                     val updatedRepos = runCatching { githubClient.repositories(token) }.getOrDefault(listOf(repo))
-                    repo to updatedRepos
+                    Triple(repo, updatedRepos, pushError)
                 }
             }
-            result.onSuccess { (repo, updatedRepos) ->
+            result.onSuccess { (repo, updatedRepos, pushError) ->
                 _state.update {
                     it.copy(
                         githubRepos = updatedRepos,
-                        githubStatusMessage = "Created & pushed to ${repo.fullName}",
+                        githubStatusMessage = if (pushError == null) {
+                            "Created & pushed to ${repo.fullName}"
+                        } else {
+                            "Created ${repo.fullName}, but the initial push failed: ${pushError.message}"
+                        },
                     )
                 }
             }.onFailure { err ->
@@ -2183,12 +2205,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ws.listFiles()?.forEach { it.deleteRecursively() }
                     val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
-                    if (token.isNotBlank()) {
-                        withGitHubCredentials(token, login) {
+                    try {
+                        if (token.isNotBlank()) {
+                            withGitHubCredentials(token, login) {
+                                runCheckedCommand(project.slug, ws, cloneCmd)
+                            }
+                        } else {
                             runCheckedCommand(project.slug, ws, cloneCmd)
                         }
-                    } else {
-                        runCheckedCommand(project.slug, ws, cloneCmd)
+                    } catch (error: Throwable) {
+                        // The project is never saved on failure; don't leave its workspace behind on disk.
+                        ws.deleteRecursively()
+                        checkpoints.checkpointDir(project.id).deleteRecursively()
+                        throw error
                     }
                     val isAndroidRepo = findAndroidProjectRoot(ws) != null
                     project.copy(
@@ -2331,5 +2360,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MAX_TERMINAL_CHARS = 128 * 1024
+        const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
     }
 }

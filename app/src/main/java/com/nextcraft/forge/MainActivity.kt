@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshRuntimeStatus()
+        viewModel.refreshRuntimeStatusOnResume()
     }
 
     override fun onTrimMemory(level: Int) {

@@ -31,6 +31,7 @@ class AntigravityAuthController(
     private val logoutOutput = File(context.cacheDir, "antigravity-logout-output.log")
     @Volatile private var process: Process? = null
     @Volatile private var codeSubmitted = false
+    private val loginStarting = java.util.concurrent.atomic.AtomicBoolean(false)
     /** Signed-in state to return to when a re-login attempt is cancelled. */
     @Volatile private var stateBeforeLogin: AntigravityAuthState? = null
 
@@ -64,13 +65,23 @@ class AntigravityAuthController(
     }
 
     suspend fun beginLogin() = withContext(Dispatchers.IO) {
-        if (process?.isAlive == true) return@withContext
+        // process?.isAlive alone is check-then-act: two quick taps could each spawn an agy.
+        if (!loginStarting.compareAndSet(false, true)) return@withContext
+        try {
+            beginLoginLocked()
+        } finally {
+            loginStarting.set(false)
+        }
+    }
+
+    private suspend fun beginLoginLocked() {
+        if (process?.isAlive == true) return
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
                 message = "Install Antigravity CLI first in Settings.",
             )
-            return@withContext
+            return
         }
         stateBeforeLogin = mutableState.value.takeIf { it.status == AntigravityAuthStatus.SIGNED_IN }
         mutableState.value = AntigravityAuthState(
@@ -112,7 +123,7 @@ class AntigravityAuthController(
                 AntigravityAuthStatus.ERROR,
                 message = error.message?.take(240) ?: "Could not start Antigravity sign-in.",
             )
-            return@withContext
+            return
         }
         process = running
         val native = running

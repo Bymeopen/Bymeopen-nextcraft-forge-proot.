@@ -923,6 +923,18 @@ private fun scriptCanEscapeSandbox(text: String): Boolean =
     (AWK_WORD_REGEX.containsMatchIn(text) && AWK_EXEC_REGEX.containsMatchIn(text)) ||
         (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
 
+/** Commands that create, overwrite or move files; their path arguments must stay inside the project. */
+private fun mutatesFiles(first: String, words: List<String>): Boolean =
+    first in setOf("cp", "mv", "mkdir", "touch") ||
+        (first == "sed" && words.any { it == "--in-place" || (it.startsWith("-i") && !it.startsWith("--")) })
+
+private fun isOutsideWorkspacePath(word: String): Boolean {
+    val arg = word.trim('\'', '"')
+    if (arg.startsWith("-") || arg.isEmpty()) return false
+    if (isSensitivePath(arg)) return true
+    return arg.startsWith("/") && !arg.startsWith("/workspace/") && !arg.startsWith("/tmp/")
+}
+
 private val SAFE_GIT_SUBCOMMANDS = setOf(
     "status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "ls-tree", "blame",
     "remote", "fetch", "pull", "stash", "restore", "switch", "tag",
@@ -982,6 +994,7 @@ private fun isSafeBashSegment(segment: String): Boolean {
         if (wrapped.isEmpty()) return first == "xargs"
         return isSafeBashSegment(wrapped.joinToString(" "))
     }
+    if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
