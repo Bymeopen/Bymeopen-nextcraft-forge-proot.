@@ -297,4 +297,8 @@
     <plurals name="time_days_ago">
         <item quantity="other">%d hari lalu</item>
     </plurals>
+    <string name="nav_terminal">Terminal</string>
+    <string name="nav_badge_agent_running">Agen berjalan</string>
+    <string name="nav_badge_files_changed">%1$d file berubah</string>
+    <string name="nav_badge_terminal_busy">Proses berjalan di terminal</string>
 </resources>

@@ -81,6 +81,16 @@ import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -124,6 +134,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 ForgeBottomBar(
                     activeTab = state.activeTab,
                     changedCount = state.changedItems.size,
+                    agentRunning = state.sessionRunning,
+                    terminalBusy = state.terminalRunning,
                     onSelectTab = viewModel::selectTab,
                 )
             }
@@ -456,111 +468,140 @@ private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, @StringRes
 
 private val navEntries = listOf(
     NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, R.string.nav_projects),
+    NavEntry(ForgeTab.TERMINAL, Icons.Default.List, R.string.nav_terminal),
     NavEntry(ForgeTab.AGENT, Icons.Default.Star, R.string.nav_agent),
     NavEntry(ForgeTab.TOOLS, Icons.Default.Build, R.string.nav_tools),
     NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, R.string.nav_settings),
 )
 
-// Screens reachable from the Tools launcher keep the Tools tab highlighted (Terminal has its own round button).
-private val toolsGroup = setOf(
-    ForgeTab.TOOLS,
-    ForgeTab.FILES,
-    ForgeTab.ANDROID,
-    ForgeTab.PREVIEW,
-)
+// Screens reachable from the Tools launcher keep the Tools tab highlighted.
+private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
+
+private fun ForgeTab.navIndex(): Int {
+    val tab = if (this in toolsGroup) ForgeTab.TOOLS else this
+    return navEntries.indexOfFirst { it.tab == tab }.coerceAtLeast(0)
+}
 
 /**
- * Linear-style floating capsule: four icon-only tabs (selected = soft pill) plus a detached
- * round button for the terminal. Same shape in every theme; only colours/border come from tokens.
+ * Five labelled tabs with ONE physical selection pill that slides between them (420 ms, slight overshoot).
+ * Material differs per theme: Dark/White draw a full-width bar fused to the screen, Glass floats a capsule.
+ * With animations disabled the pill snaps and only colours change.
  */
 @Composable
 private fun ForgeBottomBar(
     activeTab: ForgeTab,
     changedCount: Int,
+    agentRunning: Boolean,
+    terminalBusy: Boolean,
     onSelectTab: (ForgeTab) -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val barBorder = if (tokens.isGlass || tokens.isWhite) tokens.cardBorderStroke else null
-    val barShadow = if (tokens.isGlass) 12.dp else 0.dp
+    val reduceMotion = rememberReduceMotion()
+    val selectedIndex = activeTab.navIndex()
+    val pillOffset by animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.72f, stiffness = 380f),
+        label = "navPill",
+    )
 
-    Row(
+    val floating = tokens.isGlass
+    val outerPadding = if (floating) PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp) else PaddingValues(0.dp)
+    val shape = if (floating) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+    val pillFill = if (tokens.isWhite) scheme.primary.copy(alpha = 0.10f) else scheme.primary.copy(alpha = 0.18f)
+    val pillEdge = scheme.primary.copy(alpha = 0.30f)
+    val pillShape = RoundedCornerShape(if (floating) 100 else 22)
+
+    Surface(
+        shape = shape,
+        color = tokens.bottomBarContainerColor,
+        contentColor = scheme.onSurface,
+        border = if (floating) tokens.cardBorderStroke else null,
+        shadowElevation = if (floating) 12.dp else 0.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 25.dp, end = 25.dp, top = 8.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(outerPadding),
     ) {
-        Surface(
-            shape = RoundedCornerShape(100),
-            color = tokens.bottomBarContainerColor,
-            contentColor = scheme.onSurface,
-            border = barBorder,
-            shadowElevation = barShadow,
-            modifier = Modifier
-                .weight(1f)
-                .height(53.dp),
-        ) {
-            Row(
+        Column {
+            if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+            BoxWithConstraints(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
-                navEntries.forEach { entry ->
-                    val label = stringResource(entry.label)
-                    val selected = if (entry.tab == ForgeTab.TOOLS) activeTab in toolsGroup else activeTab == entry.tab
+                val slot = maxWidth / navEntries.size
+                val pillInset = 6.dp
+                // Pill: the only moving object; soft outer glow comes from a larger, fainter pill behind it.
+                Box(
+                    modifier = Modifier
+                        .offset(x = slot * pillOffset)
+                        .width(slot)
+                        .fillMaxHeight()
+                        .padding(pillInset),
+                ) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(100))
-                            .background(if (selected) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                            .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = entry.icon,
-                            contentDescription = label,
-                            tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp),
+                            .matchParentSize()
+                            .clip(pillShape)
+                            .background(pillFill)
+                            .border(1.dp, pillEdge, pillShape),
+                    )
+                }
+                Row(modifier = Modifier.fillMaxSize()) {
+                    navEntries.forEachIndexed { index, entry ->
+                        val label = stringResource(entry.label)
+                        val selected = index == selectedIndex
+                        val tint by animateColorAsState(
+                            targetValue = if (selected) scheme.primary else scheme.onSurfaceVariant,
+                            animationSpec = if (reduceMotion) snap() else tween(220),
+                            label = "navTint",
                         )
-                        // Pending file changes live under Tools; show a quiet accent dot when it is not open.
-                        if (entry.tab == ForgeTab.TOOLS && changedCount > 0 && !selected) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 9.dp, end = 18.dp)
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(scheme.primary),
+                        val badge: String? = when (entry.tab) {
+                            ForgeTab.AGENT -> if (agentRunning) stringResource(R.string.nav_badge_agent_running) else null
+                            ForgeTab.TOOLS -> if (changedCount > 0) stringResource(R.string.nav_badge_files_changed, changedCount) else null
+                            ForgeTab.TERMINAL -> if (terminalBusy) stringResource(R.string.nav_badge_terminal_busy) else null
+                            else -> null
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(pillShape)
+                                .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Box {
+                                Icon(
+                                    imageVector = entry.icon,
+                                    contentDescription = if (badge == null) label else "$label, $badge",
+                                    tint = tint,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                                if (badge != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 3.dp, y = (-2).dp)
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(scheme.primary),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = tint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
                 }
-            }
-        }
-        Surface(
-            shape = CircleShape,
-            color = tokens.bottomBarContainerColor,
-            contentColor = scheme.onSurface,
-            border = barBorder,
-            shadowElevation = barShadow,
-            modifier = Modifier.size(53.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                    .background(if (activeTab == ForgeTab.TERMINAL) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_terminal)) { onSelectTab(ForgeTab.TERMINAL) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.List,
-                    contentDescription = stringResource(R.string.shell_terminal),
-                    modifier = Modifier.size(22.dp),
-                )
             }
         }
     }

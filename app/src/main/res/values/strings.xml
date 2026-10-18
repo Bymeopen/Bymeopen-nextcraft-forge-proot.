@@ -300,4 +300,8 @@
         <item quantity="one">%d day ago</item>
         <item quantity="other">%d days ago</item>
     </plurals>
+    <string name="nav_terminal">Terminal</string>
+    <string name="nav_badge_agent_running">Agent is running</string>
+    <string name="nav_badge_files_changed">%1$d files changed</string>
+    <string name="nav_badge_terminal_busy">Process running in terminal</string>
 </resources>
