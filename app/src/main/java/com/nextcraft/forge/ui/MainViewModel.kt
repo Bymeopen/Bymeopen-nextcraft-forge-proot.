@@ -51,12 +51,14 @@ import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
+import com.nextcraft.forge.runtime.RuntimeLaunchConfigBuilder
 import com.nextcraft.forge.runtime.RuntimeSetupController
 import com.nextcraft.forge.runtime.RuntimeSetupService
 import com.nextcraft.forge.runtime.RuntimeSetupSnapshot
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import com.nextcraft.forge.runtime.RuntimeTaskController
 import com.nextcraft.forge.runtime.WorkspaceCheckpoints
+import org.json.JSONObject
 import com.nextcraft.forge.runtime.androidGradleCommand
 import com.nextcraft.forge.runtime.findAndroidProjectRoot
 import com.nextcraft.forge.runtime.findDebugApk
@@ -165,15 +167,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
+    private fun resolveProviderSecret(profile: ProviderProfile): String? {
+        vault.get(profile.kind.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (profile.kind == ProviderKind.CLAUDE) {
+            vault.get(ProviderKind.ANTHROPIC.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        } else if (profile.kind == ProviderKind.ANTHROPIC) {
+            vault.get(ProviderKind.CLAUDE.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        if (profile.kind == ProviderKind.CLAUDE || profile.kind == ProviderKind.ANTHROPIC) {
+            val credsFile = File(RuntimeInstaller.rootfsDir(getApplication()), "root/.claude/.credentials.json")
+            val guestToken = runCatching {
+                JSONObject(credsFile.readText())
+                    .optJSONObject("claudeAiOauth")
+                    ?.optString("accessToken")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+            }.getOrNull()
+            if (guestToken != null) return guestToken
+        }
+        return null
+    }
+
+    private fun rotateProviderSecret(profile: ProviderProfile): String? {
+        vault.rotateNext(profile.kind.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (profile.kind == ProviderKind.CLAUDE) {
+            vault.rotateNext(ProviderKind.ANTHROPIC.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        } else if (profile.kind == ProviderKind.ANTHROPIC) {
+            vault.rotateNext(ProviderKind.CLAUDE.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return resolveProviderSecret(profile)
+    }
+
     private val claudeRuntime = ClaudeRuntimeBridge(
         context = application,
-        secretFor = { profile -> vault.get(profile.kind.name) },
-        rotateSecretFor = { profile -> vault.rotateNext(profile.kind.name) },
+        secretFor = ::resolveProviderSecret,
+        rotateSecretFor = ::rotateProviderSecret,
     )
     private val dshRuntime = DshRuntimeBridge(
         context = application,
-        secretFor = { profile -> vault.get(profile.kind.name) },
-        rotateSecretFor = { profile -> vault.rotateNext(profile.kind.name) },
+        secretFor = ::resolveProviderSecret,
+        rotateSecretFor = ::rotateProviderSecret,
     )
     private val antigravityRuntime = AntigravityRuntimeBridge(
         context = application,
@@ -269,7 +302,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val chats = preferences.loadProjectChats(firstProject.id)
             val activeChatId = chats.firstOrNull()?.id ?: "main"
             val messages = preferences.loadMessages(firstProject.id, activeChatId)
-            val profile = preferences.loadProvider(vault, savedAgent)
+            val loadedProfile = preferences.loadProvider(vault, savedAgent)
+            val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
 
             _state.update {
@@ -429,7 +463,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectAgent(agent: AgentKind) {
         preferences.agentKind = agent.stableId
-        val profile = preferences.loadProvider(vault, agent)
+        val loadedProfile = preferences.loadProvider(vault, agent)
+        val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
         val keys = vault.list(profile.kind.name)
         _state.update {
             it.copy(
@@ -1004,36 +1039,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(terminalOutput = "") }
     }
 
+    private fun activeChrootEnvironment(): Map<String, String> {
+        val profile = _state.value.providerProfile
+        val secret = resolveProviderSecret(profile)
+        return runCatching {
+            RuntimeLaunchConfigBuilder.build(profile, secret).environment
+        }.getOrDefault(emptyMap())
+    }
+
     /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
     private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
         check(installer.isInstalled() && isRootAccessAvailable()) {
             "Root access and the installed Linux runtime are required to run this."
         }
-        val installed = installer.installedRuntime()
-        val uid = android.os.Process.myUid().toString()
-        val bridge = RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath
-        return ProcessBuilder(
-            "su",
-            "-mm",
-            "-c",
-            "sh '${installed.chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' " +
-                "'/workspace/$projectSlug' '$bridge' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
-        ).redirectErrorStream(true).start()
+        val (envFile, suCommand) = installer.prepareChrootShellCommand(
+            workspace = workspaceDir,
+            guestWorkspacePath = "/workspace/$projectSlug",
+            environment = activeChrootEnvironment(),
+            guestCommand = listOf("/bin/bash", "-lc", command),
+        )
+        return try {
+            ProcessBuilder("su", "-mm", "-c", suCommand).redirectErrorStream(true).start()
+        } catch (error: Throwable) {
+            envFile.delete()
+            throw error
+        }
     }
 
     private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
         return runCatching {
             val process = if (installer.isInstalled() && isRootAccessAvailable()) {
                 val installed = installer.installedRuntime()
-                val chrootExec = installed.chrootExec
-                val uid = android.os.Process.myUid().toString()
-                if (chrootExec.isFile) {
-                    ProcessBuilder(
-                        "su",
-                        "-mm",
-                        "-c",
-                        "sh '${chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' '/workspace/$projectSlug' '${RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath}' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
-                    ).redirectErrorStream(true).start()
+                if (installed.chrootExec.isFile) {
+                    startChrootProcess(projectSlug, workspaceDir, command)
                 } else {
                     ProcessBuilder("sh", "-c", command).directory(workspaceDir).redirectErrorStream(true).start()
                 }
@@ -1341,12 +1379,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateProviderKind(kind: ProviderKind) {
-        val updated = ProviderProfile(
+        val candidate = ProviderProfile(
             kind = kind,
             baseUrl = kind.defaultBaseUrl,
             model = kind.defaultModel,
-            hasSecret = vault.contains(kind.name),
         )
+        val updated = candidate.copy(hasSecret = !resolveProviderSecret(candidate).isNullOrBlank())
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update {
             it.copy(
@@ -1364,7 +1402,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             baseUrl = baseUrl.trim(),
             model = model.trim(),
             openRouterProviderOrder = openRouterOrder.trim(),
-            hasSecret = vault.contains(current.kind.name),
+            hasSecret = !resolveProviderSecret(current).isNullOrBlank(),
         )
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update { it.copy(providerProfile = updated) }
@@ -1403,7 +1441,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val keys = vault.list(providerId)
         _state.update {
             it.copy(
-                providerProfile = it.providerProfile.copy(hasSecret = keys.isNotEmpty()),
+                providerProfile = it.providerProfile.copy(hasSecret = !resolveProviderSecret(it.providerProfile).isNullOrBlank()),
                 savedApiKeys = keys,
             )
         }
@@ -1411,7 +1449,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun discoverProviderModels() {
         val profile = _state.value.providerProfile
-        val apiKey = vault.get(profile.kind.name).orEmpty()
+        val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
         _state.update { it.copy(apiBusy = true, apiStatusMessage = "Fetching model catalog…") }
         viewModelScope.launch {
@@ -1439,11 +1477,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun validateProviderConnection() {
         val profile = _state.value.providerProfile
-        val apiKey = vault.get(profile.kind.name).orEmpty()
+        val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
         _state.update { it.copy(apiBusy = true, apiStatusMessage = "Validating connection…") }
         viewModelScope.launch {
-            val res = providerApi.validate(
+            var res = providerApi.validate(
                 baseUrl = profile.resolvedBaseUrl,
                 model = profile.model,
                 apiKey = apiKey,
@@ -1452,6 +1490,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 openRouterProviderOrder = profile.openRouterProviderOrder,
                 openRouterAllowFallbacks = profile.openRouterAllowFallbacks,
             )
+            if (res is ConnectionValidation.Failure &&
+                _state.value.agentKind == AgentKind.CLAUDE_CODE &&
+                _state.value.runtimeInstalled &&
+                (profile.kind == ProviderKind.CLAUDE || apiKey.startsWith("sk-ant-oat"))
+            ) {
+                val cliProbe = runCatching { claudeRuntime.hello(profile, 45_000L) }.getOrNull()
+                if (!cliProbe.isNullOrBlank()) {
+                    res = ConnectionValidation.Success("Claude Code CLI verified (${cliProbe.take(80)})")
+                }
+            }
             val msg = when (res) {
                 is ConnectionValidation.Success -> "✓ ${res.message}"
                 is ConnectionValidation.Failure -> "✕ ${res.label}: ${res.message} ${res.providerMessage.orEmpty()}".trim()

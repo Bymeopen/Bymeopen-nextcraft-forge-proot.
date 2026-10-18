@@ -153,6 +153,12 @@ object RuntimeLaunchConfigBuilder {
         authToken: String? = null,
         localGatewayUrl: String? = null,
     ): RuntimeLaunchConfig {
+        val cleanToken = authToken?.trim().orEmpty()
+        val isClaudeOAuthToken = cleanToken.startsWith("sk-ant-oat")
+        val isAnthropicApiKey = cleanToken.startsWith("sk-ant-api")
+        val useClaudeOAuth = isClaudeOAuthToken ||
+            (profile.kind.protocol == ProviderProtocol.CLAUDE_LOGIN && !isAnthropicApiKey)
+
         val environment = linkedMapOf(
             "DISABLE_AUTOUPDATER" to "1",
             // Skip telemetry, error reporting and other background network calls inside Chroot.
@@ -162,12 +168,19 @@ object RuntimeLaunchConfigBuilder {
         )
         when (profile.kind.protocol) {
             ProviderProtocol.CLAUDE_LOGIN -> {
-                require(!authToken.isNullOrBlank()) { "Enter a Claude subscription token first" }
-                environment["CLAUDE_CODE_OAUTH_TOKEN"] = authToken
-                // Claude Code gives API-key variables precedence over OAuth. Explicitly
-                // clear them so a previous API provider can never shadow this token.
-                environment["ANTHROPIC_API_KEY"] = ""
-                environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                require(cleanToken.isNotBlank()) { "Enter a Claude subscription token first" }
+                if (isAnthropicApiKey) {
+                    environment["ANTHROPIC_BASE_URL"] = ProviderKind.ANTHROPIC.defaultBaseUrl
+                    environment["ANTHROPIC_MODEL"] = profile.model
+                        .takeUnless { it.isBlank() || it == "default" }
+                        ?: ProviderKind.ANTHROPIC.defaultModel
+                } else {
+                    environment["CLAUDE_CODE_OAUTH_TOKEN"] = cleanToken
+                    // Claude Code gives API-key variables precedence over OAuth. Explicitly
+                    // clear them so a previous API provider can never shadow this token.
+                    environment["ANTHROPIC_API_KEY"] = ""
+                    environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                }
             }
             ProviderProtocol.ANTHROPIC -> {
                 environment["ANTHROPIC_BASE_URL"] = profile.resolvedBaseUrl.trim().trimEnd('/')
@@ -192,7 +205,13 @@ object RuntimeLaunchConfigBuilder {
             }
         }
         val runtimeModel = environment["ANTHROPIC_MODEL"] ?: profile.model
-        if (profile.kind.protocol != ProviderProtocol.CLAUDE_LOGIN) {
+        if (useClaudeOAuth) {
+            if (cleanToken.isNotBlank()) {
+                environment["CLAUDE_CODE_OAUTH_TOKEN"] = cleanToken
+                environment["ANTHROPIC_API_KEY"] = ""
+                environment["ANTHROPIC_AUTH_TOKEN"] = ""
+            }
+        } else {
             environment["ANTHROPIC_DEFAULT_OPUS_MODEL"] = runtimeModel
             environment["ANTHROPIC_DEFAULT_SONNET_MODEL"] = runtimeModel
             environment["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = runtimeModel
@@ -202,13 +221,31 @@ object RuntimeLaunchConfigBuilder {
             environment["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
             environment["CLAUDE_CODE_DISABLE_TOKEN_COUNTING"] = "1"
             environment["DISABLE_TELEMETRY"] = "1"
-            if (!authToken.isNullOrBlank()) {
-                environment["ANTHROPIC_AUTH_TOKEN"] = authToken
-                if (profile.kind == ProviderKind.LLM_ROUTER) {
-                    environment["ANTHROPIC_API_KEY"] = ""
-                    environment["OPENROUTER_API_KEY"] = authToken
-                } else {
-                    environment["ANTHROPIC_API_KEY"] = authToken
+            if (cleanToken.isNotBlank()) {
+                environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
+                val isFirstPartyAnthropic = profile.kind.protocol == ProviderProtocol.ANTHROPIC ||
+                    profile.kind.protocol == ProviderProtocol.CLAUDE_LOGIN ||
+                    isAnthropicApiKey ||
+                    environment["ANTHROPIC_BASE_URL"].orEmpty().contains("api.anthropic.com", ignoreCase = true)
+                when {
+                    profile.kind == ProviderKind.LLM_ROUTER || profile.kind.protocol == ProviderProtocol.OPENROUTER -> {
+                        environment["ANTHROPIC_AUTH_TOKEN"] = cleanToken
+                        environment["ANTHROPIC_API_KEY"] = ""
+                        environment["OPENROUTER_API_KEY"] = cleanToken
+                    }
+                    isFirstPartyAnthropic ||
+                        profile.kind.protocol == ProviderProtocol.OPENAI_CHAT ||
+                        profile.kind.protocol == ProviderProtocol.OPENAI_RESPONSES -> {
+                        // First-party Anthropic API (and LocalFormatGateway) must use x-api-key only;
+                        // setting ANTHROPIC_AUTH_TOKEN sends Authorization: Bearer <api-key>, which
+                        // api.anthropic.com rejects with HTTP 401 "Invalid bearer token".
+                        environment["ANTHROPIC_API_KEY"] = cleanToken
+                        environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                    }
+                    else -> {
+                        environment["ANTHROPIC_AUTH_TOKEN"] = cleanToken
+                        environment["ANTHROPIC_API_KEY"] = cleanToken
+                    }
                 }
             }
         }

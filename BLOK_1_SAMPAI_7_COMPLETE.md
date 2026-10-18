@@ -35,7 +35,7 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2464 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
 - `app/src/main/cpp/forge_spawn.c` (297 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
 - `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
@@ -1130,7 +1130,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2464 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -2797,7 +2797,45 @@ class RuntimeInstaller(private val context: Context) {
         ptyRows: Int = 40,
         ptyColumns: Int = 120,
     ): Process {
-        check(ensureRootfsCompatibilityLinks(rootfs)) { "Core runtime has an invalid Linux filesystem layout" }
+        val (envFile, suCommand) = prepareChrootShellCommand(
+            workspace = workspace,
+            guestWorkspacePath = guestWorkspacePath,
+            environment = environment,
+            guestCommand = guestCommand,
+            chrootExec = chrootExec,
+            targetRootfs = rootfs,
+        )
+
+        return try {
+            NativeSpawnProcess.start(
+                argv = listOf("su", "-mm", "-c", suCommand),
+                environment = emptyMap(),
+                cwd = context.filesDir.absolutePath,
+                outputFile = outputFile,
+                pseudoTerminal = pseudoTerminal,
+                ptyRows = ptyRows,
+                ptyColumns = ptyColumns,
+            )
+        } catch (error: Throwable) {
+            envFile.delete()
+            throw error
+        }
+    }
+
+    /**
+     * Prepares a one-time mode-0600 environment script and returns `(envFile, suCommand)` for
+     * executing [guestCommand] inside the Root Chroot with all SDK, PATH, and provider variables
+     * exported and immediately unlinked before `exec`.
+     */
+    fun prepareChrootShellCommand(
+        workspace: File,
+        guestWorkspacePath: String = "/workspace",
+        environment: Map<String, String> = emptyMap(),
+        guestCommand: List<String>,
+        chrootExec: File = chrootExecFile,
+        targetRootfs: File = rootfs,
+    ): Pair<File, String> {
+        check(ensureRootfsCompatibilityLinks(targetRootfs)) { "Core runtime has an invalid Linux filesystem layout" }
         require(
             guestWorkspacePath == "/root" ||
                 guestWorkspacePath == "/workspace" ||
@@ -2806,10 +2844,10 @@ class RuntimeInstaller(private val context: Context) {
         ensureChrootScripts()
         writeResolver()
         workspace.mkdirs()
-        File(rootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
-        writeAndroidGradleConfiguration(rootfs)
+        File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
+        writeAndroidGradleConfiguration(targetRootfs)
         if (guestWorkspacePath != "/root") {
-            ensureWorkspaceTrust(guestWorkspacePath)
+            ensureWorkspaceTrust(guestWorkspacePath, environment)
         }
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
         File(context.filesDir, "runtime-bridge-responses").mkdirs()
@@ -2819,7 +2857,7 @@ class RuntimeInstaller(private val context: Context) {
             put("HOME", "/root")
             put("USER", "root")
             put("LOGNAME", "root")
-            val androidReady = File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
+            val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
                 put("ANDROID_HOME", "/root/android-sdk")
@@ -2874,7 +2912,7 @@ class RuntimeInstaller(private val context: Context) {
         val quotedEnvFile = shellSingleQuote(envFile.absolutePath)
         val chrootArgs = listOf(
             chrootExec.absolutePath,
-            rootfs.absolutePath,
+            targetRootfs.absolutePath,
             workspace.absolutePath,
             guestWorkspacePath,
             bridge.absolutePath,
@@ -2882,21 +2920,7 @@ class RuntimeInstaller(private val context: Context) {
         ) + guestCommand
         val suCommand = ". $quotedEnvFile; rm -f $quotedEnvFile; exec " +
             chrootArgs.joinToString(" ") { shellSingleQuote(it) }
-
-        return try {
-            NativeSpawnProcess.start(
-                argv = listOf("su", "-mm", "-c", suCommand),
-                environment = emptyMap(),
-                cwd = context.filesDir.absolutePath,
-                outputFile = outputFile,
-                pseudoTerminal = pseudoTerminal,
-                ptyRows = ptyRows,
-                ptyColumns = ptyColumns,
-            )
-        } catch (error: Throwable) {
-            envFile.delete()
-            throw error
-        }
+        return envFile to suCommand
     }
 
     private fun shellSingleQuote(value: String): String =
@@ -2971,16 +2995,34 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         ensureWorkspaceTrust("/workspace")
     }
 
-    private fun ensureWorkspaceTrust(workspacePath: String) {
+    private fun ensureWorkspaceTrust(
+        workspacePath: String,
+        environment: Map<String, String> = emptyMap(),
+    ) {
         val stateFile = File(rootfs, "root/.claude.json")
         val state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
         listOf("disableAllHooks", "permissions", "hooks", "allowedTools", "autoApprove")
             .forEach { state.remove(it) }
+        state.put("hasCompletedOnboarding", true)
         val projects = state.optJSONObject("projects") ?: JSONObject()
         val workspace = projects.optJSONObject(workspacePath) ?: JSONObject()
         workspace.put("hasTrustDialogAccepted", true)
         projects.put(workspacePath, workspace)
         state.put("projects", projects)
+        val apiKeySuffix = environment["ANTHROPIC_API_KEY"]?.trim()?.takeIf { it.isNotEmpty() }?.takeLast(20)
+        if (!apiKeySuffix.isNullOrBlank()) {
+            val responses = state.optJSONObject("customApiKeyResponses") ?: JSONObject()
+            val approved = responses.optJSONArray("approved") ?: JSONArray()
+            val existing = (0 until approved.length()).mapNotNull { approved.optString(it).takeIf(String::isNotBlank) }.toSet()
+            if (apiKeySuffix !in existing) {
+                approved.put(apiKeySuffix)
+            }
+            responses.put("approved", approved)
+            if (responses.optJSONArray("rejected") == null) {
+                responses.put("rejected", JSONArray())
+            }
+            state.put("customApiKeyResponses", responses)
+        }
         stateFile.parentFile?.mkdirs()
         stateFile.writeText(state.toString())
     }
@@ -4447,7 +4489,7 @@ Blok 2 menangani **keamanan penyimpanan kredensial**, **sistem snapshot/undo fil
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (221 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (253 baris)
 - `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
@@ -4996,7 +5038,7 @@ class WorkspaceCheckpoints(
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (221 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5154,6 +5196,12 @@ object RuntimeLaunchConfigBuilder {
         authToken: String? = null,
         localGatewayUrl: String? = null,
     ): RuntimeLaunchConfig {
+        val cleanToken = authToken?.trim().orEmpty()
+        val isClaudeOAuthToken = cleanToken.startsWith("sk-ant-oat")
+        val isAnthropicApiKey = cleanToken.startsWith("sk-ant-api")
+        val useClaudeOAuth = isClaudeOAuthToken ||
+            (profile.kind.protocol == ProviderProtocol.CLAUDE_LOGIN && !isAnthropicApiKey)
+
         val environment = linkedMapOf(
             "DISABLE_AUTOUPDATER" to "1",
             // Skip telemetry, error reporting and other background network calls inside Chroot.
@@ -5163,12 +5211,19 @@ object RuntimeLaunchConfigBuilder {
         )
         when (profile.kind.protocol) {
             ProviderProtocol.CLAUDE_LOGIN -> {
-                require(!authToken.isNullOrBlank()) { "Enter a Claude subscription token first" }
-                environment["CLAUDE_CODE_OAUTH_TOKEN"] = authToken
-                // Claude Code gives API-key variables precedence over OAuth. Explicitly
-                // clear them so a previous API provider can never shadow this token.
-                environment["ANTHROPIC_API_KEY"] = ""
-                environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                require(cleanToken.isNotBlank()) { "Enter a Claude subscription token first" }
+                if (isAnthropicApiKey) {
+                    environment["ANTHROPIC_BASE_URL"] = ProviderKind.ANTHROPIC.defaultBaseUrl
+                    environment["ANTHROPIC_MODEL"] = profile.model
+                        .takeUnless { it.isBlank() || it == "default" }
+                        ?: ProviderKind.ANTHROPIC.defaultModel
+                } else {
+                    environment["CLAUDE_CODE_OAUTH_TOKEN"] = cleanToken
+                    // Claude Code gives API-key variables precedence over OAuth. Explicitly
+                    // clear them so a previous API provider can never shadow this token.
+                    environment["ANTHROPIC_API_KEY"] = ""
+                    environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                }
             }
             ProviderProtocol.ANTHROPIC -> {
                 environment["ANTHROPIC_BASE_URL"] = profile.resolvedBaseUrl.trim().trimEnd('/')
@@ -5193,7 +5248,13 @@ object RuntimeLaunchConfigBuilder {
             }
         }
         val runtimeModel = environment["ANTHROPIC_MODEL"] ?: profile.model
-        if (profile.kind.protocol != ProviderProtocol.CLAUDE_LOGIN) {
+        if (useClaudeOAuth) {
+            if (cleanToken.isNotBlank()) {
+                environment["CLAUDE_CODE_OAUTH_TOKEN"] = cleanToken
+                environment["ANTHROPIC_API_KEY"] = ""
+                environment["ANTHROPIC_AUTH_TOKEN"] = ""
+            }
+        } else {
             environment["ANTHROPIC_DEFAULT_OPUS_MODEL"] = runtimeModel
             environment["ANTHROPIC_DEFAULT_SONNET_MODEL"] = runtimeModel
             environment["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = runtimeModel
@@ -5203,13 +5264,31 @@ object RuntimeLaunchConfigBuilder {
             environment["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
             environment["CLAUDE_CODE_DISABLE_TOKEN_COUNTING"] = "1"
             environment["DISABLE_TELEMETRY"] = "1"
-            if (!authToken.isNullOrBlank()) {
-                environment["ANTHROPIC_AUTH_TOKEN"] = authToken
-                if (profile.kind == ProviderKind.LLM_ROUTER) {
-                    environment["ANTHROPIC_API_KEY"] = ""
-                    environment["OPENROUTER_API_KEY"] = authToken
-                } else {
-                    environment["ANTHROPIC_API_KEY"] = authToken
+            if (cleanToken.isNotBlank()) {
+                environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
+                val isFirstPartyAnthropic = profile.kind.protocol == ProviderProtocol.ANTHROPIC ||
+                    profile.kind.protocol == ProviderProtocol.CLAUDE_LOGIN ||
+                    isAnthropicApiKey ||
+                    environment["ANTHROPIC_BASE_URL"].orEmpty().contains("api.anthropic.com", ignoreCase = true)
+                when {
+                    profile.kind == ProviderKind.LLM_ROUTER || profile.kind.protocol == ProviderProtocol.OPENROUTER -> {
+                        environment["ANTHROPIC_AUTH_TOKEN"] = cleanToken
+                        environment["ANTHROPIC_API_KEY"] = ""
+                        environment["OPENROUTER_API_KEY"] = cleanToken
+                    }
+                    isFirstPartyAnthropic ||
+                        profile.kind.protocol == ProviderProtocol.OPENAI_CHAT ||
+                        profile.kind.protocol == ProviderProtocol.OPENAI_RESPONSES -> {
+                        // First-party Anthropic API (and LocalFormatGateway) must use x-api-key only;
+                        // setting ANTHROPIC_AUTH_TOKEN sends Authorization: Bearer <api-key>, which
+                        // api.anthropic.com rejects with HTTP 401 "Invalid bearer token".
+                        environment["ANTHROPIC_API_KEY"] = cleanToken
+                        environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                    }
+                    else -> {
+                        environment["ANTHROPIC_AUTH_TOKEN"] = cleanToken
+                        environment["ANTHROPIC_API_KEY"] = cleanToken
+                    }
                 }
             }
         }
@@ -7078,14 +7157,14 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (938 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (938 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -7153,12 +7232,18 @@ internal object ProviderRuntimeErrorDetector {
             "user not found" in combined -> "User not found. Check the API key and provider account."
             "authentication_failed" in combined ||
                 "authentication failed" in combined ||
+                "authentication_error" in combined ||
+                "invalid bearer token" in combined ||
+                "oauth access token is invalid" in combined ||
+                "oauth token has been revoked" in combined ||
                 "invalid api key" in combined ||
                 "invalid_api_key" in combined ||
                 "invalid x-api-key" in combined ||
                 "oauth token has expired" in combined ||
                 "token has expired" in combined ||
                 "api key expired" in combined ||
+                "not logged in" in combined ||
+                "api error: 401" in combined ||
                 "http 401" in combined ||
                 "status 401" in combined ||
                 "401 unauthorized" in combined ||
@@ -7193,6 +7278,7 @@ class ClaudeRuntimeBridge(
     @Volatile private var activeProcess: Process? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
+    @Volatile private var turnCompletedFromStream: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
     @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
     @Volatile private var lastForegroundProgressAt: Long = 0L
@@ -7216,6 +7302,7 @@ class ClaudeRuntimeBridge(
         finishedSessions.remove(sessionId)
         activeSessionId = sessionId
         userStopRequested = false
+        turnCompletedFromStream = false
         activeProjectSlug = projectSlug
         taskStartedAtElapsedRealtime = android.os.SystemClock.elapsedRealtime()
         lastForegroundProgressAt = 0L
@@ -7360,7 +7447,7 @@ class ClaudeRuntimeBridge(
                 } else if (checkpoints.readChangedPaths(projectId).isEmpty()) {
                     acceptLastChanges(projectId)
                 }
-                if (exit == 0) {
+                if (exit == 0 || (turnCompletedFromStream && !userStopRequested)) {
                     emitCompletedOnce(sessionId)
                     finishForegroundRuntime(
                         completed = true,
@@ -7683,8 +7770,7 @@ class ClaudeRuntimeBridge(
                 }
                 streamedText.clear()
                 if (message.optString("stop_reason") == "end_turn") {
-                    emitCompletedOnce(sessionId)
-                    terminateActiveProcessGracefully()
+                    turnCompletedFromStream = true
                 }
             }
             "user" -> {
@@ -7721,7 +7807,7 @@ class ClaudeRuntimeBridge(
                     val message = json.optString("result").ifBlank { "Claude Code reported an error" }
                     throw IllegalStateException(message)
                 }
-                emitCompletedOnce(sessionId)
+                turnCompletedFromStream = true
                 terminateActiveProcessGracefully()
             }
         }
@@ -7926,7 +8012,8 @@ class ClaudeRuntimeBridge(
         val running = activeProcess ?: return
         Thread {
             runCatching {
-                running.destroy()
+                Thread.sleep(500)
+                if (running.isAlive) running.destroy()
                 Thread.sleep(3_000)
                 if (running.isAlive) running.destroyForcibly()
             }
@@ -7994,12 +8081,47 @@ private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-crede
 private fun isSensitivePath(path: String): Boolean =
     SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
 
+private fun maskQuotedAndEscapedSeparators(input: String): String {
+    val out = StringBuilder(input.length)
+    var inSingleQuote = false
+    var inDoubleQuote = false
+    var escaped = false
+    for (ch in input) {
+        if (escaped) {
+            out.append(if (ch == '|' || ch == '&' || ch == ';') '_' else ch)
+            escaped = false
+            continue
+        }
+        if (ch == '\\' && !inSingleQuote) {
+            escaped = true
+            out.append(ch)
+            continue
+        }
+        if (ch == '\'' && !inDoubleQuote) {
+            inSingleQuote = !inSingleQuote
+            out.append(ch)
+            continue
+        }
+        if (ch == '"' && !inSingleQuote) {
+            inDoubleQuote = !inDoubleQuote
+            out.append(ch)
+            continue
+        }
+        if ((inSingleQuote || inDoubleQuote) && (ch == '|' || ch == '&' || ch == ';')) {
+            out.append('_')
+        } else {
+            out.append(ch)
+        }
+    }
+    return out.toString()
+}
+
 private fun isSafeBashSegment(segment: String): Boolean {
     val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
         .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
-    val first = words.firstOrNull()?.substringAfterLast('/') ?: return false
-    if (first == "git") return words.getOrNull(1) in SAFE_GIT_SUBCOMMANDS
-    if (first == "find" && words.any { it in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
+    val first = words.firstOrNull()?.trim('\'', '"')?.substringAfterLast('/') ?: return false
+    if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
+    if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
 }
 
@@ -8015,7 +8137,8 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
         "Bash" -> {
             val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
             val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
-            val segments = text.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
+            val masked = maskQuotedAndEscapedSeparators(text)
+            val segments = masked.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
             if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {
                 RiskLevel.HIGH
             } else {
@@ -10092,7 +10215,7 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (242 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
-- `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
+- `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (407 baris)
 - `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
 - `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
 - `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (218 baris)
@@ -11766,7 +11889,7 @@ class RuntimeSetupService : Service() {
 }
 ```
 
-## 7. `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (364 baris)
+## 7. `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (407 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
@@ -11808,14 +11931,19 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         apiKey: String,
         protocol: ProviderProtocol,
     ): ModelDiscoveryResult = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank()) {
+        val effectiveBaseUrl = if (protocol == ProviderProtocol.CLAUDE_LOGIN && baseUrl.isBlank()) {
+            "https://api.anthropic.com"
+        } else {
+            baseUrl.trim()
+        }
+        if (effectiveBaseUrl.isBlank()) {
             return@withContext ModelDiscoveryResult.Failure("Enter a base URL first.")
         }
 
         var authError = false
         var lastMessage = "This provider did not expose a model list. You can enter a custom model name."
         var lastProviderMessage: String? = null
-        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+        for (endpoint in modelEndpoints(effectiveBaseUrl, protocol)) {
             // OpenRouter's complete catalog is public. Fetch it anonymously even when
             // OpenRouter is configured through Custom API so an account-scoped key does
             // not reduce discovery to the models allowed by that key's preferences.
@@ -11857,11 +11985,24 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         openRouterProviderOrder: String = "",
         openRouterAllowFallbacks: Boolean = true,
     ): ConnectionValidation = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank() || model.isBlank()) {
+        val effectiveBaseUrl = if (protocol == ProviderProtocol.CLAUDE_LOGIN && baseUrl.isBlank()) {
+            "https://api.anthropic.com"
+        } else {
+            baseUrl.trim()
+        }
+        val effectiveModel = if (
+            (protocol == ProviderProtocol.CLAUDE_LOGIN || protocol == ProviderProtocol.ANTHROPIC) &&
+            (model.isBlank() || model.trim().equals("default", ignoreCase = true))
+        ) {
+            "claude-sonnet-4-6"
+        } else {
+            model.trim()
+        }
+        if (effectiveBaseUrl.isBlank() || effectiveModel.isBlank()) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
-        val endpoint = messagesEndpoint(baseUrl, protocol)
-        val body = validationBody(model, protocol, openRouterProviderOrder, openRouterAllowFallbacks)
+        val endpoint = messagesEndpoint(effectiveBaseUrl, protocol)
+        val body = validationBody(effectiveModel, protocol, openRouterProviderOrder, openRouterAllowFallbacks)
         val response = request(
             endpoint = endpoint,
             method = "POST",
@@ -11942,21 +12083,46 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
                 readTimeout = readTimeoutMs
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
-                if (apiKey.isNotBlank()) {
-                    setRequestProperty("Authorization", "Bearer $apiKey")
+                val cleanKey = apiKey.trim()
+                val isClaudeOAuthToken = cleanKey.startsWith("sk-ant-oat")
+                val isAnthropicApiKey = cleanKey.startsWith("sk-ant-api")
+                val isAnthropicHost = runCatching {
+                    URL(endpoint).host.equals("api.anthropic.com", ignoreCase = true)
+                }.getOrDefault(endpoint.contains("api.anthropic.com", ignoreCase = true))
+                val isAnthropicProtocol = protocol == ProviderProtocol.ANTHROPIC ||
+                    protocol == ProviderProtocol.CLAUDE_LOGIN ||
+                    protocol == ProviderProtocol.ANTHROPIC_GATEWAY
+
+                if (cleanKey.isNotEmpty()) {
+                    val useOAuthBearer = isClaudeOAuthToken ||
+                        (protocol == ProviderProtocol.CLAUDE_LOGIN && !isAnthropicApiKey)
+                    when {
+                        useOAuthBearer -> {
+                            setRequestProperty("Authorization", "Bearer $cleanKey")
+                            setRequestProperty("anthropic-version", "2023-06-01")
+                            setRequestProperty("anthropic-beta", "claude-code-20250219,oauth-2025-04-20")
+                        }
+                        isAnthropicHost || protocol == ProviderProtocol.ANTHROPIC || isAnthropicApiKey -> {
+                            // First-party api.anthropic.com rejects Authorization: Bearer <sk-ant-api...>
+                            // with HTTP 401 "Invalid bearer token". Send x-api-key only.
+                            setRequestProperty("x-api-key", cleanKey)
+                            setRequestProperty("anthropic-version", "2023-06-01")
+                        }
+                        isAnthropicProtocol -> {
+                            setRequestProperty("Authorization", "Bearer $cleanKey")
+                            setRequestProperty("x-api-key", cleanKey)
+                            setRequestProperty("anthropic-version", "2023-06-01")
+                        }
+                        else -> {
+                            setRequestProperty("Authorization", "Bearer $cleanKey")
+                        }
+                    }
+                } else if (isAnthropicProtocol) {
+                    setRequestProperty("anthropic-version", "2023-06-01")
                 }
                 if (endpoint.startsWith("https://opencode.ai/zen/")) {
                     setRequestProperty("User-Agent", "opencode/1.18.20")
                     setRequestProperty("x-session-id", "session-${UUID.randomUUID()}")
-                }
-                if (
-                    apiKey.isNotBlank() &&
-                    protocol != ProviderProtocol.OPENROUTER &&
-                    protocol != ProviderProtocol.OPENAI_CHAT &&
-                    protocol != ProviderProtocol.OPENAI_RESPONSES
-                ) {
-                    setRequestProperty("x-api-key", apiKey)
-                    setRequestProperty("anthropic-version", "2023-06-01")
                 }
                 if (body != null) doOutput = true
             }
@@ -12733,7 +12899,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1851 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1899 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
@@ -12862,7 +13028,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1851 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1899 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -12918,12 +13084,14 @@ import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
+import com.nextcraft.forge.runtime.RuntimeLaunchConfigBuilder
 import com.nextcraft.forge.runtime.RuntimeSetupController
 import com.nextcraft.forge.runtime.RuntimeSetupService
 import com.nextcraft.forge.runtime.RuntimeSetupSnapshot
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import com.nextcraft.forge.runtime.RuntimeTaskController
 import com.nextcraft.forge.runtime.WorkspaceCheckpoints
+import org.json.JSONObject
 import com.nextcraft.forge.runtime.androidGradleCommand
 import com.nextcraft.forge.runtime.findAndroidProjectRoot
 import com.nextcraft.forge.runtime.findDebugApk
@@ -13032,15 +13200,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
+    private fun resolveProviderSecret(profile: ProviderProfile): String? {
+        vault.get(profile.kind.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (profile.kind == ProviderKind.CLAUDE) {
+            vault.get(ProviderKind.ANTHROPIC.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        } else if (profile.kind == ProviderKind.ANTHROPIC) {
+            vault.get(ProviderKind.CLAUDE.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        if (profile.kind == ProviderKind.CLAUDE || profile.kind == ProviderKind.ANTHROPIC) {
+            val credsFile = File(RuntimeInstaller.rootfsDir(getApplication()), "root/.claude/.credentials.json")
+            val guestToken = runCatching {
+                JSONObject(credsFile.readText())
+                    .optJSONObject("claudeAiOauth")
+                    ?.optString("accessToken")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+            }.getOrNull()
+            if (guestToken != null) return guestToken
+        }
+        return null
+    }
+
+    private fun rotateProviderSecret(profile: ProviderProfile): String? {
+        vault.rotateNext(profile.kind.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (profile.kind == ProviderKind.CLAUDE) {
+            vault.rotateNext(ProviderKind.ANTHROPIC.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        } else if (profile.kind == ProviderKind.ANTHROPIC) {
+            vault.rotateNext(ProviderKind.CLAUDE.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return resolveProviderSecret(profile)
+    }
+
     private val claudeRuntime = ClaudeRuntimeBridge(
         context = application,
-        secretFor = { profile -> vault.get(profile.kind.name) },
-        rotateSecretFor = { profile -> vault.rotateNext(profile.kind.name) },
+        secretFor = ::resolveProviderSecret,
+        rotateSecretFor = ::rotateProviderSecret,
     )
     private val dshRuntime = DshRuntimeBridge(
         context = application,
-        secretFor = { profile -> vault.get(profile.kind.name) },
-        rotateSecretFor = { profile -> vault.rotateNext(profile.kind.name) },
+        secretFor = ::resolveProviderSecret,
+        rotateSecretFor = ::rotateProviderSecret,
     )
     private val antigravityRuntime = AntigravityRuntimeBridge(
         context = application,
@@ -13136,7 +13335,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val chats = preferences.loadProjectChats(firstProject.id)
             val activeChatId = chats.firstOrNull()?.id ?: "main"
             val messages = preferences.loadMessages(firstProject.id, activeChatId)
-            val profile = preferences.loadProvider(vault, savedAgent)
+            val loadedProfile = preferences.loadProvider(vault, savedAgent)
+            val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
 
             _state.update {
@@ -13296,7 +13496,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectAgent(agent: AgentKind) {
         preferences.agentKind = agent.stableId
-        val profile = preferences.loadProvider(vault, agent)
+        val loadedProfile = preferences.loadProvider(vault, agent)
+        val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
         val keys = vault.list(profile.kind.name)
         _state.update {
             it.copy(
@@ -13871,36 +14072,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(terminalOutput = "") }
     }
 
+    private fun activeChrootEnvironment(): Map<String, String> {
+        val profile = _state.value.providerProfile
+        val secret = resolveProviderSecret(profile)
+        return runCatching {
+            RuntimeLaunchConfigBuilder.build(profile, secret).environment
+        }.getOrDefault(emptyMap())
+    }
+
     /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
     private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
         check(installer.isInstalled() && isRootAccessAvailable()) {
             "Root access and the installed Linux runtime are required to run this."
         }
-        val installed = installer.installedRuntime()
-        val uid = android.os.Process.myUid().toString()
-        val bridge = RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath
-        return ProcessBuilder(
-            "su",
-            "-mm",
-            "-c",
-            "sh '${installed.chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' " +
-                "'/workspace/$projectSlug' '$bridge' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
-        ).redirectErrorStream(true).start()
+        val (envFile, suCommand) = installer.prepareChrootShellCommand(
+            workspace = workspaceDir,
+            guestWorkspacePath = "/workspace/$projectSlug",
+            environment = activeChrootEnvironment(),
+            guestCommand = listOf("/bin/bash", "-lc", command),
+        )
+        return try {
+            ProcessBuilder("su", "-mm", "-c", suCommand).redirectErrorStream(true).start()
+        } catch (error: Throwable) {
+            envFile.delete()
+            throw error
+        }
     }
 
     private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
         return runCatching {
             val process = if (installer.isInstalled() && isRootAccessAvailable()) {
                 val installed = installer.installedRuntime()
-                val chrootExec = installed.chrootExec
-                val uid = android.os.Process.myUid().toString()
-                if (chrootExec.isFile) {
-                    ProcessBuilder(
-                        "su",
-                        "-mm",
-                        "-c",
-                        "sh '${chrootExec.absolutePath}' '${installed.rootfs.absolutePath}' '${workspaceDir.absolutePath}' '/workspace/$projectSlug' '${RuntimeInstaller.bridgeRootDir(getApplication()).absolutePath}' '$uid' /bin/bash -lc ${shellSingleQuote(command)}",
-                    ).redirectErrorStream(true).start()
+                if (installed.chrootExec.isFile) {
+                    startChrootProcess(projectSlug, workspaceDir, command)
                 } else {
                     ProcessBuilder("sh", "-c", command).directory(workspaceDir).redirectErrorStream(true).start()
                 }
@@ -14208,12 +14412,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateProviderKind(kind: ProviderKind) {
-        val updated = ProviderProfile(
+        val candidate = ProviderProfile(
             kind = kind,
             baseUrl = kind.defaultBaseUrl,
             model = kind.defaultModel,
-            hasSecret = vault.contains(kind.name),
         )
+        val updated = candidate.copy(hasSecret = !resolveProviderSecret(candidate).isNullOrBlank())
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update {
             it.copy(
@@ -14231,7 +14435,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             baseUrl = baseUrl.trim(),
             model = model.trim(),
             openRouterProviderOrder = openRouterOrder.trim(),
-            hasSecret = vault.contains(current.kind.name),
+            hasSecret = !resolveProviderSecret(current).isNullOrBlank(),
         )
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update { it.copy(providerProfile = updated) }
@@ -14270,7 +14474,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val keys = vault.list(providerId)
         _state.update {
             it.copy(
-                providerProfile = it.providerProfile.copy(hasSecret = keys.isNotEmpty()),
+                providerProfile = it.providerProfile.copy(hasSecret = !resolveProviderSecret(it.providerProfile).isNullOrBlank()),
                 savedApiKeys = keys,
             )
         }
@@ -14278,7 +14482,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun discoverProviderModels() {
         val profile = _state.value.providerProfile
-        val apiKey = vault.get(profile.kind.name).orEmpty()
+        val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
         _state.update { it.copy(apiBusy = true, apiStatusMessage = "Fetching model catalog…") }
         viewModelScope.launch {
@@ -14306,11 +14510,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun validateProviderConnection() {
         val profile = _state.value.providerProfile
-        val apiKey = vault.get(profile.kind.name).orEmpty()
+        val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
         _state.update { it.copy(apiBusy = true, apiStatusMessage = "Validating connection…") }
         viewModelScope.launch {
-            val res = providerApi.validate(
+            var res = providerApi.validate(
                 baseUrl = profile.resolvedBaseUrl,
                 model = profile.model,
                 apiKey = apiKey,
@@ -14319,6 +14523,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 openRouterProviderOrder = profile.openRouterProviderOrder,
                 openRouterAllowFallbacks = profile.openRouterAllowFallbacks,
             )
+            if (res is ConnectionValidation.Failure &&
+                _state.value.agentKind == AgentKind.CLAUDE_CODE &&
+                _state.value.runtimeInstalled &&
+                (profile.kind == ProviderKind.CLAUDE || apiKey.startsWith("sk-ant-oat"))
+            ) {
+                val cliProbe = runCatching { claudeRuntime.hello(profile, 45_000L) }.getOrNull()
+                if (!cliProbe.isNullOrBlank()) {
+                    res = ConnectionValidation.Success("Claude Code CLI verified (${cliProbe.take(80)})")
+                }
+            }
             val msg = when (res) {
                 is ConnectionValidation.Success -> "✓ ${res.message}"
                 is ConnectionValidation.Failure -> "✕ ${res.label}: ${res.message} ${res.providerMessage.orEmpty()}".trim()

@@ -63,12 +63,18 @@ internal object ProviderRuntimeErrorDetector {
             "user not found" in combined -> "User not found. Check the API key and provider account."
             "authentication_failed" in combined ||
                 "authentication failed" in combined ||
+                "authentication_error" in combined ||
+                "invalid bearer token" in combined ||
+                "oauth access token is invalid" in combined ||
+                "oauth token has been revoked" in combined ||
                 "invalid api key" in combined ||
                 "invalid_api_key" in combined ||
                 "invalid x-api-key" in combined ||
                 "oauth token has expired" in combined ||
                 "token has expired" in combined ||
                 "api key expired" in combined ||
+                "not logged in" in combined ||
+                "api error: 401" in combined ||
                 "http 401" in combined ||
                 "status 401" in combined ||
                 "401 unauthorized" in combined ||
@@ -103,6 +109,7 @@ class ClaudeRuntimeBridge(
     @Volatile private var activeProcess: Process? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
+    @Volatile private var turnCompletedFromStream: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
     @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
     @Volatile private var lastForegroundProgressAt: Long = 0L
@@ -126,6 +133,7 @@ class ClaudeRuntimeBridge(
         finishedSessions.remove(sessionId)
         activeSessionId = sessionId
         userStopRequested = false
+        turnCompletedFromStream = false
         activeProjectSlug = projectSlug
         taskStartedAtElapsedRealtime = android.os.SystemClock.elapsedRealtime()
         lastForegroundProgressAt = 0L
@@ -270,7 +278,7 @@ class ClaudeRuntimeBridge(
                 } else if (checkpoints.readChangedPaths(projectId).isEmpty()) {
                     acceptLastChanges(projectId)
                 }
-                if (exit == 0) {
+                if (exit == 0 || (turnCompletedFromStream && !userStopRequested)) {
                     emitCompletedOnce(sessionId)
                     finishForegroundRuntime(
                         completed = true,
@@ -593,8 +601,7 @@ class ClaudeRuntimeBridge(
                 }
                 streamedText.clear()
                 if (message.optString("stop_reason") == "end_turn") {
-                    emitCompletedOnce(sessionId)
-                    terminateActiveProcessGracefully()
+                    turnCompletedFromStream = true
                 }
             }
             "user" -> {
@@ -631,7 +638,7 @@ class ClaudeRuntimeBridge(
                     val message = json.optString("result").ifBlank { "Claude Code reported an error" }
                     throw IllegalStateException(message)
                 }
-                emitCompletedOnce(sessionId)
+                turnCompletedFromStream = true
                 terminateActiveProcessGracefully()
             }
         }
@@ -836,7 +843,8 @@ class ClaudeRuntimeBridge(
         val running = activeProcess ?: return
         Thread {
             runCatching {
-                running.destroy()
+                Thread.sleep(500)
+                if (running.isAlive) running.destroy()
                 Thread.sleep(3_000)
                 if (running.isAlive) running.destroyForcibly()
             }
@@ -904,12 +912,47 @@ private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-crede
 private fun isSensitivePath(path: String): Boolean =
     SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
 
+private fun maskQuotedAndEscapedSeparators(input: String): String {
+    val out = StringBuilder(input.length)
+    var inSingleQuote = false
+    var inDoubleQuote = false
+    var escaped = false
+    for (ch in input) {
+        if (escaped) {
+            out.append(if (ch == '|' || ch == '&' || ch == ';') '_' else ch)
+            escaped = false
+            continue
+        }
+        if (ch == '\\' && !inSingleQuote) {
+            escaped = true
+            out.append(ch)
+            continue
+        }
+        if (ch == '\'' && !inDoubleQuote) {
+            inSingleQuote = !inSingleQuote
+            out.append(ch)
+            continue
+        }
+        if (ch == '"' && !inSingleQuote) {
+            inDoubleQuote = !inDoubleQuote
+            out.append(ch)
+            continue
+        }
+        if ((inSingleQuote || inDoubleQuote) && (ch == '|' || ch == '&' || ch == ';')) {
+            out.append('_')
+        } else {
+            out.append(ch)
+        }
+    }
+    return out.toString()
+}
+
 private fun isSafeBashSegment(segment: String): Boolean {
     val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
         .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
-    val first = words.firstOrNull()?.substringAfterLast('/') ?: return false
-    if (first == "git") return words.getOrNull(1) in SAFE_GIT_SUBCOMMANDS
-    if (first == "find" && words.any { it in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
+    val first = words.firstOrNull()?.trim('\'', '"')?.substringAfterLast('/') ?: return false
+    if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
+    if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
 }
 
@@ -925,7 +968,8 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
         "Bash" -> {
             val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
             val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
-            val segments = text.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
+            val masked = maskQuotedAndEscapedSeparators(text)
+            val segments = masked.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
             if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {
                 RiskLevel.HIGH
             } else {

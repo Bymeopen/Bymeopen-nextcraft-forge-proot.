@@ -1662,7 +1662,45 @@ class RuntimeInstaller(private val context: Context) {
         ptyRows: Int = 40,
         ptyColumns: Int = 120,
     ): Process {
-        check(ensureRootfsCompatibilityLinks(rootfs)) { "Core runtime has an invalid Linux filesystem layout" }
+        val (envFile, suCommand) = prepareChrootShellCommand(
+            workspace = workspace,
+            guestWorkspacePath = guestWorkspacePath,
+            environment = environment,
+            guestCommand = guestCommand,
+            chrootExec = chrootExec,
+            targetRootfs = rootfs,
+        )
+
+        return try {
+            NativeSpawnProcess.start(
+                argv = listOf("su", "-mm", "-c", suCommand),
+                environment = emptyMap(),
+                cwd = context.filesDir.absolutePath,
+                outputFile = outputFile,
+                pseudoTerminal = pseudoTerminal,
+                ptyRows = ptyRows,
+                ptyColumns = ptyColumns,
+            )
+        } catch (error: Throwable) {
+            envFile.delete()
+            throw error
+        }
+    }
+
+    /**
+     * Prepares a one-time mode-0600 environment script and returns `(envFile, suCommand)` for
+     * executing [guestCommand] inside the Root Chroot with all SDK, PATH, and provider variables
+     * exported and immediately unlinked before `exec`.
+     */
+    fun prepareChrootShellCommand(
+        workspace: File,
+        guestWorkspacePath: String = "/workspace",
+        environment: Map<String, String> = emptyMap(),
+        guestCommand: List<String>,
+        chrootExec: File = chrootExecFile,
+        targetRootfs: File = rootfs,
+    ): Pair<File, String> {
+        check(ensureRootfsCompatibilityLinks(targetRootfs)) { "Core runtime has an invalid Linux filesystem layout" }
         require(
             guestWorkspacePath == "/root" ||
                 guestWorkspacePath == "/workspace" ||
@@ -1671,10 +1709,10 @@ class RuntimeInstaller(private val context: Context) {
         ensureChrootScripts()
         writeResolver()
         workspace.mkdirs()
-        File(rootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
-        writeAndroidGradleConfiguration(rootfs)
+        File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
+        writeAndroidGradleConfiguration(targetRootfs)
         if (guestWorkspacePath != "/root") {
-            ensureWorkspaceTrust(guestWorkspacePath)
+            ensureWorkspaceTrust(guestWorkspacePath, environment)
         }
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
         File(context.filesDir, "runtime-bridge-responses").mkdirs()
@@ -1684,7 +1722,7 @@ class RuntimeInstaller(private val context: Context) {
             put("HOME", "/root")
             put("USER", "root")
             put("LOGNAME", "root")
-            val androidReady = File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
+            val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
                 put("ANDROID_HOME", "/root/android-sdk")
@@ -1739,7 +1777,7 @@ class RuntimeInstaller(private val context: Context) {
         val quotedEnvFile = shellSingleQuote(envFile.absolutePath)
         val chrootArgs = listOf(
             chrootExec.absolutePath,
-            rootfs.absolutePath,
+            targetRootfs.absolutePath,
             workspace.absolutePath,
             guestWorkspacePath,
             bridge.absolutePath,
@@ -1747,21 +1785,7 @@ class RuntimeInstaller(private val context: Context) {
         ) + guestCommand
         val suCommand = ". $quotedEnvFile; rm -f $quotedEnvFile; exec " +
             chrootArgs.joinToString(" ") { shellSingleQuote(it) }
-
-        return try {
-            NativeSpawnProcess.start(
-                argv = listOf("su", "-mm", "-c", suCommand),
-                environment = emptyMap(),
-                cwd = context.filesDir.absolutePath,
-                outputFile = outputFile,
-                pseudoTerminal = pseudoTerminal,
-                ptyRows = ptyRows,
-                ptyColumns = ptyColumns,
-            )
-        } catch (error: Throwable) {
-            envFile.delete()
-            throw error
-        }
+        return envFile to suCommand
     }
 
     private fun shellSingleQuote(value: String): String =
@@ -1836,16 +1860,34 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         ensureWorkspaceTrust("/workspace")
     }
 
-    private fun ensureWorkspaceTrust(workspacePath: String) {
+    private fun ensureWorkspaceTrust(
+        workspacePath: String,
+        environment: Map<String, String> = emptyMap(),
+    ) {
         val stateFile = File(rootfs, "root/.claude.json")
         val state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
         listOf("disableAllHooks", "permissions", "hooks", "allowedTools", "autoApprove")
             .forEach { state.remove(it) }
+        state.put("hasCompletedOnboarding", true)
         val projects = state.optJSONObject("projects") ?: JSONObject()
         val workspace = projects.optJSONObject(workspacePath) ?: JSONObject()
         workspace.put("hasTrustDialogAccepted", true)
         projects.put(workspacePath, workspace)
         state.put("projects", projects)
+        val apiKeySuffix = environment["ANTHROPIC_API_KEY"]?.trim()?.takeIf { it.isNotEmpty() }?.takeLast(20)
+        if (!apiKeySuffix.isNullOrBlank()) {
+            val responses = state.optJSONObject("customApiKeyResponses") ?: JSONObject()
+            val approved = responses.optJSONArray("approved") ?: JSONArray()
+            val existing = (0 until approved.length()).mapNotNull { approved.optString(it).takeIf(String::isNotBlank) }.toSet()
+            if (apiKeySuffix !in existing) {
+                approved.put(apiKeySuffix)
+            }
+            responses.put("approved", approved)
+            if (responses.optJSONArray("rejected") == null) {
+                responses.put("rejected", JSONArray())
+            }
+            state.put("customApiKeyResponses", responses)
+        }
         stateFile.parentFile?.mkdirs()
         stateFile.writeText(state.toString())
     }

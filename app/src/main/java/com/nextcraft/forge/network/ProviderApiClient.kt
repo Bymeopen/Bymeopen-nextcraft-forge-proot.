@@ -37,14 +37,19 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         apiKey: String,
         protocol: ProviderProtocol,
     ): ModelDiscoveryResult = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank()) {
+        val effectiveBaseUrl = if (protocol == ProviderProtocol.CLAUDE_LOGIN && baseUrl.isBlank()) {
+            "https://api.anthropic.com"
+        } else {
+            baseUrl.trim()
+        }
+        if (effectiveBaseUrl.isBlank()) {
             return@withContext ModelDiscoveryResult.Failure("Enter a base URL first.")
         }
 
         var authError = false
         var lastMessage = "This provider did not expose a model list. You can enter a custom model name."
         var lastProviderMessage: String? = null
-        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+        for (endpoint in modelEndpoints(effectiveBaseUrl, protocol)) {
             // OpenRouter's complete catalog is public. Fetch it anonymously even when
             // OpenRouter is configured through Custom API so an account-scoped key does
             // not reduce discovery to the models allowed by that key's preferences.
@@ -86,11 +91,24 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         openRouterProviderOrder: String = "",
         openRouterAllowFallbacks: Boolean = true,
     ): ConnectionValidation = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank() || model.isBlank()) {
+        val effectiveBaseUrl = if (protocol == ProviderProtocol.CLAUDE_LOGIN && baseUrl.isBlank()) {
+            "https://api.anthropic.com"
+        } else {
+            baseUrl.trim()
+        }
+        val effectiveModel = if (
+            (protocol == ProviderProtocol.CLAUDE_LOGIN || protocol == ProviderProtocol.ANTHROPIC) &&
+            (model.isBlank() || model.trim().equals("default", ignoreCase = true))
+        ) {
+            "claude-sonnet-4-6"
+        } else {
+            model.trim()
+        }
+        if (effectiveBaseUrl.isBlank() || effectiveModel.isBlank()) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
-        val endpoint = messagesEndpoint(baseUrl, protocol)
-        val body = validationBody(model, protocol, openRouterProviderOrder, openRouterAllowFallbacks)
+        val endpoint = messagesEndpoint(effectiveBaseUrl, protocol)
+        val body = validationBody(effectiveModel, protocol, openRouterProviderOrder, openRouterAllowFallbacks)
         val response = request(
             endpoint = endpoint,
             method = "POST",
@@ -171,21 +189,46 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
                 readTimeout = readTimeoutMs
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
-                if (apiKey.isNotBlank()) {
-                    setRequestProperty("Authorization", "Bearer $apiKey")
+                val cleanKey = apiKey.trim()
+                val isClaudeOAuthToken = cleanKey.startsWith("sk-ant-oat")
+                val isAnthropicApiKey = cleanKey.startsWith("sk-ant-api")
+                val isAnthropicHost = runCatching {
+                    URL(endpoint).host.equals("api.anthropic.com", ignoreCase = true)
+                }.getOrDefault(endpoint.contains("api.anthropic.com", ignoreCase = true))
+                val isAnthropicProtocol = protocol == ProviderProtocol.ANTHROPIC ||
+                    protocol == ProviderProtocol.CLAUDE_LOGIN ||
+                    protocol == ProviderProtocol.ANTHROPIC_GATEWAY
+
+                if (cleanKey.isNotEmpty()) {
+                    val useOAuthBearer = isClaudeOAuthToken ||
+                        (protocol == ProviderProtocol.CLAUDE_LOGIN && !isAnthropicApiKey)
+                    when {
+                        useOAuthBearer -> {
+                            setRequestProperty("Authorization", "Bearer $cleanKey")
+                            setRequestProperty("anthropic-version", "2023-06-01")
+                            setRequestProperty("anthropic-beta", "claude-code-20250219,oauth-2025-04-20")
+                        }
+                        isAnthropicHost || protocol == ProviderProtocol.ANTHROPIC || isAnthropicApiKey -> {
+                            // First-party api.anthropic.com rejects Authorization: Bearer <sk-ant-api...>
+                            // with HTTP 401 "Invalid bearer token". Send x-api-key only.
+                            setRequestProperty("x-api-key", cleanKey)
+                            setRequestProperty("anthropic-version", "2023-06-01")
+                        }
+                        isAnthropicProtocol -> {
+                            setRequestProperty("Authorization", "Bearer $cleanKey")
+                            setRequestProperty("x-api-key", cleanKey)
+                            setRequestProperty("anthropic-version", "2023-06-01")
+                        }
+                        else -> {
+                            setRequestProperty("Authorization", "Bearer $cleanKey")
+                        }
+                    }
+                } else if (isAnthropicProtocol) {
+                    setRequestProperty("anthropic-version", "2023-06-01")
                 }
                 if (endpoint.startsWith("https://opencode.ai/zen/")) {
                     setRequestProperty("User-Agent", "opencode/1.18.20")
                     setRequestProperty("x-session-id", "session-${UUID.randomUUID()}")
-                }
-                if (
-                    apiKey.isNotBlank() &&
-                    protocol != ProviderProtocol.OPENROUTER &&
-                    protocol != ProviderProtocol.OPENAI_CHAT &&
-                    protocol != ProviderProtocol.OPENAI_RESPONSES
-                ) {
-                    setRequestProperty("x-api-key", apiKey)
-                    setRequestProperty("anthropic-version", "2023-06-01")
                 }
                 if (body != null) doOutput = true
             }

@@ -782,9 +782,54 @@ fun main() {
             baseUrl = "",
             model = "claude-sonnet-4-6",
         )
-        val launchCfg = RuntimeLaunchConfigBuilder.build(customAnthropic, authToken = "sk-ant-test")
+        val launchCfg = RuntimeLaunchConfigBuilder.build(customAnthropic, authToken = "sk-ant-api03-test")
         check(launchCfg.environment["ANTHROPIC_BASE_URL"] == "https://api.anthropic.com") {
             "Expected resolvedBaseUrl fallback for ANTHROPIC_BASE_URL, got '${launchCfg.environment["ANTHROPIC_BASE_URL"]}'"
+        }
+        check(launchCfg.environment["ANTHROPIC_API_KEY"] == "sk-ant-api03-test") {
+            "Expected ANTHROPIC_API_KEY to be populated for Anthropic API key"
+        }
+        check(launchCfg.environment["ANTHROPIC_AUTH_TOKEN"] == "") {
+            "Expected ANTHROPIC_AUTH_TOKEN to be empty for Anthropic API key so Claude CLI does not send invalid Bearer header"
+        }
+        check(launchCfg.environment["CLAUDE_CODE_OAUTH_TOKEN"] == "") {
+            "Expected CLAUDE_CODE_OAUTH_TOKEN to be empty for Anthropic API key"
+        }
+
+        val oauthUnderAnthropicCfg = RuntimeLaunchConfigBuilder.build(customAnthropic, authToken = "sk-ant-oat01-oauth-token")
+        check(oauthUnderAnthropicCfg.environment["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-oauth-token") {
+            "Expected sk-ant-oat* token under ANTHROPIC profile to route to CLAUDE_CODE_OAUTH_TOKEN"
+        }
+        check(oauthUnderAnthropicCfg.environment["ANTHROPIC_API_KEY"] == "") {
+            "Expected ANTHROPIC_API_KEY to be cleared for sk-ant-oat* OAuth token"
+        }
+        check(oauthUnderAnthropicCfg.environment["ANTHROPIC_AUTH_TOKEN"] == "") {
+            "Expected ANTHROPIC_AUTH_TOKEN to be cleared for sk-ant-oat* OAuth token"
+        }
+
+        val apiKeyUnderClaudeLoginCfg = RuntimeLaunchConfigBuilder.build(
+            ProviderProfile(kind = ProviderKind.CLAUDE, baseUrl = "", model = "default"),
+            authToken = "sk-ant-api03-key-under-claude",
+        )
+        check(apiKeyUnderClaudeLoginCfg.environment["ANTHROPIC_API_KEY"] == "sk-ant-api03-key-under-claude") {
+            "Expected sk-ant-api* key under CLAUDE profile to route to ANTHROPIC_API_KEY"
+        }
+        check(apiKeyUnderClaudeLoginCfg.environment["ANTHROPIC_AUTH_TOKEN"] == "") {
+            "Expected ANTHROPIC_AUTH_TOKEN to be empty when sk-ant-api* key is used under CLAUDE profile"
+        }
+        check(apiKeyUnderClaudeLoginCfg.environment["CLAUDE_CODE_OAUTH_TOKEN"] == "") {
+            "Expected CLAUDE_CODE_OAUTH_TOKEN to be empty when sk-ant-api* key is used under CLAUDE profile"
+        }
+
+        val openRouterCfg = RuntimeLaunchConfigBuilder.build(
+            ProviderProfile(kind = ProviderKind.LLM_ROUTER),
+            authToken = "sk-or-v1-router-key",
+        )
+        check(openRouterCfg.environment["ANTHROPIC_AUTH_TOKEN"] == "sk-or-v1-router-key") {
+            "Expected ANTHROPIC_AUTH_TOKEN for OpenRouter"
+        }
+        check(openRouterCfg.environment["ANTHROPIC_API_KEY"] == "") {
+            "Expected ANTHROPIC_API_KEY to be empty for OpenRouter Bearer auth"
         }
 
         // 5. Test Block 4: AndroidProjectTemplateGenerator (Compose & XML) + AndroidBuildSupport
@@ -1253,6 +1298,9 @@ fun main() {
         check(classifyToolRisk("Bash", "git add . && git commit -m x") == RiskLevel.REVIEW)
         check(classifyToolRisk("Bash", "gradle :app:compileDebugKotlin -q 2>&1 | tail -40") == RiskLevel.REVIEW)
         check(classifyToolRisk("Bash", "find app/src/main -name '*.kt' 2>/dev/null | xargs wc -l") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Bash", "grep -Ei 'update|vault' app/src") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Bash", "grep \"a\\|b\" app/src") == RiskLevel.REVIEW)
+        check(classifyToolRisk("Bash", "grep a | rm -rf /") == RiskLevel.HIGH)
         check(classifyToolRisk("Edit", "", listOf("/opt/pocket/permission-hook.sh")) == RiskLevel.HIGH)
         check(classifyToolRisk("Write", "", listOf("/workspace/p/a.txt")) == RiskLevel.REVIEW)
 
@@ -1271,6 +1319,9 @@ fun main() {
         }
         check(ProviderRuntimeErrorDetector.detect("""{"type":"result","is_error":true,"result":"API Error: 401 {\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}"}""") == "The provider rejected the saved API key.") {
             "ProviderRuntimeErrorDetector must detect 401 authentication error in result"
+        }
+        check(ProviderRuntimeErrorDetector.detect("""{"type":"result","is_error":true,"result":"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"Invalid bearer token\"}}"}""") == "The provider rejected the saved API key.") {
+            "ProviderRuntimeErrorDetector must detect 401 Invalid bearer token error in result"
         }
 
         kotlinx.coroutines.runBlocking {
