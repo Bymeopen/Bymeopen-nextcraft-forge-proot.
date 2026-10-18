@@ -639,7 +639,9 @@ class RuntimeInstaller(private val context: Context) {
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
                 "rm -rf \"${'$'}next\"; mkdir -p \"${'$'}next\"; " +
                 "cd \"${'$'}next\"; npm init -y >/dev/null; " +
-                "npm install --omit=dev --no-audit --no-fund @deepseek-ai/dsh@$quotedVersion",
+                "npm install --omit=dev --no-audit --no-fund @deepseek-ai/dsh@$quotedVersion; " +
+                // npm runs as root; the app patches the tree next (applyDshAndroidCompatibility) as its own UID.
+                "chown -R -h ${AndroidProcess.myUid()}:${AndroidProcess.myUid()} \"${'$'}next\"",
             displayCommand = "npm install @deepseek-ai/dsh@$quotedVersion",
             fraction = 0.55f,
             timeoutMs = 20 * 60 * 1_000L,
@@ -677,7 +679,10 @@ class RuntimeInstaller(private val context: Context) {
             }
             verified.getOrThrow()
         }
-        File(rootfs, "usr/local/lib/dsh.previous").deleteRecursively()
+        val previous = File(rootfs, "usr/local/lib/dsh.previous")
+        if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
+            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek Harness copy")
+        }
         dshMarker.writeText(expectedVersion)
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
@@ -841,7 +846,14 @@ class RuntimeInstaller(private val context: Context) {
      */
     fun ensureDshAndroidCompatibility() {
         if (!isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) return
-        applyDshAndroidCompatibility(File(rootfs, "usr/local/lib/dsh"), dshMarker.readTextOrNull().orEmpty())
+        val dshRoot = File(rootfs, "usr/local/lib/dsh")
+        try {
+            applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
+        } catch (e: java.io.IOException) {
+            // A tree installed by an earlier root npm is root-owned; take it back and retry once.
+            if (!RootfsRepair.reclaimOwnership(dshRoot, AndroidProcess.myUid())) throw e
+            applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
+        }
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
@@ -1023,10 +1035,13 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePath(file: File) {
-        if (file.isDirectory && !java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            check(file.deleteRecursively()) { "Could not remove ${file.name}" }
-        } else if (file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            check(file.delete()) { "Could not remove ${file.name}" }
+        val isLink = java.nio.file.Files.isSymbolicLink(file.toPath())
+        if (!file.exists() && !isLink) return
+        val removed = if (file.isDirectory && !isLink) file.deleteRecursively() else file.delete()
+        // Caches and packages created inside the chroot (Gradle, pip, Composer) are root-owned, so the app UID
+        // cannot delete them; fall back to a root rm, which first checks that nothing is mounted below the path.
+        if (!removed) {
+            check(RootfsRepair.safeDeleteRecursively(file)) { "Could not remove ${file.name}" }
         }
     }
 
@@ -2006,8 +2021,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             File(rootfs, "etc/claude/settings.json"),
         )
         for (target in settingsPaths) {
-            target.parentFile?.mkdirs()
-            target.writeText(settingsContent)
+            writeRootfsFileAtomically(target, settingsContent)
         }
         ensureWorkspaceTrust("/workspace")
     }
@@ -2015,9 +2029,22 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
     private fun ensureWorkspaceTrust(
         workspacePath: String,
         environment: Map<String, String> = emptyMap(),
-    ) {
+    ) = synchronized(CLAUDE_STATE_LOCK) {
         val stateFile = File(rootfs, "root/.claude.json")
-        val state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
+        if (stateFile.exists() && !(stateFile.canRead() && stateFile.canWrite())) {
+            // Claude runs as root inside the chroot and may have rewritten the file as root-owned 0600.
+            RootfsRepair.reclaimOwnership(stateFile, AndroidProcess.myUid())
+        }
+        val state = if (stateFile.exists()) {
+            // Claude may be writing the file right now (another session); never replace a file that does not parse,
+            // or the account, API-key approvals and project history in it would be lost.
+            readClaudeState(stateFile) ?: run {
+                Log.w("RuntimeInstaller", "Leaving ~/.claude.json untouched: it could not be parsed")
+                return@synchronized
+            }
+        } else {
+            JSONObject()
+        }
         listOf("disableAllHooks", "permissions", "hooks", "allowedTools", "autoApprove")
             .forEach { state.remove(it) }
         state.put("hasCompletedOnboarding", true)
@@ -2040,8 +2067,40 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
             state.put("customApiKeyResponses", responses)
         }
-        stateFile.parentFile?.mkdirs()
-        stateFile.writeText(state.toString())
+        writeRootfsFileAtomically(stateFile, state.toString())
+    }
+
+    /** Parses ~/.claude.json, retrying briefly in case Claude is in the middle of rewriting it. */
+    private fun readClaudeState(stateFile: File): JSONObject? {
+        repeat(3) { attempt ->
+            val parsed = runCatching { JSONObject(stateFile.readText()) }.getOrNull()
+            if (parsed != null) return parsed
+            if (attempt < 2) Thread.sleep(150)
+        }
+        return null
+    }
+
+    /**
+     * Writes [target] through a temp file in the same directory and an atomic rename, so a crash or a concurrent
+     * reader never sees a truncated file. A root-owned target (rewritten by a root process in the chroot) is
+     * reclaimed first.
+     */
+    private fun writeRootfsFileAtomically(target: File, content: String) {
+        val parent = checkNotNull(target.parentFile) { "No parent directory for ${target.name}" }
+        parent.mkdirs()
+        if (!parent.canWrite() || (target.exists() && !target.canWrite())) {
+            RootfsRepair.reclaimOwnership(if (parent.canWrite()) target else parent, AndroidProcess.myUid())
+        }
+        val temp = File(parent, ".${target.name}.${AndroidProcess.myPid()}.tmp")
+        try {
+            FileOutputStream(temp).use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
+            Os.rename(temp.absolutePath, target.absolutePath)
+        } finally {
+            temp.delete()
+        }
     }
 
     // Only auto-allow read-only tools. Bash/Edit/Write/NotebookEdit go through the
@@ -2412,6 +2471,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
+        private val CLAUDE_STATE_LOCK = Any()
+
         fun rootfsDir(context: Context): File = File(context.filesDir, "runtime/ubuntu")
         fun bridgeRootDir(context: Context): File = File(context.filesDir, "runtime-bridge")
 
