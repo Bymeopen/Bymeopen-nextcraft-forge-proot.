@@ -60,7 +60,7 @@ internal class LocalFormatGateway(
                 socket.tcpNoDelay = true
             }
             try {
-                workers.execute { socket.use(::handle) }
+                workers.execute { runCatching { socket.use(::handle) } } // client disconnects must not escape as uncaught exceptions (crashes the app)
             } catch (_: java.util.concurrent.RejectedExecutionException) {
                 runCatching { socket.close() }
             }
