@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.nextcraft.forge.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -54,6 +56,24 @@ import com.nextcraft.forge.model.ProjectType
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
@@ -64,6 +84,10 @@ fun ProjectsScreen(
     state: ForgeUiState,
     onOpenProject: (String) -> Unit,
     onNewProject: () -> Unit,
+    onQuickProject: () -> Unit,
+    onImportZip: (Uri) -> Unit,
+    onCloneGitUrl: (String) -> Unit,
+    onConnectGitHub: () -> Unit,
     onDeleteProject: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -75,40 +99,236 @@ fun ProjectsScreen(
         .sortedByDescending { it.updatedAtMillis }
     // Mirrors MainViewModel.deleteProject, which refuses to delete the last project.
     val canDelete = state.projects.size > 1 && !state.sessionRunning
+    var showCloneDialog by rememberSaveable { mutableStateOf(false) }
+    val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(onImportZip)
+    }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        ProjectsHeader(onNewProject = onNewProject)
-        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-
+    LazyColumn(modifier = modifier.fillMaxSize()) {
+        item(key = "hero") {
+            ProjectsHero(
+                onQuickProject = onQuickProject,
+                onNewProject = onNewProject,
+            )
+        }
+        item(key = "import") {
+            BringExistingProjectCard(
+                githubLogin = state.githubLogin,
+                onPickZip = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
+                onGitUrl = { showCloneDialog = true },
+                onConnectGitHub = onConnectGitHub,
+            )
+        }
+        item(key = "header-yours") {
+            Text(
+                text = stringResource(R.string.projects_your_projects),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 6.dp),
+            )
+        }
         if (state.projects.isEmpty()) {
-            ProjectsEmptyState(onNewProject = onNewProject)
+            item(key = "empty") { ProjectsEmptyState() }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (regular.isNotEmpty()) {
-                    item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
-                    items(regular, key = { it.id }) { project ->
-                        ProjectRow(
-                            project = project,
-                            active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while the agent streams.
-                            locked = state.sessionRunning && project.id != state.activeProjectId,
-                            canDelete = canDelete,
-                            onOpen = { onOpenProject(project.id) },
-                            onDelete = { onDeleteProject(project.id) },
+            if (regular.isNotEmpty()) {
+                if (quick.isNotEmpty()) item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
+                items(regular, key = { it.id }) { project ->
+                    ProjectRow(
+                        project = project,
+                        active = project.id == state.activeProjectId,
+                        // MainViewModel.selectProject ignores switches while the agent streams.
+                        locked = state.sessionRunning && project.id != state.activeProjectId,
+                        canDelete = canDelete,
+                        onOpen = { onOpenProject(project.id) },
+                        onDelete = { onDeleteProject(project.id) },
+                    )
+                }
+            }
+            if (quick.isNotEmpty()) {
+                item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
+                items(quick, key = { it.id }) { project ->
+                    ProjectRow(
+                        project = project,
+                        active = project.id == state.activeProjectId,
+                        locked = state.sessionRunning && project.id != state.activeProjectId,
+                        canDelete = canDelete,
+                        onOpen = { onOpenProject(project.id) },
+                        onDelete = { onDeleteProject(project.id) },
+                    )
+                }
+            }
+        }
+        item(key = "bottom-space") { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+
+    if (showCloneDialog) {
+        CloneUrlDialog(
+            onDismiss = { showCloneDialog = false },
+            onClone = { url ->
+                showCloneDialog = false
+                onCloneGitUrl(url)
+            },
+        )
+    }
+}
+
+/** Title, tagline and the two entry actions (filled Quick project, outlined New project). */
+@Composable
+private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+        Text(
+            text = stringResource(R.string.shell_nextcraft_forge),
+            fontSize = 14.sp,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+        Text(
+            text = stringResource(R.string.projects_build_from_your_phone),
+            fontSize = 27.sp,
+            fontWeight = FontWeight.SemiBold,
+            lineHeight = 32.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Text(
+            text = stringResource(R.string.projects_tagline),
+            fontSize = 14.sp,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ForgePrimaryButton(
+                text = stringResource(R.string.projects_quick_project),
+                onClick = onQuickProject,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(
+                onClick = onNewProject,
+                shape = RoundedCornerShape(100),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/** Collapsible import card: header toggles; body offers ZIP, Git URL and GitHub. */
+@Composable
+private fun BringExistingProjectCard(
+    githubLogin: String,
+    onPickZip: () -> Unit,
+    onGitUrl: () -> Unit,
+    onConnectGitHub: () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val toggleLabel = stringResource(if (expanded) R.string.projects_collapse else R.string.projects_expand)
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = tokens.cardContainerColor,
+        contentColor = scheme.onSurface,
+        border = tokens.cardBorderStroke,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClickLabel = toggleLabel) { expanded = !expanded }
+                    .padding(start = 16.dp, end = 10.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.projects_bring_existing),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = stringResource(
+                            if (expanded) R.string.projects_bring_existing_expanded else R.string.projects_bring_existing_collapsed,
+                        ),
+                        fontSize = 14.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = scheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ImportTile(
+                            icon = Icons.Default.KeyboardArrowDown,
+                            label = stringResource(R.string.projects_zip_file),
+                            onClick = onPickZip,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ImportTile(
+                            icon = Icons.Default.Edit,
+                            label = stringResource(R.string.projects_git_url),
+                            onClick = onGitUrl,
+                            modifier = Modifier.weight(1f),
                         )
                     }
-                }
-                if (quick.isNotEmpty()) {
-                    item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
-                    items(quick, key = { it.id }) { project ->
-                        ProjectRow(
-                            project = project,
-                            active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while the agent streams.
-                            locked = state.sessionRunning && project.id != state.activeProjectId,
-                            canDelete = canDelete,
-                            onOpen = { onOpenProject(project.id) },
-                            onDelete = { onDeleteProject(project.id) },
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(tokens.cardElevatedColor)
+                            .clickable(role = Role.Button, onClick = onConnectGitHub)
+                            .heightIn(min = 60.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            tint = scheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.projects_connect_github),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = if (githubLogin.isBlank()) {
+                                    stringResource(R.string.projects_browse_remote)
+                                } else {
+                                    stringResource(R.string.projects_github_connected, githubLogin)
+                                },
+                                fontSize = 13.sp,
+                                color = scheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
@@ -118,30 +338,58 @@ fun ProjectsScreen(
 }
 
 @Composable
-private fun ProjectsHeader(onNewProject: () -> Unit) {
+private fun ImportTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalForgeThemeTokens.current
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .padding(start = 16.dp, end = 4.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(tokens.cardElevatedColor)
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        Text(
-            text = stringResource(R.string.projects_projects),
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
         )
-        // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
-        IconButton(onClick = onNewProject) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = stringResource(R.string.projects_new_project),
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
+}
+
+@Composable
+private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
+    var url by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.projects_clone_title)) },
+        text = {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it },
+                placeholder = { Text(stringResource(R.string.projects_clone_hint)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onClone(url) }, enabled = url.isNotBlank()) {
+                Text(stringResource(R.string.projects_clone))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
+        },
+    )
 }
 
 @Composable
@@ -251,35 +499,37 @@ private fun StatusDot(active: Boolean) {
 }
 
 @Composable
-private fun ProjectsEmptyState(onNewProject: () -> Unit) {
+private fun ProjectsEmptyState() {
+    val tokens = LocalForgeThemeTokens.current
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(tokens.cardContainerColor)
+            .padding(horizontal = 28.dp, vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
+        Icon(
+            imageVector = Icons.Default.Home,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(34.dp),
+        )
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = stringResource(R.string.projects_no_projects_yet),
-            fontSize = 14.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = stringResource(R.string.projects_create_a_project_to),
-            fontSize = 13.sp,
+            text = stringResource(R.string.projects_empty_hint),
+            fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = onNewProject,
-            shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.heightIn(min = 44.dp),
-        ) {
-            Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
-        }
     }
 }
 

@@ -203,4 +203,23 @@
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
+    <string name="projects_build_from_your_phone">Bangun dari ponsel Anda</string>
+    <string name="projects_tagline">Ngobrol, tinjau perubahan, dan pratinjau proyek Anda.</string>
+    <string name="projects_quick_project">Proyek cepat</string>
+    <string name="projects_bring_existing">Bawa proyek yang sudah ada</string>
+    <string name="projects_bring_existing_collapsed">File ZIP, repositori Git, atau GitHub</string>
+    <string name="projects_bring_existing_expanded">Impor file atau clone riwayat Git lengkap</string>
+    <string name="projects_zip_file">File ZIP</string>
+    <string name="projects_git_url">URL Git</string>
+    <string name="projects_connect_github">Hubungkan GitHub</string>
+    <string name="projects_browse_remote">Telusuri repositori remote Anda</string>
+    <string name="projects_github_connected">Terhubung sebagai @%1$s · pilih repositori di Settings</string>
+    <string name="projects_your_projects">Proyek Anda</string>
+    <string name="projects_empty_hint">Buat proyek bernama atau mulai langsung dengan Proyek Cepat.</string>
+    <string name="projects_clone_title">Clone dari URL Git</string>
+    <string name="projects_clone_hint">https://github.com/user/repo.git</string>
+    <string name="projects_clone">Clone</string>
+    <string name="projects_cancel">Batal</string>
+    <string name="projects_expand">Buka</string>
+    <string name="projects_collapse">Tutup</string>
 </resources>

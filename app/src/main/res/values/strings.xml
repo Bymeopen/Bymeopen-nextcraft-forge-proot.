@@ -203,4 +203,23 @@
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
+    <string name="projects_build_from_your_phone">Build from your phone</string>
+    <string name="projects_tagline">Chat, review changes, and preview your project.</string>
+    <string name="projects_quick_project">Quick project</string>
+    <string name="projects_bring_existing">Bring an existing project</string>
+    <string name="projects_bring_existing_collapsed">ZIP file, Git repository, or GitHub</string>
+    <string name="projects_bring_existing_expanded">Import files or clone complete Git history</string>
+    <string name="projects_zip_file">ZIP file</string>
+    <string name="projects_git_url">Git URL</string>
+    <string name="projects_connect_github">Connect GitHub</string>
+    <string name="projects_browse_remote">Browse your remote repositories</string>
+    <string name="projects_github_connected">Connected as @%1$s · pick a repository in Settings</string>
+    <string name="projects_your_projects">Your projects</string>
+    <string name="projects_empty_hint">Create a named project or start instantly with a Quick Project.</string>
+    <string name="projects_clone_title">Clone from Git URL</string>
+    <string name="projects_clone_hint">https://github.com/user/repo.git</string>
+    <string name="projects_clone">Clone</string>
+    <string name="projects_cancel">Cancel</string>
+    <string name="projects_expand">Expand</string>
+    <string name="projects_collapse">Collapse</string>
 </resources>

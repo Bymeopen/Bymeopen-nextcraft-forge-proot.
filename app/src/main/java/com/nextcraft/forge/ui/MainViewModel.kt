@@ -1810,6 +1810,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Clones any http(s) git URL into a fresh workspace project (GitHub token is used only for github.com). */
+    fun cloneGitUrl(rawUrl: String) {
+        val url = rawUrl.trim()
+        val uriScheme = android.net.Uri.parse(url).scheme?.lowercase()
+        if (url.isEmpty() || (uriScheme != "http" && uriScheme != "https")) {
+            _state.update { it.copy(githubStatusMessage = "Enter an http(s) git URL") }
+            return
+        }
+        val name = url.trimEnd('/').substringAfterLast('/').removeSuffix(".git").ifBlank { "repository" }
+        cloneGitHubRepository(
+            GitHubRepository(
+                fullName = name,
+                cloneUrl = url,
+                private = false,
+                defaultBranch = "",
+                description = "",
+                updatedAt = "",
+            ),
+        )
+    }
+
+    /** Unpacks a user-picked ZIP into a new workspace project named after the file. */
+    fun importZipProject(uri: android.net.Uri) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val displayName = app.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                        val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (c.moveToFirst() && idx >= 0) c.getString(idx) else null
+                    } ?: "import.zip"
+                    val cleanName = displayName.removeSuffix(".zip").ifBlank { "Imported project" }
+                    val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                    val baseSlug = projectSlug(cleanName)
+                    var slug = baseSlug
+                    var suffix = 2
+                    while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                    val project = Project(
+                        name = cleanName,
+                        description = "Imported from $displayName",
+                        language = "Multi-language",
+                        slug = slug,
+                    )
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val root = ws.canonicalFile
+                    app.contentResolver.openInputStream(uri)?.use { input ->
+                        java.util.zip.ZipInputStream(input).use { zip ->
+                            var entry = zip.nextEntry
+                            while (entry != null) {
+                                val target = File(root, entry.name).canonicalFile
+                                // Zip-slip guard: refuse entries that escape the workspace.
+                                if (!target.path.startsWith(root.path + File.separator) && target != root) {
+                                    throw IllegalArgumentException("Unsafe zip entry: ${entry.name}")
+                                }
+                                if (entry.isDirectory) {
+                                    target.mkdirs()
+                                } else {
+                                    target.parentFile?.mkdirs()
+                                    target.outputStream().use { zip.copyTo(it) }
+                                }
+                                zip.closeEntry()
+                                entry = zip.nextEntry
+                            }
+                        }
+                    } ?: throw IllegalStateException("Cannot open $displayName")
+                    project
+                }
+            }
+            result.onSuccess { newProject ->
+                val updated = listOf(newProject) + _state.value.projects
+                preferences.saveProjects(updated)
+                configureAllProjectRoots(updated)
+                _state.update { it.copy(projects = updated, bannerMessage = "Imported ${newProject.name}") }
+                selectProject(newProject.id)
+            }.onFailure { err ->
+                _state.update { it.copy(bannerMessage = "Import failed: ${err.message}") }
+            }
+        }
+    }
+
     fun setLanguageCode(code: String) {
         val clean = code.trim().ifEmpty { "system" }
         AppStrings.saveLanguageCode(getApplication(), clean)

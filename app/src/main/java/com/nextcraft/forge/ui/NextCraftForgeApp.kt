@@ -186,6 +186,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             viewModel.selectTab(ForgeTab.AGENT)
                         },
                         onNewProject = { showNewProjectDialog = true },
+                        onQuickProject = {
+                            viewModel.createProject(name = "Quick project", description = "", isAndroid = false)
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onImportZip = viewModel::importZipProject,
+                        onCloneGitUrl = viewModel::cloneGitUrl,
+                        onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
                         onDeleteProject = viewModel::deleteProject,
                     )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
