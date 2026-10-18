@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -86,6 +87,8 @@ fun ProjectsScreen(
                         ProjectRow(
                             project = project,
                             active = project.id == state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while the agent streams.
+                            locked = state.sessionRunning && project.id != state.activeProjectId,
                             canDelete = canDelete,
                             onOpen = { onOpenProject(project.id) },
                             onDelete = { onDeleteProject(project.id) },
@@ -98,6 +101,8 @@ fun ProjectsScreen(
                         ProjectRow(
                             project = project,
                             active = project.id == state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while the agent streams.
+                            locked = state.sessionRunning && project.id != state.activeProjectId,
                             canDelete = canDelete,
                             onOpen = { onOpenProject(project.id) },
                             onDelete = { onDeleteProject(project.id) },
@@ -152,6 +157,7 @@ private fun SectionLabel(text: String) {
 private fun ProjectRow(
     project: Project,
     active: Boolean,
+    locked: Boolean,
     canDelete: Boolean,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
@@ -165,10 +171,13 @@ private fun ProjectRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 56.dp)
+                    .alpha(if (locked) 0.5f else 1f)
                     .combinedClickable(
+                        enabled = !locked,
                         role = Role.Button,
                         onClick = onOpen,
-                        onLongClick = { if (canDelete) menuOpen = true },
+                        onLongClickLabel = if (canDelete) "Delete project" else null,
+                        onLongClick = if (canDelete) ({ menuOpen = true }) else null,
                     )
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -184,7 +193,7 @@ private fun ProjectRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = project.subtitle(),
+                        text = if (locked) "Agent is running" else project.subtitle(),
                         fontSize = 12.5.sp,
                         color = muted,
                         maxLines = 1,

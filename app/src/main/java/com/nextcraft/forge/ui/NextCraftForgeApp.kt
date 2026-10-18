@@ -442,11 +442,10 @@ private val navEntries = listOf(
     NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, "Settings"),
 )
 
-// Screens reachable from the Tools launcher keep the Tools tab highlighted.
+// Screens reachable from the Tools launcher keep the Tools tab highlighted (Terminal has its own round button).
 private val toolsGroup = setOf(
     ForgeTab.TOOLS,
     ForgeTab.FILES,
-    ForgeTab.TERMINAL,
     ForgeTab.ANDROID,
     ForgeTab.PREVIEW,
 )
@@ -533,6 +532,7 @@ private fun ForgeBottomBar(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(CircleShape)
+                    .background(if (activeTab == ForgeTab.TERMINAL) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
                     .clickable(role = Role.Button, onClickLabel = "Terminal") { onSelectTab(ForgeTab.TERMINAL) },
                 contentAlignment = Alignment.Center,
             ) {
