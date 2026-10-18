@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,8 +48,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -68,6 +67,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -176,6 +177,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         onDeleteProject = viewModel::deleteProject,
                     )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
+                    ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
@@ -431,6 +433,28 @@ private fun ForgeTopBar(
     }
 }
 
+private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, val label: String)
+
+private val navEntries = listOf(
+    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, "Projects"),
+    NavEntry(ForgeTab.AGENT, Icons.Default.Star, "Agent"),
+    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, "Tools"),
+    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, "Settings"),
+)
+
+// Screens reachable from the Tools launcher keep the Tools tab highlighted.
+private val toolsGroup = setOf(
+    ForgeTab.TOOLS,
+    ForgeTab.FILES,
+    ForgeTab.TERMINAL,
+    ForgeTab.ANDROID,
+    ForgeTab.PREVIEW,
+)
+
+/**
+ * Linear-style floating capsule: four icon-only tabs (selected = soft pill) plus a detached
+ * round button for the terminal. Same shape in every theme; only colours/border come from tokens.
+ */
 @Composable
 private fun ForgeBottomBar(
     activeTab: ForgeTab,
@@ -438,63 +462,85 @@ private fun ForgeBottomBar(
     onSelectTab: (ForgeTab) -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
-    val shape = if (tokens.isGlass) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+    val scheme = MaterialTheme.colorScheme
+    val barBorder = if (tokens.isGlass || tokens.isWhite) tokens.cardBorderStroke else null
+    val barShadow = if (tokens.isGlass) 12.dp else 0.dp
 
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(
-                horizontal = if (tokens.isGlass) 16.dp else 0.dp,
-                vertical = if (tokens.isGlass) 10.dp else 0.dp,
-            ),
+            .padding(start = 25.dp, end = 25.dp, top = 8.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Surface(
-            shape = shape,
+            shape = RoundedCornerShape(100),
             color = tokens.bottomBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            border = if (tokens.isGlass) tokens.cardBorderStroke else null,
-            shadowElevation = if (tokens.isGlass) 12.dp else 0.dp,
-            modifier = Modifier.fillMaxWidth(),
+            contentColor = scheme.onSurface,
+            border = barBorder,
+            shadowElevation = barShadow,
+            modifier = Modifier
+                .weight(1f)
+                .height(53.dp),
         ) {
-            Column {
-                if (!tokens.isGlass) {
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                }
-                NavigationBar(
-                    containerColor = Color.Transparent,
-                    tonalElevation = 0.dp,
-                ) {
-                    ForgeTab.entries.forEach { tab ->
-                        val label = when (tab) {
-                            ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
-                            else -> tab.title
-                        }
-                        val icon = when (tab) {
-                            ForgeTab.PROJECTS -> Icons.Default.Home
-                            ForgeTab.AGENT -> Icons.Default.Star
-                            ForgeTab.FILES -> Icons.Default.Edit
-                            ForgeTab.TERMINAL -> Icons.Default.List
-                            ForgeTab.ANDROID -> Icons.Default.Build
-                            ForgeTab.PREVIEW -> Icons.Default.PlayArrow
-                            ForgeTab.SETTINGS -> Icons.Default.Settings
-                        }
-                        NavigationBarItem(
-                            selected = activeTab == tab,
-                            onClick = { onSelectTab(tab) },
-                            icon = { Icon(icon, contentDescription = label) },
-                            // With 7 tabs only the selected one keeps its label (Linear-style compact bar).
-                            alwaysShowLabel = false,
-                            label = {
-                                Text(
-                                    text = label,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontSize = 11.sp,
-                                )
-                            },
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                navEntries.forEach { entry ->
+                    val selected = if (entry.tab == ForgeTab.TOOLS) activeTab in toolsGroup else activeTab == entry.tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(100))
+                            .background(if (selected) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
+                            .clickable(role = Role.Tab, onClickLabel = entry.label) { onSelectTab(entry.tab) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = entry.label,
+                            tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp),
                         )
+                        // Pending file changes live under Tools; show a quiet accent dot when it is not open.
+                        if (entry.tab == ForgeTab.TOOLS && changedCount > 0 && !selected) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 9.dp, end = 18.dp)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(scheme.primary),
+                            )
+                        }
                     }
                 }
+            }
+        }
+        Surface(
+            shape = CircleShape,
+            color = tokens.bottomBarContainerColor,
+            contentColor = scheme.onSurface,
+            border = barBorder,
+            shadowElevation = barShadow,
+            modifier = Modifier.size(53.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .clickable(role = Role.Button, onClickLabel = "Terminal") { onSelectTab(ForgeTab.TERMINAL) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.List,
+                    contentDescription = "Terminal",
+                    modifier = Modifier.size(22.dp),
+                )
             }
         }
     }
