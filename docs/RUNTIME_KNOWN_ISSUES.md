@@ -3,7 +3,13 @@
 Status per 2026-10-18, dari uji di perangkat root (kernel 5.10 GKI, Ubuntu 24.04.5 arm64, glibc 2.39) memakai
 `scripts/runtime-bundles/chroot-health.sh` dan diagnosa manual di terminal chroot.
 
-## Harus diperbaiki
+## Status
+
+| # | Masalah | Status |
+|---|---|---|
+| 1 | `/apex` tanpa submount, `aapt2`/`zipalign` gagal | Diperbaiki di kode, belum diverifikasi di perangkat |
+| 2 | Satu stack gagal menghentikan stack lain | Diperbaiki |
+| 3 | Skrip init Gradle rusak di bundle Android | Belum; tidak berdampak |
 
 ### 1. `aapt2` dan `zipalign` tidak bisa jalan: `/apex` di-bind tanpa submount (kritis)
 
@@ -24,33 +30,42 @@ adalah mount tersendiri di bawahnya. `chroot-exec.sh` memasang `/system`, `/apex
 `mount -o bind` (non-rekursif), sehingga di dalam chroot `/apex` hanya berisi direktori kosong. Linker tidak
 ditemukan, dan kernel mengembalikan `ENOENT` untuk interpreter ELF.
 
-**Perbaikan:**
+**Perbaikan (diterapkan):** `mount_bionic` di kedua salinan `chroot-exec.sh` (string `CHROOT_EXEC_SCRIPT` di
+`RuntimeInstaller.kt` dan `scripts/runtime-bundles/chroot-exec.sh`):
 
-- Di kedua salinan `chroot-exec.sh` (string `CHROOT_EXEC_SCRIPT` di `RuntimeInstaller.kt` dan
-  `scripts/runtime-bundles/chroot-exec.sh`), ganti bind keempat direktori Bionic menjadi rekursif lalu
-  `rslave`, agar unmount di dalam chroot tidak merambat ke namespace Android:
-  ```sh
-  mount -o rbind "$bionic_dir" "$ROOTFS$bionic_dir"
-  mount --make-rslave "$ROOTFS$bionic_dir" 2>/dev/null || true
-  mount -o remount,bind,ro "$ROOTFS$bionic_dir" 2>/dev/null || true
-  ```
-- `is_mounted` hanya memeriksa titik mount teratas. Mount lama yang sudah ada (non-rekursif dari versi
-  sebelumnya) tidak akan diperbaiki otomatis. Tambahkan deteksi: bila `/apex` ter-mount tetapi tidak punya
-  submount, lepas (`umount -l`) lalu pasang ulang dengan `rbind`.
-- Pastikan `unmount-chroot.sh` dan `RootfsRepair.ensureUnmounted` melepas semua submount `/apex/*` (urutan
-  terbalik) sebelum rootfs dihapus atau diganti.
-- Verifikasi di perangkat: `chroot-health.sh` harus menunjukkan `apex submounts` > 0, `linker64` OK,
-  `aapt2 version` OK, `zipalign` OK, lalu build APK template berhasil.
+1. Bind `/system`, `/apex`, `/vendor`, `/product` tanpa rekursi (belum ada submount, jadi aman).
+2. Jadikan mount itu `slave` (`--make-rslave`, dengan cadangan `-o rslave`/`--make-slave`/`-o slave`). Bila
+   semuanya gagal, berhenti di bind lama dan tampilkan peringatan: `aapt2` tetap gagal, tetapi Android aman.
+3. Bind setiap submount (modul APEX) satu per satu, induk lebih dulu, masing-masing langsung dijadikan `slave`.
+4. Mount lama yang non-rekursif (dari versi sebelumnya) dideteksi dan diganti otomatis.
+
+`rbind` sengaja **tidak** dipakai: salinannya adalah peer dari mount Android yang *shared* sampai dijadikan
+slave, dan `umount` salinan yang masih peer ikut melepas modul APEX asli. Sebagai lapisan kedua,
+`unmount-chroot.sh` (kedua salinan) dan `RootfsRepair.ensureUnmounted` menjadikan semua mount di bawah rootfs
+`private` sebelum melepasnya.
+
+**Diuji** di Linux dengan `/apex` tiruan yang *shared* (tmpfs + submount modul), dijalankan dengan `dash`:
+linker terlihat di dalam rootfs, salinan tidak lagi *shared*, mount lama terganti, kedua skrip unmount melepas
+semuanya tanpa menyentuh modul asli, dan jalur cadangan tanpa `rbind`/`--make-rslave` juga lulus. Uji kontrol
+memastikan risikonya nyata: `rbind` tanpa `slave` lalu `umount` memang melepas modul asli.
+
+**Belum diverifikasi di perangkat:** dukungan opsi propagasi di `mount` milik toybox/busybox Magisk/KernelSU.
+Setelah update, `chroot-health.sh` harus menunjukkan `apex submounts` > 0, `linker64` OK, `aapt2` dan
+`zipalign` OK, lalu build APK template berhasil. Bila muncul peringatan "mount propagation cannot be changed",
+`mount` di perangkat tidak mendukung opsi propagasi.
 
 ### 2. Kegagalan satu stack menghentikan stack berikutnya
 
 **Gejala:** toggle C/C++ dan PHP aktif, tetapi `gcc`, `make`, `cmake`, `gdb`, `php`, dan `composer` tidak
 terpasang setelah verifikasi Android gagal.
 
-**Perlu dicek:** urutan dan penanganan error di loop pemasangan stack (`ensureInstalled` →
-`missingStacks`, `ensureStackInstalled`). Bila memang berhenti di stack pertama yang gagal, pilihannya:
-lanjutkan stack lain dan laporkan semua kegagalan di akhir, atau tampilkan dengan jelas stack mana yang
-belum dipasang.
+**Akar masalah:** loop pemasangan stack di `ensureInstalled` memanggil `applyStack` berurutan tanpa
+penanganan error, sehingga exception dari verifikasi Android menghentikan stack sesudahnya.
+
+**Perbaikan (diterapkan):** setiap stack dipasang dalam `try`; kegagalan dicatat (`Log.e`, pesan progres),
+stack berikutnya tetap dipasang, agen tetap dipasang, lalu semua kegagalan dilaporkan sekaligus di akhir.
+Pembatalan (`CancellationException`) tetap menghentikan proses. Stack yang gagal tidak ditandai terpasang,
+jadi akan dicoba lagi pada pemasangan berikutnya.
 
 ### 3. Skrip init Gradle di dalam bundle Android rusak (kecil)
 

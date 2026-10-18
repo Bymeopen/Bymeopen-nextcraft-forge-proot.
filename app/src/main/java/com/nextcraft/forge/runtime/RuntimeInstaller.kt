@@ -17,6 +17,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -290,10 +291,26 @@ class RuntimeInstaller(private val context: Context) {
             }
             opIndex++
         }
+        // One broken stack (e.g. Android tools that cannot run) must not keep the others from installing:
+        // install every selected stack, then report all failures together.
+        val failedStacks = mutableListOf<Pair<DevStack, Throwable>>()
         missingStacks.forEach { stack ->
             val slice = 0.26f / totalStackOps
             val from = 0.72f + opIndex * slice
-            applyStack(chrootExec, stack, from, from + slice, onProgress)
+            try {
+                applyStack(chrootExec, stack, from, from + slice, onProgress)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("RuntimeInstaller", "Installing ${stack.label} failed", e)
+                failedStacks += stack to e
+                onProgress(
+                    RuntimeInstallProgress(
+                        "${stack.label} failed: ${e.message?.take(160).orEmpty()}",
+                        from + slice,
+                    ),
+                )
+            }
             opIndex++
         }
 
@@ -301,6 +318,11 @@ class RuntimeInstaller(private val context: Context) {
             AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(chrootExec, 0.985f, onProgress)
             AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(chrootExec, 0.985f, onProgress)
             AgentKind.ANTIGRAVITY -> ensureAgyInstalled(chrootExec, 0.985f, onProgress)
+        }
+        check(failedStacks.isEmpty()) {
+            failedStacks.joinToString(separator = "\n") { (stack, error) ->
+                "${stack.label}: ${error.message?.take(200).orEmpty()}"
+            }
         }
         onProgress(RuntimeInstallProgress("NextCraft Forge Root Chroot setup complete", 1f))
         return InstalledRuntime(chrootExec, rootfs)
@@ -2561,6 +2583,47 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             }
 
+            # Android's /apex is a tmpfs with every APEX module mounted below it, and /system/bin/linker64 (the interpreter
+            # of Bionic tools such as aapt2) points into /apex/com.android.runtime. A plain bind leaves those modules out.
+            # A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
+            # and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
+            # its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
+            has_submounts() {
+                awk -v prefix="${'$'}1/" 'index(${'$'}2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
+            }
+
+            make_slave() {
+                mount --make-rslave "${'$'}1" 2>/dev/null || mount -o rslave "${'$'}1" 2>/dev/null ||
+                    mount --make-slave "${'$'}1" 2>/dev/null || mount -o slave "${'$'}1" 2>/dev/null
+            }
+
+            mount_bionic() {
+                local src="${'$'}1"
+                local dst="${'$'}2"
+                mkdir -p "${'$'}dst"
+                # Earlier versions bound these directories without their submounts; replace such a mount.
+                if is_mounted "${'$'}dst" && has_submounts "${'$'}src" && ! has_submounts "${'$'}dst"; then
+                    umount "${'$'}dst" 2>/dev/null || umount -l "${'$'}dst" 2>/dev/null || true
+                fi
+                is_mounted "${'$'}dst" && return 0
+                mount -o bind "${'$'}src" "${'$'}dst" || return 1
+                if ! make_slave "${'$'}dst"; then
+                    echo "Warning: mount propagation cannot be changed; ${'$'}dst is bound without its submounts" >&2
+                    mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
+                    return 0
+                fi
+                # Parents first, so each module lands on a mount point that is already a slave copy.
+                awk -v prefix="${'$'}src/" 'index(${'$'}2, prefix) == 1 { print ${'$'}2 }' /proc/mounts | sort | while read -r sub; do
+                    target="${'$'}dst${'$'}{sub#"${'$'}src"}"
+                    [ -d "${'$'}sub" ] && [ -d "${'$'}target" ] || continue
+                    is_mounted "${'$'}target" && continue
+                    if mount -o bind "${'$'}sub" "${'$'}target" 2>/dev/null && ! make_slave "${'$'}target"; then
+                        umount "${'$'}target" 2>/dev/null || true
+                    fi
+                done
+                mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
+            }
+
             mount_dynamic_bind() {
                 local src="${'$'}1"
                 local dst="${'$'}2"
@@ -2597,7 +2660,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
             for bionic_dir in /system /apex /vendor /product; do
                 if [ -d "${'$'}bionic_dir" ]; then
-                    mount_once "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir" "bind" "ro"
+                    mount_bionic "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir"
                 fi
             done
 
@@ -2696,6 +2759,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
             ROOTFS_REAL=${'$'}(realpath "${'$'}ROOTFS" 2>/dev/null || printf '%s' "${'$'}ROOTFS")
             ROOTFS_CLEAN="${'$'}{ROOTFS_REAL%/}"
+            # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
+            # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
+            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
+                mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
+            done
+
             for pass in 1 2 3; do
                 MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
                 if [ -z "${'$'}MOUNTS" ]; then
