@@ -95,6 +95,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.layout.heightIn
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -645,164 +646,124 @@ private fun RuntimeOnboardingScreen(
 ) {
     val snap = state.setupSnapshot
     val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
-    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(bottom = 24.dp),
     ) {
-        Text(
-            text = stringResource(R.string.shell_nextcraft_forge),
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "Ubuntu 24.04 LTS ARM64 Root Chroot (`su -mm`) Environment Setup",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        ForgeLargeTitle(
+            title = stringResource(R.string.onb_title),
+            subtitle = stringResource(R.string.onb_subtitle),
         )
 
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_arm64),
-                    ok = state.arm64Supported,
-                    detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
-                )
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_root),
-                    ok = state.rootAvailable,
-                    detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
-                )
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_rootfs),
-                    ok = state.runtimeInstalled,
-                    detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
-                )
-            }
-        }
+        ForgeSectionLabel(stringResource(R.string.onb_checks))
+        StatusCheckRow(
+            label = stringResource(R.string.shell_check_arm64),
+            ok = state.arm64Supported,
+            detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
+        )
+        StatusCheckRow(
+            label = stringResource(R.string.shell_check_root),
+            ok = state.rootAvailable,
+            detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
+        )
+        StatusCheckRow(
+            label = stringResource(R.string.shell_check_rootfs),
+            ok = state.runtimeInstalled,
+            detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
+        )
 
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.shell_select_development_stacks_to),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                DevStack.entries.forEach { stack ->
-                    val selected = stack in state.selectedDevStacks
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isInstalling, role = Role.Button) { onToggleStack(stack) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = selected,
-                            onCheckedChange = { if (!isInstalling) onToggleStack(stack) },
-                            enabled = !isInstalling,
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stack.displayLabel(), fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = stack.displayDescription(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = stack.installsSummary,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = tokens.accentText,
-                            )
-                        }
-                    }
-                }
-            }
+        ForgeSectionLabel(stringResource(R.string.onb_stacks))
+        DevStack.entries.forEach { stack ->
+            ForgeToggleRow(
+                title = stack.displayLabel(),
+                subtitle = stack.displayDescription() + " · " + stack.installsSummary,
+                checked = stack in state.selectedDevStacks,
+                enabled = !isInstalling,
+                onCheckedChange = { onToggleStack(stack) },
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
         }
 
         if (snap.status != RuntimeSetupStatus.IDLE) {
             val pct = (snap.progress.coerceIn(0f, 1f) * 100f).toInt()
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(snap.message, style = MaterialTheme.typography.titleMedium)
-                    snap.errorMessage?.let { err ->
-                        Text(
-                            text = err,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.dangerText,
-                        )
-                    }
-                    LinearProgressIndicator(
-                        progress = snap.progress.coerceIn(0f, 1f),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "$pct% • Status: ${snap.status.name}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Button(
-                onClick = onStartSetup,
-                enabled = state.arm64Supported && !isInstalling,
-                modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime))
-            }
-            if (isInstalling) {
-                OutlinedButton(onClick = onPauseSetup) {
-                    Text(stringResource(R.string.launch_pause))
+                ForgeStatusIcon(
+                    status = when (snap.status) {
+                        RuntimeSetupStatus.RUNNING -> ForgeStatus.RUNNING
+                        RuntimeSetupStatus.CANCELLED -> ForgeStatus.SKIPPED
+                        else -> if (snap.errorMessage != null) ForgeStatus.FAILED else ForgeStatus.DONE
+                    },
+                    iconSize = 22.dp,
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(snap.message, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = snap.errorMessage ?: stringResource(R.string.onb_progress_pct, pct, snap.status.name.lowercase()),
+                        fontSize = 13.sp,
+                        color = if (snap.errorMessage != null) scheme.error else scheme.onSurfaceVariant,
+                    )
                 }
             }
+            LinearProgressIndicator(
+                progress = snap.progress.coerceIn(0f, 1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                    .height(3.dp),
+            )
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+        if (isInstalling) {
+            OutlinedButton(
+                onClick = onPauseSetup,
+                shape = RoundedCornerShape(100),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.launch_pause)) }
+        } else {
+            ForgePrimaryButton(
+                text = stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime),
+                onClick = onStartSetup,
+                enabled = state.arm64Supported,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+            )
+        }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             OutlinedButton(
                 onClick = onRepairRootfs,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.shell_repair_mounts_dpkg))
-            }
+                shape = RoundedCornerShape(100),
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.onb_repair)) }
             OutlinedButton(
                 onClick = onRefreshStatus,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.shell_re_check_root))
-            }
+                shape = RoundedCornerShape(100),
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.onb_recheck)) }
         }
-
         TextButton(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
-        ) {
-            Text(stringResource(R.string.shell_continue_to_ide_workspace))
-        }
+        ) { Text(stringResource(R.string.onb_continue_anyway)) }
     }
 }
 
@@ -812,25 +773,18 @@ private fun StatusCheckRow(
     ok: Boolean,
     detail: String,
 ) {
-    val tokens = LocalForgeThemeTokens.current
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
-            contentDescription = null,
-            tint = if (ok) tokens.successText else tokens.warningText,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(modifier = Modifier.width(10.dp))
+        ForgeStatusIcon(if (ok) ForgeStatus.DONE else ForgeStatus.FAILED, iconSize = 20.dp)
+        Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(text = detail, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -847,7 +801,8 @@ private fun NewProjectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.shell_create_workspace_project)) },
+        shape = RoundedCornerShape(24.dp),
+        title = { Text(stringResource(R.string.np_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -856,6 +811,7 @@ private fun NewProjectDialog(
                     label = { Text(stringResource(R.string.shell_project_name)) },
                     placeholder = { Text(stringResource(R.string.shell_my_awesome_app)) },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -864,46 +820,34 @@ private fun NewProjectDialog(
                     label = { Text(stringResource(R.string.shell_description)) },
                     placeholder = { Text(stringResource(R.string.shell_optional_project_summary)) },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Switch(
-                        checked = isAndroid,
-                        onCheckedChange = { isAndroid = it },
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(stringResource(R.string.shell_generate_android_app_template))
-                }
+                ForgeToggleRow(
+                    title = stringResource(R.string.np_android_template),
+                    subtitle = stringResource(R.string.np_android_template_sub),
+                    checked = isAndroid,
+                    onCheckedChange = { isAndroid = it },
+                )
                 if (isAndroid) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        AndroidTemplate.entries.forEach { item ->
-                            FilterChip(
-                                selected = template == item,
-                                onClick = { template = item },
-                                label = { Text(item.label) },
-                            )
-                        }
-                    }
+                    ForgePillTabs(
+                        items = AndroidTemplate.entries.map { it.label },
+                        selectedIndex = AndroidTemplate.entries.indexOf(template),
+                        onSelect = { template = AndroidTemplate.entries[it] },
+                        modifier = Modifier.padding(horizontal = 0.dp),
+                    )
                 }
             }
         },
         confirmButton = {
             Button(
                 onClick = { onCreate(name, description, isAndroid, template) },
-            ) {
-                Text(stringResource(R.string.files_create))
-            }
+                enabled = name.isNotBlank(),
+                shape = RoundedCornerShape(100),
+            ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.agent_cancel))
-            }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
         },
     )
 }

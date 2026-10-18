@@ -313,4 +313,15 @@
     <string name="agent_sugg_compose">Buat layar Jetpack Compose responsif dengan manajemen state yang rapi.</string>
     <string name="agent_sugg_tests">Jalankan test suite atau skrip verifikasi di dalam Ubuntu Root Chroot.</string>
     <string name="agent_sugg_audit">Audit kode untuk bug konkurensi, keamanan, dan kasus tepi.</string>
+    <string name="onb_title">Siapkan runtime</string>
+    <string name="onb_subtitle">Chroot root Ubuntu 24.04 untuk agen dan toolchain</string>
+    <string name="onb_checks">Pemeriksaan perangkat</string>
+    <string name="onb_stacks">Stack yang dipasang</string>
+    <string name="onb_progress_pct">%1$d%% · %2$s</string>
+    <string name="onb_continue_anyway">Lanjut tanpa runtime</string>
+    <string name="onb_repair">Perbaiki mount</string>
+    <string name="onb_recheck">Periksa ulang</string>
+    <string name="np_title">Proyek baru</string>
+    <string name="np_android_template">Templat aplikasi Android</string>
+    <string name="np_android_template_sub">Buat proyek Kotlin (SDK 35)</string>
 </resources>

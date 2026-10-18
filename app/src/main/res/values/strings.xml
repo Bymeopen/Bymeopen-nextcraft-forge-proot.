@@ -316,4 +316,15 @@
     <string name="agent_sugg_compose">Create a responsive Jetpack Compose screen with clean state management.</string>
     <string name="agent_sugg_tests">Run the test suite or verify scripts inside the Ubuntu Root Chroot.</string>
     <string name="agent_sugg_audit">Audit the codebase for concurrency, security, and edge-case bugs.</string>
+    <string name="onb_title">Set up runtime</string>
+    <string name="onb_subtitle">Ubuntu 24.04 root chroot for agents and toolchains</string>
+    <string name="onb_checks">Device checks</string>
+    <string name="onb_stacks">Dev stacks to install</string>
+    <string name="onb_progress_pct">%1$d%% · %2$s</string>
+    <string name="onb_continue_anyway">Continue without runtime</string>
+    <string name="onb_repair">Repair mounts</string>
+    <string name="onb_recheck">Re-check</string>
+    <string name="np_title">New project</string>
+    <string name="np_android_template">Android app template</string>
+    <string name="np_android_template_sub">Generate a Kotlin project (SDK 35)</string>
 </resources>
