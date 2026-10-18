@@ -65,6 +65,9 @@ import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
 import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 
 @Composable
 fun FilesAndDiffScreen(
@@ -264,70 +267,76 @@ private fun WorkspaceFileEditor(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
     if (selectedPath == null) {
-        Box(
-            modifier = modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = stringResource(R.string.files_select_a_file_from),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(onClick = onBackToExplorer) {
-                    Text(stringResource(R.string.files_open_file_explorer))
-                }
-            }
+            Text(
+                text = stringResource(R.string.files_select_a_file_from),
+                fontSize = 14.sp,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            OutlinedButton(
+                onClick = onBackToExplorer,
+                shape = RoundedCornerShape(100),
+                modifier = Modifier.heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.files_open_file_explorer)) }
         }
         return
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(modifier = modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 14.dp, top = 4.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = selectedPath,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onBackground,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
+                fontSize = 13.sp,
+                color = scheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            savedBanner?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tokens.successText,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
+            if (savedBanner != null) {
+                // Saved confirmation: a status glyph instead of green text, so it reads in every theme.
+                ForgeStatusIcon(ForgeStatus.DONE, iconSize = 18.dp)
+                Spacer(modifier = Modifier.width(10.dp))
             }
-            Button(onClick = onSave) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(stringResource(R.string.files_save))
-            }
+            ForgePrimaryButton(text = stringResource(R.string.files_save), onClick = onSave)
         }
-
-        OutlinedTextField(
-            value = content,
-            onValueChange = onContentChange,
-            textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+        // Code surface: deepest theme surface, rounded, no outline; the field is transparent on top of it.
+        Box(
             modifier = Modifier
+                .weight(1f)
                 .fillMaxWidth()
-                .weight(1f),
-        )
+                .padding(start = 14.dp, end = 14.dp, bottom = 8.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(tokens.terminalBackground),
+        ) {
+            TextField(
+                value = content,
+                onValueChange = onContentChange,
+                textStyle = ForgeCodeTextStyle.copy(color = tokens.terminalText),
+                colors = TextFieldDefaults.textFieldColors(
+                    containerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                    cursorColor = scheme.primary,
+                ),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -501,7 +510,8 @@ private fun NewWorkspaceFileDialog(
     var path by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.files_create_new_file)) },
+        shape = RoundedCornerShape(24.dp),
+        title = { Text(stringResource(R.string.files_create_new_file), fontWeight = FontWeight.SemiBold) },
         text = {
             OutlinedTextField(
                 value = path,
@@ -509,6 +519,8 @@ private fun NewWorkspaceFileDialog(
                 label = { Text(stringResource(R.string.files_relative_file_path)) },
                 placeholder = { Text("src/main.py or index.html") },
                 singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -516,14 +528,11 @@ private fun NewWorkspaceFileDialog(
             Button(
                 onClick = { if (path.isNotBlank()) onCreate(path.trim()) },
                 enabled = path.isNotBlank(),
-            ) {
-                Text(stringResource(R.string.files_create))
-            }
+                shape = RoundedCornerShape(100),
+            ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.agent_cancel))
-            }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
         },
     )
 }
