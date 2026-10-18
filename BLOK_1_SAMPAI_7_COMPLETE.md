@@ -12905,7 +12905,7 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
 
 ## Daftar File dalam Blok Ini
 - `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (118 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2242 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2243 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (557 baris)
@@ -13040,7 +13040,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2242 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2243 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13135,6 +13135,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ForgeTab(val title: String) {
+    PROJECTS("Projects"),
     AGENT("Agent"),
     FILES("Files"),
     TERMINAL("Terminal"),
@@ -16744,7 +16745,7 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
    - Mengelola konfigurasi penyedia AI & kunci API terenkripsi (`ApiKeyVault`) beserta rotasi multi-kunci dan pengambilan katalog model langsung dari server, pengelolaan bundle runtime (impor `.tar.zst` lokal, unduh dari rilis resmi, *Verify & Repair Rootfs*, bersihkan *staging* atau *reset runtime*), integrasi penuh akun & repositori GitHub (`Connect Token`, `Create Repo`, `Clone`, `Push`, `Pull`, dan *Auto-Sync*), pemilih tema & bahasa antarmuka, kebijakan persetujuan perintah berisiko tinggi, serta pemeriksaan dan instalasi pembaruan aplikasi (`AppUpdater`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1112 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1123 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (1182 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (864 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (291 baris)
@@ -16753,7 +16754,7 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1112 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (1123 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -16791,6 +16792,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -16931,6 +16933,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.activeTab) {
+                    ForgeTab.PROJECTS -> ProjectsScreen(
+                        state = state,
+                        onOpenProject = { id ->
+                            viewModel.selectProject(id)
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onNewProject = { showNewProjectDialog = true },
+                        onDeleteProject = viewModel::deleteProject,
+                    )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
@@ -17387,6 +17398,7 @@ private fun ForgeBottomBar(
                     ForgeTab.entries.forEach { tab ->
                         val selected = activeTab == tab
                         val icon = when (tab) {
+                            ForgeTab.PROJECTS -> Icons.Default.Home
                             ForgeTab.AGENT -> Icons.Default.Star
                             ForgeTab.FILES -> Icons.Default.Edit
                             ForgeTab.TERMINAL -> Icons.Default.List
@@ -17417,7 +17429,7 @@ private fun ForgeBottomBar(
                             Box(contentAlignment = Alignment.Center) {
                                 Box(
                                     modifier = Modifier
-                                        .width(42.dp)
+                                        .width(36.dp)
                                         .height(28.dp)
                                         .clip(RoundedCornerShape(14.dp))
                                         .background(
@@ -17433,7 +17445,7 @@ private fun ForgeBottomBar(
                                         imageVector = icon,
                                         contentDescription = tab.title,
                                         tint = itemColor,
-                                        modifier = Modifier.size(19.dp),
+                                        modifier = Modifier.size(18.dp),
                                     )
                                 }
 
@@ -17460,7 +17472,7 @@ private fun ForgeBottomBar(
                             Text(
                                 text = tab.title,
                                 color = labelColor,
-                                fontSize = 10.5.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,

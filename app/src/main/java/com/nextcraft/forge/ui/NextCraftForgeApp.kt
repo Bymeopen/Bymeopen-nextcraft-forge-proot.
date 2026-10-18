@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -173,6 +174,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.activeTab) {
+                    ForgeTab.PROJECTS -> ProjectsScreen(
+                        state = state,
+                        onOpenProject = { id ->
+                            viewModel.selectProject(id)
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onNewProject = { showNewProjectDialog = true },
+                        onDeleteProject = viewModel::deleteProject,
+                    )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
@@ -629,6 +639,7 @@ private fun ForgeBottomBar(
                     ForgeTab.entries.forEach { tab ->
                         val selected = activeTab == tab
                         val icon = when (tab) {
+                            ForgeTab.PROJECTS -> Icons.Default.Home
                             ForgeTab.AGENT -> Icons.Default.Star
                             ForgeTab.FILES -> Icons.Default.Edit
                             ForgeTab.TERMINAL -> Icons.Default.List
@@ -659,7 +670,7 @@ private fun ForgeBottomBar(
                             Box(contentAlignment = Alignment.Center) {
                                 Box(
                                     modifier = Modifier
-                                        .width(42.dp)
+                                        .width(36.dp)
                                         .height(28.dp)
                                         .clip(RoundedCornerShape(14.dp))
                                         .background(
@@ -675,7 +686,7 @@ private fun ForgeBottomBar(
                                         imageVector = icon,
                                         contentDescription = tab.title,
                                         tint = itemColor,
-                                        modifier = Modifier.size(19.dp),
+                                        modifier = Modifier.size(18.dp),
                                     )
                                 }
 
@@ -702,7 +713,7 @@ private fun ForgeBottomBar(
                             Text(
                                 text = tab.title,
                                 color = labelColor,
-                                fontSize = 10.5.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,

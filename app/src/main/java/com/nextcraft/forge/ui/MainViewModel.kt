@@ -90,6 +90,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ForgeTab(val title: String) {
+    PROJECTS("Projects"),
     AGENT("Agent"),
     FILES("Files"),
     TERMINAL("Terminal"),
