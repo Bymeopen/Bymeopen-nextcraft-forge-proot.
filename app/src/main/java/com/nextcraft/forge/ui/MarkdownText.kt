@@ -393,7 +393,12 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
 
     for (line in lines) {
         val trimmed = line.trimStart()
-        if (trimmed.startsWith("```")) {
+        val fencePrefix = when {
+            trimmed.startsWith("```") -> "```"
+            trimmed.startsWith("~~~") -> "~~~"
+            else -> null
+        }
+        if (fencePrefix != null) {
             if (inCodeBlock) {
                 blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
                 codeBuf.setLength(0)
@@ -403,7 +408,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 flushParagraph()
                 flushTable()
                 inCodeBlock = true
-                codeLang = trimmed.removePrefix("```").trim()
+                codeLang = trimmed.removePrefix(fencePrefix).trim()
             }
             continue
         }
@@ -467,7 +472,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             }
         }
     }
-    if (inCodeBlock && codeBuf.isNotEmpty()) {
+    if (inCodeBlock) {
         blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
     }
     flushTable()

@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        applyPreComposeWindowTheme()
+        applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
@@ -56,6 +56,9 @@ class MainActivity : ComponentActivity() {
             // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
             LaunchedEffect(state.languageCode) {
                 if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+            }
+            LaunchedEffect(state.themeMode) {
+                applyWindowTheme(state.themeMode)
             }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 val tokens = LocalForgeThemeTokens.current
@@ -70,11 +73,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun applyPreComposeWindowTheme() {
-        val savedTheme = AppPreferences(this).themeMode
+    private fun applyWindowTheme(themeMode: String) {
         val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
-        val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
+        val (_, tokens) = resolveThemeTokens(themeMode, isNight)
         window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
         window.statusBarColor = tokens.topBarContainerColor.toArgb()
         window.navigationBarColor = if (tokens.isGlass) {

@@ -306,6 +306,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val loadedProfile = preferences.loadProvider(vault, savedAgent)
             val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
+            val initialBuildRecord = withContext(Dispatchers.IO) {
+                val ws = checkpoints.ensureWorkspace(firstProject.id)
+                val androidRoot = findAndroidProjectRoot(ws)
+                val existingApk = androidRoot?.let { findDebugApk(it) }
+                if (existingApk != null) {
+                    AndroidBuildRecord(
+                        phase = AndroidBuildPhase.SUCCEEDED,
+                        stage = AndroidBuildStage.COMPLETE,
+                        apkPath = existingApk.absolutePath,
+                        apkSizeBytes = existingApk.length(),
+                        message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                    )
+                } else {
+                    AndroidBuildRecord()
+                }
+            }
 
             _state.update {
                 it.copy(
@@ -321,6 +337,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     chats = chats,
                     activeChatId = activeChatId,
                     messages = messages,
+                    androidBuild = if (it.androidBuild.phase == AndroidBuildPhase.BUILDING) it.androidBuild else initialBuildRecord,
                     providerProfile = profile,
                     savedApiKeys = keys,
                     githubLogin = preferences.githubLogin,
@@ -377,6 +394,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun configureAllProjectRoots(projects: List<Project>) {
         projects.forEach { project ->
             checkpoints.configureProjectRoot(project.id, project.rootPath)
+            claudeRuntime.configureProjectRoot(project.id, project.rootPath)
+            dshRuntime.configureProjectRoot(project.id, project.rootPath)
             antigravityRuntime.configureProjectRoot(project.id, project.rootPath)
         }
     }
@@ -582,6 +601,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
         if (updated.size == currentProjects.size) return
+        val oldChats = runCatching { preferences.loadProjectChats(projectId) }.getOrDefault(emptyList())
+        oldChats.forEach { chat ->
+            AgentKind.entries.forEach { agent ->
+                preferences.saveAgentConversation(agent, projectId, chat.id, null)
+            }
+        }
         preferences.saveProjects(updated)
         preferences.deleteProjectChats(projectId)
         viewModelScope.launch(Dispatchers.IO) {
@@ -635,6 +660,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
         preferences.saveProjectChats(project.id, updatedChats)
         runCatching {
             File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
@@ -658,6 +686,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
         preferences.saveMessages(project.id, chatId, emptyList())
         _state.update {
             it.copy(
@@ -1160,6 +1191,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
                     )
                 }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }

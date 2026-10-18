@@ -12898,18 +12898,18 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (116 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2149 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (118 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2181 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (557 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/ModelLabels.kt` (74 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidBuildText.kt` (62 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (573 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (116 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (118 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -12961,7 +12961,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        applyPreComposeWindowTheme()
+        applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
@@ -12970,6 +12970,9 @@ class MainActivity : ComponentActivity() {
             // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
             LaunchedEffect(state.languageCode) {
                 if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+            }
+            LaunchedEffect(state.themeMode) {
+                applyWindowTheme(state.themeMode)
             }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 val tokens = LocalForgeThemeTokens.current
@@ -12984,11 +12987,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun applyPreComposeWindowTheme() {
-        val savedTheme = AppPreferences(this).themeMode
+    private fun applyWindowTheme(themeMode: String) {
         val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
-        val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
+        val (_, tokens) = resolveThemeTokens(themeMode, isNight)
         window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
         window.statusBarColor = tokens.topBarContainerColor.toArgb()
         window.navigationBarColor = if (tokens.isGlass) {
@@ -13032,7 +13034,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2149 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2181 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13343,6 +13345,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val loadedProfile = preferences.loadProvider(vault, savedAgent)
             val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
+            val initialBuildRecord = withContext(Dispatchers.IO) {
+                val ws = checkpoints.ensureWorkspace(firstProject.id)
+                val androidRoot = findAndroidProjectRoot(ws)
+                val existingApk = androidRoot?.let { findDebugApk(it) }
+                if (existingApk != null) {
+                    AndroidBuildRecord(
+                        phase = AndroidBuildPhase.SUCCEEDED,
+                        stage = AndroidBuildStage.COMPLETE,
+                        apkPath = existingApk.absolutePath,
+                        apkSizeBytes = existingApk.length(),
+                        message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                    )
+                } else {
+                    AndroidBuildRecord()
+                }
+            }
 
             _state.update {
                 it.copy(
@@ -13358,6 +13376,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     chats = chats,
                     activeChatId = activeChatId,
                     messages = messages,
+                    androidBuild = if (it.androidBuild.phase == AndroidBuildPhase.BUILDING) it.androidBuild else initialBuildRecord,
                     providerProfile = profile,
                     savedApiKeys = keys,
                     githubLogin = preferences.githubLogin,
@@ -13414,6 +13433,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun configureAllProjectRoots(projects: List<Project>) {
         projects.forEach { project ->
             checkpoints.configureProjectRoot(project.id, project.rootPath)
+            claudeRuntime.configureProjectRoot(project.id, project.rootPath)
+            dshRuntime.configureProjectRoot(project.id, project.rootPath)
             antigravityRuntime.configureProjectRoot(project.id, project.rootPath)
         }
     }
@@ -13619,6 +13640,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
         if (updated.size == currentProjects.size) return
+        val oldChats = runCatching { preferences.loadProjectChats(projectId) }.getOrDefault(emptyList())
+        oldChats.forEach { chat ->
+            AgentKind.entries.forEach { agent ->
+                preferences.saveAgentConversation(agent, projectId, chat.id, null)
+            }
+        }
         preferences.saveProjects(updated)
         preferences.deleteProjectChats(projectId)
         viewModelScope.launch(Dispatchers.IO) {
@@ -13672,6 +13699,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
         preferences.saveProjectChats(project.id, updatedChats)
         runCatching {
             File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
@@ -13695,6 +13725,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
         preferences.saveMessages(project.id, chatId, emptyList())
         _state.update {
             it.copy(
@@ -14197,6 +14230,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
                     )
                 }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }
@@ -16033,7 +16067,7 @@ fun AndroidBuildIssue.formatForAgentPrompt(): String = buildString {
 
 ---
 
-## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (573 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -16431,7 +16465,12 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
 
     for (line in lines) {
         val trimmed = line.trimStart()
-        if (trimmed.startsWith("```")) {
+        val fencePrefix = when {
+            trimmed.startsWith("```") -> "```"
+            trimmed.startsWith("~~~") -> "~~~"
+            else -> null
+        }
+        if (fencePrefix != null) {
             if (inCodeBlock) {
                 blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
                 codeBuf.setLength(0)
@@ -16441,7 +16480,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 flushParagraph()
                 flushTable()
                 inCodeBlock = true
-                codeLang = trimmed.removePrefix("```").trim()
+                codeLang = trimmed.removePrefix(fencePrefix).trim()
             }
             continue
         }
@@ -16505,7 +16544,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             }
         }
     }
-    if (inCodeBlock && codeBuf.isNotEmpty()) {
+    if (inCodeBlock) {
         blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
     }
     flushTable()
