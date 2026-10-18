@@ -93,6 +93,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -534,17 +536,34 @@ private fun ForgeBottomBar(
             ) {
                 val slot = maxWidth / navEntries.size
                 val pillInset = 6.dp
-                // Pill: the only moving object; soft outer glow comes from a larger, fainter pill behind it.
+                // Pill: the only moving object. A radial gradient drawn behind it gives the soft outward glow
+                // (no blur, so it costs nothing on low-end GPUs). White skips the glow: it would look muddy.
+                val glow = !tokens.isWhite
                 Box(
                     modifier = Modifier
                         .offset(x = slot * pillOffset)
                         .width(slot)
-                        .fillMaxHeight()
-                        .padding(pillInset),
+                        .fillMaxHeight(),
                 ) {
+                    if (glow) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .drawBehind {
+                                    drawRect(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(scheme.primary.copy(alpha = 0.28f), Color.Transparent),
+                                            center = center,
+                                            radius = size.maxDimension * 0.62f,
+                                        ),
+                                    )
+                                },
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .matchParentSize()
+                            .padding(pillInset)
                             .clip(pillShape)
                             .background(pillFill)
                             .border(1.dp, pillEdge, pillShape),
