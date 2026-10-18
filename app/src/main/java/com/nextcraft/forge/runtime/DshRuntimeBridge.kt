@@ -638,6 +638,11 @@ internal data class DshRoute(
 
 internal data class DshCustomRoute(val api: String, val baseUrl: String)
 
+private val DSH_WIRE_APIS = setOf("anthropic-messages", "openai-completions", "openai-responses")
+
+/** dshApi is user-editable and written unquoted into settings.yaml, so only known wire protocols pass through. */
+internal fun safeDshApi(value: String): String = value.trim().takeIf { it in DSH_WIRE_APIS } ?: "anthropic-messages"
+
 internal object DshRouteMapper {
     fun forProfile(profile: ProviderProfile): DshRoute {
         val model = profile.model.ifBlank { profile.kind.defaultModel }
@@ -666,7 +671,7 @@ internal object DshRouteMapper {
                 name = "mh-kimi",
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
-                custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
+                custom = DshCustomRoute(safeDshApi(profile.dshApi), profile.resolvedBaseUrl),
             )
             ProviderKind.OPENCODE_ZEN -> DshRoute(
                 name = "opencode-zen",
@@ -684,7 +689,7 @@ internal object DshRouteMapper {
                 name = "mh-custom",
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
-                custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
+                custom = DshCustomRoute(safeDshApi(profile.dshApi), profile.resolvedBaseUrl),
             )
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
         }
