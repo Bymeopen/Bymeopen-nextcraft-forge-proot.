@@ -464,7 +464,7 @@ private fun ProjectRow(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = project.formattedUpdatedAt,
+                    text = project.relativeUpdatedAt(),
                     fontSize = 12.sp,
                     color = muted,
                     maxLines = 1,

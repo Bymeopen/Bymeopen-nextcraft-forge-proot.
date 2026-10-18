@@ -156,7 +156,7 @@ fun SettingsScreenModern(
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
                 Text(
-                    text = stringResource(R.string.settings_theme_mode, activeThemeMode.title),
+                    text = stringResource(R.string.settings_theme_mode, stringResource(activeThemeMode.title)),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -181,7 +181,7 @@ fun SettingsScreenModern(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = mode.title,
+                                            text = stringResource(mode.title),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold,
                                         )
@@ -210,7 +210,7 @@ fun SettingsScreenModern(
                                     }
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = mode.subtitle,
+                                        text = stringResource(mode.subtitle),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = if (selected) {
                                             MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)

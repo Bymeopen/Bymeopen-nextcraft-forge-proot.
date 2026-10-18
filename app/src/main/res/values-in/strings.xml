@@ -255,4 +255,46 @@
     <string name="msg_gh_pulled">Ditarik dari GitHub: %1$s</string>
     <string name="msg_gh_up_to_date">sudah terbaru</string>
     <string name="msg_gh_pull_failed">Pull GitHub gagal: %1$s</string>
+    <string name="provider_claude_sub">Masuk dengan akun Claude Pro / Max di dalam Ubuntu Chroot</string>
+    <string name="provider_anthropic_sub">Anthropic Messages API langsung (/v1/messages)</string>
+    <string name="provider_router_sub">Gateway OpenRouter terpadu dengan urutan penyedia &amp; cadangan</string>
+    <string name="provider_deepseek_sub">DeepSeek Reasoner &amp; Chat lewat jembatan Anthropic/OpenAI</string>
+    <string name="provider_kimi_sub">Endpoint Kimi Coding / Moonshot kompatibel Anthropic</string>
+    <string name="provider_zen_sub">Model coding pilihan OpenCode Zen</string>
+    <string name="provider_nim_sub">API inferensi NVIDIA NIM kompatibel OpenAI</string>
+    <string name="provider_custom_title">Endpoint kustom</string>
+    <string name="provider_custom_sub">Ollama, vLLM, LiteLLM self-hosted, atau server API kustom</string>
+    <string name="agent_claude_sub">CLI resmi @anthropic-ai/claude-code di Root Chroot</string>
+    <string name="agent_deepseek_sub">Harness SDK JSON-RPC 2.0 dengan routing multi-penyedia</string>
+    <string name="agent_antigravity_sub">CLI coding agentik resmi Google Antigravity (agy)</string>
+    <string name="stack_web">Web &amp; Node.js</string>
+    <string name="stack_python">Python 3</string>
+    <string name="stack_android">Android SDK &amp; Gradle</string>
+    <string name="stack_cpp">Toolchain C / C++</string>
+    <string name="stack_php">Runtime PHP</string>
+    <string name="stack_web_desc">Node.js 24, npm, TypeScript, Vite, Next.js</string>
+    <string name="stack_python_desc">Python 3.12, pip, venv, FastAPI, perkakas data</string>
+    <string name="stack_android_desc">OpenJDK 17, Gradle, Android SDK 35/36, Bionic aapt2</string>
+    <string name="stack_cpp_desc">Clang/GCC, CMake, Make, Ninja, gdb</string>
+    <string name="stack_php_desc">PHP CLI, Composer, ekstensi SQLite/PDO</string>
+    <string name="chat_main">Obrolan utama</string>
+    <string name="time_just_now">Baru saja</string>
+    <string name="time_yesterday">Kemarin</string>
+    <string name="theme_system_title">Sistem</string>
+    <string name="theme_system_sub">Mengikuti mode terang/gelap Android</string>
+    <string name="theme_linear_title">Linear (Gelap)</string>
+    <string name="theme_linear_sub">Abu netral dengan satu aksen indigo, tenang untuk kerja lama</string>
+    <string name="theme_glass_title">Glass</string>
+    <string name="theme_glass_sub">Permukaan tembus pandang di atas kanvas berwarna</string>
+    <string name="theme_white_title">White</string>
+    <string name="theme_white_sub">Putih bersih bergaya editorial siang hari</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="other">%d menit lalu</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="other">%d jam lalu</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="other">%d hari lalu</item>
+    </plurals>
 </resources>

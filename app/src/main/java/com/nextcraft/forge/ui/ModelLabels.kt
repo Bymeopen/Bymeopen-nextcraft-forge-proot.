@@ -1,10 +1,20 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.nextcraft.forge.ui
 
+import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
 import com.nextcraft.forge.model.ProviderKind
+
+// Product and brand names stay as written; only descriptive text goes through resources.
 
 fun ProviderKind.displayTitle(): String = when (this) {
     ProviderKind.CLAUDE -> "Claude Subscription (OAuth)"
@@ -17,16 +27,20 @@ fun ProviderKind.displayTitle(): String = when (this) {
     ProviderKind.CUSTOM -> "Custom Endpoint"
 }
 
-fun ProviderKind.displaySubtitle(): String = when (this) {
-    ProviderKind.CLAUDE -> "Sign in with Claude Pro / Max account inside Ubuntu Chroot"
-    ProviderKind.ANTHROPIC -> "Direct Anthropic Messages API (/v1/messages)"
-    ProviderKind.LLM_ROUTER -> "Unified OpenRouter gateway with provider order & fallbacks"
-    ProviderKind.DEEPSEEK -> "DeepSeek Reasoner & Chat via Anthropic/OpenAI bridge"
-    ProviderKind.KIMI -> "Kimi Coding / Moonshot Anthropic-compatible endpoint"
-    ProviderKind.OPENCODE_ZEN -> "OpenCode Zen curated coding models"
-    ProviderKind.NVIDIA_NIM -> "NVIDIA NIM OpenAI-compatible inference API"
-    ProviderKind.CUSTOM -> "Self-hosted Ollama, vLLM, LiteLLM, or custom API server"
+@StringRes
+fun ProviderKind.subtitleRes(): Int = when (this) {
+    ProviderKind.CLAUDE -> R.string.provider_claude_sub
+    ProviderKind.ANTHROPIC -> R.string.provider_anthropic_sub
+    ProviderKind.LLM_ROUTER -> R.string.provider_router_sub
+    ProviderKind.DEEPSEEK -> R.string.provider_deepseek_sub
+    ProviderKind.KIMI -> R.string.provider_kimi_sub
+    ProviderKind.OPENCODE_ZEN -> R.string.provider_zen_sub
+    ProviderKind.NVIDIA_NIM -> R.string.provider_nim_sub
+    ProviderKind.CUSTOM -> R.string.provider_custom_sub
 }
+
+@Composable
+fun ProviderKind.displaySubtitle(): String = stringResource(subtitleRes())
 
 fun AgentKind.displayTitle(): String = when (this) {
     AgentKind.CLAUDE_CODE -> "Claude Code"
@@ -34,41 +48,56 @@ fun AgentKind.displayTitle(): String = when (this) {
     AgentKind.ANTIGRAVITY -> "Antigravity CLI"
 }
 
-fun AgentKind.displaySubtitle(): String = when (this) {
-    AgentKind.CLAUDE_CODE -> "Official @anthropic-ai/claude-code CLI in Root Chroot"
-    AgentKind.DEEPSEEK_HARNESS -> "JSON-RPC 2.0 SDK harness with multi-provider routing"
-    AgentKind.ANTIGRAVITY -> "Official Google Antigravity agentic coding CLI (agy)"
+@StringRes
+fun AgentKind.subtitleRes(): Int = when (this) {
+    AgentKind.CLAUDE_CODE -> R.string.agent_claude_sub
+    AgentKind.DEEPSEEK_HARNESS -> R.string.agent_deepseek_sub
+    AgentKind.ANTIGRAVITY -> R.string.agent_antigravity_sub
 }
 
-fun DevStack.displayLabel(): String = when (this) {
-    DevStack.WEB -> "Web & Node.js"
-    DevStack.PYTHON -> "Python 3"
-    DevStack.ANDROID -> "Android SDK & Gradle"
-    DevStack.CPP -> "C / C++ Toolchain"
-    DevStack.PHP -> "PHP Runtime"
+@Composable
+fun AgentKind.displaySubtitle(): String = stringResource(subtitleRes())
+
+@StringRes
+fun DevStack.labelRes(): Int = when (this) {
+    DevStack.WEB -> R.string.stack_web
+    DevStack.PYTHON -> R.string.stack_python
+    DevStack.ANDROID -> R.string.stack_android
+    DevStack.CPP -> R.string.stack_cpp
+    DevStack.PHP -> R.string.stack_php
 }
 
-fun DevStack.displayDescription(): String = when (this) {
-    DevStack.WEB -> "Node.js 24, npm, TypeScript, Vite, Next.js"
-    DevStack.PYTHON -> "Python 3.12, pip, venv, FastAPI, data tools"
-    DevStack.ANDROID -> "OpenJDK 17, Gradle, Android SDK 35/36, Bionic aapt2"
-    DevStack.CPP -> "Clang/GCC, CMake, Make, Ninja, gdb"
-    DevStack.PHP -> "PHP CLI, Composer, SQLite/PDO extensions"
+@StringRes
+fun DevStack.descriptionRes(): Int = when (this) {
+    DevStack.WEB -> R.string.stack_web_desc
+    DevStack.PYTHON -> R.string.stack_python_desc
+    DevStack.ANDROID -> R.string.stack_android_desc
+    DevStack.CPP -> R.string.stack_cpp_desc
+    DevStack.PHP -> R.string.stack_php_desc
 }
 
+@Composable
+fun DevStack.displayLabel(): String = stringResource(labelRes())
+
+@Composable
+fun DevStack.displayDescription(): String = stringResource(descriptionRes())
+
+/** "3m ago" style text for list rows; plurals come from resources so each locale decides the form. */
+@Composable
 fun Project.relativeUpdatedAt(nowMillis: Long = System.currentTimeMillis()): String {
     val diff = (nowMillis - updatedAtMillis).coerceAtLeast(0L)
-    val minutes = diff / 60_000L
-    val hours = minutes / 60L
-    val days = hours / 24L
+    val minutes = (diff / 60_000L).toInt()
+    val hours = minutes / 60
+    val days = hours / 24
     return when {
-        diff < 60_000L -> "Just now"
-        minutes < 60L -> "${minutes}m ago"
-        hours < 24L -> "${hours}h ago"
-        days == 1L -> "Yesterday"
-        days < 7L -> "${days}d ago"
+        diff < 60_000L -> stringResource(R.string.time_just_now)
+        minutes < 60 -> pluralStringResource(R.plurals.time_minutes_ago, minutes, minutes)
+        hours < 24 -> pluralStringResource(R.plurals.time_hours_ago, hours, hours)
+        days == 1 -> stringResource(R.string.time_yesterday)
+        days < 7 -> pluralStringResource(R.plurals.time_days_ago, days, days)
         else -> formattedUpdatedAt
     }
 }
 
-fun ProjectChat.displayTitle(): String = title.ifBlank { "Main chat" }
+@Composable
+fun ProjectChat.displayTitle(): String = title.ifBlank { stringResource(R.string.chat_main) }

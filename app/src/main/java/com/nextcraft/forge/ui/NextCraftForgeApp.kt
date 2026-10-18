@@ -425,9 +425,9 @@ private fun ForgeTopBar(
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(mode.title, fontWeight = FontWeight.SemiBold)
+                                        Text(stringResource(mode.title), fontWeight = FontWeight.SemiBold)
                                         Text(
-                                            text = mode.subtitle,
+                                            text = stringResource(mode.subtitle),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )

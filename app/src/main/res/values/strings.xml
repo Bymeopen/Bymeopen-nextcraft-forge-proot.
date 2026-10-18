@@ -255,4 +255,49 @@
     <string name="msg_gh_pulled">Pulled from GitHub: %1$s</string>
     <string name="msg_gh_up_to_date">up to date</string>
     <string name="msg_gh_pull_failed">GitHub pull failed: %1$s</string>
+    <string name="provider_claude_sub">Sign in with Claude Pro / Max account inside Ubuntu Chroot</string>
+    <string name="provider_anthropic_sub">Direct Anthropic Messages API (/v1/messages)</string>
+    <string name="provider_router_sub">Unified OpenRouter gateway with provider order &amp; fallbacks</string>
+    <string name="provider_deepseek_sub">DeepSeek Reasoner &amp; Chat via Anthropic/OpenAI bridge</string>
+    <string name="provider_kimi_sub">Kimi Coding / Moonshot Anthropic-compatible endpoint</string>
+    <string name="provider_zen_sub">OpenCode Zen curated coding models</string>
+    <string name="provider_nim_sub">NVIDIA NIM OpenAI-compatible inference API</string>
+    <string name="provider_custom_title">Custom Endpoint</string>
+    <string name="provider_custom_sub">Self-hosted Ollama, vLLM, LiteLLM, or custom API server</string>
+    <string name="agent_claude_sub">Official @anthropic-ai/claude-code CLI in Root Chroot</string>
+    <string name="agent_deepseek_sub">JSON-RPC 2.0 SDK harness with multi-provider routing</string>
+    <string name="agent_antigravity_sub">Official Google Antigravity agentic coding CLI (agy)</string>
+    <string name="stack_web">Web &amp; Node.js</string>
+    <string name="stack_python">Python 3</string>
+    <string name="stack_android">Android SDK &amp; Gradle</string>
+    <string name="stack_cpp">C / C++ Toolchain</string>
+    <string name="stack_php">PHP Runtime</string>
+    <string name="stack_web_desc">Node.js 24, npm, TypeScript, Vite, Next.js</string>
+    <string name="stack_python_desc">Python 3.12, pip, venv, FastAPI, data tools</string>
+    <string name="stack_android_desc">OpenJDK 17, Gradle, Android SDK 35/36, Bionic aapt2</string>
+    <string name="stack_cpp_desc">Clang/GCC, CMake, Make, Ninja, gdb</string>
+    <string name="stack_php_desc">PHP CLI, Composer, SQLite/PDO extensions</string>
+    <string name="chat_main">Main chat</string>
+    <string name="time_just_now">Just now</string>
+    <string name="time_yesterday">Yesterday</string>
+    <string name="theme_system_title">System</string>
+    <string name="theme_system_sub">Follows the Android light/dark setting</string>
+    <string name="theme_linear_title">Linear (Dark)</string>
+    <string name="theme_linear_sub">Neutral greys with one indigo accent, calm for long sessions</string>
+    <string name="theme_glass_title">Glass</string>
+    <string name="theme_glass_sub">Translucent surfaces over a tinted canvas</string>
+    <string name="theme_white_title">White</string>
+    <string name="theme_white_sub">Clean pure white, editorial daylight look</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%d minute ago</item>
+        <item quantity="other">%d minutes ago</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">%d hour ago</item>
+        <item quantity="other">%d hours ago</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">%d day ago</item>
+        <item quantity="other">%d days ago</item>
+    </plurals>
 </resources>

@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.annotation.StringRes
+import com.nextcraft.forge.R
 
 // Base palette constants retained for binary/source compatibility
 val ForgeCyan = Color(0xFF38BDF8)
@@ -57,34 +59,14 @@ val ForgeDarkElevated = Color(0xFF1E293B)
  */
 enum class ForgeThemeMode(
     val id: String,
-    val title: String,
-    val subtitle: String,
+    @StringRes val title: Int,
+    @StringRes val subtitle: Int,
     val badge: String,
 ) {
-    SYSTEM(
-        id = "system",
-        title = "Bawaan System",
-        subtitle = "Ikuti mode siang/malam otomatis dari sistem Android",
-        badge = "AUTO",
-    ),
-    DARK(
-        id = "dark",
-        title = "Linear (Dark)",
-        subtitle = "Abu netral dengan satu aksen indigo, tenang untuk kerja lama",
-        badge = "DARK",
-    ),
-    GLASS(
-        id = "glass",
-        title = "Glass (Liquid)",
-        subtitle = "Permukaan kaca transparan 3D & kapsul navigasi melayang",
-        badge = "GLASS",
-    ),
-    WHITE(
-        id = "white",
-        title = "White (Daylight)",
-        subtitle = "Putih murni bersih bergaya editorial siang hari",
-        badge = "WHITE",
-    );
+    SYSTEM(id = "system", title = R.string.theme_system_title, subtitle = R.string.theme_system_sub, badge = "AUTO"),
+    DARK(id = "dark", title = R.string.theme_linear_title, subtitle = R.string.theme_linear_sub, badge = "DARK"),
+    GLASS(id = "glass", title = R.string.theme_glass_title, subtitle = R.string.theme_glass_sub, badge = "GLASS"),
+    WHITE(id = "white", title = R.string.theme_white_title, subtitle = R.string.theme_white_sub, badge = "WHITE");
 
     companion object {
         fun fromStored(raw: String?): ForgeThemeMode {
