@@ -263,13 +263,18 @@ class AppPreferences(private val context: Context) {
     fun loadProjects(): List<Project> {
         val raw = preferences.getString("projects_json", null) ?: return emptyList()
         var needsSave = false
+        var dropped = 0
         val list = runCatching {
             val arr = JSONArray(raw)
             val usedSlugs = mutableSetOf<String>()
-            (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                val id = obj.getString("id")
-                val name = obj.getString("name")
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i)
+                val id = obj?.optString("id").orEmpty()
+                val name = obj?.optString("name").orEmpty()
+                if (obj == null || id.isBlank() || name.isBlank()) {
+                    dropped++
+                    return@mapNotNull null
+                }
                 val storedKind = obj.optString("kind", ProjectKind.PROJECT.name)
                 if (!obj.has("kind") || storedKind == "QUICK_CHAT") needsSave = true
                 val requestedSlug = obj.optString("slug").ifBlank { projectSlug(name) }
@@ -325,15 +330,46 @@ class AppPreferences(private val context: Context) {
                     },
                 )
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            backupCorruptProjects(raw)
+            return emptyList()
+        }
 
+        // Entries that could not be parsed are dropped on the next save, so keep the original around.
+        if (dropped > 0) backupCorruptProjects(raw)
         if (needsSave && list.isNotEmpty()) {
             saveProjects(list)
         }
         return list
     }
 
+    /** Keeps the unparseable projects JSON so a later save cannot silently destroy it. */
+    private fun backupCorruptProjects(raw: String) {
+        android.util.Log.w("AppPreferences", "projects_json had unreadable entries; keeping a backup")
+        preferences.edit().putString("projects_json_corrupt_backup", raw).apply()
+    }
+
     private val chatsDir = File(context.filesDir, "chats").also { it.mkdirs() }
+
+    /** Moves an unreadable file aside so the next save does not overwrite it. */
+    private fun quarantine(file: File) {
+        android.util.Log.w("AppPreferences", "Quarantining unreadable ${file.name}")
+        runCatching { file.renameTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")) }
+    }
+
+    /** Writes via a temp file that is fsynced before the rename, so a power loss cannot leave an empty file. */
+    private fun writeAtomically(destination: File, content: String) {
+        val temporary = File(destination.parentFile, ".${destination.name}.tmp")
+        java.io.FileOutputStream(temporary).use { out ->
+            out.write(content.toByteArray(Charsets.UTF_8))
+            out.fd.sync()
+        }
+        if (!temporary.renameTo(destination)) {
+            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
+            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
+            temporary.delete()
+        }
+    }
 
     private fun safeStorageId(id: String): String {
         val trimmed = id.trim()
@@ -362,14 +398,7 @@ class AppPreferences(private val context: Context) {
                 put("updatedAtMillis", chat.updatedAtMillis)
             })
         }
-        val destination = File(projectDir, "index.json")
-        val temporary = File(projectDir, ".index.json.tmp")
-        temporary.writeText(arr.toString())
-        if (!temporary.renameTo(destination)) {
-            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
-            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
-            temporary.delete()
-        }
+        writeAtomically(File(projectDir, "index.json"), arr.toString())
     }
 
     @Synchronized
@@ -380,16 +409,22 @@ class AppPreferences(private val context: Context) {
         if (index.exists()) {
             return runCatching {
                 val arr = JSONArray(index.readText())
-                (0 until arr.length()).map { i ->
-                    val obj = arr.getJSONObject(i)
-                    ProjectChat(
-                        id = safeStorageId(obj.getString("id")),
-                        title = obj.optString("title", "Chat"),
-                        createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
-                        updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
-                    )
+                // One malformed entry must not hide every other chat in the project.
+                (0 until arr.length()).mapNotNull { i ->
+                    runCatching {
+                        val obj = arr.getJSONObject(i)
+                        ProjectChat(
+                            id = safeStorageId(obj.getString("id")),
+                            title = obj.optString("title", "Chat"),
+                            createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
+                            updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
+                        )
+                    }.getOrNull()
                 }.sortedByDescending { it.updatedAtMillis }
-            }.getOrDefault(emptyList())
+            }.getOrElse {
+                quarantine(index)
+                emptyList()
+            }
         }
 
         val legacy = File(chatsDir, "$safeProject.json")
@@ -442,14 +477,7 @@ class AppPreferences(private val context: Context) {
             })
         }
         val projectDir = File(chatsDir, safeProject).also { it.mkdirs() }
-        val destination = File(projectDir, "$safeChat.json")
-        val temporary = File(projectDir, ".$safeChat.json.tmp")
-        temporary.writeText(arr.toString())
-        if (!temporary.renameTo(destination)) {
-            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
-            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
-            temporary.delete()
-        }
+        writeAtomically(File(projectDir, "$safeChat.json"), arr.toString())
     }
 
     @Synchronized
@@ -471,47 +499,53 @@ class AppPreferences(private val context: Context) {
         if (!file.exists()) return emptyList()
         return runCatching {
             val arr = JSONArray(file.readText())
-            (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                ChatMessage(
-                    id = obj.getString("id"),
-                    fromUser = obj.getBoolean("fromUser"),
-                    text = obj.getString("text"),
-                    createdAt = runCatching { Instant.parse(obj.getString("createdAt")) }
-                        .getOrDefault(Instant.now()),
-                    attachments = obj.optJSONArray("attachments")?.let { attachments ->
-                        (0 until attachments.length()).mapNotNull { index ->
-                            runCatching {
-                                attachments.getJSONObject(index).let { attachment ->
-                                    ChatAttachment(
-                                        id = attachment.optString("id").ifBlank { UUID.randomUUID().toString() },
-                                        displayName = attachment.getString("displayName"),
-                                        relativePath = attachment.getString("relativePath"),
-                                        mimeType = attachment.optString("mimeType", "application/octet-stream"),
-                                        sizeBytes = attachment.optLong("sizeBytes", 0L),
-                                    )
-                                }
-                            }.getOrNull()
-                        }
-                    }.orEmpty(),
-                    workedMillis = obj.optLong("workedMillis", 0L),
-                    workItems = obj.optJSONArray("workItems")?.let { workItems ->
-                        (0 until workItems.length()).mapNotNull { index ->
-                            runCatching {
-                                workItems.getJSONObject(index).let { item ->
-                                    ActivityItem(
-                                        title = item.optString("title"),
-                                        detail = item.optString("detail"),
-                                        isComplete = item.optBoolean("isComplete", true),
-                                        isCommand = item.optBoolean("isCommand", false),
-                                    )
-                                }
-                            }.getOrNull()
-                        }
-                    }.orEmpty(),
-                )
+            (0 until arr.length()).mapNotNull { i ->
+                runCatching { parseMessage(arr.getJSONObject(i)) }.getOrNull()
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            quarantine(file)
+            emptyList()
+        }
+    }
+
+    private fun parseMessage(obj: JSONObject): ChatMessage {
+        return ChatMessage(
+            id = obj.getString("id"),
+            fromUser = obj.getBoolean("fromUser"),
+            text = obj.getString("text"),
+            createdAt = runCatching { Instant.parse(obj.getString("createdAt")) }
+                .getOrDefault(Instant.now()),
+            attachments = obj.optJSONArray("attachments")?.let { attachments ->
+                (0 until attachments.length()).mapNotNull { index ->
+                    runCatching {
+                        attachments.getJSONObject(index).let { attachment ->
+                            ChatAttachment(
+                                id = attachment.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                displayName = attachment.getString("displayName"),
+                                relativePath = attachment.getString("relativePath"),
+                                mimeType = attachment.optString("mimeType", "application/octet-stream"),
+                                sizeBytes = attachment.optLong("sizeBytes", 0L),
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }.orEmpty(),
+            workedMillis = obj.optLong("workedMillis", 0L),
+            workItems = obj.optJSONArray("workItems")?.let { workItems ->
+                (0 until workItems.length()).mapNotNull { index ->
+                    runCatching {
+                        workItems.getJSONObject(index).let { item ->
+                            ActivityItem(
+                                title = item.optString("title"),
+                                detail = item.optString("detail"),
+                                isComplete = item.optBoolean("isComplete", true),
+                                isCommand = item.optBoolean("isCommand", false),
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }.orEmpty(),
+        )
     }
 
     private fun String.toChatTitle(): String {

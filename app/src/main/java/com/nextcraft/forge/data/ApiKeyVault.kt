@@ -117,9 +117,14 @@ class ApiKeyVault(context: Context) {
         val entries = list(providerId)
         if (entries.size <= 1) return get(providerId)
         val currentIdx = entries.indexOfFirst { it.isActive }.coerceAtLeast(0)
-        val nextEntry = entries[(currentIdx + 1) % entries.size]
-        setActiveId(providerId, nextEntry.id)
-        return getEncrypted(secretKey(providerId, nextEntry.id))
+        // Skip entries whose secret is missing or unreadable instead of returning null for the whole rotation.
+        for (step in 1 until entries.size) {
+            val candidate = entries[(currentIdx + step) % entries.size]
+            val secret = getEncrypted(secretKey(providerId, candidate.id)) ?: continue
+            setActiveId(providerId, candidate.id)
+            return secret
+        }
+        return get(providerId)
     }
 
     @Synchronized
@@ -226,11 +231,11 @@ class ApiKeyVault(context: Context) {
     private fun savePool(providerId: String, entries: List<ApiKeyInfo>) {
         val array = JSONArray()
         entries.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name)) }
-        preferences.edit().putString(poolKey(providerId), array.toString()).apply()
+        preferences.edit().putString(poolKey(providerId), array.toString()).commit()
     }
 
     private fun activeId(providerId: String): String? = preferences.getString(activeKey(providerId), null)
-    private fun setActiveId(providerId: String, id: String) = preferences.edit().putString(activeKey(providerId), id).apply()
+    private fun setActiveId(providerId: String, id: String) = preferences.edit().putString(activeKey(providerId), id).commit()
     private fun poolKey(providerId: String) = "$providerId.pool"
     private fun activeKey(providerId: String) = "$providerId.active"
     private fun secretKey(providerId: String, id: String) = "$providerId.pool.$id"
