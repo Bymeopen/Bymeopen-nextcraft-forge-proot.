@@ -93,6 +93,7 @@ import kotlinx.coroutines.withContext
 enum class ForgeTab(val title: String) {
     PROJECTS("Projects"),
     AGENT("Agent"),
+    TOOLS("Tools"),
     FILES("Files"),
     TERMINAL("Terminal"),
     ANDROID("Android"),

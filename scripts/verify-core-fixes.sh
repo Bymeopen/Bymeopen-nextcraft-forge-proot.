@@ -1453,7 +1453,7 @@ EOF
 
 mkdir -p "$TMP_WORK/kt-classes"
 mapfile -t ALL_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -not -path "*/ui/*" -not -name "MainActivity.kt" -name "*.kt" | sort)
-[[ "${#ALL_KT_FILES[@]}" -eq 26 ]] || fail "Expected 26 core Kotlin source files, found ${#ALL_KT_FILES[@]}"
+[[ "${#ALL_KT_FILES[@]}" -eq 27 ]] || fail "Expected 27 core Kotlin source files, found ${#ALL_KT_FILES[@]}"
 
 java -cp "$TMP_WORK/compiler-shims:$GRADLE_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -language-version 1.9 -nowarn -no-stdlib \
@@ -1467,7 +1467,7 @@ java -cp "$TMP_WORK/compiler-shims:$GRADLE_LIB/*" org.jetbrains.kotlin.cli.jvm.K
     "$TMP_WORK/AllBlocksTest.kt" \
     -d "$TMP_WORK/kt-classes"
 
-pass "All 26 core Kotlin source files across Blocks 1, 2, 3, and 4 compiled cleanly with zero errors"
+pass "All 27 core Kotlin source files across Blocks 1, 2, 3, and 4 compiled cleanly with zero errors"
 
 java -cp "$TMP_WORK/kt-classes:$KOTLIN_STDLIB:$COROUTINES_JAR:$COMMONS_COMPRESS_JAR:$ANDROID_JAR" com.nextcraft.forge.runtime.AllBlocksTestKt
 pass "BUG-020: WorkspaceCheckpoints.safeWorkspaceFile blocks symlinked ancestor dirs & allows valid 'v1..v2.diff' filenames"
@@ -1481,9 +1481,23 @@ pass "Audit C-1..C-3, H-1..H-6, M-1..M-18, L-1..L-12 runtime checks passed"
 pass "BUG-036..041: AgentKind.fromStored, OPENAI_RESPONSES + tool ordering, chroot PATH, UTF-8 tailer truncation, synchronized checkpoint pruning, and background APK installer verified"
 pass "UPGRADE-001..004: InotifyLogTailer bridge integration, real-time OpenAI->Anthropic SSE streaming, incremental SHA-256 checkpoint sync, and interactive high-risk tool approvals verified"
 
-# Compile all 41 Kotlin files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) with Compose IR plugin
+# Compile all 44 Kotlin files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) with Compose IR plugin
 mapfile -t ALL_APP_KT_FILES < <(find "$ROOT_DIR/app/src/main/java/com/nextcraft/forge" -name "*.kt" | sort)
-[[ "${#ALL_APP_KT_FILES[@]}" -eq 41 ]] || fail "Expected 41 total Kotlin source files across Blocks 1–6, found ${#ALL_APP_KT_FILES[@]}"
+[[ "${#ALL_APP_KT_FILES[@]}" -eq 44 ]] || fail "Expected 44 total Kotlin source files across Blocks 1–6, found ${#ALL_APP_KT_FILES[@]}"
+
+{
+    echo "package com.nextcraft.forge"
+    echo "object R {"
+    echo "    object string {"
+    idx=1
+    while IFS= read -r res_name; do
+        [[ -n "$res_name" ]] || continue
+        echo "        const val $res_name: Int = $idx"
+        idx=$((idx + 1))
+    done < <(sed -n 's/.*<string name="\([^"]*\)".*/\1/p' "$ROOT_DIR/app/src/main/res/values/strings.xml")
+    echo "    }"
+    echo "}"
+} > "$TMP_WORK/RStub.kt"
 
 mkdir -p "$TMP_WORK/aar-jars" "$TMP_WORK/full-app-classes"
 aar_idx=0
@@ -1501,9 +1515,10 @@ java -cp "/root/maven/localMvnRepository/org/jetbrains/kotlin/kotlin-compiler-em
     -Xplugin=/root/maven/localMvnRepository/androidx/compose/compiler/compiler/1.5.10/compiler-1.5.10.jar \
     -cp "$FULL_CP" \
     -d "$TMP_WORK/full-app-classes" \
+    "$TMP_WORK/RStub.kt" \
     "${ALL_APP_KT_FILES[@]}"
 
-pass "All 41 Kotlin source files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) compiled cleanly with Compose IR plugin"
+pass "All 44 Kotlin source files across Blocks 1–6 (Core + ViewModel + Jetpack Compose UI) compiled cleanly with Compose IR plugin"
 
 # Test BUG-019 awk exact match logic in RootfsRepair.kt and unmount-chroot.sh
 MOCK_MOUNTS="$TMP_WORK/mock_mounts"

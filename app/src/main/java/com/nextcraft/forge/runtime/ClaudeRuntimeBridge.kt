@@ -93,10 +93,10 @@ class ClaudeRuntimeBridge(
         com.nextcraft.forge.data.ApiKeyVault(context).rotateNext(profile.kind.name)
     },
     private val autoApproveAllTools: () -> Boolean = {
-        com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(false)
     },
     private val interactiveHighRiskApprovals: () -> Boolean = {
-        com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals }.getOrDefault(true)
     },
 ) : RuntimeBridge {
     private val installer by lazy { RuntimeInstaller(context) }

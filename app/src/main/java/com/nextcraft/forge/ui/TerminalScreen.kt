@@ -15,14 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
@@ -42,23 +37,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 
 @Composable
 fun TerminalScreen(
@@ -66,26 +65,26 @@ fun TerminalScreen(
     viewModel: MainViewModel,
 ) {
     var commandInput by rememberSaveable { mutableStateOf("") }
-    var copied by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val clipboard = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
 
-    val quickCommands = remember {
-        listOf(
-            "git status",
-            "ls -la",
-            "uname -a",
-            "node -v && npm -v",
-            "python3 --version",
-            "gradle -v",
-            "df -h",
-        )
+    val quickCommands = listOf(
+        "uname -a",
+        "git status",
+        "ls -la",
+        "node -v && npm -v",
+        "python3 --version",
+        "gradle -v",
+        "df -h",
+    )
+
+    LaunchedEffect(state.terminalOutput.length) {
+        scrollState.animateScrollTo(scrollState.maxValue)
     }
 
-    val executeCurrentCommand = {
+    fun runCommand() {
         val cmd = commandInput.trim()
         if (cmd.isNotEmpty() && !state.terminalRunning) {
             commandInput = ""
@@ -93,150 +92,63 @@ fun TerminalScreen(
         }
     }
 
-    LaunchedEffect(state.terminalOutput.length) {
-        scrollState.animateScrollTo(scrollState.maxValue)
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = scheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(if (state.terminalRunning) tokens.warningText else tokens.successText),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Root Chroot Shell (`su -mm`)",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = scheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (state.terminalRunning) {
-                            tokens.inlineCodeBackground
-                        } else {
-                            tokens.diffAddedBackground
-                        },
-                    ) {
-                        Text(
-                            text = if (state.terminalRunning) "RUNNING" else "READY",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = if (state.terminalRunning) tokens.accentText else tokens.successText,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(
-                        onClick = {
-                            clipboard.setText(AnnotatedString(state.terminalOutput))
-                            copied = true
-                            scope.launch {
-                                delay(1400)
-                                copied = false
-                            }
-                        },
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Icon(
-                            imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
-                            contentDescription = "Copy terminal output",
-                            tint = if (copied) tokens.successText else scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    if (state.terminalRunning) {
-                        IconButton(
-                            onClick = viewModel::stopTerminal,
-                            modifier = Modifier.size(34.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Stop command",
-                                tint = tokens.dangerText,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = viewModel::clearTerminal,
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Clear terminal",
-                            tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    quickCommands.forEach { cmd ->
-                        AssistChip(
-                            onClick = { viewModel.runTerminalCommand(cmd) },
-                            enabled = !state.terminalRunning,
-                            label = {
-                                Text(
-                                    text = cmd,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                )
-                            },
-                        )
-                    }
-                }
+            ForgeLargeTitle(
+                title = stringResource(R.string.shell_terminal),
+                subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Share,
+                    description = stringResource(R.string.terminal_copy_terminal_output),
+                    onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
+                )
                 if (state.terminalRunning) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    ForgePillIcon(
+                        icon = Icons.Default.Close,
+                        description = stringResource(R.string.terminal_stop_command),
+                        onClick = viewModel::stopTerminal,
+                        tint = scheme.error,
+                    )
+                } else {
+                    ForgePillIcon(
+                        icon = Icons.Default.Delete,
+                        description = stringResource(R.string.terminal_clear_terminal),
+                        onClick = viewModel::clearTerminal,
+                    )
                 }
             }
         }
-        Divider(color = scheme.outlineVariant)
+        if (state.terminalRunning) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(3.dp),
+            )
+        }
 
+        // Output: the deepest surface of the theme, rounded like every other panel.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(14.dp))
                 .background(tokens.terminalBackground)
                 .verticalScroll(scrollState)
                 .padding(12.dp),
         ) {
             SelectionContainer {
                 Text(
-                    text = state.terminalOutput.ifEmpty {
-                        "root@nextcraft-forge:/workspace/${state.activeProject?.slug ?: "sandbox"}# Ready.\n"
-                    },
+                    text = state.terminalOutput.ifEmpty { "Ready.\n" },
                     color = tokens.terminalText,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -245,45 +157,83 @@ fun TerminalScreen(
             }
         }
 
-        Divider(color = scheme.outlineVariant)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            quickCommands.forEach { cmd ->
+                AssistChip(
+                    onClick = { viewModel.runTerminalCommand(cmd) },
+                    enabled = !state.terminalRunning,
+                    shape = RoundedCornerShape(100),
+                    label = {
+                        Text(
+                            text = cmd,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                        )
+                    },
+                )
+            }
+        }
+
+        // Command line: one rounded surface, prompt glyph, round run button.
         Surface(
-            color = tokens.topBarContainerColor,
+            shape = RoundedCornerShape(24.dp),
+            color = tokens.cardContainerColor,
             contentColor = scheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                Text(
+                    text = "$",
+                    fontFamily = FontFamily.Monospace,
+                    color = scheme.onSurfaceVariant,
+                )
+                TextField(
                     value = commandInput,
                     onValueChange = { commandInput = it },
-                    shape = RoundedCornerShape(16.dp),
                     placeholder = {
                         Text(
-                            text = "$ Run command in Ubuntu Root Chroot…",
+                            text = stringResource(R.string.terminal_run_command_in_the),
                             fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 13.sp,
                         )
                     },
                     textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { executeCurrentCommand() }),
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = executeCurrentCommand,
-                    enabled = commandInput.isNotBlank() && !state.terminalRunning,
-                    shape = RoundedCornerShape(14.dp),
+                val canRun = commandInput.isNotBlank() && !state.terminalRunning
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (canRun) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
+                        .clickable(enabled = canRun, role = Role.Button, onClickLabel = stringResource(R.string.terminal_run)) { runCommand() },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Execute")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Run")
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.terminal_run),
+                        tint = if (canRun) scheme.onPrimary else scheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
         }
