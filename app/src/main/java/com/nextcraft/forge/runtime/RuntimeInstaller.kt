@@ -191,7 +191,8 @@ class RuntimeInstaller(private val context: Context) {
                 System.getProperty("os.arch"),
             ),
         ) { "NextCraft Forge requires an ARM64 (arm64-v8a / aarch64) Android device." }
-        require(isRootAccessAvailable()) {
+        // The first su call shows the Magisk/KernelSU/APatch grant dialog; the 8 s default kills su before the user can tap Allow.
+        require(isRootAccessAvailable(ROOT_GRANT_TIMEOUT_SECONDS)) {
             "Root access (su -mm) is required by NextCraft Forge's Ubuntu 24.04 LTS Chroot engine. Grant root permission in Magisk, KernelSU, or APatch and try again."
         }
         val chrootExec = ensureChrootScripts()
@@ -242,7 +243,9 @@ class RuntimeInstaller(private val context: Context) {
         ensureSettingsAndHooks()
 
         val coreNeeded = !File(rootfs, "usr/bin/git").exists() || !isSupportedCoreToolsVersion()
-        if (coreNeeded) {
+        // isInstalled() also requires Node; a missing/dangling node must be repaired even when git and the marker are fine.
+        val nodeMissing = !File(rootfs, "usr/local/bin/node").exists()
+        if (coreNeeded || nodeMissing) {
             installNodeIfNeeded(chrootExec, 0.58f, 0.66f, onProgress)
         }
         if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
@@ -1134,6 +1137,18 @@ class RuntimeInstaller(private val context: Context) {
             true
         }.getOrDefault(false)
 
+    /** Fails early with an actionable message instead of an opaque IOException halfway through extraction. */
+    private fun requireFreeSpaceForBundle(bundle: RuntimeBundle, alreadyDownloaded: Boolean) {
+        val free = context.filesDir.usableSpace
+        if (free <= 0L) return // unknown (some filesystems report 0); let the real write decide
+        val factor = if (alreadyDownloaded) BUNDLE_EXTRACT_SPACE_FACTOR else BUNDLE_DOWNLOAD_SPACE_FACTOR
+        val needed = bundle.compressedBytes * factor
+        check(free >= needed) {
+            "Not enough free storage for the ${bundle.label} bundle: about ${needed / MEGABYTE} MB needed, " +
+                "${free / MEGABYTE} MB available. Free some space and retry."
+        }
+    }
+
     private suspend fun obtainRuntimeBundle(
         bundle: RuntimeBundle,
         preferEmbedded: Boolean,
@@ -1143,6 +1158,7 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
+        requireFreeSpaceForBundle(bundle, alreadyDownloaded = destination.isFile)
         if (preferEmbedded && isAssetAvailable("runtime/${bundle.fileName}")) {
             val loadingLabel = "Loading ${bundle.label} bundle…"
             onProgress(RuntimeInstallProgress(loadingLabel, from, 0, bundle.compressedBytes))
@@ -2403,6 +2419,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
             compressedBytes = 41_870_025L,
         )
+        private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
+        /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
+        private const val BUNDLE_DOWNLOAD_SPACE_FACTOR = 4
+        private const val BUNDLE_EXTRACT_SPACE_FACTOR = 3
+        private const val MEGABYTE = 1024L * 1024L
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
         private const val MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
