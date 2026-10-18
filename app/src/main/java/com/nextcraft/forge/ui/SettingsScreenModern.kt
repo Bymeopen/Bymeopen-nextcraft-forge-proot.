@@ -64,11 +64,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
+import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import kotlinx.coroutines.launch
 
 @Composable
@@ -675,6 +677,8 @@ fun SettingsScreenModern(
 
         // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            val snap = state.setupSnapshot
+            val isProvisioning = snap.status == RuntimeSetupStatus.RUNNING
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -693,6 +697,7 @@ fun SettingsScreenModern(
                     ) {
                         Switch(
                             checked = selected,
+                            enabled = !isProvisioning,
                             onCheckedChange = { viewModel.toggleDevStack(stack) },
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -709,18 +714,71 @@ fun SettingsScreenModern(
                         }
                     }
                 }
+                if (snap.status != RuntimeSetupStatus.IDLE) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (isProvisioning) {
+                            LinearProgressIndicator(
+                                progress = snap.progress.coerceIn(0f, 1f),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Text(
+                            text = "${snap.status.name} (${(snap.progress * 100).toInt()}%) — ${snap.errorMessage ?: snap.message}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when (snap.status) {
+                                RuntimeSetupStatus.ERROR -> tokens.dangerText
+                                RuntimeSetupStatus.COMPLETE -> tokens.successText
+                                else -> tokens.accentText
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (snap.logs.isNotEmpty() && (isProvisioning || snap.status == RuntimeSetupStatus.ERROR)) {
+                            val logShape = RoundedCornerShape(10.dp)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(logShape)
+                                    .background(tokens.terminalBackground)
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, logShape)
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                snap.logs.takeLast(6).forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = tokens.terminalText,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(
-                        onClick = viewModel::startRuntimeSetup,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Apply / Provision Stacks")
+                    if (isProvisioning) {
+                        OutlinedButton(
+                            onClick = viewModel::pauseRuntimeSetup,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Pause Provisioning")
+                        }
+                    } else {
+                        Button(
+                            onClick = viewModel::startRuntimeSetup,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Apply / Provision Stacks")
+                        }
                     }
                     OutlinedButton(
                         onClick = viewModel::repairRootfs,
+                        enabled = !isProvisioning,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Repair Chroot")

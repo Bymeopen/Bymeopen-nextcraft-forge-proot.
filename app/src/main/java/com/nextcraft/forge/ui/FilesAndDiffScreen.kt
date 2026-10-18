@@ -32,8 +32,10 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -56,6 +58,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.DiffLineType
 import com.nextcraft.forge.model.WorkspaceEntry
+import kotlinx.coroutines.delay
 
 @Composable
 fun FilesAndDiffScreen(
@@ -112,10 +117,15 @@ fun FilesAndDiffScreen(
                         label = { Text("Explorer (${state.workspaceFiles.size})") },
                         leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
                     )
-                    val editorFileLabel = state.selectedFilePath
+                    val baseEditorLabel = state.selectedFilePath
                         ?.substringAfterLast('/')
                         ?.let { if (it.length > 18) it.take(16) + "…" else it }
                         ?: "Editor"
+                    val editorFileLabel = if (state.selectedFileDirty && state.selectedFilePath != null) {
+                        "$baseEditorLabel •"
+                    } else {
+                        baseEditorLabel
+                    }
                     FilterChip(
                         selected = mode == "editor",
                         onClick = { mode = "editor" },
@@ -168,14 +178,21 @@ fun FilesAndDiffScreen(
                 selectedPath = state.selectedFilePath,
                 content = state.selectedFileContent,
                 editable = state.selectedFileEditable,
+                dirty = state.selectedFileDirty,
+                sessionRunning = state.sessionRunning,
                 savedBanner = state.fileSavedBanner,
                 onContentChange = viewModel::updateSelectedFileContent,
                 onSave = viewModel::saveSelectedFile,
+                onDeleteFile = { path ->
+                    viewModel.deleteWorkspaceFile(path)
+                    mode = "files"
+                },
                 onBackToExplorer = { mode = "files" },
                 modifier = Modifier.weight(1f),
             )
             else -> WorkspaceDiffReviewList(
                 changes = state.changedItems,
+                sessionRunning = state.sessionRunning,
                 onOpenFile = { path ->
                     lastAutoOpenedPath = path
                     viewModel.openWorkspaceFile(path)
@@ -210,6 +227,7 @@ private fun WorkspaceTreeList(
     modifier: Modifier = Modifier,
 ) {
     var filterQuery by rememberSaveable { mutableStateOf("") }
+    var collapsedDirs by remember { mutableStateOf(setOf<String>()) }
     if (entries.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -225,10 +243,12 @@ private fun WorkspaceTreeList(
         return
     }
 
-    val filteredEntries = remember(entries, filterQuery) {
+    val filteredEntries = remember(entries, filterQuery, collapsedDirs) {
         val q = filterQuery.trim()
         if (q.isEmpty()) {
-            entries
+            entries.filterNot { entry ->
+                collapsedDirs.any { collapsed -> entry.path.startsWith("$collapsed/") }
+            }
         } else {
             entries.filter { it.path.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
         }
@@ -281,6 +301,7 @@ private fun WorkspaceTreeList(
         ) {
             items(filteredEntries, key = { it.path }) { entry ->
                 val isSelected = entry.path == selectedPath
+                val isCollapsed = entry.isDirectory && entry.path in collapsedDirs
                 val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
                 val secondaryTextColor = if (isSelected) {
                     scheme.onPrimaryContainer.copy(alpha = 0.78f)
@@ -299,7 +320,17 @@ private fun WorkspaceTreeList(
                                 Color.Transparent
                             },
                         )
-                        .clickable(enabled = !entry.isDirectory) { onSelectFile(entry.path) }
+                        .clickable {
+                            if (entry.isDirectory) {
+                                collapsedDirs = if (isCollapsed) {
+                                    collapsedDirs - entry.path
+                                } else {
+                                    collapsedDirs + entry.path
+                                }
+                            } else {
+                                onSelectFile(entry.path)
+                            }
+                        }
                         .padding(
                             start = (10 + indentDepth * 14).dp,
                             end = 10.dp,
@@ -309,8 +340,12 @@ private fun WorkspaceTreeList(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = if (entry.isDirectory) "📁" else "📄",
-                        fontSize = 14.sp,
+                        text = when {
+                            entry.isDirectory && isCollapsed -> "▸ 📁"
+                            entry.isDirectory -> "▾ 📂"
+                            else -> "📄"
+                        },
+                        fontSize = 13.sp,
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -350,14 +385,28 @@ private fun WorkspaceFileEditor(
     selectedPath: String?,
     content: String,
     editable: Boolean,
+    dirty: Boolean,
+    sessionRunning: Boolean,
     savedBanner: String?,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onDeleteFile: (String) -> Unit,
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500)
+            copied = false
+        }
+    }
+
     if (selectedPath == null) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -376,6 +425,40 @@ private fun WorkspaceFileEditor(
             }
         }
         return
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = tokens.cardElevatedColor,
+            title = { Text("Delete '$selectedPath'?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This file will be deleted from the active workspace.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeleteFile(selectedPath)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     val lineCount = remember(content) {
@@ -415,6 +498,15 @@ private fun WorkspaceFileEditor(
                             fontFamily = FontFamily.Monospace,
                             color = scheme.onSurfaceVariant,
                         )
+                        if (dirty) {
+                            Text(
+                                text = "UNSAVED",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = tokens.warningText,
+                            )
+                        }
                         if (!editable) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -435,20 +527,57 @@ private fun WorkspaceFileEditor(
                         }
                     }
                 }
-                savedBanner?.let { msg ->
+                if (copied) {
                     Text(
-                        text = msg,
+                        text = "Copied!",
                         style = MaterialTheme.typography.labelSmall,
                         color = tokens.successText,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(end = 8.dp),
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                } else {
+                    savedBanner?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(content))
+                        copied = true
+                    },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Copy file content",
+                        tint = scheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
                     )
                 }
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    enabled = !sessionRunning,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete file",
+                        tint = tokens.dangerText,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 Button(
                     onClick = onSave,
-                    enabled = editable,
+                    enabled = editable && dirty,
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
@@ -473,6 +602,7 @@ private fun WorkspaceFileEditor(
 @Composable
 private fun WorkspaceDiffReviewList(
     changes: List<ChangeItem>,
+    sessionRunning: Boolean,
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
@@ -481,6 +611,43 @@ private fun WorkspaceDiffReviewList(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    var showRevertAllConfirm by remember { mutableStateOf(false) }
+
+    if (showRevertAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRevertAllConfirm = false },
+            containerColor = tokens.cardElevatedColor,
+            title = { Text("Undo all ${changes.size} modified file(s)?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This will revert all modified files in this workspace back to the last checkpoint.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRevertAllConfirm = false
+                        onRevertAll()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Undo All", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRevertAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     if (changes.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -513,10 +680,16 @@ private fun WorkspaceDiffReviewList(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Button(onClick = onKeepAll) {
+            Button(
+                onClick = onKeepAll,
+                enabled = !sessionRunning,
+            ) {
                 Text("Keep All", maxLines = 1)
             }
-            OutlinedButton(onClick = onRevertAll) {
+            OutlinedButton(
+                onClick = { showRevertAllConfirm = true },
+                enabled = !sessionRunning,
+            ) {
                 Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Undo All", maxLines = 1)
@@ -568,6 +741,7 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(6.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(
@@ -579,6 +753,7 @@ private fun WorkspaceDiffReviewList(
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
+                                enabled = !sessionRunning,
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(

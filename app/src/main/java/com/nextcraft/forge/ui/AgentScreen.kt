@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -153,6 +154,7 @@ fun AgentScreen(
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
+            onClearChat = viewModel::clearActiveChat,
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -165,6 +167,46 @@ fun AgentScreen(
                 onSubmitCode = { code -> runCatching { viewModel.antigravityAuth.submitCode(code) } },
                 onCancel = { viewModel.antigravityAuth.cancel() },
             )
+        } else if (state.agentKind != AgentKind.ANTIGRAVITY && !state.providerProfile.hasSecret) {
+            Surface(
+                color = tokens.cardElevatedColor,
+                contentColor = scheme.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = tokens.warningText,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = "No API key saved for ${state.providerProfile.kind.title} (${state.providerProfile.model})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tokens.warningText,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(
+                            onClick = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp),
+                        ) {
+                            Text("Configure Key", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Divider(color = scheme.outlineVariant)
+                }
+            }
         }
 
         state.activeStatusLine?.let { statusLine ->
@@ -294,6 +336,52 @@ fun AgentScreen(
             }
         }
 
+        if (state.changedItems.isNotEmpty() && !state.sessionRunning) {
+            val totalAdded = state.changedItems.sumOf { it.additions }
+            val totalRemoved = state.changedItems.sumOf { it.deletions }
+            Divider(color = scheme.outlineVariant)
+            Surface(
+                color = tokens.cardElevatedColor,
+                contentColor = scheme.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = tokens.accentText,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = "${state.changedItems.size} file(s) changed",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = scheme.onSurface,
+                    )
+                    Text(
+                        text = "+$totalAdded / -$totalRemoved",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = tokens.successText,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(
+                        onClick = { viewModel.selectTab(ForgeTab.FILES) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp),
+                    ) {
+                        Text("Review Diff →", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         Divider(color = scheme.outlineVariant)
         Surface(
             color = tokens.topBarContainerColor,
@@ -362,6 +450,7 @@ private fun ChatTabsRow(
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
+    onClearChat: () -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     Surface(
@@ -382,15 +471,17 @@ private fun ChatTabsRow(
                     val selected = chat.id == state.activeChatId
                     FilterChip(
                         selected = selected,
-                        onClick = { onSelectChat(chat.id) },
+                        enabled = !state.sessionRunning || selected,
+                        onClick = { if (!state.sessionRunning) onSelectChat(chat.id) },
                         label = {
                             Text(
                                 text = chat.displayTitle(),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 175.dp),
                             )
                         },
-                        trailingIcon = if (state.chats.size > 1 && selected) {
+                        trailingIcon = if (state.chats.size > 1 && selected && !state.sessionRunning) {
                             {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -405,7 +496,21 @@ private fun ChatTabsRow(
                         },
                     )
                 }
+                if (state.chats.size == 1 && state.messages.isNotEmpty() && !state.sessionRunning) {
+                    AssistChip(
+                        onClick = onClearChat,
+                        label = { Text("Clear") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        },
+                    )
+                }
                 AssistChip(
+                    enabled = !state.sessionRunning,
                     onClick = onCreateChat,
                     label = { Text("New Chat") },
                     leadingIcon = {

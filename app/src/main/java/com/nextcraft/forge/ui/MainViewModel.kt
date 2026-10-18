@@ -121,6 +121,7 @@ data class ForgeUiState(
     val selectedFilePath: String? = null,
     val selectedFileContent: String = "",
     val selectedFileEditable: Boolean = true,
+    val selectedFileDirty: Boolean = false,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -244,9 +245,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         RuntimeSetupController.restore(application)
         viewModelScope.launch {
             RuntimeSetupController.snapshot.collect { snap ->
-                val justCompleted = snap.status == RuntimeSetupStatus.COMPLETE && !_state.value.runtimeInstalled
+                val completed = snap.status == RuntimeSetupStatus.COMPLETE
                 _state.update { it.copy(setupSnapshot = snap) }
-                if (justCompleted) {
+                if (completed) {
                     refreshRuntimeStatus()
                 }
             }
@@ -480,6 +481,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
         // Switching mid-run would append streamed output to, and save over, another project's chat.
         if (_state.value.sessionRunning && projectId != _state.value.activeProjectId) return
+        val switchingProject = projectId != _state.value.activeProjectId
+        if (switchingProject) {
+            activeLogcatProcess?.destroyForcibly()
+            activeLogcatProcess = null
+            activeLogcatJob?.cancel()
+        }
         val chats = preferences.loadProjectChats(project.id)
         val chatId = chats.firstOrNull()?.id ?: "main"
         val messages = preferences.loadMessages(project.id, chatId)
@@ -491,7 +498,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 messages = messages,
                 selectedFilePath = null,
                 selectedFileContent = "",
+                selectedFileDirty = false,
+                fileSavedBanner = null,
+                androidLogcat = if (switchingProject) AndroidLogcatState() else it.androidLogcat,
             )
+        }
+        if (_state.value.androidBuild.phase != AndroidBuildPhase.BUILDING) {
+            viewModelScope.launch {
+                val buildRecord = withContext(Dispatchers.IO) {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val androidRoot = findAndroidProjectRoot(ws)
+                    val existingApk = androidRoot?.let { findDebugApk(it) }
+                    if (existingApk != null) {
+                        AndroidBuildRecord(
+                            phase = AndroidBuildPhase.SUCCEEDED,
+                            stage = AndroidBuildStage.COMPLETE,
+                            apkPath = existingApk.absolutePath,
+                            apkSizeBytes = existingApk.length(),
+                            message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                        )
+                    } else {
+                        AndroidBuildRecord()
+                    }
+                }
+                if (_state.value.activeProjectId == project.id && _state.value.androidBuild.phase != AndroidBuildPhase.BUILDING) {
+                    _state.update { it.copy(androidBuild = buildRecord) }
+                }
+            }
         }
         refreshWorkspaceFilesAndChanges(project.id)
     }
@@ -621,11 +654,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearActiveChat() {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        preferences.saveMessages(project.id, chatId, emptyList())
+        _state.update {
+            it.copy(
+                messages = emptyList(),
+                activeStatusLine = null,
+            )
+        }
+    }
+
     fun sendPrompt(promptText: String) {
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() || _state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        val now = System.currentTimeMillis()
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
@@ -636,8 +683,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updatedMessages = historyBefore + userMsg + assistantPlaceholder
         preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
 
+        val autoTitle = cleanPrompt.lineSequence().firstOrNull()?.trim().orEmpty().let { firstLine ->
+            if (firstLine.length > 34) firstLine.take(34).trimEnd() + "…" else firstLine
+        }
+        val updatedChats = _state.value.chats.map { chat ->
+            if (chat.id == chatId) {
+                val shouldRetitle = historyBefore.isEmpty() &&
+                    (chat.title == "Main chat" || chat.title.matches(Regex("""^Chat \d+$"""))) &&
+                    autoTitle.isNotEmpty()
+                chat.copy(
+                    title = if (shouldRetitle) autoTitle else chat.title,
+                    updatedAtMillis = now,
+                )
+            } else {
+                chat
+            }
+        }
+        val updatedProjects = _state.value.projects.map { proj ->
+            if (proj.id == project.id) proj.copy(updatedAtMillis = now) else proj
+        }
+        preferences.saveProjectChats(project.id, updatedChats)
+        preferences.saveProjects(updatedProjects)
+
         _state.update {
             it.copy(
+                projects = updatedProjects,
+                chats = updatedChats,
                 messages = updatedMessages,
                 sessionRunning = true,
                 activeStatusLine = "Starting ${_state.value.agentKind.title}…",
@@ -791,11 +862,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun finishAgentTurn(projectId: String) {
         val chatId = _state.value.activeChatId
+        val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->
             if (msg.id == "streaming-assistant") {
+                val elapsed = (now - msg.createdAt.toEpochMilli()).coerceAtLeast(0L)
                 msg.copy(
                     id = UUID.randomUUID().toString(),
                     text = msg.text.ifBlank { "Task finished." },
+                    workedMillis = elapsed,
                 )
             } else {
                 msg
@@ -913,6 +987,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedFilePath = relativePath,
                     selectedFileContent = content,
                     selectedFileEditable = editable,
+                    selectedFileDirty = false,
                     fileSavedBanner = null,
                 )
             }
@@ -920,7 +995,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateSelectedFileContent(newContent: String) {
-        _state.update { it.copy(selectedFileContent = newContent, fileSavedBanner = null) }
+        _state.update {
+            it.copy(
+                selectedFileContent = newContent,
+                selectedFileDirty = true,
+                fileSavedBanner = null,
+            )
+        }
     }
 
     fun saveSelectedFile() {
@@ -942,7 +1023,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrDefault(false)
             }
             _state.update {
-                it.copy(fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path")
+                it.copy(
+                    selectedFileDirty = if (saved) false else it.selectedFileDirty,
+                    fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path",
+                )
             }
             refreshWorkspaceFilesAndChanges(project.id)
             if (saved && preferences.autoSyncGitHub) {
@@ -968,6 +1052,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (ok) {
                 refreshWorkspaceFilesAndChanges(project.id)
                 openWorkspaceFile(cleanPath)
+            }
+        }
+    }
+
+    fun deleteWorkspaceFile(relativePath: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/')
+        if (cleanPath.isEmpty()) return
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val target = checkpoints.safeWorkspaceFile(ws, cleanPath)
+                    target.exists() && target.deleteRecursively()
+                }.getOrDefault(false)
+            }
+            if (deleted) {
+                if (_state.value.selectedFilePath == cleanPath || _state.value.selectedFilePath?.startsWith("$cleanPath/") == true) {
+                    _state.update {
+                        it.copy(
+                            selectedFilePath = null,
+                            selectedFileContent = "",
+                            selectedFileDirty = false,
+                            fileSavedBanner = "Deleted $cleanPath",
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(fileSavedBanner = "Deleted $cleanPath") }
+                }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }
@@ -1183,6 +1298,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
+            var cancelled = false
             var builtApk: File? = null
             var fullLog = ""
             var exitCode = -1
@@ -1216,14 +1332,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     builtApk = if (exitCode == 0) findDebugApk(androidRoot) else null
                     succeeded = exitCode == 0 && (task == "clean" || builtApk != null)
                 }
+            } catch (e: CancellationException) {
+                cancelled = true
             } catch (e: Throwable) {
-                fullLog += "\nBuild exception: ${e.message}"
+                if (!isActive) {
+                    cancelled = true
+                } else {
+                    fullLog += "\nBuild exception: ${e.message}"
+                }
             } finally {
+                if (!isActive) cancelled = true
                 activeBuildProcess = null
                 RuntimeTaskController.stopAction = null
             }
 
-            val issues = if (!succeeded && task != "clean") {
+            val issues = if (!succeeded && !cancelled && task != "clean") {
                 parseAndroidBuildIssues(fullLog, androidRoot, exitCode)
             } else {
                 emptyList()
@@ -1232,12 +1355,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
-                        phase = if (succeeded) AndroidBuildPhase.SUCCEEDED else AndroidBuildPhase.FAILED,
-                        stage = if (succeeded) AndroidBuildStage.COMPLETE else AndroidBuildStage.FAILED,
+                        phase = when {
+                            cancelled -> AndroidBuildPhase.CANCELLED
+                            succeeded -> AndroidBuildPhase.SUCCEEDED
+                            else -> AndroidBuildPhase.FAILED
+                        },
+                        stage = when {
+                            cancelled -> AndroidBuildStage.CANCELLED
+                            succeeded -> AndroidBuildStage.COMPLETE
+                            else -> AndroidBuildStage.FAILED
+                        },
                         finishedAtMillis = System.currentTimeMillis(),
                         apkPath = finalApk?.absolutePath,
                         apkSizeBytes = finalApk?.length(),
                         message = when {
+                            cancelled -> "Build cancelled by user."
                             succeeded && finalApk != null -> "APK ready: ${finalApk.name} (${finalApk.length() / 1024} KB)"
                             succeeded -> "Gradle $task completed."
                             else -> issues.firstOrNull()?.detail ?: "Build failed (exit $exitCode)"
@@ -1248,14 +1380,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             getApplication<Application>().startService(
                 Intent(getApplication(), RuntimeExecutionService::class.java)
-                    .setAction(if (succeeded) RuntimeExecutionService.ACTION_COMPLETE else RuntimeExecutionService.ACTION_FAILED)
+                    .setAction(
+                        when {
+                            cancelled -> RuntimeExecutionService.ACTION_CANCELLED
+                            succeeded -> RuntimeExecutionService.ACTION_COMPLETE
+                            else -> RuntimeExecutionService.ACTION_FAILED
+                        },
+                    )
                     .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
                     .putExtra(
                         RuntimeExecutionService.EXTRA_DETAIL,
-                        if (succeeded) "Android build succeeded" else "Android build failed",
+                        when {
+                            cancelled -> "Android build cancelled"
+                            succeeded -> "Android build succeeded"
+                            else -> "Android build failed"
+                        },
                     ),
             )
-            if (succeeded && installAfterBuild && finalApk != null) {
+            if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
         }
@@ -1298,12 +1440,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun resolveProjectAndroidPackageName(project: Project): String {
+        val builtApkPath = _state.value.androidBuild.apkPath
+        if (!builtApkPath.isNullOrBlank()) {
+            val apkFile = File(builtApkPath)
+            if (apkFile.isFile) {
+                val apkPkg = AndroidAppInstaller.packageName(getApplication(), apkFile)
+                if (!apkPkg.isNullOrBlank()) return apkPkg
+            }
+        }
+        val ws = runCatching { checkpoints.ensureWorkspace(project.id) }.getOrNull()
+        val androidRoot = ws?.let { findAndroidProjectRoot(it) ?: it }
+        if (androidRoot != null) {
+            val existingApk = findDebugApk(androidRoot)
+            if (existingApk != null) {
+                val apkPkg = AndroidAppInstaller.packageName(getApplication(), existingApk)
+                if (!apkPkg.isNullOrBlank()) return apkPkg
+            }
+            val candidates = listOf(
+                File(androidRoot, "app/build.gradle.kts"),
+                File(androidRoot, "app/build.gradle"),
+                File(androidRoot, "build.gradle.kts"),
+                File(androidRoot, "build.gradle"),
+                File(androidRoot, "app/src/main/AndroidManifest.xml"),
+            )
+            val appIdRegex = Regex("""(?:applicationId|namespace|package)\s*=?\s*["']([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)+)["']""")
+            for (file in candidates) {
+                if (file.isFile) {
+                    val text = runCatching { file.readBoundedText(64 * 1024) }.getOrNull().orEmpty()
+                    val match = appIdRegex.find(text)?.groupValues?.getOrNull(1)
+                    if (!match.isNullOrBlank()) return match
+                }
+            }
+        }
+        return AndroidProjectTemplateGenerator.packageName(project.name)
+    }
+
     fun startProjectLogcat() {
         val project = _state.value.activeProject ?: return
         activeLogcatProcess?.destroyForcibly()
         activeLogcatJob?.cancel()
-        val pkg = AndroidProjectTemplateGenerator.packageName(project.name)
         activeLogcatJob = viewModelScope.launch {
+            val pkg = withContext(Dispatchers.IO) { resolveProjectAndroidPackageName(project) }
             val canRead = withContext(Dispatchers.IO) { hasAndroidLogcatAccess(getApplication()) }
             if (!canRead) {
                 _state.update {
@@ -1383,6 +1561,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearProjectLogcat() {
         _state.update {
             it.copy(androidLogcat = it.androidLogcat.copy(lines = emptyList()))
+        }
+    }
+
+    fun setLogcatMinimumLevel(level: AndroidLogLevel) {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(minimumLevel = level))
+        }
+    }
+
+    fun setLogcatQuery(query: String) {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(query = query))
         }
     }
 
@@ -1814,7 +2004,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         runCheckedCommand(project.slug, ws, cloneCmd)
                     }
-                    project
+                    val isAndroidRepo = findAndroidProjectRoot(ws) != null
+                    project.copy(
+                        type = if (isAndroidRepo) ProjectType.ANDROID else ProjectType.GENERAL,
+                        language = if (isAndroidRepo) "Kotlin / Android" else "Git Repository",
+                    )
                 }
             }
             clonedProject.onSuccess { newProject ->

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
+import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 
 @Composable
@@ -205,11 +207,52 @@ private fun ForgeTopBar(
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
     var themeMenuExpanded by remember { mutableStateOf(false) }
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
     val activeProject = state.activeProject
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
     val runtimeReady = state.rootAvailable && state.runtimeInstalled
+
+    pendingDeleteProject?.let { targetProject ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            containerColor = tokens.cardElevatedColor,
+            title = {
+                Text(
+                    text = "Delete '${targetProject.name}'?",
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = "This permanently deletes /workspace/${targetProject.slug}, all local files, checkpoints, and chat history for this project.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = targetProject.id
+                        pendingDeleteProject = null
+                        onDeleteProject(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.errorContainer,
+                        contentColor = scheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Delete Project", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 
     Surface(
         color = tokens.topBarContainerColor,
@@ -296,6 +339,7 @@ private fun ForgeTopBar(
                         state.projects.forEach { project ->
                             val isCurrent = project.id == state.activeProjectId
                             DropdownMenuItem(
+                                enabled = !state.sessionRunning || isCurrent,
                                 text = {
                                     Column {
                                         Text(
@@ -305,7 +349,7 @@ private fun ForgeTopBar(
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                         Text(
-                                            text = "${project.language} • /workspace/${project.slug}",
+                                            text = "${project.language} • /workspace/${project.slug} • ${project.relativeUpdatedAt()}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = scheme.onSurfaceVariant,
                                             fontFamily = FontFamily.Monospace,
@@ -324,11 +368,11 @@ private fun ForgeTopBar(
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1) {
+                                    if (state.projects.size > 1 && !state.sessionRunning) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
-                                                onDeleteProject(project.id)
+                                                pendingDeleteProject = project
                                             },
                                         ) {
                                             Icon(
@@ -348,6 +392,7 @@ private fun ForgeTopBar(
                         }
                         Divider(color = scheme.outlineVariant)
                         DropdownMenuItem(
+                            enabled = !state.sessionRunning,
                             text = {
                                 Text(
                                     text = "New Workspace Project…",

@@ -3,6 +3,8 @@
 package com.nextcraft.forge.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -35,6 +37,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -60,6 +64,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -71,6 +78,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.nextcraft.forge.runtime.AndroidBuildIssue
 import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidLogLevel
+import kotlinx.coroutines.delay
 
 @Composable
 fun AndroidBuildScreen(
@@ -82,11 +90,29 @@ fun AndroidBuildScreen(
     var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
     val gradleScrollState = rememberScrollState()
     val tokens = LocalForgeThemeTokens.current
+    val clipboard = LocalClipboardManager.current
+    var logCopied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(logCopied) {
+        if (logCopied) {
+            delay(1500)
+            logCopied = false
+        }
+    }
 
     // BUG-UI-008 Fix: Auto-scroll Gradle output as build log streams in
     LaunchedEffect(build.log.length, isBuilding) {
         if (isBuilding && build.log.isNotEmpty()) {
             gradleScrollState.animateScrollTo(gradleScrollState.maxValue)
+        }
+    }
+
+    // BUG-UI-026 Fix: Auto-switch to Diagnostics when a build fails with parsed compiler/resource issues
+    LaunchedEffect(build.phase, build.issues.size) {
+        if (build.phase == AndroidBuildPhase.BUILDING) {
+            activeConsoleTab = "gradle"
+        } else if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+            activeConsoleTab = "issues"
         }
     }
 
@@ -202,6 +228,7 @@ fun AndroidBuildScreen(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             FilterChip(
                 selected = activeConsoleTab == "gradle",
@@ -218,6 +245,22 @@ fun AndroidBuildScreen(
                 onClick = { activeConsoleTab = "logcat" },
                 label = { Text("Live Logcat (${state.androidLogcat.lines.size})") },
             )
+            if (activeConsoleTab == "gradle" && build.log.isNotBlank()) {
+                AssistChip(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(build.log))
+                        logCopied = true
+                    },
+                    label = { Text(if (logCopied) "Copied!" else "Copy Log") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    },
+                )
+            }
         }
 
         when (activeConsoleTab) {
@@ -263,6 +306,8 @@ fun AndroidBuildScreen(
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
                 onClearLogcat = viewModel::clearProjectLogcat,
+                onSetMinimumLevel = viewModel::setLogcatMinimumLevel,
+                onSetQuery = viewModel::setLogcatQuery,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -364,16 +409,26 @@ private fun LogcatPanel(
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
     onClearLogcat: () -> Unit,
+    onSetMinimumLevel: (AndroidLogLevel) -> Unit,
+    onSetQuery: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
     val listState = rememberLazyListState()
     val tokens = LocalForgeThemeTokens.current
 
-    val lastLogId = logcat.lines.lastOrNull()?.id ?: 0L
+    val filteredLines = remember(logcat.lines, logcat.minimumLevel, logcat.query) {
+        val q = logcat.query.trim()
+        logcat.lines.filter { line ->
+            line.level.ordinal >= logcat.minimumLevel.ordinal &&
+                (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+        }
+    }
+
+    val lastLogId = filteredLines.lastOrNull()?.id ?: 0L
     LaunchedEffect(lastLogId) {
-        if (logcat.lines.isNotEmpty() && logcat.running) {
-            listState.scrollToItem(logcat.lines.lastIndex)
+        if (filteredLines.isNotEmpty() && logcat.running) {
+            listState.scrollToItem(filteredLines.lastIndex)
         }
     }
 
@@ -417,6 +472,59 @@ private fun LogcatPanel(
             }
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val levels = listOf(
+                AndroidLogLevel.VERBOSE to "ALL",
+                AndroidLogLevel.INFO to "I+",
+                AndroidLogLevel.WARNING to "W+",
+                AndroidLogLevel.ERROR to "E+",
+            )
+            levels.forEach { (level, label) ->
+                FilterChip(
+                    selected = logcat.minimumLevel == level,
+                    onClick = { onSetMinimumLevel(level) },
+                    label = { Text(label, fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
+                )
+            }
+            OutlinedTextField(
+                value = logcat.query,
+                onValueChange = onSetQuery,
+                placeholder = { Text("Filter tag/text…", fontSize = 12.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                    )
+                },
+                trailingIcon = if (logcat.query.isNotEmpty()) {
+                    {
+                        IconButton(
+                            onClick = { onSetQuery("") },
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear logcat filter",
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.width(200.dp),
+            )
+        }
+
         val logcatShape = RoundedCornerShape(12.dp)
         LazyColumn(
             state = listState,
@@ -429,7 +537,7 @@ private fun LogcatPanel(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(logcat.lines, key = { it.id }) { line ->
+            items(filteredLines, key = { it.id }) { line ->
                 val color = when (line.level) {
                     AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
                     AndroidLogLevel.WARNING -> tokens.warningText
@@ -448,6 +556,22 @@ private fun LogcatPanel(
     }
 }
 
+private fun normalizePreviewUrlInput(raw: String): String {
+    val clean = raw.trim()
+    if (clean.isEmpty()) return ""
+    if (clean.startsWith(":")) {
+        return "http://127.0.0.1$clean"
+    }
+    if (clean.all { it.isDigit() }) {
+        return "http://127.0.0.1:$clean"
+    }
+    val lower = clean.lowercase()
+    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+        return clean
+    }
+    return "http://$clean"
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebPreviewScreen(
@@ -458,15 +582,17 @@ fun WebPreviewScreen(
     var lastLoadedUrl by remember { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val tokens = LocalForgeThemeTokens.current
+    val context = LocalContext.current
     val webViewBgArgb = tokens.terminalBackground.toArgb()
 
     val navigateToInputUrl = {
-        val clean = urlInput.trim()
-        val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
-        if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
-            lastLoadedUrl = clean
-            viewModel.updatePreviewUrl(clean)
-            webViewRef?.loadUrl(clean)
+        val normalized = normalizePreviewUrlInput(urlInput)
+        val scheme = Uri.parse(normalized).scheme?.lowercase()
+        if (normalized.isNotEmpty() && (scheme == "http" || scheme == "https")) {
+            urlInput = normalized
+            lastLoadedUrl = normalized
+            viewModel.updatePreviewUrl(normalized)
+            webViewRef?.loadUrl(normalized)
         }
     }
 
@@ -507,6 +633,7 @@ fun WebPreviewScreen(
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         label = { Text("Local Dev Server URL (Host NetNS)") },
+                        placeholder = { Text("http://127.0.0.1:3000 or :5173") },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { navigateToInputUrl() }),
                         modifier = Modifier.weight(1f),
@@ -525,6 +652,19 @@ fun WebPreviewScreen(
                         },
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Scan & Reload")
+                    }
+                    IconButton(
+                        onClick = {
+                            val target = normalizePreviewUrlInput(urlInput).ifBlank { state.previewUrl }
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(target))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Open in external browser")
                     }
                 }
 
@@ -564,8 +704,8 @@ fun WebPreviewScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            factory = { context ->
-                WebView(context).apply {
+            factory = { ctx ->
+                WebView(ctx).apply {
                     setBackgroundColor(webViewBgArgb)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
