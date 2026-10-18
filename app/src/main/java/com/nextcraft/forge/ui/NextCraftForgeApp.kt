@@ -2,6 +2,7 @@
 
 package com.nextcraft.forge.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -97,10 +98,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         return
     }
 
+    val imeVisible by rememberImeVisible()
+    val backTarget = forgeBackTarget(state.activeTab)
+    BackHandler(enabled = backTarget != null) { backTarget?.let(viewModel::selectTab) }
+
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
-            ForgeTopBar(
+            // Projects and Tools draw their own large title; a second header would duplicate it.
+            if (state.activeTab != ForgeTab.PROJECTS && state.activeTab != ForgeTab.TOOLS) ForgeTopBar(
                 state = state,
                 onSelectProject = viewModel::selectProject,
                 onDeleteProject = viewModel::deleteProject,
@@ -110,11 +116,14 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             )
         },
         bottomBar = {
-            ForgeBottomBar(
-                activeTab = state.activeTab,
-                changedCount = state.changedItems.size,
-                onSelectTab = viewModel::selectTab,
-            )
+            // adjustResize lifts the bar above the keyboard and eats the composer's space; hide it while typing.
+            if (!imeVisible) {
+                ForgeBottomBar(
+                    activeTab = state.activeTab,
+                    changedCount = state.changedItems.size,
+                    onSelectTab = viewModel::selectTab,
+                )
+            }
         },
     ) { innerPadding ->
         Column(

@@ -1,5 +1,6 @@
 package com.nextcraft.forge.ui
 
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,12 +14,19 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 /**
  * Linear-style toggle cell: label and optional description on the left, switch on the right.
@@ -77,4 +85,33 @@ fun ForgeToggleRow(
             ),
         )
     }
+}
+
+/**
+ * True while the soft keyboard is showing. The window uses adjustResize (no edge-to-edge), so Compose
+ * never sees an IME inset; the root view's insets are the reliable signal.
+ */
+@Composable
+fun rememberImeVisible(): State<Boolean> {
+    val view = LocalView.current
+    val visible = remember { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            visible.value = ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
+    return visible
+}
+
+/**
+ * Where the system Back button goes from [tab]; null = let the system leave the app.
+ * Tool screens return to the Tools launcher, top-level tabs return to Projects.
+ */
+fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
+    ForgeTab.PROJECTS -> null
+    ForgeTab.FILES, ForgeTab.TERMINAL, ForgeTab.ANDROID, ForgeTab.PREVIEW -> ForgeTab.TOOLS
+    ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
 }

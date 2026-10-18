@@ -126,7 +126,7 @@ data class ForgeThemeTokens(
 )
 
 // 1. DARK (Zuan Tinted Obsidian Dark)
-private val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
+internal val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
     // Linear-style neutral dark: R=G=B greys, one indigo accent (values measured from Linear Android).
     primary = Color(0xFF5E6AD2),
     onPrimary = Color(0xFFFFFFFF),
