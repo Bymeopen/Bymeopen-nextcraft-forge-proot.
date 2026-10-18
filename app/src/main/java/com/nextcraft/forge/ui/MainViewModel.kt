@@ -238,6 +238,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
+    /** Bridge actually running the current session; approvals must go here, not to whatever agentKind is selected now. */
+    private var activeRuntimeBridge: RuntimeBridge? = null
     private val logLineIdCounter = AtomicLong(1L)
     /** Session whose events may touch the active chat; late events from older sessions are dropped. */
     private val activeRuntimeSessionId = AtomicReference<String?>(null)
@@ -483,6 +485,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectAgent(agent: AgentKind) {
+        // Switching bridges mid-run would desync providerProfile/hasSecret from the session that is
+        // still streaming, and would misroute any pending tool approval to the newly selected bridge.
+        if (_state.value.sessionRunning) return
         preferences.agentKind = agent.stableId
         val loadedProfile = preferences.loadProvider(vault, agent)
         val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
@@ -753,6 +758,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AgentKind.DEEPSEEK_HARNESS -> dshRuntime
             AgentKind.ANTIGRAVITY -> antigravityRuntime
         }
+        activeRuntimeBridge = bridge
 
         activeAgentJob = viewModelScope.launch {
             try {
@@ -795,9 +801,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun respondToToolRequest(approved: Boolean) {
         val req = _state.value.pendingToolRequest ?: return
+        val bridge = activeRuntimeBridge ?: claudeRuntime
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            claudeRuntime.respondToApproval(req, approved)
+            bridge.respondToApproval(req, approved)
         }
     }
 
@@ -896,6 +903,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishAgentTurn(projectId: String) {
+        activeRuntimeBridge = null
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->

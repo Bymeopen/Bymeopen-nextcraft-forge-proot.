@@ -635,9 +635,30 @@ class RuntimeInstaller(private val context: Context) {
             val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
             if (comparison != 0) return comparison > 0
         }
-        val candidatePre = '-' in candidate.substringBefore('+')
-        val currentPre = '-' in current.substringBefore('+')
-        return !candidatePre && currentPre
+        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+        }
+        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+        val candidateIds = candidatePreTag.split('.')
+        val currentIds = currentPreTag.split('.')
+        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+            val candidateId = candidateIds.getOrNull(index)
+            val currentId = currentIds.getOrNull(index)
+            if (candidateId == null) return false
+            if (currentId == null) return true
+            val candidateNum = candidateId.toIntOrNull()
+            val currentNum = currentId.toIntOrNull()
+            val comparison = if (candidateNum != null && currentNum != null) {
+                candidateNum.compareTo(currentNum)
+            } else {
+                candidateId.compareTo(currentId)
+            }
+            if (comparison != 0) return comparison > 0
+        }
+        return false
     }
 
     private fun migrateLegacyClaudeMarker() {
@@ -1236,13 +1257,19 @@ class RuntimeInstaller(private val context: Context) {
 
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        return when (stack) {
+            DevStack.WEB -> true
+            DevStack.PYTHON -> File(rootfs, "usr/bin/python3").exists() && File(rootfs, "usr/bin/pip3").exists()
+            DevStack.CPP -> File(rootfs, "usr/bin/gcc").exists() && File(rootfs, "usr/bin/g++").exists()
+            DevStack.PHP -> File(rootfs, "usr/bin/php").exists() && File(rootfs, "usr/local/bin/composer").isFile
+            DevStack.ANDROID ->
+                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
+                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
+                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
+                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
+                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        }
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {
@@ -2201,7 +2228,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09"
+        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
