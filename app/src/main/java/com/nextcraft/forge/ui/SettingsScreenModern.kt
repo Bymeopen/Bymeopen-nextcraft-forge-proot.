@@ -37,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -521,17 +520,12 @@ fun SettingsScreenModern(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = state.autoSyncGitHub,
-                            onCheckedChange = viewModel::setAutoSyncGitHub,
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Auto-commit & push workspace after every Agent turn")
-                    }
+                    ForgeToggleRow(
+                        title = "Auto-commit & push",
+                        subtitle = "Commit and push the workspace after every Agent turn",
+                        checked = state.autoSyncGitHub,
+                        onCheckedChange = viewModel::setAutoSyncGitHub,
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -572,15 +566,15 @@ fun SettingsScreenModern(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(
-                            checked = newRepoPrivate,
-                            onCheckedChange = { newRepoPrivate = it },
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (newRepoPrivate) "Private Repository" else "Public Repository")
-                        Spacer(modifier = Modifier.weight(1f))
+                    ForgeToggleRow(
+                        title = if (newRepoPrivate) "Private repository" else "Public repository",
+                        subtitle = "Visibility of the new GitHub repository",
+                        checked = newRepoPrivate,
+                        onCheckedChange = { newRepoPrivate = it },
+                    )
+                    Row(modifier = Modifier.fillMaxWidth()) {
                         Button(
+                            modifier = Modifier.weight(1f),
                             onClick = {
                                 val targetName = newRepoName.ifBlank { state.activeProject?.slug.orEmpty() }
                                 if (targetName.isNotBlank()) {
@@ -647,27 +641,12 @@ fun SettingsScreenModern(
                 DevStack.entries.forEach { stack ->
                     val selected = stack in state.selectedDevStacks
                     val installed = stack in state.installedDevStacks
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = selected,
-                            onCheckedChange = { viewModel.toggleDevStack(stack) },
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                text = stack.displayDescription(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    ForgeToggleRow(
+                        title = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
+                        subtitle = stack.displayDescription(),
+                        checked = selected,
+                        onCheckedChange = { viewModel.toggleDevStack(stack) },
+                    )
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -700,24 +679,12 @@ fun SettingsScreenModern(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Switch(
-                        checked = state.interactiveHighRiskApprovals,
-                        onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Interactive High-Risk Command Approvals", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = "Prompt before executing destructive shell or system commands",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                ForgeToggleRow(
+                    title = "High-risk command approvals",
+                    subtitle = "Prompt before executing destructive shell or system commands",
+                    checked = state.interactiveHighRiskApprovals,
+                    onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
+                )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
