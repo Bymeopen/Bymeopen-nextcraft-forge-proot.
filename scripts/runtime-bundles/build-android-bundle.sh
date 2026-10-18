@@ -145,6 +145,8 @@ echo "Laying out JDK and Gradle"
 mkdir -p "$payload/opt/gradle" "$payload/usr/local/bin"
 tar -xzf "$jdk_tar" -C "$payload/opt"
 [[ -x "$payload/opt/$JDK_DIR/bin/java" ]] || { echo "JDK archive did not produce opt/$JDK_DIR" >&2; exit 1; }
+# jlink modules (jmods), the JDK sources (lib/src.zip), and man pages are never used by Gradle or javac: ~140 MB saved.
+rm -rf "$payload/opt/$JDK_DIR/jmods" "$payload/opt/$JDK_DIR/lib/src.zip" "$payload/opt/$JDK_DIR/man"
 ln -s "$JDK_DIR" "$payload/opt/jdk-$JDK_MAJOR"
 for bin in java javac jar jarsigner javadoc keytool; do
   ln -s "/opt/jdk-$JDK_MAJOR/bin/$bin" "$payload/usr/local/bin/$bin"
