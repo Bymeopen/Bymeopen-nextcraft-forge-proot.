@@ -2817,9 +2817,29 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             fi
 
+            # Run the guest command as a child and forward INT/TERM to it. With a plain foreground command the shell only runs
+            # its trap after the command exits, so a cancelled npm install or Gradle build kept running until it finished, and
+            # a later SIGKILL of this script orphaned it and skipped the ownership fix. Stdin (the
+            # Claude prompt) is passed through fd 3: a non-interactive shell gives background commands /dev/null.
+            child_status=0
+            exec 3<&0
+            forward_signal() {
+                kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+            }
+
             ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
                 GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
-                /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@"
+                /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &
+            child=${'$'}!
+            trap 'forward_signal INT' INT
+            trap 'forward_signal TERM' TERM
+            # wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
+            while :; do
+                wait "${'$'}child"
+                child_status=${'$'}?
+                kill -0 "${'$'}child" 2>/dev/null || break
+            done
+            exit "${'$'}child_status"
         """.trimIndent() + "\n"
 
         private val UNMOUNT_CHROOT_SCRIPT = """

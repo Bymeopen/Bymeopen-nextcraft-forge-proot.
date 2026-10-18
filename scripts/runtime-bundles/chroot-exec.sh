@@ -208,4 +208,23 @@ else
 fi
 
 # 7. Masuk ke Chroot Ubuntu 24.04 LTS ARM64, pindah ke direktori $GUEST_WORKSPACE, dan eksekusi perintah
-chroot "$ROOTFS" /bin/sh -c 'cd "$1" && shift && exec "$@"' -- "$GUEST_WORKSPACE" "$@"
+# Run the guest command as a child and forward INT/TERM to it. With a plain foreground command the shell only runs
+# its trap after the command exits, so a cancelled npm install or Gradle build kept running until it finished, and
+# a later SIGKILL of this script orphaned it and skipped the ownership fix. Stdin (the
+# Claude prompt) is passed through fd 3: a non-interactive shell gives background commands /dev/null.
+child_status=0
+exec 3<&0
+forward_signal() {
+    kill "-$1" "$child" 2>/dev/null || true
+}
+chroot "$ROOTFS" /bin/sh -c 'cd "$1" && shift && exec "$@"' -- "$GUEST_WORKSPACE" "$@" <&3 3<&- &
+child=$!
+trap 'forward_signal INT' INT
+trap 'forward_signal TERM' TERM
+# wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
+while :; do
+    wait "$child"
+    child_status=$?
+    kill -0 "$child" 2>/dev/null || break
+done
+exit "$child_status"

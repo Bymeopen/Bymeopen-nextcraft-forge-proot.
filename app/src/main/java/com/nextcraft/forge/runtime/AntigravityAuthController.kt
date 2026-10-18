@@ -4,6 +4,7 @@ import android.content.Context
 import com.nextcraft.forge.model.AgentKind
 import java.io.File
 import java.io.RandomAccessFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -281,6 +282,13 @@ class AntigravityAuthController(
                 }
                 else -> Unit
             }
+        } catch (cancelled: CancellationException) {
+            // The caller went away (screen closed, scope cleared): not a sign-in failure. Restore the previous state
+            // instead of showing an error, and let the cancellation reach the parent scope.
+            if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
+                mutableState.value = stateBeforeLogin ?: AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
+            }
+            throw cancelled
         } catch (error: Throwable) {
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
                 mutableState.value = AntigravityAuthState(

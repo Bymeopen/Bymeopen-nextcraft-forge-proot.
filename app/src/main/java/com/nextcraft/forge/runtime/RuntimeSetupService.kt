@@ -261,6 +261,8 @@ class RuntimeSetupService : Service() {
     private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
     private var installJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wakeLockAcquiredAt = 0L
+    private var lastWakeLockRenewAt = 0L
     private var lastNotificationAt = 0L
 
     override fun onCreate() {
@@ -294,6 +296,7 @@ class RuntimeSetupService : Service() {
                     RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
                         RuntimeSetupController.update(this@RuntimeSetupService, progress)
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
+                        renewWakeLock()
                     }
                     AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
                     RuntimeSetupController.complete(this@RuntimeSetupService)
@@ -396,9 +399,27 @@ class RuntimeSetupService : Service() {
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
+        wakeLockAcquiredAt = SystemClock.elapsedRealtime()
+        lastWakeLockRenewAt = wakeLockAcquiredAt
         wakeLock = getSystemService(PowerManager::class.java)
             ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.nextcraft.forge:runtime-setup")
+            // Not reference counted, so acquire() can re-arm the timeout without needing a matching release().
+            ?.apply { setReferenceCounted(false) }
             ?.apply { acquire(MAX_WAKE_LOCK_MS) }
+    }
+
+    /**
+     * A full setup (system maintenance up to 35 min, each apt step up to 30 min, plus downloads) can outlast one
+     * wake lock timeout; once it expired the CPU could sleep with the screen off and stall the setup. Progress
+     * re-arms it, up to [MAX_SETUP_WAKE_MS] in total so a hung setup cannot keep the device awake forever.
+     */
+    private fun renewWakeLock() {
+        val lock = wakeLock ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWakeLockRenewAt < WAKE_LOCK_RENEW_INTERVAL_MS) return
+        if (now - wakeLockAcquiredAt > MAX_SETUP_WAKE_MS) return
+        lastWakeLockRenewAt = now
+        runCatching { lock.acquire(MAX_WAKE_LOCK_MS) }
     }
 
     private fun releaseWakeLock() {
@@ -426,6 +447,8 @@ class RuntimeSetupService : Service() {
         private const val RESULT_NOTIFICATION_ID = 52
         private const val NOTIFICATION_THROTTLE_MS = 750L
         private const val MAX_WAKE_LOCK_MS = 45 * 60 * 1_000L
+        private const val WAKE_LOCK_RENEW_INTERVAL_MS = 5 * 60 * 1_000L
+        private const val MAX_SETUP_WAKE_MS = 4 * 60 * 60 * 1_000L
 
         fun ensureNotificationChannel(context: Context) {
             context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(
