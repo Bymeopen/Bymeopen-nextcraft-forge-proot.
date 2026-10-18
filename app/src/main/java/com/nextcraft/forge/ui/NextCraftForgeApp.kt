@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -165,6 +166,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.activeTab) {
+                    ForgeTab.PROJECTS -> ProjectsScreen(
+                        state = state,
+                        onOpenProject = { id ->
+                            viewModel.selectProject(id)
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onNewProject = { showNewProjectDialog = true },
+                        onDeleteProject = viewModel::deleteProject,
+                    )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
@@ -460,6 +470,7 @@ private fun ForgeBottomBar(
                             else -> tab.title
                         }
                         val icon = when (tab) {
+                            ForgeTab.PROJECTS -> Icons.Default.Home
                             ForgeTab.AGENT -> Icons.Default.Star
                             ForgeTab.FILES -> Icons.Default.Edit
                             ForgeTab.TERMINAL -> Icons.Default.List
@@ -471,6 +482,8 @@ private fun ForgeBottomBar(
                             selected = activeTab == tab,
                             onClick = { onSelectTab(tab) },
                             icon = { Icon(icon, contentDescription = label) },
+                            // With 7 tabs only the selected one keeps its label (Linear-style compact bar).
+                            alwaysShowLabel = false,
                             label = {
                                 Text(
                                     text = label,
