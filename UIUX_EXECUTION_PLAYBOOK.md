@@ -4,7 +4,7 @@
 > Dokumen ini melengkapi `ZUAN_UI_UX_ARCHITECTURE_100.md`, `AIRBNB_UI_UX_ARCHITECTURE_100.md`, dan `MULTI_THEME_ARCHITECTURE_100.md`. Dokumen-dokumen itu menjawab *"seperti apa tampilannya"*. Dokumen ini menjawab *"urutan kerja, aturan, dan bukti lulus"*.
 
 > **Konteks produk: aplikasi mobile LOKAL (offline-first, tanpa backend sendiri, distribusi sideload via `AppUpdater` + manifest HTTPS).**
-> Konsekuensi: tidak ada analitik/A-B server, tidak ada staged rollout Play Console, TMS bersifat opsional. Semua metrik dikumpulkan **di perangkat** atau lewat uji manual. Bagian E7/E8, §3, dan DoD di bawah sudah disesuaikan.
+> Konsekuensi: satu-satunya trafik keluar adalah panggilan ke provider AI (dan cek update), tidak ada analitik/A-B server, tidak ada staged rollout Play Console, TMS bersifat opsional. Semua metrik dikumpulkan **di perangkat** atau lewat uji manual. Bagian E7/E8, §3, dan DoD di bawah sudah disesuaikan.
 
 ---
 
@@ -263,14 +263,40 @@ Praktik: `@Stable/@Immutable` model UI, `remember`/`derivedStateOf`, `key` di li
 
 ---
 
+### UX koneksi AI provider (hybrid: lokal + jaringan)
+
+```
+ Composer ─▶ validasi lokal (key ada? model dipilih?) ─▶ request ─▶ stream token ─▶ render bertahap
+    │                                                        │
+    │                                       ┌────────────────┼─────────────────┐
+    ▼                                       ▼                ▼                 ▼
+ Draft tersimpan lokal                 401/403 key        429 limit        timeout/5xx/offline
+ (tidak hilang bila gagal)             → "Perbarui key"   → hitung mundur  → "Coba lagi" + draft utuh
+```
+
+| Area | Aturan UX |
+|---|---|
+| Status koneksi | Chip per provider: Terhubung / Key salah / Limit / Offline. Cek ringan saat dibuka, bukan tiap pesan. |
+| Streaming | Token tampil bertahap, tombol **Stop** selalu terlihat, auto-scroll berhenti bila pengguna menggulir ke atas, markdown dirender tanpa kedip. |
+| Error taksonomi | Setiap kode punya pesan manusiawi + aksi: 401 → buka Settings key; 429 → tampilkan waktu tunggu (`Retry-After`); 5xx/timeout → coba lagi; offline → antre/draft. Pesan dari `ProviderApiClient` dipetakan ke `UiText` resource (lokalisasi), bukan teks mentah server. |
+| Tidak kehilangan kerja | Prompt dan percakapan disimpan lokal sebelum dikirim. Gagal kirim tidak mengosongkan composer. |
+| Transparansi data | Layar jelas: "Isi percakapan dikirim ke {provider}". Tampilkan provider & model aktif di composer. Opsi mode "hanya lokal" bila tersedia. |
+| Biaya & limit | Tampilkan estimasi token/konteks bila provider mengembalikan usage; peringatan sebelum konteks penuh. |
+| Keamanan key | `ApiKeyVault` (terenkripsi), tampil ter-mask, tombol uji koneksi, tidak pernah masuk log/laporan crash/screenshot (`FLAG_SECURE` pada layar key). |
+| Jaringan | Timeout bertahap, retry eksponensial hanya untuk request idempoten, batalkan saat layar ditinggalkan (coroutine scope terikat ViewModel), `network_security_config` ketat (HTTPS saja kecuali localhost gateway). |
+| Konten AI & i18n | Jawaban AI mengikuti bahasa pengguna (instruksi sistem membawa locale); UI tetap dari resource. Blok kode tetap LTR di RTL. |
+| Aksesibilitas | Streaming diumumkan sebagai `liveRegion = Polite` secara throttled (jangan per token), hasil akhir diumumkan sekali. |
+
+Uji wajib: provider palsu (MockWebServer) untuk skenario 401, 429, 5xx, stream terputus di tengah, respons lambat, dan offline, masing-masing dengan UI test + screenshot.
+
 ### Prinsip khusus app lokal
 
 | Prinsip | Terapan |
 |---|---|
-| Offline-first | Semua fitur inti jalan tanpa jaringan; state **Offline** hanya untuk fitur yang memang butuh jaringan (API provider, update) |
+| Offline-first | Fitur non-AI (Code, Console, Settings, riwayat) jalan tanpa jaringan; state **Offline** hanya untuk fitur AI dan update |
 | Cepat di perangkat terbatas | Uji di RAM 3–4 GB, storage penuh, Android minSdk; I/O berat (chroot, build) di `Dispatchers.IO` + indikator progres dan tombol batal |
 | Daya & panas | Proses panjang (runtime/build) lewat foreground service dengan notifikasi, tidak menahan layar/wakelock tanpa batas |
-| Privasi by default | Tidak ada telemetri keluar; API key hanya di `ApiKeyVault`, tampilan di-mask, tidak masuk log/laporan crash |
+| Privasi by default | Tidak ada telemetri; satu-satunya data keluar adalah prompt ke provider pilihan pengguna; API key hanya di `ApiKeyVault`, tampilan di-mask, tidak masuk log/laporan crash |
 | Data pengguna | Backup/ekspor lokal, konfirmasi sebelum hapus workspace, checkpoint (`WorkspaceCheckpoints` sudah ada) dijadikan pola "Undo" yang terlihat di UI |
 
 ---
