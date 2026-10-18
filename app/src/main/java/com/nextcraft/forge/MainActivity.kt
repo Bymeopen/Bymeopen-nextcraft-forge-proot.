@@ -77,7 +77,11 @@ class MainActivity : ComponentActivity() {
         val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
         window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
         window.statusBarColor = tokens.topBarContainerColor.toArgb()
-        window.navigationBarColor = tokens.bottomBarContainerColor.toArgb()
+        window.navigationBarColor = if (tokens.isGlass) {
+            android.graphics.Color.parseColor("#0B1324")
+        } else {
+            tokens.bottomBarContainerColor.toArgb()
+        }
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.isAppearanceLightStatusBars = !tokens.isDark
         controller.isAppearanceLightNavigationBars = !tokens.isDark

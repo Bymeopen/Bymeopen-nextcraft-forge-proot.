@@ -848,6 +848,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         .toList()
+                        .sortedWith { a, b ->
+                            val aParts = a.path.split('/')
+                            val bParts = b.path.split('/')
+                            val minLen = minOf(aParts.size, bParts.size)
+                            var cmp = 0
+                            for (i in 0 until minLen) {
+                                if (aParts[i] != bParts[i]) {
+                                    val aDir = (i < aParts.lastIndex) || a.isDirectory
+                                    val bDir = (i < bParts.lastIndex) || b.isDirectory
+                                    cmp = if (aDir != bDir) {
+                                        if (aDir) -1 else 1
+                                    } else {
+                                        val ci = aParts[i].compareTo(bParts[i], ignoreCase = true)
+                                        if (ci != 0) ci else aParts[i].compareTo(bParts[i])
+                                    }
+                                    break
+                                }
+                            }
+                            if (cmp != 0) cmp else aParts.size.compareTo(bParts.size)
+                        }
                 }
                 val changedPaths = checkpoints.readChangedPaths(projectId)
                 val changeDetails = if (changedPaths.isNotEmpty()) {
@@ -1360,6 +1380,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearProjectLogcat() {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(lines = emptyList()))
+        }
+    }
+
     fun updatePreviewUrl(url: String) {
         _state.update { it.copy(previewUrl = url) }
     }
@@ -1825,7 +1851,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setAntigravityConfig(model: String, effort: String) {
-        val cleanModel = model.trim().ifEmpty { "gemini-2.5-pro" }
+        val cleanModel = model.trim()
         val cleanEffort = effort.trim().ifEmpty { "high" }
         preferences.antigravityModel = cleanModel
         preferences.antigravityEffort = cleanEffort
@@ -1864,6 +1890,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         "NextCraft Forge is up to date."
                     },
                 )
+            }
+        }
+    }
+
+    fun downloadAndInstallAppUpdate() {
+        val info = _state.value.updateInfo ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(updateStatusMessage = "Downloading v${info.versionName}…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val apk = AppUpdater(getApplication()).download(info) { downloaded, total ->
+                        val pct = if (total > 0) ((downloaded * 100L) / total).coerceIn(0L, 100L) else -1L
+                        val msg = if (pct >= 0) {
+                            "Downloading v${info.versionName} ($pct%)…"
+                        } else {
+                            "Downloading v${info.versionName} (${downloaded / 1024} KB)…"
+                        }
+                        _state.update { it.copy(updateStatusMessage = msg) }
+                    }
+                    AndroidAppInstaller.install(
+                        context = getApplication(),
+                        apk = apk,
+                        launchAfterInstall = false,
+                    )
+                }
+            }
+            result.onSuccess {
+                _state.update { it.copy(updateStatusMessage = "Update v${info.versionName} verified & installing…") }
+            }.onFailure { err ->
+                _state.update { it.copy(updateStatusMessage = "Update install failed: ${err.message}") }
             }
         }
     }

@@ -7,6 +7,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,13 +22,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
@@ -45,6 +50,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +62,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -71,7 +80,15 @@ fun AndroidBuildScreen(
     val build = state.androidBuild
     val isBuilding = build.phase == AndroidBuildPhase.BUILDING
     var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
+    val gradleScrollState = rememberScrollState()
     val tokens = LocalForgeThemeTokens.current
+
+    // BUG-UI-008 Fix: Auto-scroll Gradle output as build log streams in
+    LaunchedEffect(build.log.length, isBuilding) {
+        if (isBuilding && build.log.isNotEmpty()) {
+            gradleScrollState.animateScrollTo(gradleScrollState.maxValue)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -94,13 +111,18 @@ fun AndroidBuildScreen(
                             text = "Android APK Builder (SDK 35 • Bionic aapt2)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = build.message ?: build.stage.displayLabel(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     val (badgeBg, badgeFg) = when (build.phase) {
                         AndroidBuildPhase.SUCCEEDED -> tokens.diffAddedBackground to tokens.successText
                         AndroidBuildPhase.FAILED -> tokens.diffRemovedBackground to tokens.dangerText
@@ -110,12 +132,13 @@ fun AndroidBuildScreen(
                     Surface(
                         color = badgeBg,
                         contentColor = badgeFg,
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(8.dp),
                     ) {
                         Text(
                             text = build.phase.displayBadge(),
                             color = badgeFg,
                             style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         )
@@ -173,8 +196,11 @@ fun AndroidBuildScreen(
             }
         }
 
+        // BUG-UI-008 Fix: Horizontally scrollable FilterChip row so 3 console tabs never overflow on narrow phones
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
@@ -196,7 +222,7 @@ fun AndroidBuildScreen(
 
         when (activeConsoleTab) {
             "gradle" -> {
-                val consoleShape = RoundedCornerShape(10.dp)
+                val consoleShape = RoundedCornerShape(12.dp)
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -204,7 +230,7 @@ fun AndroidBuildScreen(
                         .clip(consoleShape)
                         .background(tokens.terminalBackground)
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, consoleShape)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(gradleScrollState)
                         .padding(12.dp),
                 ) {
                     SelectionContainer {
@@ -236,6 +262,7 @@ fun AndroidBuildScreen(
                 state = state,
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
+                onClearLogcat = viewModel::clearProjectLogcat,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -299,6 +326,8 @@ private fun BuildIssuesList(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = tokens.accentText,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable { onOpenFile(path) },
                         )
                     }
                     Text(
@@ -334,10 +363,20 @@ private fun LogcatPanel(
     state: ForgeUiState,
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
+    onClearLogcat: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
+    val listState = rememberLazyListState()
     val tokens = LocalForgeThemeTokens.current
+
+    val lastLogId = logcat.lines.lastOrNull()?.id ?: 0L
+    LaunchedEffect(lastLogId) {
+        if (logcat.lines.isNotEmpty() && logcat.running) {
+            listState.scrollToItem(logcat.lines.lastIndex)
+        }
+    }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -345,14 +384,28 @@ private fun LogcatPanel(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (logcat.lines.isNotEmpty()) {
+                IconButton(
+                    onClick = onClearLogcat,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear logcat",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
                     Text("Pause")
@@ -364,8 +417,9 @@ private fun LogcatPanel(
             }
         }
 
-        val logcatShape = RoundedCornerShape(10.dp)
+        val logcatShape = RoundedCornerShape(12.dp)
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -401,9 +455,28 @@ fun WebPreviewScreen(
     viewModel: MainViewModel,
 ) {
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
+    var lastLoadedUrl by remember { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val tokens = LocalForgeThemeTokens.current
     val webViewBgArgb = tokens.terminalBackground.toArgb()
+
+    val navigateToInputUrl = {
+        val clean = urlInput.trim()
+        val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
+        if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
+            lastLoadedUrl = clean
+            viewModel.updatePreviewUrl(clean)
+            webViewRef?.loadUrl(clean)
+        }
+    }
+
+    // BUG-UI-008 Fix: Automatically navigate WebView when state.previewUrl changes externally (e.g. PreviewStarted event or port scan)
+    LaunchedEffect(state.previewUrl) {
+        if (state.previewUrl.isNotBlank() && state.previewUrl != lastLoadedUrl) {
+            lastLoadedUrl = state.previewUrl
+            webViewRef?.loadUrl(state.previewUrl)
+        }
+    }
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
@@ -432,19 +505,16 @@ fun WebPreviewScreen(
                         value = urlInput,
                         onValueChange = { urlInput = it },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         label = { Text("Local Dev Server URL (Host NetNS)") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { navigateToInputUrl() }),
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = {
-                            val clean = urlInput.trim()
-                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
-                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
-                                viewModel.updatePreviewUrl(clean)
-                                webViewRef?.loadUrl(clean)
-                            }
-                        },
+                        onClick = { navigateToInputUrl() },
+                        shape = RoundedCornerShape(12.dp),
                     ) {
                         Text("Go")
                     }
@@ -477,6 +547,7 @@ fun WebPreviewScreen(
                             AssistChip(
                                 onClick = {
                                     urlInput = portUrl
+                                    lastLoadedUrl = portUrl
                                     viewModel.updatePreviewUrl(portUrl)
                                     webViewRef?.loadUrl(portUrl)
                                 },
@@ -506,6 +577,7 @@ fun WebPreviewScreen(
                             request: android.webkit.WebResourceRequest,
                         ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
                     }
+                    lastLoadedUrl = state.previewUrl
                     loadUrl(state.previewUrl)
                     webViewRef = this
                 }

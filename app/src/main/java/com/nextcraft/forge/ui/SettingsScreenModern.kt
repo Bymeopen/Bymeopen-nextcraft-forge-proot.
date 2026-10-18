@@ -4,9 +4,12 @@ package com.nextcraft.forge.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -51,12 +55,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
@@ -165,10 +171,32 @@ fun SettingsScreenModern(
                     OutlinedTextField(
                         value = agyModelInput,
                         onValueChange = { agyModelInput = it },
-                        label = { Text("Antigravity Model") },
+                        label = { Text("Antigravity Model (blank = default auto)") },
+                        placeholder = { Text("default (auto) — e.g. gemini-2.5-pro") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf(
+                            "" to "default (auto)",
+                            "gemini-2.5-pro" to "gemini-2.5-pro",
+                            "gemini-2.5-flash" to "gemini-2.5-flash",
+                        ).forEach { (modelVal, label) ->
+                            FilterChip(
+                                selected = agyModelInput.trim() == modelVal,
+                                onClick = {
+                                    agyModelInput = modelVal
+                                    viewModel.setAntigravityConfig(modelVal, agyEffortInput)
+                                },
+                                label = { Text(label, fontFamily = FontFamily.Monospace) },
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -184,7 +212,12 @@ fun SettingsScreenModern(
                             )
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Button(
                             onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
                         ) {
@@ -278,7 +311,9 @@ fun SettingsScreenModern(
                     }
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Button(
@@ -451,7 +486,12 @@ fun SettingsScreenModern(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 Button(
                                     onClick = {
                                         clipboard.setText(AnnotatedString(dc.userCode))
@@ -751,67 +791,109 @@ fun SettingsScreenModern(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ForgeThemeMode.entries.forEach { mode ->
-                        val selected = mode == activeThemeMode
-                        ForgeElevatedCard(
+                    ForgeThemeMode.entries.chunked(2).forEach { rowModes ->
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            selected = selected,
-                            onClick = { viewModel.setThemeMode(mode.id) },
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = mode.title,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (selected) {
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                            } else {
-                                                tokens.cardContainerColor
-                                            },
+                            rowModes.forEach { mode ->
+                                val selected = mode == activeThemeMode
+                                val (canvasSwatch, accentSwatch) = when (mode) {
+                                    ForgeThemeMode.SYSTEM -> Color(0xFF1E293B) to Color(0xFF38BDF8)
+                                    ForgeThemeMode.DARK -> Color(0xFF090C10) to Color(0xFF3B82F6)
+                                    ForgeThemeMode.GLASS -> Color(0xFF060B16) to Color(0xFF38BDF8)
+                                    ForgeThemeMode.WHITE -> Color(0xFFFFFFFF) to Color(0xFFFF385C)
+                                }
+                                ForgeElevatedCard(
+                                    modifier = Modifier.weight(1f),
+                                    selected = selected,
+                                    onClick = { viewModel.setThemeMode(mode.id) },
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(11.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(canvasSwatch)
+                                                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), CircleShape),
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(accentSwatch),
+                                                )
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (selected) {
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                                } else {
+                                                    tokens.cardContainerColor
+                                                },
+                                            ) {
+                                                Text(
+                                                    text = mode.badge,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (selected) {
+                                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                                    } else {
+                                                        tokens.accentText
+                                                    },
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                )
+                                            }
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
                                         ) {
                                             Text(
-                                                text = mode.badge,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
+                                                text = mode.title,
+                                                style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (selected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    tokens.accentText
-                                                },
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
                                             )
+                                            if (selected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = tokens.successText,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            }
                                         }
+                                        Text(
+                                            text = mode.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = mode.subtitle,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (selected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                }
-                                if (selected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = tokens.successText,
-                                    )
                                 }
                             }
                         }
@@ -839,8 +921,41 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
-                Button(onClick = { viewModel.checkForAppUpdates() }) {
-                    Text("Check for App Updates")
+                state.updateInfo?.let { info ->
+                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "Release v${info.versionName} (code ${info.versionCode})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            if (info.notes.isNotBlank()) {
+                                Text(
+                                    text = info.notes,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = { viewModel.checkForAppUpdates() }) {
+                        Text("Check for App Updates")
+                    }
+                    if (state.updateInfo != null) {
+                        Button(onClick = { viewModel.downloadAndInstallAppUpdate() }) {
+                            Text("Download & Install v${state.updateInfo.versionName}")
+                        }
+                    }
                 }
             }
         }

@@ -56,6 +56,7 @@ private sealed interface MarkdownBlock {
     data class BulletItem(val depth: Int, val text: String) : MarkdownBlock
     data class NumberedItem(val number: String, val text: String) : MarkdownBlock
     data class BlockQuote(val text: String) : MarkdownBlock
+    data class Table(val rows: List<List<String>>) : MarkdownBlock
     object HorizontalRule : MarkdownBlock
     data class Paragraph(val text: String) : MarkdownBlock
 }
@@ -80,6 +81,7 @@ fun MarkdownText(
                     is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
+                    is MarkdownBlock.Table -> TableBlockView(block, resolvedColor, tokens)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
@@ -299,7 +301,71 @@ private fun CodeSnippetBlock(
     }
 }
 
+@Composable
+private fun TableBlockView(
+    block: MarkdownBlock.Table,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
+    if (block.rows.isEmpty()) return
+    val shape = RoundedCornerShape(10.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
+        color = tokens.cardContainerColor,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            block.rows.forEachIndexed { rowIdx, cells ->
+                val isHeader = rowIdx == 0 && block.rows.size > 1
+                Row(
+                    modifier = Modifier
+                        .background(
+                            if (isHeader) {
+                                tokens.cardElevatedColor.copy(alpha = 0.78f)
+                            } else if (rowIdx % 2 == 1) {
+                                Color.Transparent
+                            } else {
+                                tokens.cardElevatedColor.copy(alpha = 0.25f)
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    cells.forEach { cellText ->
+                        Text(
+                            text = parseInlineMarkdown(
+                                text = cellText,
+                                accentColor = tokens.accentText,
+                                inlineCodeBg = tokens.inlineCodeBackground,
+                            ),
+                            color = color,
+                            style = if (isHeader) {
+                                MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            } else {
+                                MaterialTheme.typography.bodySmall
+                            },
+                            modifier = Modifier
+                                .width(136.dp)
+                                .padding(end = 10.dp),
+                        )
+                    }
+                }
+                if (rowIdx < block.rows.lastIndex) {
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                }
+            }
+        }
+    }
+}
+
 private val NUMBERED_ITEM_REGEX = Regex("""^(\d+)\.\s+(.*)$""")
+private val TABLE_DIVIDER_REGEX = Regex("""^\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$""")
 
 private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     if (raw.isBlank()) return emptyList()
@@ -309,11 +375,19 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     var codeLang = ""
     val codeBuf = StringBuilder()
     val paraBuf = StringBuilder()
+    val tableRows = ArrayList<List<String>>()
 
     fun flushParagraph() {
         if (paraBuf.isNotEmpty()) {
             blocks += MarkdownBlock.Paragraph(paraBuf.toString().trimEnd())
             paraBuf.setLength(0)
+        }
+    }
+
+    fun flushTable() {
+        if (tableRows.isNotEmpty()) {
+            blocks += MarkdownBlock.Table(tableRows.toList())
+            tableRows.clear()
         }
     }
 
@@ -327,6 +401,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 inCodeBlock = false
             } else {
                 flushParagraph()
+                flushTable()
                 inCodeBlock = true
                 codeLang = trimmed.removePrefix("```").trim()
             }
@@ -336,6 +411,25 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             codeBuf.append(line).append('\n')
             continue
         }
+        val trimmedBoth = trimmed.trimEnd()
+        val isTableRow = trimmedBoth.startsWith("|") && trimmedBoth.endsWith("|") && trimmedBoth.count { it == '|' } >= 2
+        if (isTableRow) {
+            flushParagraph()
+            if (!TABLE_DIVIDER_REGEX.matches(trimmedBoth)) {
+                val cells = trimmedBoth
+                    .removePrefix("|")
+                    .removeSuffix("|")
+                    .split("|")
+                    .map { it.trim() }
+                if (cells.isNotEmpty()) {
+                    tableRows += cells
+                }
+            }
+            continue
+        } else {
+            flushTable()
+        }
+
         when {
             line.isBlank() -> flushParagraph()
             trimmed == "---" || trimmed == "***" -> {
@@ -357,9 +451,9 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 val leadingSpaces = line.length - trimmed.length
                 blocks += MarkdownBlock.BulletItem(leadingSpaces / 2, trimmed.substring(2).trim())
             }
-            trimmed.startsWith("> ") -> {
+            trimmed.startsWith("> ") || trimmed == ">" -> {
                 flushParagraph()
-                blocks += MarkdownBlock.BlockQuote(trimmed.removePrefix("> ").trim())
+                blocks += MarkdownBlock.BlockQuote(trimmed.removePrefix(">").trim())
             }
             else -> {
                 val numMatch = NUMBERED_ITEM_REGEX.matchEntire(trimmed)
@@ -376,6 +470,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     if (inCodeBlock && codeBuf.isNotEmpty()) {
         blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
     }
+    flushTable()
     flushParagraph()
     return blocks
 }
