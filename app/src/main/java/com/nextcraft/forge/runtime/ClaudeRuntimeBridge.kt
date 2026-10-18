@@ -2,6 +2,7 @@ package com.nextcraft.forge.runtime
 
 import android.content.Context
 import android.util.Log
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.DevStack
@@ -43,20 +44,20 @@ internal object ProviderRuntimeErrorDetector {
         val combined = if (json == null) {
             trimmed.lowercase()
         } else buildString {
-            append(json.optString("error"))
-            if (json.optString("type") == "error") {
+            append(json.stringOrEmpty("error"))
+            if (json.stringOrEmpty("type") == "error") {
                 append(' ')
-                append(json.optString("message"))
+                append(json.stringOrEmpty("message"))
                 json.optJSONObject("error")?.let { errObj ->
                     append(' ')
-                    append(errObj.optString("type"))
+                    append(errObj.stringOrEmpty("type"))
                     append(' ')
-                    append(errObj.optString("message"))
+                    append(errObj.stringOrEmpty("message"))
                 }
             }
-            if (json.optString("type") == "result" && json.optBoolean("is_error")) {
+            if (json.stringOrEmpty("type") == "result" && json.optBoolean("is_error")) {
                 append(' ')
-                append(json.optString("result"))
+                append(json.stringOrEmpty("result"))
             }
         }.lowercase()
         return when {
@@ -78,7 +79,7 @@ internal object ProviderRuntimeErrorDetector {
                 "http 401" in combined ||
                 "status 401" in combined ||
                 "401 unauthorized" in combined ||
-                (json?.optString("subtype") == "api_retry" && json.optInt("error_status") == 401) ->
+                (json?.stringOrEmpty("subtype") == "api_retry" && json.optInt("error_status") == 401) ->
                 "The provider rejected the saved API key."
             else -> null
         }
@@ -352,11 +353,11 @@ class ClaudeRuntimeBridge(
                 .map(String::trim)
                 .filter { it.startsWith("{") }
                 .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-                .lastOrNull { it.optString("type") == "result" }
+                .lastOrNull { it.stringOrEmpty("type") == "result" }
             when {
                 result == null -> error(output.trim().takeLast(300).ifBlank { "Claude Code did not answer." })
-                result.optBoolean("is_error") -> error(result.optString("result").ifBlank { result.optString("subtype") })
-                else -> result.optString("result").trim().ifBlank { "ok" }
+                result.optBoolean("is_error") -> error(result.stringOrEmpty("result").ifBlank { result.stringOrEmpty("subtype") })
+                else -> result.stringOrEmpty("result").trim().ifBlank { "ok" }
             }
         } catch (e: TimeoutCancellationException) {
             error("Claude Code did not answer in time. Check your connection and try again.")
@@ -468,12 +469,12 @@ class ClaudeRuntimeBridge(
         val approvalId = file.name.removeSuffix(".request")
         runCatching {
             val json = JSONObject(file.readText())
-            val toolName = json.optString("tool_name", "Tool")
+            val toolName = json.stringOrEmpty("tool_name", "Tool")
             val input = json.optJSONObject("tool_input") ?: JSONObject()
-            val command = input.optString("command").ifBlank { null }
+            val command = input.stringOrEmpty("command").ifBlank { null }
             val paths = listOf("file_path", "path", "notebook_path")
-                .mapNotNull { key -> input.optString(key).takeIf(String::isNotBlank) }
-            val explanation = input.optString("description")
+                .mapNotNull { key -> input.stringOrEmpty(key).takeIf(String::isNotBlank) }
+            val explanation = input.stringOrEmpty("description")
                 .ifBlank { command.orEmpty() }
                 .ifBlank { "$toolName running in project" }
 
@@ -525,27 +526,27 @@ class ClaudeRuntimeBridge(
     }
 
     private suspend fun consumeClaudeJsonEvent(sessionId: String, json: JSONObject) {
-        when (json.optString("type")) {
+        when (json.stringOrEmpty("type")) {
             "stream_event" -> json.optJSONObject("event")?.let { consumeClaudeJsonEvent(sessionId, it) }
-            "system" -> when (json.optString("subtype")) {
+            "system" -> when (json.stringOrEmpty("subtype")) {
                 "init" -> Unit
                 "thinking_tokens" -> emitReasoningProgress(sessionId, json.optInt("estimated_tokens"))
                 "permission_denied" -> eventBus.emit(
                     RuntimeEvent.RuntimeLog(
                         sessionId,
                         "Permission denied",
-                        sanitizeForDisplay(json.optString("decision_reason").ifBlank { json.optString("message") }),
+                        sanitizeForDisplay(json.stringOrEmpty("decision_reason").ifBlank { json.stringOrEmpty("message") }),
                     ),
                 )
             }
             "content_block_start" -> {
                 val block = json.optJSONObject("content_block")
-                when (block?.optString("type")) {
+                when (block?.stringOrEmpty("type")) {
                     "thinking" -> {
                         currentThinkingBlockId += 1
                         streamedThinking.clear()
                         emitReasoningSummary(sessionId, "", startsNewBlock = true)
-                        block.optString("thinking").takeIf(String::isNotBlank)?.let {
+                        block.stringOrEmpty("thinking").takeIf(String::isNotBlank)?.let {
                             streamedThinking.append(it)
                             emitReasoningSummary(sessionId, it, force = true)
                         }
@@ -555,12 +556,12 @@ class ClaudeRuntimeBridge(
             }
             "content_block_delta" -> {
                 val delta = json.optJSONObject("delta")
-                when (delta?.optString("type")) {
-                    "thinking_delta" -> delta.optString("thinking").takeIf(String::isNotEmpty)?.let {
+                when (delta?.stringOrEmpty("type")) {
+                    "thinking_delta" -> delta.stringOrEmpty("thinking").takeIf(String::isNotEmpty)?.let {
                         streamedThinking.append(it)
                         emitReasoningSummary(sessionId, streamedThinking.toString())
                     }
-                    "text_delta", "" -> delta.optString("text").takeIf(String::isNotEmpty)?.let {
+                    "text_delta", "" -> delta.stringOrEmpty("text").takeIf(String::isNotEmpty)?.let {
                         streamedText.append(it)
                         eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, it))
                     }
@@ -576,13 +577,13 @@ class ClaudeRuntimeBridge(
                 val content = message.optJSONArray("content") ?: return
                 for (index in 0 until content.length()) {
                     val block = content.optJSONObject(index) ?: continue
-                    when (block.optString("type")) {
+                    when (block.stringOrEmpty("type")) {
                         "text" -> if (streamedText.isEmpty()) {
-                            block.optString("text").takeIf(String::isNotBlank)?.let {
+                            block.stringOrEmpty("text").takeIf(String::isNotBlank)?.let {
                                 eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, it))
                             }
                         }
-                        "thinking" -> block.optString("thinking").takeIf(String::isNotBlank)?.let {
+                        "thinking" -> block.stringOrEmpty("thinking").takeIf(String::isNotBlank)?.let {
                             if (currentThinkingBlockId == 0L || streamedThinking.toString() != it) {
                                 currentThinkingBlockId += 1
                                 streamedThinking.clear()
@@ -600,7 +601,7 @@ class ClaudeRuntimeBridge(
                     }
                 }
                 streamedText.clear()
-                if (message.optString("stop_reason") == "end_turn") {
+                if (message.stringOrEmpty("stop_reason") == "end_turn") {
                     turnCompletedFromStream = true
                 }
             }
@@ -608,15 +609,15 @@ class ClaudeRuntimeBridge(
                 val content = json.optJSONObject("message")?.optJSONArray("content") ?: return
                 for (index in 0 until content.length()) {
                     val block = content.optJSONObject(index) ?: continue
-                    if (block.optString("type") == "tool_result") {
-                        val toolId = block.optString("tool_use_id")
+                    if (block.stringOrEmpty("type") == "tool_result") {
+                        val toolId = block.stringOrEmpty("tool_use_id")
                         val toolName = toolNames.remove(toolId) ?: "Tool"
                         val contentArray = block.optJSONArray("content")
                         val extractedContent = if (contentArray != null) {
                             buildString {
                                 for (itemIndex in 0 until contentArray.length()) {
                                     val item = contentArray.optJSONObject(itemIndex)
-                                    val text = item?.optString("text")?.takeIf(String::isNotBlank)
+                                    val text = item?.stringOrEmpty("text")?.takeIf(String::isNotBlank)
                                         ?: contentArray.optString(itemIndex).takeIf(String::isNotBlank)
                                     if (text != null) {
                                         if (isNotEmpty()) append('\n')
@@ -625,7 +626,7 @@ class ClaudeRuntimeBridge(
                                 }
                             }
                         } else {
-                            block.optString("content")
+                            block.stringOrEmpty("content")
                         }
                         val result = extractedContent
                             .ifBlank { if (block.optBoolean("is_error")) "Tool failed" else "Completed successfully" }
@@ -635,7 +636,7 @@ class ClaudeRuntimeBridge(
             }
             "result" -> {
                 if (json.optBoolean("is_error")) {
-                    val message = json.optString("result").ifBlank { "Claude Code reported an error" }
+                    val message = json.stringOrEmpty("result").ifBlank { "Claude Code reported an error" }
                     throw IllegalStateException(message)
                 }
                 turnCompletedFromStream = true
@@ -681,19 +682,19 @@ class ClaudeRuntimeBridge(
     }
 
     private suspend fun emitToolStarted(sessionId: String, block: JSONObject) {
-        val id = block.optString("id")
+        val id = block.stringOrEmpty("id")
         if (id.isNotBlank() && !seenToolCalls.add(id)) return
-        val name = block.optString("name", "Tool")
+        val name = block.stringOrEmpty("name", "Tool")
         if (id.isNotBlank()) toolNames[id] = name
         val input = block.optJSONObject("input") ?: JSONObject()
         val detail = when (name) {
-            "Bash" -> input.optString("command").ifBlank { input.optString("description") }
-            "Write", "Edit", "Read", "NotebookEdit" -> input.optString("file_path").ifBlank { input.optString("notebook_path") }
-            "Glob" -> input.optString("pattern")
-            "Grep" -> input.optString("pattern").let { pattern ->
-                input.optString("path").takeIf(String::isNotBlank)?.let { "$pattern in $it" } ?: pattern
+            "Bash" -> input.stringOrEmpty("command").ifBlank { input.stringOrEmpty("description") }
+            "Write", "Edit", "Read", "NotebookEdit" -> input.stringOrEmpty("file_path").ifBlank { input.stringOrEmpty("notebook_path") }
+            "Glob" -> input.stringOrEmpty("pattern")
+            "Grep" -> input.stringOrEmpty("pattern").let { pattern ->
+                input.stringOrEmpty("path").takeIf(String::isNotBlank)?.let { "$pattern in $it" } ?: pattern
             }
-            else -> input.optString("description").ifBlank { "Running $name" }
+            else -> input.stringOrEmpty("description").ifBlank { "Running $name" }
         }
         eventBus.emit(RuntimeEvent.ToolStarted(sessionId, name, sanitizeForDisplay(detail.ifBlank { "Running $name" })))
         val compactDetail = detail.replace(Regex("\\s+"), " ").trim().take(80).ifBlank { name }

@@ -2411,7 +2411,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
 
             case "${'$'}GUEST_WORKSPACE" in
-                *..*|/workspace/.|/workspace/*/*)
+                *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
                     echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
                     exit 65
                     ;;
@@ -2521,7 +2521,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
                 chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
             }
-            trap fix_workspace_ownership EXIT INT TERM
+            # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
+            # resume execution (keep mounting) and run the ownership fix twice.
+            trap fix_workspace_ownership EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
 
             unset ANDROID_ROOT ANDROID_DATA ANDROID_ART_ROOT ANDROID_I18N_ROOT ANDROID_TZDATA_ROOT
             unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_RUNTIME_ROOT ANDROID_STORAGE

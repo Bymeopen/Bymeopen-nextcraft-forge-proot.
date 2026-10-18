@@ -3,6 +3,7 @@ package com.nextcraft.forge.runtime
 import android.util.Log
 import com.nextcraft.forge.model.ProviderProtocol
 import com.nextcraft.forge.model.ProviderProfile
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
@@ -278,7 +279,7 @@ internal class LocalFormatGateway(
         }
         val message = source.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: JSONObject()
         val content = JSONArray()
-        val text = message.optString("content")
+        val text = message.stringOrEmpty("content")
         if (text.isNotBlank()) content.put(JSONObject().put("type", "text").put("text", text))
         val calls = message.optJSONArray("tool_calls") ?: JSONArray()
         for (index in 0 until calls.length()) {
@@ -293,9 +294,15 @@ internal class LocalFormatGateway(
             )
         }
         val usage = source.optJSONObject("usage") ?: JSONObject()
+        val finishReason = source.optJSONArray("choices")?.optJSONObject(0)?.stringOrEmpty("finish_reason").orEmpty()
+        val stopReason = when {
+            calls.length() > 0 -> "tool_use"
+            finishReason == "length" -> "max_tokens"
+            else -> "end_turn"
+        }
         return JSONObject().put("id", source.optString("id").ifBlank { "msg_${UUID.randomUUID()}" })
             .put("type", "message").put("role", "assistant").put("model", model)
-            .put("content", content).put("stop_reason", if (calls.length() > 0) "tool_use" else "end_turn")
+            .put("content", content).put("stop_reason", stopReason)
             .put("stop_sequence", JSONObject.NULL)
             .put("usage", JSONObject().put("input_tokens", usage.optInt("prompt_tokens")).put("output_tokens", usage.optInt("completion_tokens")))
     }
@@ -518,6 +525,7 @@ internal class LocalFormatGateway(
         var openBlockIndex = -1
         val activeToolSlots = HashMap<Int, Int>()
         var sawToolCalls = false
+        var truncated = false
         var inputTokens = 0
         var outputTokens = 0
 
@@ -541,9 +549,10 @@ internal class LocalFormatGateway(
                 outputTokens = usage.optInt("completion_tokens", usage.optInt("output_tokens", outputTokens))
             }
             val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
+            if (choice.stringOrEmpty("finish_reason") == "length") truncated = true
             val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: continue
 
-            val reasoningDelta = delta.optString("reasoning_content").ifEmpty { delta.optString("reasoning") }
+            val reasoningDelta = delta.stringOrEmpty("reasoning_content").ifEmpty { delta.stringOrEmpty("reasoning") }
             if (reasoningDelta.isNotEmpty()) {
                 if (openBlockType != "thinking") {
                     closeOpenBlock()
@@ -567,7 +576,7 @@ internal class LocalFormatGateway(
                 )
             }
 
-            val textDelta = if (delta.isNull("content")) "" else delta.optString("content")
+            val textDelta = delta.stringOrEmpty("content")
             if (textDelta.isNotEmpty()) {
                 if (openBlockType != "text") {
                     closeOpenBlock()
@@ -598,9 +607,9 @@ internal class LocalFormatGateway(
                     sawToolCalls = true
                     val slot = tc.optInt("index", tcIdx)
                     val fn = tc.optJSONObject("function")
-                    val id = tc.optString("id")
-                    val name = fn?.optString("name").orEmpty()
-                    val argsDelta = fn?.optString("arguments").orEmpty()
+                    val id = tc.stringOrEmpty("id")
+                    val name = fn?.stringOrEmpty("name").orEmpty()
+                    val argsDelta = fn?.stringOrEmpty("arguments").orEmpty()
                     if (slot !in activeToolSlots) {
                         closeOpenBlock()
                         val idx = nextBlockIndex++
@@ -644,7 +653,7 @@ internal class LocalFormatGateway(
                 .put(
                     "delta",
                     JSONObject()
-                        .put("stop_reason", if (sawToolCalls) "tool_use" else "end_turn")
+                        .put("stop_reason", if (sawToolCalls) "tool_use" else if (truncated) "max_tokens" else "end_turn")
                         .put("stop_sequence", JSONObject.NULL),
                 )
                 .put("usage", JSONObject().put("input_tokens", inputTokens).put("output_tokens", outputTokens)),

@@ -19,7 +19,7 @@ shift 5
 
 # Validasi keamanan path guest workspace (wajib /root, /workspace, atau /workspace/<slug> tanpa '..' atau nested '/')
 case "$GUEST_WORKSPACE" in
-    *..*|/workspace/.|/workspace/*/*)
+    *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
         echo "Invalid guest workspace path: $GUEST_WORKSPACE" >&2
         exit 65
         ;;
@@ -56,7 +56,11 @@ cleanup_ownership() {
     chown -R "$APP_UID:$APP_UID" "$BRIDGE_HOST" 2>/dev/null || true
     chmod -R u+rwX,g+rwX "$BRIDGE_HOST" 2>/dev/null || true
 }
-trap cleanup_ownership EXIT INT TERM
+# INT/TERM harus mengakhiri skrip (exit memicu EXIT trap sekali); trap handler biasa akan
+# melanjutkan eksekusi (mis. terus me-mount) dan menjalankan cleanup dua kali.
+trap cleanup_ownership EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Fungsi Idempotent Mount untuk direktori sistem statis
 mount_once() {
