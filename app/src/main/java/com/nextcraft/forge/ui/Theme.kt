@@ -169,10 +169,10 @@ private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
     onBackground = Color(0xFFF8FAFC),
     surface = Color(0xF0111827), // High opacity for DropdownMenu & AlertDialog popups (THEME-BUG-022)
     onSurface = Color(0xFFF8FAFC),
-    surfaceVariant = Color(0xA61E293B),
+    surfaceVariant = Color(0x661E293B),
     onSurfaceVariant = Color(0xFFCBD5E1),
-    outline = Color(0x47FFFFFF),
-    outlineVariant = Color(0x24FFFFFF),
+    outline = Color(0x55FFFFFF),
+    outlineVariant = Color(0x2EFFFFFF),
     error = Color(0xFFF87171),
     onError = Color(0xFF450A0A),
     errorContainer = Color(0x99450A0A),
@@ -223,15 +223,15 @@ private val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
 // Pre-allocated Brushes & Tokens to prevent recomposition allocation thrashing (THEME-BUG-025)
 private val GlassSpecularBorderBrush = Brush.linearGradient(
     colors = listOf(
-        Color.White.copy(alpha = 0.28f),
-        Color.White.copy(alpha = 0.07f),
+        Color.White.copy(alpha = 0.38f),
+        Color.White.copy(alpha = 0.12f),
     ),
 )
 
 private val GlassInnerBorderBrush = Brush.linearGradient(
     colors = listOf(
-        Color.White.copy(alpha = 0.18f),
-        Color.White.copy(alpha = 0.04f),
+        Color.White.copy(alpha = 0.24f),
+        Color.White.copy(alpha = 0.08f),
     ),
 )
 
@@ -282,24 +282,24 @@ private val GlassThemeTokens = ForgeThemeTokens(
     isWhite = false,
     canvasBrush = GlassCosmicCanvasBrush,
     windowBackgroundArgb = Color(0xFF090D16).toArgb(),
-    cardContainerColor = Color(0xFF1E293B).copy(alpha = 0.62f),
-    cardElevatedColor = Color(0xFF283750).copy(alpha = 0.72f),
+    cardContainerColor = Color(0xFF1E293B).copy(alpha = 0.30f),
+    cardElevatedColor = Color(0xFF283750).copy(alpha = 0.42f),
     cardBorderStroke = BorderStroke(0.8.dp, GlassSpecularBorderBrush),
     elevatedBorderStroke = BorderStroke(0.8.dp, GlassInnerBorderBrush),
     cardCornerRadius = 22.dp,
-    topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.76f),
-    bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.82f),
+    topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.30f),
+    bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.38f),
     accentText = Color(0xFF60A5FA),
     successText = Color(0xFF2DD4BF),
     warningText = Color(0xFFFBBF24),
     dangerText = Color(0xFFF87171),
-    terminalBackground = Color(0xFF090D16).copy(alpha = 0.72f),
-    terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.78f),
+    terminalBackground = Color(0xFF090D16).copy(alpha = 0.58f),
+    terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.45f),
     terminalText = Color(0xFFF8FAFC),
     inlineCodeBackground = Color(0x4060A5FA),
-    diffAddedBackground = Color(0x73064E3B),
+    diffAddedBackground = Color(0x40064E3B),
     diffAddedText = Color(0xFFA7F3D0),
-    diffRemovedBackground = Color(0x737F1D1D),
+    diffRemovedBackground = Color(0x407F1D1D),
     diffRemovedText = Color(0xFFFECACA),
     selectionColors = TextSelectionColors(
         handleColor = Color(0xFF60A5FA),
