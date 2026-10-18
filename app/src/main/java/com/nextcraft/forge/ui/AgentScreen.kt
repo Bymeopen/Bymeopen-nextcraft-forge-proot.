@@ -354,8 +354,10 @@ private fun ChatTabsRow(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = stringResource(R.string.agent_delete_chat),
                                     modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable { onDeleteChat(chat.id) },
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .clickable(role = Role.Button) { onDeleteChat(chat.id) }
+                                        .padding(9.dp),
                                 )
                             }
                         } else {
@@ -656,8 +658,11 @@ private fun ChatMessageCard(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable { expandTools = !expandTools }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .clickable(
+                                role = Role.Button,
+                                onClickLabel = stringResource(if (expandTools) R.string.a11y_collapse else R.string.a11y_expand),
+                            ) { expandTools = !expandTools }
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(

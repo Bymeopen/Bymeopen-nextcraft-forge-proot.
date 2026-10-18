@@ -306,7 +306,7 @@ fun ForgePillTabs(
             val selected = index == selectedIndex
             Box(
                 modifier = Modifier
-                    .height(34.dp)
+                    .heightIn(min = 34.dp)
                     .clip(RoundedCornerShape(100))
                     .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
                     .clickable(role = Role.Tab, onClickLabel = label) { onSelect(index) }
@@ -336,7 +336,7 @@ fun ForgePrimaryButton(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(100),
-        modifier = modifier.height(44.dp),
+        modifier = modifier.heightIn(min = 44.dp),
     ) {
         Text(text = text, fontWeight = FontWeight.SemiBold)
     }

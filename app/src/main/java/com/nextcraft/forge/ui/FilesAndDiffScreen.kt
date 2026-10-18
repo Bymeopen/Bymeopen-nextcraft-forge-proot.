@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun FilesAndDiffScreen(
@@ -201,7 +202,7 @@ private fun WorkspaceTreeList(
                             Color.Transparent
                         },
                     )
-                    .clickable(enabled = !entry.isDirectory) { onSelectFile(entry.path) }
+                    .clickable(enabled = !entry.isDirectory, role = Role.Button) { onSelectFile(entry.path) }
                     .padding(
                         start = (12 + entry.depth * 14).dp,
                         end = 12.dp,
@@ -401,7 +402,7 @@ private fun WorkspaceDiffReviewList(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable { onOpenFile(item.path) },
+                                    .clickable(role = Role.Button) { onOpenFile(item.path) },
                             )
                             Text(
                                 text = "+${item.additions}",

@@ -66,6 +66,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun SettingsScreenModern(
@@ -221,7 +222,7 @@ fun SettingsScreenModern(
                                 if (selected) {
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
+                                        contentDescription = stringResource(R.string.a11y_selected),
                                         tint = tokens.successText,
                                     )
                                 }
@@ -272,7 +273,7 @@ fun SettingsScreenModern(
                             if (selected) {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
+                                    contentDescription = stringResource(R.string.a11y_selected),
                                     tint = tokens.successText,
                                 )
                             }
@@ -482,7 +483,7 @@ fun SettingsScreenModern(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.selectActiveApiKey(keyInfo.id) }
+                                .clickable(role = Role.Button) { viewModel.selectActiveApiKey(keyInfo.id) }
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {

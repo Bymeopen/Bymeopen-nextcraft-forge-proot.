@@ -257,7 +257,7 @@ private fun ForgeTopBar(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { projectMenuExpanded = true }
+                            .clickable(role = Role.Button) { projectMenuExpanded = true }
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -307,7 +307,7 @@ private fun ForgeTopBar(
                                 },
                                 leadingIcon = {
                                     if (project.id == state.activeProjectId) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
+                                        Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected))
                                     }
                                 },
                                 trailingIcon = {
@@ -631,7 +631,7 @@ private fun RuntimeOnboardingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isInstalling) { onToggleStack(stack) }
+                            .clickable(enabled = !isInstalling, role = Role.Button) { onToggleStack(stack) }
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
