@@ -56,6 +56,7 @@ import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.combinedClickable
 
 /**
  * Linear-style toggle cell: label and optional description on the left, switch on the right.
@@ -289,11 +290,14 @@ fun ForgePillIcon(
 
 /** Text tabs; the selected one sits in a soft pill. */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun ForgePillTabs(
     items: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onLongPress: ((Int) -> Unit)? = null,
+    longPressLabel: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Row(
@@ -310,7 +314,13 @@ fun ForgePillTabs(
                     .heightIn(min = 34.dp)
                     .clip(RoundedCornerShape(100))
                     .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
-                    .clickable(role = Role.Tab, onClickLabel = label) { onSelect(index) }
+                    .combinedClickable(
+                        role = Role.Tab,
+                        onClickLabel = label,
+                        onLongClickLabel = longPressLabel,
+                        onLongClick = onLongPress?.let { cb -> { cb(index) } },
+                        onClick = { onSelect(index) },
+                    )
                     .padding(horizontal = 15.dp),
                 contentAlignment = Alignment.Center,
             ) {

@@ -121,17 +121,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     Scaffold(
         containerColor = Color.Transparent,
-        topBar = {
-            // Every screen except Agent now draws its own large title; Agent keeps the project/agent switcher bar.
-            if (state.activeTab == ForgeTab.AGENT) ForgeTopBar(
-                state = state,
-                onSelectProject = viewModel::selectProject,
-                onDeleteProject = viewModel::deleteProject,
-                onOpenNewProject = { showNewProjectDialog = true },
-                onSelectAgent = viewModel::selectAgent,
-                onSelectThemeMode = viewModel::setThemeMode,
-            )
-        },
+        topBar = {},
         bottomBar = {
             // adjustResize lifts the bar above the keyboard and eats the composer's space; hide it while typing.
             if (!imeVisible) {

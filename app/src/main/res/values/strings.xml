@@ -304,4 +304,16 @@
     <string name="nav_badge_agent_running">Agent is running</string>
     <string name="nav_badge_files_changed">%1$d files changed</string>
     <string name="nav_badge_terminal_busy">Process running in terminal</string>
+    <string name="agent_title">Agent</string>
+    <string name="agent_switch_agent">Switch agent</string>
+    <string name="agent_more">More</string>
+    <string name="agent_approval_title">Approval needed</string>
+    <string name="agent_approval_sub">%1$s · %2$s risk</string>
+    <string name="agent_google_account">Google account</string>
+    <string name="agent_required_for_antigravity">Required for Antigravity</string>
+    <string name="agent_welcome_hint">Ask anything about this workspace, or start with a suggestion.</string>
+    <string name="agent_sugg_inspect">Inspect this workspace and summarize its architecture.</string>
+    <string name="agent_sugg_compose">Create a responsive Jetpack Compose screen with clean state management.</string>
+    <string name="agent_sugg_tests">Run the test suite or verify scripts inside the Ubuntu Root Chroot.</string>
+    <string name="agent_sugg_audit">Audit the codebase for concurrency, security, and edge-case bugs.</string>
 </resources>

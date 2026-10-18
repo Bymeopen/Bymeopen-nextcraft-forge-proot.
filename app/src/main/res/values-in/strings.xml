@@ -301,4 +301,16 @@
     <string name="nav_badge_agent_running">Agen berjalan</string>
     <string name="nav_badge_files_changed">%1$d file berubah</string>
     <string name="nav_badge_terminal_busy">Proses berjalan di terminal</string>
+    <string name="agent_title">Agent</string>
+    <string name="agent_switch_agent">Ganti agen</string>
+    <string name="agent_more">Lainnya</string>
+    <string name="agent_approval_title">Perlu persetujuan</string>
+    <string name="agent_approval_sub">%1$s · risiko %2$s</string>
+    <string name="agent_google_account">Akun Google</string>
+    <string name="agent_required_for_antigravity">Diperlukan untuk Antigravity</string>
+    <string name="agent_welcome_hint">Tanyakan apa saja tentang workspace ini, atau mulai dari saran.</string>
+    <string name="agent_sugg_inspect">Periksa workspace ini dan ringkas arsitekturnya.</string>
+    <string name="agent_sugg_compose">Buat layar Jetpack Compose responsif dengan manajemen state yang rapi.</string>
+    <string name="agent_sugg_tests">Jalankan test suite atau skrip verifikasi di dalam Ubuntu Root Chroot.</string>
+    <string name="agent_sugg_audit">Audit kode untuk bug konkurensi, keamanan, dan kasus tepi.</string>
 </resources>
