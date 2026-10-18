@@ -3,6 +3,7 @@ package com.nextcraft.forge.ui
 import android.app.Application
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -536,6 +537,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activeLogcatProcess?.destroyForcibly()
             activeLogcatProcess = null
             activeLogcatJob?.cancel()
+            // A file read still running for the previous project must not land in this one.
+            openFileRequest++
         }
         val chats = preferences.loadProjectChats(project.id)
         val chatId = chats.firstOrNull()?.id ?: "main"
@@ -1115,8 +1118,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.getOrDefault("[Read-only: file could not be read]" to false)
             }
-            // A slower earlier read must not overwrite the file the user opened afterwards.
-            if (requestId != openFileRequest) return@launch
+            // A slower earlier read must not overwrite the file the user opened afterwards, nor show up (and later be
+            // saved) in another project the user switched to meanwhile.
+            if (requestId != openFileRequest || _state.value.activeProjectId != project.id) return@launch
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
@@ -1542,25 +1546,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
             }
-            getApplication<Application>().startService(
-                Intent(getApplication(), RuntimeExecutionService::class.java)
-                    .setAction(
-                        when {
-                            cancelled -> RuntimeExecutionService.ACTION_CANCELLED
-                            succeeded -> RuntimeExecutionService.ACTION_COMPLETE
-                            else -> RuntimeExecutionService.ACTION_FAILED
-                        },
-                    )
-                    .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
-                    .putExtra(
-                        RuntimeExecutionService.EXTRA_DETAIL,
-                        when {
-                            cancelled -> "Android build cancelled"
-                            succeeded -> "Android build succeeded"
-                            else -> "Android build failed"
-                        },
-                    ),
-            )
+            // The agent shares this foreground service and may already have stopped it; starting a service from the
+            // background then throws (Android 8+), which would crash the app in viewModelScope.
+            runCatching {
+                getApplication<Application>().startService(
+                    Intent(getApplication(), RuntimeExecutionService::class.java)
+                        .setAction(
+                            when {
+                                cancelled -> RuntimeExecutionService.ACTION_CANCELLED
+                                succeeded -> RuntimeExecutionService.ACTION_COMPLETE
+                                else -> RuntimeExecutionService.ACTION_FAILED
+                            },
+                        )
+                        .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
+                        .putExtra(
+                            RuntimeExecutionService.EXTRA_DETAIL,
+                            when {
+                                cancelled -> "Android build cancelled"
+                                succeeded -> "Android build succeeded"
+                                else -> "Android build failed"
+                            },
+                        ),
+                )
+            }.onFailure { error ->
+                Log.w("MainViewModel", "Could not post the build result notification", error)
+                runCatching {
+                    getApplication<Application>().stopService(Intent(getApplication(), RuntimeExecutionService::class.java))
+                }
+            }
             if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }

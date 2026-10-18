@@ -1052,7 +1052,6 @@ class RuntimeInstaller(private val context: Context) {
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        var verified = true
         when (stack) {
             DevStack.WEB -> {
                 onProgress(RuntimeInstallProgress("Checking Node.js and npm…", from))
@@ -1060,16 +1059,18 @@ class RuntimeInstaller(private val context: Context) {
             }
             DevStack.PYTHON -> {
                 installRuntimeOverlay(pythonBundle(), "Installing Python toolchain…", from, to, onProgress)
+                // A failed check must fail the stack: returning normally reported "Python stack is ready" and left it
+                // out of the failures that ensureInstalled reports.
                 runCatching {
                     verifyGuest(chrootExec, "python3 --version && pip3 --version", "Failed to verify Python")
                 }.onFailure { error ->
-                    verified = false
                     onProgress(
                         RuntimeInstallProgress(
                             "Python verification failed: ${error.message?.take(120).orEmpty()}",
                             to,
                         ),
                     )
+                    throw error
                 }
             }
             DevStack.ANDROID -> {
@@ -1101,7 +1102,6 @@ class RuntimeInstaller(private val context: Context) {
                 verifyGuest(chrootExec, "php --version && composer --version", "Failed to verify PHP and Composer")
             }
         }
-        if (!verified) return
         writeDevStackState(readDevStackState().apply { put(stack.name, true) })
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
