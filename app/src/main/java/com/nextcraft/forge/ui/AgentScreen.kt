@@ -98,6 +98,8 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -686,8 +688,10 @@ private fun ChatMessageCard(
         MessageContainer(fromUser = true, contentColor = textColor) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (message.text.isNotBlank()) {
-                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
-                    CopyMessageButton(message.text)
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false, modifier = Modifier.padding(end = 32.dp))
+                        CopyMessageButton(message.text, Modifier.align(Alignment.TopEnd))
+                    }
                 }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -712,9 +716,9 @@ private fun ChatMessageCard(
         }
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
-                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
-                    CopyMessageButton(message.text)
+                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false, modifier = Modifier.padding(end = 32.dp))
+                    CopyMessageButton(message.text, Modifier.align(Alignment.TopEnd))
                 }
             }
         } else if (message.workItems.isEmpty()) {
@@ -733,27 +737,38 @@ private fun ChatMessageCard(
  * but it is easy to miss and can be lost while the list updates, so copying must not depend on it.
  */
 @Composable
-private fun CopyMessageButton(text: String) {
+private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
-    androidx.compose.material3.TextButton(
-        onClick = {
-            clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-            copied = true
-            scope.launch {
-                kotlinx.coroutines.delay(1_500)
-                copied = false
-            }
-        },
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        modifier = Modifier.heightIn(min = 32.dp),
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    val label = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy)
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.Button, onClickLabel = label) {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                copied = true
+                scope.launch {
+                    kotlinx.coroutines.delay(1_500)
+                    copied = false
+                }
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (copied) {
+            Icon(Icons.Default.Check, contentDescription = label, tint = tint, modifier = Modifier.size(16.dp))
+        } else {
+            // Copy glyph (two overlapping rounded sheets); the core icon set has no ContentCopy.
+            androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp).semantics { contentDescription = label }) {
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx())
+                val sheet = androidx.compose.ui.geometry.Size(size.width * 0.62f, size.height * 0.68f)
+                val radius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                drawRoundRect(tint, topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.34f, 0f), size = sheet, cornerRadius = radius, style = stroke)
+                drawRoundRect(tint, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height * 0.30f), size = sheet, cornerRadius = radius, style = stroke)
+            }
+        }
     }
 }
 
