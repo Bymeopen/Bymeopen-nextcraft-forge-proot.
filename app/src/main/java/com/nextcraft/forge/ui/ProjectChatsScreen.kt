@@ -1,4 +1,8 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.nextcraft.forge.ui
+
+import androidx.compose.foundation.ExperimentalFoundationApi
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +115,7 @@ fun ProjectChatsScreen(
                 val active = chat.id == state.activeChatId
                 Row(
                     modifier = Modifier
+                        .animateItemPlacement()
                         .fillMaxWidth()
                         .clickable(role = Role.Button) { viewModel.openChat(chat.id) }
                         .heightIn(min = 60.dp)

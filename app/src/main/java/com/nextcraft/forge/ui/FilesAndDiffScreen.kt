@@ -243,6 +243,7 @@ fun FilesAndDiffScreen(
 
     pendingDeletePath?.let { targetPath ->
         AlertDialog(
+            modifier = Modifier.forgePopIn(),
             onDismissRequest = { pendingDeletePath = null },
             title = { Text(stringResource(R.string.files_delete_file_confirm_title)) },
             text = { Text(stringResource(R.string.files_delete_file_confirm_message, targetPath)) },
@@ -498,6 +499,7 @@ private fun NameDialog(
 ) {
     var value by rememberSaveable { mutableStateOf(initial) }
     AlertDialog(
+        modifier = Modifier.forgePopIn(),
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
         title = { Text(title, fontWeight = FontWeight.SemiBold) },
@@ -806,6 +808,7 @@ private fun NewWorkspaceFileDialog(
 ) {
     var path by rememberSaveable(baseDir) { mutableStateOf(if (baseDir.isEmpty()) "" else "$baseDir/") }
     AlertDialog(
+        modifier = Modifier.forgePopIn(),
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
         title = { Text(stringResource(R.string.files_create_new_file), fontWeight = FontWeight.SemiBold) },

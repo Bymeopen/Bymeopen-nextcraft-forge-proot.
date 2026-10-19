@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
@@ -274,11 +275,13 @@ fun ForgePillIcon(
     enabled: Boolean = true,
     tint: Color = MaterialTheme.colorScheme.onSurface,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
+            .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 44.dp, height = 38.dp)
             .clip(RoundedCornerShape(100))
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -345,11 +348,13 @@ fun ForgePrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(100),
-        modifier = modifier.heightIn(min = 44.dp),
+        interactionSource = interaction,
+        modifier = modifier.forgePressScale(interaction).heightIn(min = 44.dp),
     ) {
         Text(text = text, fontWeight = FontWeight.SemiBold)
     }

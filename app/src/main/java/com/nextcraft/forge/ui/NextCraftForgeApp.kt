@@ -106,6 +106,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     state.unsavedChangesPrompt?.let { path ->
         AlertDialog(
+            modifier = Modifier.forgePopIn(),
             onDismissRequest = viewModel::cancelLeavingFile,
             title = { Text(stringResource(R.string.files_unsaved_title)) },
             text = { Text(stringResource(R.string.files_unsaved_message, path)) },
@@ -242,9 +243,21 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 }
             }
 
-            Box(modifier = Modifier.weight(1f)) {
-                when (state.activeTab) {
-                    ForgeTab.PROJECTS -> when (state.projectView) {
+            // Screen host: inside Projects, going deeper (list → chats → conversation) pushes from the right and
+            // Back pops; tab and pane changes cross-fade. One key per visible screen.
+            val depth = when (state.projectView) { ProjectView.LIST -> 0; ProjectView.CHATS -> 1; ProjectView.CONVERSATION -> 2 }
+            var lastDepth by remember { mutableStateOf(depth) }
+            val forward = depth >= lastDepth
+            val slide = state.activeTab == ForgeTab.PROJECTS && state.projectPane == ProjectPane.CHAT && depth != lastDepth
+            androidx.compose.runtime.SideEffect { lastDepth = depth }
+            ForgeScreenHost(
+                key = Triple(state.activeTab, state.projectView, state.projectPane),
+                forward = forward,
+                slide = slide,
+                modifier = Modifier.weight(1f),
+            ) { (tab, view, pane) ->
+                when (tab) {
+                    ForgeTab.PROJECTS -> when (view) {
                         ProjectView.LIST -> ProjectsScreen(
                             state = state,
                             onOpenProject = viewModel::openProject,
@@ -257,8 +270,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
                         )
-                        ProjectView.CHATS, ProjectView.CONVERSATION -> when (state.projectPane) {
-                            ProjectPane.CHAT -> if (state.projectView == ProjectView.CHATS) {
+                        ProjectView.CHATS, ProjectView.CONVERSATION -> when (pane) {
+                            ProjectPane.CHAT -> if (view == ProjectView.CHATS) {
                                 ProjectChatsScreen(state = state, viewModel = viewModel)
                             } else {
                                 AgentScreen(state = state, viewModel = viewModel)
@@ -972,6 +985,7 @@ private fun NewProjectDialog(
     var template by rememberSaveable { mutableStateOf(AndroidTemplate.COMPOSE) }
 
     AlertDialog(
+        modifier = Modifier.forgePopIn(),
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
         title = { Text(stringResource(R.string.np_title), fontWeight = FontWeight.SemiBold) },
