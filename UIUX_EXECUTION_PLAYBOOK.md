@@ -350,3 +350,4 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 **Belum**: locale es/ar/hi/ru/zh; blur Glass + fallback; isi form Settings masih form (bukan baris datar) meski kulitnya baru; durasi per tahap di Launch; **uji di perangkat** (bentuk glyph nav & glow, keyboard vs bar, Back, TalkBack, font 200%, reduce-motion, ZIP picker, transparansi Glass).
 
 - Design study (semua layar, 4 tema, interaktif): `docs/design-study/` + artifact https://claude.ai/artifact/Mgq8C7tfQtXSS17fnjhy9Y
+- Settings ditata ulang mengikuti referensi: General (Appearance tiles, Language radio, Safety), tab agen + Access mode / Endpoint / Model & access, Google account card, Runtime updates, Developer tools (Add/Remove), Linux runtime, Danger zone, About.
