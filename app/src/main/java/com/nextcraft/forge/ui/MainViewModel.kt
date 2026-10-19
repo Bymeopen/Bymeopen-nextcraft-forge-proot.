@@ -124,6 +124,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
+    /** True when Claude runs on the user's subscription login (no key, or the OAuth token read from the credentials file). */
+    private fun isClaudeSubscriptionLogin(profile: ProviderProfile, apiKey: String): Boolean =
+        profile.kind == ProviderKind.CLAUDE && (apiKey.isBlank() || apiKey.startsWith("sk-ant-oat"))
+
     private fun resolveProviderSecret(profile: ProviderProfile): String? {
         vault.get(profile.kind.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
         if (profile.kind == ProviderKind.CLAUDE) {
@@ -2438,6 +2442,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val profile = _state.value.providerProfile
         val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
+        // A Claude subscription login is an OAuth token: Anthropic's /v1/models rejects it, so the catalog is Claude
+        // Code's own model list (shown in the picker) and no API call is made.
+        if (isClaudeSubscriptionLogin(profile, apiKey)) {
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = UiText.res(R.string.msg_subscription_models)) }
+            return
+        }
         _state.update { it.copy(apiBusy = true, apiStatusMessage = UiText.res(R.string.msg_fetching_models)) }
         viewModelScope.launch {
             when (val res = providerApi.discoverModels(profile.resolvedBaseUrl, apiKey, protocol)) {
@@ -2468,6 +2478,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
         _state.update { it.copy(apiBusy = true, apiStatusMessage = UiText.res(R.string.msg_validating)) }
         viewModelScope.launch {
+            // Subscription login: verify through Claude Code itself; the Messages API would reject the OAuth token.
+            if (_state.value.agentKind == AgentKind.CLAUDE_CODE && isClaudeSubscriptionLogin(profile, apiKey)) {
+                val probe = if (_state.value.runtimeInstalled) {
+                    runCatching { claudeRuntime.hello(profile, 45_000L) }.getOrNull()
+                } else null
+                val text = if (!probe.isNullOrBlank()) {
+                    UiText.res(R.string.msg_claude_cli_verified, probe.take(80))
+                } else {
+                    UiText.res(R.string.msg_claude_cli_unverified)
+                }
+                _state.update { it.copy(apiBusy = false, apiStatusMessage = text) }
+                return@launch
+            }
             var res = providerApi.validate(
                 baseUrl = profile.resolvedBaseUrl,
                 model = profile.model,
