@@ -604,7 +604,14 @@ fun WebPreviewScreen(
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
-            webViewRef?.destroy()
+            // destroy() on a still-attached WebView is unsafe: detach first.
+            webViewRef?.let { wv ->
+                runCatching {
+                    (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+                    wv.stopLoading()
+                    wv.destroy()
+                }
+            }
             webViewRef = null
         }
     }
@@ -758,25 +765,45 @@ fun WebPreviewScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(16.dp)),
             factory = { context ->
-                WebView(context).apply {
-                    setBackgroundColor(webViewBgArgb)
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.allowFileAccess = false
-                    settings.allowContentAccess = false
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView,
-                            request: android.webkit.WebResourceRequest,
-                        ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+                // WebView creation throws when the system WebView package is missing or updating.
+                runCatching {
+                    WebView(context).apply {
+                        setBackgroundColor(webViewBgArgb)
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView,
+                                request: android.webkit.WebResourceRequest,
+                            ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+
+                            // Without this the app process is killed when the renderer dies (e.g. low memory).
+                            override fun onRenderProcessGone(
+                                view: WebView,
+                                detail: android.webkit.RenderProcessGoneDetail,
+                            ): Boolean {
+                                if (webViewRef === view) webViewRef = null
+                                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                                runCatching { view.destroy() }
+                                return true
+                            }
+                        }
+                        loadUrl(state.previewUrl)
+                        webViewRef = this
                     }
-                    loadUrl(state.previewUrl)
-                    webViewRef = this
+                }.getOrElse {
+                    android.widget.TextView(context).apply {
+                        text = context.getString(R.string.launch_preview_not_running)
+                    }
                 }
             },
-            update = { webView ->
-                webView.setBackgroundColor(webViewBgArgb)
-                webViewRef = webView
+            update = { view ->
+                if (view is WebView) {
+                    view.setBackgroundColor(webViewBgArgb)
+                    webViewRef = view
+                }
             },
         )
     }
