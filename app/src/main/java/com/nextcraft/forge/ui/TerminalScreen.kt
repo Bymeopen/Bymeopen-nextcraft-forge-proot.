@@ -263,6 +263,7 @@ fun TerminalScreen(
                             text = stringResource(R.string.terminal_run_command_in_the),
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
+                            color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
                         )
                     },
                     textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),

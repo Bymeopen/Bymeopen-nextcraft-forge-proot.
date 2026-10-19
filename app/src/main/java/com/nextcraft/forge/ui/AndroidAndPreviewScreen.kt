@@ -683,7 +683,7 @@ fun WebPreviewScreen(
                         value = urlInput,
                         onValueChange = { urlInput = it },
                         singleLine = true,
-                        placeholder = { Text(stringResource(R.string.launch_preview_url)) },
+                        placeholder = { Text(stringResource(R.string.launch_preview_url), color = colors.onSurfaceVariant.copy(alpha = 0.6f)) },
                         colors = TextFieldDefaults.textFieldColors(
                             containerColor = Color.Transparent,
                             focusedIndicatorColor = Color.Transparent,
