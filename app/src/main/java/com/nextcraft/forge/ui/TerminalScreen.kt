@@ -120,7 +120,7 @@ fun TerminalScreen(
             }
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.terminal_project_terminal), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.terminal_project_terminal), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = "/workspace/${state.activeProject?.slug ?: "sandbox"} · ${stringResource(R.string.terminal_env_root_chroot)}",
                     fontSize = 13.sp,

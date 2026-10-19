@@ -111,7 +111,7 @@ fun AgentConfigScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = stringResource(R.string.settings_agent_not_installed, agent.displayTitle()),
-                            fontSize = 18.sp,
+                            fontSize = ForgeType.cardTitle,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -228,7 +228,7 @@ fun AgentConfigScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = stringResource(R.string.settings_model_access),
-                            fontSize = 17.sp,
+                            fontSize = ForgeType.cardTitle,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                         )
@@ -246,7 +246,7 @@ fun AgentConfigScreen(
                             Text(stringResource(R.string.settings_current_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
                             Text(
                                 text = state.providerProfile.model.ifBlank { "default" },
-                                fontSize = 17.sp,
+                                fontSize = ForgeType.cardTitle,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }

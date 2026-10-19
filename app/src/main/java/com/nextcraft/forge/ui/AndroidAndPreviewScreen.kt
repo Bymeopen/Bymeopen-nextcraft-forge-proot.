@@ -255,7 +255,7 @@ fun AndroidBuildScreen(
             ForgeStatusIcon(build.phase.overallStatus(), iconSize = 22.dp)
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(build.phase.headline()), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(build.phase.headline()), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
                         stringResource(R.string.launch_errors_warnings, errorCount, warningCount)
@@ -582,7 +582,7 @@ private fun LogcatPanel(
                     text = line.text,
                     color = color,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
+                    fontSize = ForgeType.caption,
                     lineHeight = 15.sp,
                 )
             }
@@ -745,7 +745,7 @@ fun WebPreviewScreen(
             ) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(56.dp))
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(stringResource(R.string.launch_preview_not_running), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.launch_preview_not_running), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = stringResource(R.string.launch_preview_not_running_hint),
