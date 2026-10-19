@@ -2037,7 +2037,10 @@ class RuntimeInstaller(private val context: Context) {
         // Hands every permission request to the app through the shared bridge directory and
         // waits for the user's/guardrail decision. The app classifies risk, auto-answers
         // SAFE/REVIEW and prompts for HIGH. No answer within the timeout means deny.
-        hook.writeText(
+        // Written atomically: a Claude session may be executing this script, and truncating it in place makes the hook
+        // answer nothing, which Claude Code treats as a refusal.
+        writeRootfsFileAtomically(
+            hook,
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
@@ -2059,21 +2062,22 @@ else
 fi
 printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
 """,
+            mode = 0b111101101,
         )
-        Os.chmod(hook.absolutePath, 0b111101101)
 
         // BROWSER handler for `claude auth login`: there is no browser in the chroot, so the sign-in URL is handed to
         // the app through the bridge directory and opened in the Android browser. The browser then redirects to
         // http://localhost:<port>/callback, which the CLI (same network namespace) is listening on.
         val openUrl = File(rootfs, "opt/pocket/open-url.sh")
-        openUrl.writeText(
+        writeRootfsFileAtomically(
+            openUrl,
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 [ -n "${'$'}1" ] && [ -d "${'$'}BRIDGE" ] || exit 0
 printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDGE/claude-login-url.tmp" "${'$'}BRIDGE/claude-login-url"
 """,
+            mode = 0b111101101,
         )
-        Os.chmod(openUrl.absolutePath, 0b111101101)
 
         val settingsContent = JSONObject()
             .put("disableAllHooks", false)
@@ -2171,7 +2175,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
      * reader never sees a truncated file. A root-owned target (rewritten by a root process in the chroot) is
      * reclaimed first.
      */
-    private fun writeRootfsFileAtomically(target: File, content: String) {
+    private fun writeRootfsFileAtomically(target: File, content: String, mode: Int? = null) {
         val parent = checkNotNull(target.parentFile) { "No parent directory for ${target.name}" }
         parent.mkdirs()
         if (!parent.canWrite() || (target.exists() && !target.canWrite())) {
@@ -2183,6 +2187,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 out.write(content.toByteArray(Charsets.UTF_8))
                 out.fd.sync()
             }
+            // Set the mode before the rename so the file is never visible without its execute bit.
+            if (mode != null) Os.chmod(temp.absolutePath, mode)
             Os.rename(temp.absolutePath, target.absolutePath)
         } finally {
             temp.delete()
@@ -2300,6 +2306,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         TarArchiveInputStream(openZstdInputStream(archive, consumed)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
             while (entry != null) {
+                // Pause/stop from the notification must end a long unpack instead of waiting for it to finish.
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (report != null && consumed != null) {
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (now - lastReport >= 400L) {
