@@ -204,5 +204,5 @@ private fun DrawScope.drawPreview(tint: Color, stroke: Stroke, p: Float) {
         lineTo(w * 0.42f, h * 0.72f)
         close()
     }
-    drawPath(tri, tint.copy(alpha = 0.25f + 0.75f * p), style = if (p > 0.5f) androidx.compose.ui.graphics.drawscope.Fill else stroke)
+    drawPath(tri, tint.copy(alpha = (0.25f + 0.75f * p).coerceIn(0f, 1f)), style = if (p > 0.5f) androidx.compose.ui.graphics.drawscope.Fill else stroke)
 }
