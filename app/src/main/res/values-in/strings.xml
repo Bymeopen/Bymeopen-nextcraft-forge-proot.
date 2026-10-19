@@ -202,6 +202,11 @@
     <string name="shell_install_runtime">Pasang runtime chroot</string>
     <string name="settings_agent_install">Pasang</string>
     <string name="settings_agent_installed">Terpasang</string>
+    <string name="settings_agent_update">Perbarui ke %1$s</string>
+    <string name="settings_agent_remove">Copot</string>
+    <string name="settings_agent_check_updates">Cek pembaruan agen</string>
+    <string name="settings_stack_install">Pasang %1$s</string>
+    <string name="settings_stack_remove">Hapus %1$s</string>
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>

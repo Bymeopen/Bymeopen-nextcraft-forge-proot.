@@ -202,6 +202,11 @@
     <string name="shell_install_runtime">Install Chroot Runtime</string>
     <string name="settings_agent_install">Install</string>
     <string name="settings_agent_installed">Installed</string>
+    <string name="settings_agent_update">Update to %1$s</string>
+    <string name="settings_agent_remove">Uninstall</string>
+    <string name="settings_agent_check_updates">Check agent updates</string>
+    <string name="settings_stack_install">Install %1$s</string>
+    <string name="settings_stack_remove">Remove %1$s</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>

@@ -276,20 +276,32 @@ fun SettingsScreenModern(
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     },
                                 )
-                            }
-                            if (kind in state.installedAgents) {
-                                Text(
-                                    text = stringResource(R.string.settings_agent_installed),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = tokens.successText,
-                                )
-                            } else {
-                                OutlinedButton(
-                                    onClick = { viewModel.installAgent(kind) },
-                                    enabled = state.runtimeInstalled &&
-                                        state.setupSnapshot.status != RuntimeSetupStatus.RUNNING,
+                                val busy = !state.runtimeInstalled ||
+                                    state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text("${stringResource(R.string.settings_agent_install)} · ${kind.downloadNote}")
+                                    if (kind in state.installedAgents) {
+                                        Text(
+                                            text = stringResource(R.string.settings_agent_installed),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = tokens.successText,
+                                        )
+                                        state.agentUpdates[kind]?.let { info ->
+                                            Button(onClick = { viewModel.updateAgent(kind) }, enabled = !busy) {
+                                                Text(stringResource(R.string.settings_agent_update, info.latestVersion))
+                                            }
+                                        }
+                                        OutlinedButton(onClick = { viewModel.removeAgent(kind) }, enabled = !busy) {
+                                            Text(stringResource(R.string.settings_agent_remove))
+                                        }
+                                    } else {
+                                        OutlinedButton(onClick = { viewModel.installAgent(kind) }, enabled = !busy) {
+                                            Text("${stringResource(R.string.settings_agent_install)} · ${kind.downloadNote}")
+                                        }
+                                    }
                                 }
                             }
                             if (selected) {
@@ -300,6 +312,15 @@ fun SettingsScreenModern(
                                 )
                             }
                         }
+                    }
+                }
+
+                if (state.installedAgents.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = viewModel::checkAgentUpdates,
+                        enabled = !state.checkingAgentUpdates,
+                    ) {
+                        Text(stringResource(R.string.settings_agent_check_updates))
                     }
                 }
 
@@ -896,6 +917,20 @@ fun SettingsScreenModern(
                         checked = selected,
                         onCheckedChange = { if (!isProvisioning) viewModel.toggleDevStack(stack) },
                     )
+                    if (stack != DevStack.WEB) {
+                        // Install or remove this one stack right away, without touching the other toggles.
+                        OutlinedButton(
+                            onClick = { if (installed) viewModel.removeStack(stack) else viewModel.installStack(stack) },
+                            enabled = !isProvisioning && state.runtimeInstalled,
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (installed) R.string.settings_stack_remove else R.string.settings_stack_install,
+                                    stack.displayLabel(),
+                                ),
+                            )
+                        }
+                    }
                 }
                 if (state.setupSnapshot.status != com.nextcraft.forge.runtime.RuntimeSetupStatus.IDLE) {
                     Text(

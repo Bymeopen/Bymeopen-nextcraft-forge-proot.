@@ -121,7 +121,7 @@ class RuntimeInstaller(private val context: Context) {
 
     /** Returns the already verified Root Chroot runtime without performing network or update checks. */
     fun installedRuntime(): InstalledRuntime {
-        check(isInstalled()) { "NextCraft Forge Root Chroot runtime installation is incomplete." }
+        check(isInstalled()) { CORE_MISSING_MESSAGE }
         return InstalledRuntime(
             chrootExec = chrootExecFile,
             rootfs = rootfs,
@@ -343,6 +343,32 @@ class RuntimeInstaller(private val context: Context) {
             AgentKind.ANTIGRAVITY -> ensureAgyInstalled(runtime.chrootExec, 0.05f, onProgress)
         }
         onProgress(RuntimeInstallProgress("${agent.title} is ready", 1f))
+    }
+
+    /**
+     * Removes one coding agent's binaries and version markers. Projects, API keys and the Core runtime are untouched;
+     * the agent's own login/config under /root is kept so a reinstall does not force a new sign-in.
+     */
+    fun removeAgent(agent: AgentKind) {
+        installedRuntime()
+        when (agent) {
+            AgentKind.CLAUDE_CODE -> {
+                removePath(File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")))
+                listOf(".pocket-claude-version", ".nextcraft-claude-version", ".pocket-bundled-claude-version")
+                    .forEach { File(rootfs, it).delete() }
+            }
+            AgentKind.DEEPSEEK_HARNESS -> {
+                removePath(File(rootfs, "usr/local/bin/dsh"))
+                removePath(File(rootfs, "usr/local/lib/dsh"))
+                listOf(".pocket-dsh-version", ".nextcraft-dsh-version", ".pocket-dsh-android-compat-version")
+                    .forEach { File(rootfs, it).delete() }
+            }
+            AgentKind.ANTIGRAVITY -> {
+                removePath(File(rootfs, AGY_GUEST_PATH.removePrefix("/")))
+                listOf(".pocket-agy-version", ".nextcraft-agy-version").forEach { File(rootfs, it).delete() }
+            }
+        }
+        check(!isAgentInstalled(agent)) { "Could not fully remove ${agent.title}" }
     }
 
     fun isAgentInstalled(agent: AgentKind): Boolean {
@@ -2447,6 +2473,8 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
         private const val AGY_VERSION = "1.1.27"
+        const val CORE_MISSING_MESSAGE =
+            "The base Ubuntu runtime (Core) is not installed or is incomplete. Run the runtime setup first, then retry."
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
         private const val GITHUB_CLI_RELEASE_SHA256 = "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961"

@@ -289,8 +289,8 @@ class RuntimeSetupService : Service() {
                 .mapNotNull { name -> runCatching { DevStack.valueOf(name.trim()) }.getOrNull() }
                 .toSet()
             val agent = AgentKind.fromStored(intent?.getStringExtra(EXTRA_AGENT)?.trim())
-            // Manual install of a single agent on top of an existing Core runtime.
-            val agentOnly = intent?.action == ACTION_INSTALL_AGENT
+            val action = intent?.action
+            val expectedVersion = intent?.getStringExtra(EXTRA_VERSION).orEmpty()
             RuntimeSetupController.begin(this)
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
@@ -301,12 +301,20 @@ class RuntimeSetupService : Service() {
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
                         renewWakeLock()
                     }
-                    if (agentOnly) {
-                        installer.ensureAgentInstalled(agent, onProgress)
-                    } else {
-                        installer.ensureInstalled(stacks, agent, onProgress)
+                    // Manual per-component operations work on top of an existing Core runtime.
+                    when (action) {
+                        ACTION_INSTALL_AGENT -> installer.ensureAgentInstalled(agent, onProgress)
+                        ACTION_UPDATE_AGENT -> installer.updateAgent(agent, expectedVersion, onProgress)
+                        ACTION_REMOVE_AGENT -> {
+                            onProgress(RuntimeInstallProgress("Removing ${agent.title}…", 0.5f, indeterminate = true))
+                            installer.removeAgent(agent)
+                            onProgress(RuntimeInstallProgress("Removed ${agent.title}", 1f))
+                        }
+                        ACTION_INSTALL_STACK -> stacks.forEach { installer.ensureStackInstalled(it, onProgress) }
+                        ACTION_REMOVE_STACK -> stacks.forEach { installer.removeStack(it, onProgress) }
+                        else -> installer.ensureInstalled(stacks, agent, onProgress)
                     }
-                    AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
+                    if (action == ACTION_START) AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
                     RuntimeSetupController.complete(this@RuntimeSetupService)
                     showFinishedNotification(success = true)
                 } catch (_: CancellationException) {
@@ -448,6 +456,11 @@ class RuntimeSetupService : Service() {
     companion object {
         const val ACTION_START = "com.nextcraft.forge.START_SETUP"
         const val ACTION_INSTALL_AGENT = "com.nextcraft.forge.INSTALL_AGENT"
+        const val ACTION_UPDATE_AGENT = "com.nextcraft.forge.UPDATE_AGENT"
+        const val ACTION_REMOVE_AGENT = "com.nextcraft.forge.REMOVE_AGENT"
+        const val ACTION_INSTALL_STACK = "com.nextcraft.forge.INSTALL_STACK"
+        const val ACTION_REMOVE_STACK = "com.nextcraft.forge.REMOVE_STACK"
+        const val EXTRA_VERSION = "target_version"
         const val ACTION_STOP = "com.nextcraft.forge.STOP_SETUP"
         const val EXTRA_STACKS = "selected_stacks"
         const val EXTRA_AGENT = "selected_agent"

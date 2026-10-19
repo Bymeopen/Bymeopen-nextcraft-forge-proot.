@@ -54,6 +54,7 @@ import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
 import com.nextcraft.forge.runtime.RuntimeLaunchConfigBuilder
+import com.nextcraft.forge.runtime.AgentUpdateInfo
 import com.nextcraft.forge.runtime.RuntimeSetupController
 import com.nextcraft.forge.runtime.RuntimeSetupService
 import com.nextcraft.forge.runtime.RuntimeSetupSnapshot
@@ -110,6 +111,8 @@ data class ForgeUiState(
     val selectedDevStacks: Set<DevStack> = setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID),
     val installedDevStacks: Set<DevStack> = emptySet(),
     val installedAgents: Set<AgentKind> = emptySet(),
+    val agentUpdates: Map<AgentKind, AgentUpdateInfo> = emptyMap(),
+    val checkingAgentUpdates: Boolean = false,
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     val activeTab: ForgeTab = ForgeTab.AGENT,
     val themeMode: String = "dark",
@@ -258,6 +261,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val completed = snap.status == RuntimeSetupStatus.COMPLETE
                 _state.update { it.copy(setupSnapshot = snap) }
                 if (completed) {
+                    _state.update { it.copy(agentUpdates = emptyMap()) }
                     refreshRuntimeStatus()
                 }
             }
@@ -470,21 +474,84 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
-    fun installAgent(agent: AgentKind) {
+    /** True when a manual runtime operation may start; otherwise posts the reason as a banner. */
+    private fun canRunRuntimeOperation(): Boolean {
         val current = _state.value
-        if (!current.runtimeInstalled || current.sessionRunning ||
-            current.setupSnapshot.status == RuntimeSetupStatus.RUNNING
-        ) {
-            _state.update { it.copy(bannerMessage = "Finish the base runtime setup first, and wait for any running task.") }
-            return
+        val reason = when {
+            !current.runtimeInstalled -> "The base Ubuntu runtime (Core) is not installed. Run the runtime setup first."
+            current.sessionRunning || current.terminalRunning || current.androidBuild.phase == AndroidBuildPhase.BUILDING ->
+                "Wait for the running agent, terminal or build to finish."
+            current.setupSnapshot.status == RuntimeSetupStatus.RUNNING -> "Another runtime operation is already running."
+            else -> return true
         }
+        _state.update { it.copy(bannerMessage = reason) }
+        return false
+    }
+
+    private fun startRuntimeOperation(configure: Intent.() -> Unit) {
         ContextCompat.startForegroundService(
             getApplication(),
-            Intent(getApplication(), RuntimeSetupService::class.java)
-                .setAction(RuntimeSetupService.ACTION_INSTALL_AGENT)
-                .putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name),
+            Intent(getApplication(), RuntimeSetupService::class.java).apply(configure),
         )
+    }
+
+    /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
+    fun installAgent(agent: AgentKind) {
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = RuntimeSetupService.ACTION_INSTALL_AGENT
+            putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
+        }
+    }
+
+    fun removeAgent(agent: AgentKind) {
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = RuntimeSetupService.ACTION_REMOVE_AGENT
+            putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
+        }
+    }
+
+    fun updateAgent(agent: AgentKind) {
+        val info = _state.value.agentUpdates[agent] ?: return
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = RuntimeSetupService.ACTION_UPDATE_AGENT
+            putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
+            putExtra(RuntimeSetupService.EXTRA_VERSION, info.latestVersion)
+        }
+    }
+
+    fun checkAgentUpdates() {
+        if (_state.value.checkingAgentUpdates) return
+        _state.update { it.copy(checkingAgentUpdates = true) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { installer.checkAgentUpdates() } }
+            _state.update {
+                it.copy(
+                    checkingAgentUpdates = false,
+                    agentUpdates = result.getOrDefault(emptyMap()),
+                    bannerMessage = when {
+                        result.isFailure -> "Could not check for agent updates: ${result.exceptionOrNull()?.message.orEmpty()}"
+                        result.getOrThrow().isEmpty() -> "All installed agents are up to date."
+                        else -> it.bannerMessage
+                    },
+                )
+            }
+        }
+    }
+
+    /** Installs or removes a single dev stack after onboarding, independent of the stack toggles. */
+    fun installStack(stack: DevStack) = runStackOperation(RuntimeSetupService.ACTION_INSTALL_STACK, stack)
+
+    fun removeStack(stack: DevStack) = runStackOperation(RuntimeSetupService.ACTION_REMOVE_STACK, stack)
+
+    private fun runStackOperation(serviceAction: String, stack: DevStack) {
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = serviceAction
+            putExtra(RuntimeSetupService.EXTRA_STACKS, stack.name)
+        }
     }
 
     fun pauseRuntimeSetup() {
