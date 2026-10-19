@@ -64,6 +64,16 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
         }
     }
 
+    // Steps without a byte counter (apt/SDK installs inside the chroot) show elapsed time instead of a speed.
+    var elapsedSeconds by remember(snapshot.message) { mutableStateOf(0L) }
+    LaunchedEffect(snapshot.message, running) {
+        val started = android.os.SystemClock.elapsedRealtime()
+        while (running) {
+            elapsedSeconds = (android.os.SystemClock.elapsedRealtime() - started) / 1000
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -93,7 +103,7 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
                 LinearProgressIndicator(progress = snapshot.progress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(transfer.orEmpty(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(transfer ?: if (running) "%d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60) else "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!snapshot.indeterminate || !running) {
                     val speed = if (bytesPerSecond > 0.0 && transfer != null) " · %.1f MB/s".format(bytesPerSecond / MIB) else ""
                     Text(

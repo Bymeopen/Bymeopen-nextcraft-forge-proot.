@@ -270,7 +270,7 @@
     <string name="tool_run_selected">Run selected</string>
     <string name="tool_runs">Recent runs</string>
     <string name="tool_runtime">Runtime</string>
-    <string name="tool_runtime_missing">Install the base runtime first (Settings).</string>
+    <string name="tool_runtime_missing">Core runtime is not installed yet: installing a stack or agent will install the Core runtime first.</string>
     <string name="tool_snapshot_name">Snapshot name</string>
     <string name="tool_snapshots">Snapshots</string>
     <string name="tool_ssh_add_host">Add host</string>

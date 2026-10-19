@@ -123,6 +123,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     var bypassSetupGate by rememberSaveable { mutableStateOf(false) }
     var showNewProjectDialog by rememberSaveable { mutableStateOf(false) }
+    var showGitHubDialog by rememberSaveable { mutableStateOf(false) }
 
     if (!state.runtimeInstalled && !bypassSetupGate) {
         RuntimeOnboardingScreen(
@@ -251,7 +252,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onQuickProject = viewModel::createQuickProject,
                             onImportZip = viewModel::importZipProject,
                             onCloneGitUrl = viewModel::cloneGitUrl,
-                            onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                            onConnectGitHub = { showGitHubDialog = true },
                             onDeleteProject = viewModel::deleteProject,
                             onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
@@ -284,6 +285,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 }
             }
         }
+    }
+
+    if (showGitHubDialog) {
+        AlertDialog(
+            onDismissRequest = { showGitHubDialog = false },
+            title = { Text(stringResource(R.string.settings_github)) },
+            text = { GitHubSection(state, viewModel) },
+            confirmButton = { TextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.agent_close)) } },
+        )
     }
 
     if (showNewProjectDialog) {

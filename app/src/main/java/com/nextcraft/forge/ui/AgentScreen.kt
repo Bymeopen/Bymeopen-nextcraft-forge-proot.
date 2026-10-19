@@ -686,7 +686,7 @@ private fun ChatMessageCard(
         MessageContainer(fromUser = true, contentColor = textColor) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (message.text.isNotBlank()) {
-                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
                     CopyMessageButton(message.text)
                 }
                 if (message.attachments.isNotEmpty()) {
@@ -713,7 +713,7 @@ private fun ChatMessageCard(
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
                 Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
                     CopyMessageButton(message.text)
                 }
             }
