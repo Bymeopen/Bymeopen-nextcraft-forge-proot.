@@ -11,9 +11,6 @@ import java.util.concurrent.TimeUnit
  */
 internal object RootfsRepair {
 
-    private fun shellSingleQuote(value: String): String =
-        "'" + value.replace("'", "'\"'\"'") + "'"
-
     private fun runRootCommand(vararg command: String, timeoutSeconds: Long = 15L): Int =
         runCatching {
             // Output is never used; discarding it avoids a full pipe blocking the child until the timeout.

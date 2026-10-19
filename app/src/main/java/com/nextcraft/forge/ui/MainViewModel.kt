@@ -32,6 +32,7 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import com.nextcraft.forge.runtime.shellSingleQuote
 import com.nextcraft.forge.network.GitHubRepository
 import com.nextcraft.forge.network.GitHubTokenPoll
 import com.nextcraft.forge.network.LocalNetwork
@@ -1902,8 +1903,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return output
     }
-
-    private fun shellSingleQuote(raw: String): String = "'" + raw.replace("'", "'\"'\"'") + "'"
 
     /**
      * Writes the GitHub PAT into the rootfs only while [block] runs, then removes it so agent

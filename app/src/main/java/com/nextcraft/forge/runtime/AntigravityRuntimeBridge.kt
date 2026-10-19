@@ -193,10 +193,9 @@ class AntigravityRuntimeBridge(
     @Volatile private var activeProcess: Process? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested = false
-    @Volatile private var foregroundResultPosted = false
+    private val foreground = ForegroundSession(context, "AntigravityBridge")
+
     @Volatile private var activeProjectSlug = ""
-    @Volatile private var taskStartedAtElapsedRealtime = 0L
-    @Volatile private var lastForegroundProgressAt = 0L
 
     fun configureProjectRoot(projectId: String, rootPath: String) = checkpoints.configureProjectRoot(projectId, rootPath)
 
@@ -322,10 +321,8 @@ class AntigravityRuntimeBridge(
         val sessionStartedAtMillis = System.currentTimeMillis()
         activeSessionId = sessionId
         userStopRequested = false
-        foregroundResultPosted = false
         activeProjectSlug = projectSlug
-        taskStartedAtElapsedRealtime = android.os.SystemClock.elapsedRealtime()
-        lastForegroundProgressAt = 0L
+        foreground.begin()
         finished.remove(sessionId)
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
@@ -493,7 +490,7 @@ class AntigravityRuntimeBridge(
         activeProcess = null
         activeSessionId = null
         activeProjectSlug = ""
-        taskStartedAtElapsedRealtime = 0L
+        foreground.clearStart()
         RuntimeTaskController.release(stopHandler)
         sessionId
     }
@@ -546,38 +543,18 @@ class AntigravityRuntimeBridge(
         if (finished.add(sessionId)) eventBus.emit(RuntimeEvent.SessionFailed(sessionId, reason))
     }
 
-    private fun startForegroundRuntime(projectName: String) {
-        RuntimeExecutionServiceContract.startForeground(context, projectName)
-    }
+    private fun startForegroundRuntime(projectName: String) = foreground.start(projectName)
 
     /** Keeps long, silent Antigravity turns visibly active in Android's foreground service. */
     private fun pushForegroundProgress(detailRaw: String) {
         if (activeSessionId == null) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastForegroundProgressAt < FOREGROUND_PROGRESS_MIN_INTERVAL_MS) return
-        lastForegroundProgressAt = now
-        val detail = detailRaw.replace(Regex("\\s+"), " ").trim().take(110)
-        val elapsed = (now - taskStartedAtElapsedRealtime).coerceAtLeast(0L) / 1_000L
-        val minutes = elapsed / 60L
-        val seconds = elapsed % 60L
-        RuntimeExecutionServiceContract.pushProgress(
-            context,
-            activeProjectSlug,
-            "$detail · $minutes:${seconds.toString().padStart(2, '0')}",
-        )
+        foreground.progress(activeProjectSlug, detailRaw)
     }
 
-    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, "AntigravityBridge")
-    }
+    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
+        foreground.finish(completed, projectName, detail)
 
-    private fun cancelForegroundRuntime() {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.cancelForeground(context)
-    }
+    private fun cancelForegroundRuntime() = foreground.cancel()
 
     private fun friendlyError(raw: String): String = antigravityFriendlyError(raw)
 
@@ -592,10 +569,6 @@ class AntigravityRuntimeBridge(
             ?: return@runCatching ""
         latest.readTailText(12_000)
     }.getOrDefault("")
-
-    private companion object {
-        const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
-    }
 }
 
 internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): String {
