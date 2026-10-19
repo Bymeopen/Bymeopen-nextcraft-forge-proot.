@@ -253,6 +253,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onCloneGitUrl = viewModel::cloneGitUrl,
                             onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
                             onDeleteProject = viewModel::deleteProject,
+                            onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
                         )
                         ProjectView.CHATS, ProjectView.CONVERSATION -> when (state.projectPane) {

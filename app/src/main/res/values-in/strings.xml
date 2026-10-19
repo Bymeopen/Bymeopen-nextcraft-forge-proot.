@@ -226,6 +226,11 @@
     <string name="model_picker_refresh">Muat ulang</string>
     <string name="settings_choose_model">Pilih model</string>
     <string name="settings_current_model">Model</string>
+    <string name="projects_rename">Ganti nama</string>
+    <string name="projects_rename_title">Ganti nama proyek</string>
+    <string name="projects_rename_label">Nama proyek</string>
+    <string name="projects_rename_save">Simpan</string>
+    <string name="projects_more_actions">Aksi lainnya</string>
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>

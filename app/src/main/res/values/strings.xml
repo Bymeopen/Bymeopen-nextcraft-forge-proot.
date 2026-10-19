@@ -226,6 +226,11 @@
     <string name="model_picker_refresh">Refresh</string>
     <string name="settings_choose_model">Choose model</string>
     <string name="settings_current_model">Model</string>
+    <string name="projects_rename">Rename</string>
+    <string name="projects_rename_title">Rename project</string>
+    <string name="projects_rename_label">Project name</string>
+    <string name="projects_rename_save">Save</string>
+    <string name="projects_more_actions">More actions</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>

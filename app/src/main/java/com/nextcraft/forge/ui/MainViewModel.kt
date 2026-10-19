@@ -808,6 +808,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Renames the display name only; the slug (the /workspace/<slug> path agents and chats are bound to) stays. */
+    fun renameProject(projectId: String, newName: String) {
+        val cleanName = newName.trim().take(80)
+        if (cleanName.isEmpty()) return
+        val current = _state.value.projects
+        val target = current.firstOrNull { it.id == projectId } ?: return
+        if (target.name == cleanName) return
+        val updated = current.map { if (it.id == projectId) it.copy(name = cleanName) else it }
+        preferences.saveProjects(updated)
+        _state.update { it.copy(projects = updated) }
+    }
+
     fun selectChat(chatId: String) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
