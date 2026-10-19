@@ -21,13 +21,21 @@ private val ANTIGRAVITY_PRESETS = listOf(
 internal fun antigravityModelLabel(id: String): String {
     val effort = Regex("-(low|medium|high)$").find(id)
     val base = if (effort != null) id.removeSuffix(effort.value) else id
-    val words = base.split('-').filter { it.isNotEmpty() }.joinToString(" ") { word ->
-        when (word.lowercase()) {
+    val words = mutableListOf<String>()
+    for (word in base.split('-').filter { it.isNotEmpty() }) {
+        val previous = words.lastOrNull()
+        // "claude-opus-5-5" is version 5.5: join digit-only parts that follow a number.
+        if (previous != null && word.all(Char::isDigit) && previous.all { it.isDigit() || it == '.' } && previous.any(Char::isDigit)) {
+            words[words.lastIndex] = "$previous.$word"
+            continue
+        }
+        words += when (word.lowercase()) {
             "gpt", "oss" -> word.uppercase()
             else -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
         }
     }
-    return effort?.let { "$words (${it.groupValues[1].replaceFirstChar { c -> c.titlecase(java.util.Locale.ROOT) }})" } ?: words
+    val name = words.joinToString(" ")
+    return effort?.let { "$name (${it.groupValues[1].replaceFirstChar { c -> c.titlecase(java.util.Locale.ROOT) }})" } ?: name
 }
 
 private fun antigravityBadge(id: String): String = when {
