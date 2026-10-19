@@ -54,6 +54,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -266,7 +267,7 @@ fun FilesAndDiffScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeletePath = null }) {
+                ForgeTextButton(onClick = { pendingDeletePath = null }) {
                     Text(stringResource(R.string.agent_cancel))
                 }
             },
@@ -507,12 +508,11 @@ private fun NameDialog(
         shape = RoundedCornerShape(24.dp),
         title = { Text(title, fontWeight = FontWeight.SemiBold) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                 value = value,
                 onValueChange = { value = it },
                 label = { Text(label) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -523,7 +523,7 @@ private fun NameDialog(
                 shape = RoundedCornerShape(100),
             ) { Text(stringResource(R.string.files_ok), fontWeight = FontWeight.SemiBold) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) } },
+        dismissButton = { ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) } },
     )
 }
 
@@ -624,6 +624,7 @@ private fun WorkspaceFileEditor(
                 value = content,
                 onValueChange = { if (editable) onContentChange(it) },
                 readOnly = !editable,
+                keyboardOptions = ForgeFieldKind.IDENTIFIER.keyboardOptions(ImeAction.Default),
                 textStyle = ForgeCodeTextStyle.copy(color = tokens.terminalText),
                 colors = TextFieldDefaults.textFieldColors(
                     containerColor = Color.Transparent,
@@ -816,13 +817,12 @@ private fun NewWorkspaceFileDialog(
         shape = RoundedCornerShape(24.dp),
         title = { Text(stringResource(R.string.files_create_new_file), fontWeight = FontWeight.SemiBold) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                 value = path,
                 onValueChange = { path = it },
                 label = { Text(stringResource(R.string.files_relative_file_path)) },
                 placeholder = { Text("src/main.py or index.html") },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
                 textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -835,7 +835,7 @@ private fun NewWorkspaceFileDialog(
             ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
         },
     )
 }

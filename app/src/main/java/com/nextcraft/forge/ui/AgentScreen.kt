@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -403,6 +404,8 @@ fun AgentScreen(
                     },
                     modifier = Modifier.weight(1f),
                     maxLines = 5,
+                    // Enter stays a newline (messages are multi-line); send is the round button.
+                    keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
                     colors = TextFieldDefaults.textFieldColors(
                         containerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
@@ -494,6 +497,7 @@ private fun AgentHeader(
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
                 text = state.activeProject?.name ?: stringResource(R.string.agent_title),
+                modifier = Modifier.forgeHeading(),
                 fontSize = ForgeType.screenTitle,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -583,7 +587,7 @@ private fun ProjectChatsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
         },
     )
 }
@@ -644,12 +648,11 @@ private fun AntigravityOAuthBanner(
                     ) { Text(stringResource(R.string.agent_copy_link)) }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    ForgeTextField(
+                        kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                         value = verificationCode,
                         onValueChange = { verificationCode = it },
                         placeholder = { Text(stringResource(R.string.agent_paste_google_verification_code), fontSize = ForgeType.secondary) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f),
                     )
                     ForgePrimaryButton(
@@ -826,6 +829,7 @@ private fun ChatMessageCard(
                     text = stringResource(R.string.agent_thinking),
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
+                    modifier = Modifier.forgeLive(),
                 )
             }
         }

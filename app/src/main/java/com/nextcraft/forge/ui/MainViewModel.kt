@@ -1576,7 +1576,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val copied = withContext(Dispatchers.IO) { copyUrisIntoWorkspace(project.id, uris, dir) }
             if (copied.isNotEmpty()) {
-                _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_files_uploaded, copied.size)) }
+                _state.update { it.copy(fileSavedBanner = getApplication<Application>().resources.getQuantityString(R.plurals.msg_files_uploaded, copied.size, copied.size)) }
                 refreshWorkspaceFilesAndChanges(project.id)
             }
         }
@@ -1667,7 +1667,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _state.update {
                 it.copy(
-                    fileSavedBanner = if (count >= 0) getApplication<Application>().getString(R.string.msg_zip_saved, count) else getApplication<Application>().getString(R.string.msg_zip_failed),
+                    fileSavedBanner = if (count >= 0) getApplication<Application>().resources.getQuantityString(R.plurals.msg_zip_saved, count, count) else getApplication<Application>().getString(R.string.msg_zip_failed),
                 )
             }
         }

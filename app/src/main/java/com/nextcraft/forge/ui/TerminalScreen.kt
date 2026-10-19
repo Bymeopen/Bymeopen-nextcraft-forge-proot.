@@ -42,6 +42,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -251,6 +253,9 @@ fun TerminalScreen(
                     },
                     textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
                     singleLine = true,
+                    // Commands are exact strings (no autocorrect or capitals), and the keyboard's Send key runs them.
+                    keyboardOptions = ForgeFieldKind.IDENTIFIER.keyboardOptions(ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (commandInput.isNotBlank() && !state.terminalRunning) runCommand() }),
                     colors = TextFieldDefaults.textFieldColors(
                         containerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,

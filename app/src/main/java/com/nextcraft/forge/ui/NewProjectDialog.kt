@@ -64,6 +64,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.SideEffect
@@ -126,22 +127,20 @@ internal fun NewProjectDialog(
         title = { Text(stringResource(R.string.np_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
+                ForgeTextField(
+                    kind = ForgeFieldKind.NAME, imeAction = ImeAction.Next, error = if (name.isBlank()) stringResource(R.string.field_error_required) else null,
                     value = name,
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.shell_project_name)) },
                     placeholder = { Text(stringResource(R.string.shell_my_awesome_app)) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                ForgeTextField(
+                    kind = ForgeFieldKind.TEXT, imeAction = ImeAction.Done,
                     value = description,
                     onValueChange = { description = it },
                     label = { Text(stringResource(R.string.shell_description)) },
                     placeholder = { Text(stringResource(R.string.shell_optional_project_summary)) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ForgeToggleRow(
@@ -168,7 +167,7 @@ internal fun NewProjectDialog(
             ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
         },
     )
 }

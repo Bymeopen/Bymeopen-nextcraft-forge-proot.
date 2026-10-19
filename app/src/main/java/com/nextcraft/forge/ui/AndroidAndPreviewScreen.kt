@@ -49,6 +49,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -259,7 +261,11 @@ fun AndroidBuildScreen(
                 Text(stringResource(build.phase.headline()), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
-                        stringResource(R.string.launch_errors_warnings, errorCount, warningCount)
+                        stringResource(
+                            R.string.launch_errors_warnings_join,
+                            quantityStringResource(R.plurals.launch_errors, errorCount, errorCount),
+                            quantityStringResource(R.plurals.launch_warnings, warningCount, warningCount),
+                        )
                     } else {
                         build.message ?: build.stage.displayLabel()
                     },
@@ -553,11 +559,11 @@ private fun LogcatPanel(
             }
         }
 
-        OutlinedTextField(
+        ForgeTextField(
+            kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Search,
             value = logcat.query,
             onValueChange = onSetQuery,
             placeholder = { Text(stringResource(R.string.launch_filter_logcat)) },
-            singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -684,6 +690,8 @@ fun WebPreviewScreen(
                         value = urlInput,
                         onValueChange = { urlInput = it },
                         singleLine = true,
+                        keyboardOptions = ForgeFieldKind.URL.keyboardOptions(ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { opened = true; openUrl(urlInput) }),
                         placeholder = { Text(stringResource(R.string.launch_preview_url), color = colors.onSurfaceVariant.copy(alpha = 0.6f)) },
                         colors = TextFieldDefaults.textFieldColors(
                             containerColor = Color.Transparent,

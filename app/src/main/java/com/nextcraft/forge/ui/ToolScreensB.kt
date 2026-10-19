@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,9 +74,9 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
                         Text(target.name, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
                         Text(target.command, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    Text(matrix.statuses[target.id].mark(), fontSize = ForgeType.cardTitle, color = scheme.primary, modifier = Modifier.padding(horizontal = 6.dp))
+                    Text(matrix.statuses[target.id].mark(), fontSize = ForgeType.cardTitle, color = LocalForgeThemeTokens.current.accentText, modifier = Modifier.padding(horizontal = 6.dp))
                     if (!target.detected) {
-                        TextButton(onClick = { viewModel.buildMatrix.remove(target.id) }, enabled = !matrix.running) { Text(stringResource(R.string.tool_delete)) }
+                        ForgeTextButton(onClick = { viewModel.buildMatrix.remove(target.id) }, enabled = !matrix.running) { Text(stringResource(R.string.tool_delete)) }
                     }
                 }
             }
@@ -108,8 +109,8 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
             title = { Text(stringResource(R.string.tool_add_target)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(stringResource(R.string.tool_target_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = command, onValueChange = { command = it }, label = { Text(stringResource(R.string.tool_target_command)) }, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.NAME, imeAction = ImeAction.Next, value = name, onValueChange = { name = it }, label = { Text(stringResource(R.string.tool_target_name)) }, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done, singleLine = false, value = command, onValueChange = { command = it }, label = { Text(stringResource(R.string.tool_target_command)) }, modifier = Modifier.fillMaxWidth())
                 }
             },
             confirmButton = {
@@ -118,7 +119,7 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
                     showAdd = false
                 })
             },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.projects_cancel)) } },
+            dismissButton = { ForgeTextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.projects_cancel)) } },
         )
     }
 }
@@ -159,7 +160,7 @@ fun SshScreen(viewModel: MainViewModel) {
             }
             ssh.publicKey?.let { key ->
                 Text(key, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                TextButton(onClick = { clipboard.setText(AnnotatedString(key)) }) { Text(stringResource(R.string.tool_copy)) }
+                ForgeTextButton(onClick = { clipboard.setText(AnnotatedString(key)) }) { Text(stringResource(R.string.tool_copy)) }
             }
         }
         ToolSectionLabel(stringResource(R.string.tool_ssh_hosts))
@@ -181,14 +182,14 @@ fun SshScreen(viewModel: MainViewModel) {
                             OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.ssh.startTunnel(host) }, enabled = ssh.clientInstalled == true) { Text(stringResource(R.string.tool_ssh_start_tunnel)) }
                         }
                     }
-                    TextButton(onClick = { viewModel.ssh.removeHost(host.id) }) { Text(stringResource(R.string.tool_delete)) }
+                    ForgeTextButton(onClick = { viewModel.ssh.removeHost(host.id) }) { Text(stringResource(R.string.tool_delete)) }
                 }
             }
         }
         OutlinedButton(shape = RoundedCornerShape(100), onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.tool_ssh_add_host)) }
         if (ssh.busy) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            TextButton(onClick = viewModel.ssh::cancel) { Text(stringResource(R.string.tool_stop)) }
+            ForgeTextButton(onClick = viewModel.ssh::cancel) { Text(stringResource(R.string.tool_stop)) }
         }
         LogBox(text = ssh.log, placeholder = stringResource(R.string.tool_log_placeholder))
     }
@@ -204,11 +205,11 @@ fun SshScreen(viewModel: MainViewModel) {
             title = { Text(stringResource(R.string.tool_ssh_add_host)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(value = alias, onValueChange = { alias = it }, label = { Text(stringResource(R.string.tool_ssh_alias)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text(stringResource(R.string.tool_ssh_user)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text(stringResource(R.string.tool_ssh_host)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text(stringResource(R.string.tool_ssh_port)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = forward, onValueChange = { forward = it }, label = { Text(stringResource(R.string.tool_ssh_forward)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next, value = alias, onValueChange = { alias = it }, label = { Text(stringResource(R.string.tool_ssh_alias)) }, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next, value = user, onValueChange = { user = it }, label = { Text(stringResource(R.string.tool_ssh_user)) }, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next, value = host, onValueChange = { host = it }, label = { Text(stringResource(R.string.tool_ssh_host)) }, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.NUMBER, imeAction = ImeAction.Next, error = port.takeIf { it.isNotBlank() && !FieldValidation.isPort(it) }?.let { stringResource(R.string.field_error_port) }, value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text(stringResource(R.string.tool_ssh_port)) }, modifier = Modifier.fillMaxWidth())
+                    ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done, value = forward, onValueChange = { forward = it }, label = { Text(stringResource(R.string.tool_ssh_forward)) }, modifier = Modifier.fillMaxWidth())
                     error?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.error) }
                 }
             },
@@ -218,7 +219,7 @@ fun SshScreen(viewModel: MainViewModel) {
                     if (error == null) showAdd = false
                 })
             },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.projects_cancel)) } },
+            dismissButton = { ForgeTextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.projects_cancel)) } },
         )
     }
     remoteFor?.let { target ->
@@ -227,7 +228,7 @@ fun SshScreen(viewModel: MainViewModel) {
             onDismissRequest = { remoteFor = null },
             title = { Text(stringResource(R.string.tool_ssh_run_on, target.alias)) },
             text = {
-                OutlinedTextField(value = command, onValueChange = { command = it }, label = { Text(stringResource(R.string.tool_ssh_command)) }, modifier = Modifier.fillMaxWidth())
+                ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done, singleLine = false, value = command, onValueChange = { command = it }, label = { Text(stringResource(R.string.tool_ssh_command)) }, modifier = Modifier.fillMaxWidth())
             },
             confirmButton = {
                 ForgePrimaryButton(text = stringResource(R.string.tool_ssh_run), enabled = command.isNotBlank(), onClick = {
@@ -235,7 +236,7 @@ fun SshScreen(viewModel: MainViewModel) {
                     remoteFor = null
                 })
             },
-            dismissButton = { TextButton(onClick = { remoteFor = null }) { Text(stringResource(R.string.projects_cancel)) } },
+            dismissButton = { ForgeTextButton(onClick = { remoteFor = null }) { Text(stringResource(R.string.projects_cancel)) } },
         )
     }
 }
@@ -259,12 +260,11 @@ fun CiCdScreen(viewModel: MainViewModel) {
         }
         if (ci.workflows.isNotEmpty()) {
             ToolSectionLabel(stringResource(R.string.tool_workflows))
-            OutlinedTextField(
-                shape = RoundedCornerShape(14.dp),
+            ForgeTextField(
+                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                 value = ci.branch,
                 onValueChange = viewModel.cicd::setBranch,
                 label = { Text(stringResource(R.string.tool_branch)) },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             ci.workflows.forEach { workflow ->
@@ -299,7 +299,7 @@ fun CiCdScreen(viewModel: MainViewModel) {
                             color = if (run.conclusion == "success") scheme.primary else if (run.conclusion == null) scheme.onSurfaceVariant else scheme.error,
                             modifier = Modifier.padding(horizontal = 8.dp),
                         )
-                        TextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(run.url))) } }) { Text(stringResource(R.string.tool_open)) }
+                        ForgeTextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(run.url))) } }) { Text(stringResource(R.string.tool_open)) }
                     }
                 }
             }
@@ -321,10 +321,10 @@ fun RomStudioScreen(viewModel: MainViewModel) {
         ToolCard {
             Text(stringResource(R.string.tool_rom_warning, rom.freeStorage), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
         }
-        OutlinedTextField(shape = RoundedCornerShape(14.dp), value = rom.manifestUrl, onValueChange = { viewModel.rom.update(manifestUrl = it) }, label = { Text(stringResource(R.string.tool_rom_manifest)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        ForgeTextField(kind = ForgeFieldKind.URL, imeAction = ImeAction.Next, error = rom.manifestUrl.takeIf { it.isNotBlank() && !FieldValidation.isHttpUrl(it) }?.let { stringResource(R.string.field_error_url) },  value = rom.manifestUrl, onValueChange = { viewModel.rom.update(manifestUrl = it) }, label = { Text(stringResource(R.string.tool_rom_manifest)) }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(shape = RoundedCornerShape(14.dp), value = rom.branch, onValueChange = { viewModel.rom.update(branch = it) }, label = { Text(stringResource(R.string.tool_branch)) }, singleLine = true, modifier = Modifier.weight(1f))
-            OutlinedTextField(shape = RoundedCornerShape(14.dp), value = rom.directory, onValueChange = { viewModel.rom.update(directory = it) }, label = { Text(stringResource(R.string.tool_rom_folder)) }, singleLine = true, modifier = Modifier.weight(1f))
+            ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next,  value = rom.branch, onValueChange = { viewModel.rom.update(branch = it) }, label = { Text(stringResource(R.string.tool_branch)) }, modifier = Modifier.weight(1f))
+            ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,  value = rom.directory, onValueChange = { viewModel.rom.update(directory = it) }, label = { Text(stringResource(R.string.tool_rom_folder)) }, modifier = Modifier.weight(1f))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.tool_rom_jobs, rom.jobs), fontSize = ForgeType.control, modifier = Modifier.weight(1f))

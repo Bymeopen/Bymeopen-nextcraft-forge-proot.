@@ -189,7 +189,7 @@ fun ForgeEmptyState(
             contentAlignment = Alignment.Center,
         ) { ForgeIcon(glyph, tint = tint, size = 26.dp) }
         Spacer(modifier = Modifier.height(14.dp))
-        Text(title, fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Text(title, fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.forgeHeading())
         if (!message.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(message, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)

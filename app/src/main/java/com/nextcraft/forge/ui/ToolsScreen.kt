@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -95,11 +96,11 @@ fun ToolsScreen(
             },
         )
         if (searching) {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.TEXT, imeAction = ImeAction.Search,
                 value = query,
                 onValueChange = { query = it },
                 label = { Text(stringResource(R.string.tools_search)) },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }

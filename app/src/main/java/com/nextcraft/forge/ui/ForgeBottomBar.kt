@@ -250,7 +250,7 @@ internal fun ForgeBottomBar(
                         }
                         val badge: String? = when (entry.tab) {
                             ForgeTab.AGENT -> if (agentRunning) stringResource(R.string.nav_badge_agent_running) else null
-                            ForgeTab.TOOLS, ForgeTab.FILES -> if (changedCount > 0) stringResource(R.string.nav_badge_files_changed, changedCount) else null
+                            ForgeTab.TOOLS, ForgeTab.FILES -> if (changedCount > 0) quantityStringResource(R.plurals.nav_badge_files_changed, changedCount, changedCount) else null
                             ForgeTab.TERMINAL -> if (terminalBusy) stringResource(R.string.nav_badge_terminal_busy) else null
                             else -> null
                         }
@@ -262,7 +262,8 @@ internal fun ForgeBottomBar(
                                 .clickable(role = Role.Tab, onClickLabel = label) {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onSelectTab(entry.tab)
-                                },
+                                }
+                                .forgeSelected(selected),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {

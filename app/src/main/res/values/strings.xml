@@ -173,7 +173,6 @@
     <string name="launch_tab_issues_count">Issues (%1$d)</string>
     <string name="launch_tab_log">Log</string>
     <string name="launch_tab_logcat">Logcat</string>
-    <string name="launch_errors_warnings">%1$d errors · %2$d warnings</string>
     <string name="launch_no_build_output">No build output yet. Tap play to compile.</string>
     <string name="nav_projects">Projects</string>
     <string name="nav_agent">AI setup</string>
@@ -251,7 +250,6 @@
     <string name="tool_no_snapshots">No snapshots yet. Create one before risky changes.</string>
     <string name="tool_no_targets">No build targets found. Add your own command below.</string>
     <string name="tool_open">Open</string>
-    <string name="tool_pending_changes">%1$d files changed by the agent are waiting for Keep or Undo.</string>
     <string name="tool_refresh">Refresh</string>
     <string name="tool_remove">Remove</string>
     <string name="tool_restore">Restore</string>
@@ -409,6 +407,43 @@
     <string name="theme_glass_sub">Translucent surfaces over a tinted canvas</string>
     <string name="theme_white_title">White</string>
     <string name="theme_white_sub">Clean pure white, editorial daylight look</string>
+    <plurals name="tool_pending_changes">
+        <item quantity="one">%d file changed by the agent is waiting for Keep or Undo.</item>
+        <item quantity="other">%d files changed by the agent are waiting for Keep or Undo.</item>
+    </plurals>
+    <plurals name="nav_badge_files_changed">
+        <item quantity="one">%d file changed</item>
+        <item quantity="other">%d files changed</item>
+    </plurals>
+    <plurals name="chats_subtitle">
+        <item quantity="one">%d chat</item>
+        <item quantity="other">%d chats</item>
+    </plurals>
+    <plurals name="msg_files_uploaded">
+        <item quantity="one">%d file uploaded</item>
+        <item quantity="other">%d files uploaded</item>
+    </plurals>
+    <plurals name="msg_zip_saved">
+        <item quantity="one">ZIP saved · %d file</item>
+        <item quantity="other">ZIP saved · %d files</item>
+    </plurals>
+    <plurals name="launch_errors">
+        <item quantity="one">%d error</item>
+        <item quantity="other">%d errors</item>
+    </plurals>
+    <plurals name="launch_warnings">
+        <item quantity="one">%d warning</item>
+        <item quantity="other">%d warnings</item>
+    </plurals>
+    <plurals name="settings_models_found">
+        <item quantity="one">%d model found · tap to use</item>
+        <item quantity="other">%d models found · tap to use</item>
+    </plurals>
+    <plurals name="settings_core_plus_optional">
+        <item quantity="one">Core tools + %d optional toolchain</item>
+        <item quantity="other">Core tools + %d optional toolchains</item>
+    </plurals>
+    <string name="launch_errors_warnings_join">%1$s · %2$s</string>
     <plurals name="time_minutes_ago">
         <item quantity="one">%d minute ago</item>
         <item quantity="other">%d minutes ago</item>
@@ -423,7 +458,6 @@
     </plurals>
     <string name="nav_terminal">Terminal</string>
     <string name="nav_badge_agent_running">Agent is running</string>
-    <string name="nav_badge_files_changed">%1$d files changed</string>
     <string name="nav_badge_terminal_busy">Process running in terminal</string>
     <string name="agent_title">Agent</string>
     <string name="agent_switch_agent">Switch agent</string>
@@ -468,6 +502,9 @@
     <string name="files_unsaved_save">Save</string>
     <string name="files_unsaved_discard">Discard</string>
     <string name="msg_busy_before_quick_project">Finish or stop the active task before starting a Quick project.</string>
+    <string name="field_error_url">Enter a full address starting with http:// or https://</string>
+    <string name="field_error_required">This field is required</string>
+    <string name="field_error_port">Enter a port from 1 to 65535</string>
     <string name="msg_project_deleted">Deleted \"%1$s\"</string>
     <string name="action_undo">Undo</string>
     <string name="msg_busy_before_delete">Cannot delete a project while an agent session, build, or terminal command is running.</string>
@@ -506,7 +543,6 @@
     <string name="settings_runtime_updates">Runtime updates</string>
     <string name="settings_installed_agents_current">Installed agents stay current</string>
     <string name="settings_developer_tools">Developer tools</string>
-    <string name="settings_core_plus_optional">Core tools + %1$d optional toolchains</string>
     <string name="settings_included">Included</string>
     <string name="settings_add">Add</string>
     <string name="settings_remove">Remove</string>
@@ -521,7 +557,6 @@
     <string name="settings_repair_rootfs_sub">Fix broken mounts, symlinks and runtime scripts.</string>
     <string name="settings_version">Version</string>
     <string name="settings_check_updates_sub">Looks for a newer APK</string>
-    <string name="settings_models_found">%1$d models found · tap to use</string>
     <string name="a11y_back">Back</string>
     <string name="agent_latest">Latest</string>
     <string name="agent_project_chats">Project chats</string>
@@ -539,7 +574,6 @@
     <string name="launch_force_rebuild">Force rebuild</string>
     <string name="launch_copy_apk_path">Copy APK path</string>
     <string name="agent_config_title">AI setup</string>
-    <string name="chats_subtitle">%1$d chats</string>
     <string name="chats_empty">No chats yet. Start one to talk to the agent about this project.</string>
     <string name="chats_empty_title">No chats yet</string>
     <string name="chats_open_project_tools">Project tools</string>
@@ -549,8 +583,6 @@
     <string name="nav_preview">Preview</string>
     <string name="agent_greeting">Hi! Tell me what you want to build or change.</string>
     <string name="agent_message_placeholder">Message %1$s…</string>
-    <string name="msg_files_uploaded">%1$d files uploaded</string>
-    <string name="msg_zip_saved">ZIP saved · %1$d files</string>
     <string name="msg_zip_failed">Could not write the ZIP</string>
     <string name="files_download_zip">Download ZIP</string>
     <string name="files_save_copy">Save a copy</string>

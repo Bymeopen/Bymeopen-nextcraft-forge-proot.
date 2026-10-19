@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -194,11 +195,11 @@ fun ProjectsScreen(
             onDismissRequest = { pendingRenameProject = null },
             title = { Text(stringResource(R.string.projects_rename_title)) },
             text = {
-                OutlinedTextField(
+                ForgeTextField(
+                    kind = ForgeFieldKind.NAME, imeAction = ImeAction.Done, error = if (name.isBlank()) stringResource(R.string.field_error_required) else null,
                     value = name,
                     onValueChange = { name = it.take(MAX_PROJECT_NAME) },
                     label = { Text(stringResource(R.string.projects_rename_label)) },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -213,7 +214,7 @@ fun ProjectsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+                ForgeTextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -233,7 +234,7 @@ fun ProjectsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+                ForgeTextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -446,11 +447,11 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.projects_clone_title)) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.URL, imeAction = ImeAction.Done, error = url.takeIf { it.isNotBlank() && !FieldValidation.isHttpUrl(it) }?.let { stringResource(R.string.field_error_url) },
                 value = url,
                 onValueChange = { url = it },
                 placeholder = { Text(stringResource(R.string.projects_clone_hint)) },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -460,7 +461,7 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
         },
     )
 }
@@ -472,7 +473,7 @@ private fun SectionLabel(text: String) {
         fontSize = ForgeType.caption,
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp).forgeHeading(),
     )
 }
 

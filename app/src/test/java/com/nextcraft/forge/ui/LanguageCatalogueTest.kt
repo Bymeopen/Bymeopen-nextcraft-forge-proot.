@@ -31,6 +31,19 @@ class LanguageCatalogueTest {
         }
     }
 
+    private fun plurals(dir: String): Set<String> =
+        Regex("""<plurals\s+name="([^"]+)"""").findAll(File(res, "$dir/strings.xml").readText()).map { it.groupValues[1] }.toSet()
+
+    /** Counted nouns ("1 file" / "2 files") must exist in every translated locale, or it falls back to English. */
+    @Test
+    fun translatedLocales_coverEveryPlural() {
+        val base = plurals("values")
+        AppLanguage.selectable.forEach { lang ->
+            val missing = base - plurals(resDir(lang))
+            assertTrue("${lang.code} misses plurals $missing", missing.isEmpty())
+        }
+    }
+
     @Test
     fun stubLocales_areNotSelectable() {
         val base = keys("values").size

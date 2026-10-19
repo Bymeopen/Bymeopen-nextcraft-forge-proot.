@@ -48,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -143,7 +144,8 @@ fun SettingsScreenModern(
                                         .weight(1f)
                                         .heightIn(min = 76.dp)
                                         .clip(RoundedCornerShape(14.dp))
-                                        .clickable(role = Role.RadioButton) { viewModel.setThemeMode(mode.id) },
+                                        .clickable(role = Role.RadioButton) { viewModel.setThemeMode(mode.id) }
+                                        .forgeSelected(selected),
                                 ) {
                                     Column(
                                         modifier = Modifier.padding(12.dp),
@@ -219,7 +221,7 @@ fun SettingsScreenModern(
         DisclosureCard(
             icon = ForgeGlyph.CODE,
             title = stringResource(R.string.settings_developer_tools),
-            subtitle = stringResource(R.string.settings_core_plus_optional, optionalInstalled),
+            subtitle = quantityStringResource(R.plurals.settings_core_plus_optional, optionalInstalled, optionalInstalled),
             expanded = toolsOpen,
             onToggle = { toolsOpen = !toolsOpen },
         ) {
@@ -239,7 +241,7 @@ fun SettingsScreenModern(
                             stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
                             installed -> Row(verticalAlignment = Alignment.CenterVertically) {
                                 ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
-                                TextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
+                                ForgeTextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
                                     Text(stringResource(R.string.settings_remove), color = tokens.dangerText)
                                 }
                             }
@@ -431,16 +433,15 @@ internal fun AntigravityAccountCard(
                     }
                 }
                 if (!manualCode) {
-                    TextButton(onClick = { manualCode = true }, modifier = Modifier.align(Alignment.End)) {
+                    ForgeTextButton(onClick = { manualCode = true }, modifier = Modifier.align(Alignment.End)) {
                         Text(stringResource(R.string.settings_enter_code_manually))
                     }
                 } else {
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
+                    ForgeTextField(
+                        kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                         value = agyVerificationCode,
                         onValueChange = { agyVerificationCode = it },
                         label = { Text(stringResource(R.string.settings_one_time_code)) },
-                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -455,7 +456,7 @@ internal fun AntigravityAccountCard(
                             enabled = agyVerificationCode.isNotBlank(),
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = {
+                        ForgeTextButton(onClick = {
                             manualCode = false
                             agyVerificationCode = ""
                             viewModel.antigravityAuth.cancel()
@@ -510,7 +511,7 @@ internal fun AntigravityAccountCard(
                         color = scheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = viewModel::refreshAntigravityModels, enabled = !state.antigravityModelsLoading) {
+                    ForgeTextButton(onClick = viewModel::refreshAntigravityModels, enabled = !state.antigravityModelsLoading) {
                         Text(stringResource(R.string.agent_sync))
                     }
                 }
@@ -685,6 +686,7 @@ internal fun RadioRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.RadioButton, onClick = onClick)
+            .forgeSelected(selected)
             .heightIn(min = 56.dp)
             .padding(horizontal = horizontalPadding, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

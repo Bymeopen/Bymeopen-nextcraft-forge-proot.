@@ -222,6 +222,7 @@ internal fun RuntimeOnboardingScreen(
                                 text = snap.errorMessage ?: stringResource(progressStatus.labelRes),
                                 fontSize = ForgeType.secondary,
                                 color = if (snap.errorMessage != null) scheme.error else scheme.onSurfaceVariant,
+                                modifier = if (snap.errorMessage != null) Modifier.forgeLive() else Modifier,
                             )
                         }
                         Text(
@@ -278,16 +279,16 @@ internal fun RuntimeOnboardingScreen(
                 .padding(horizontal = 20.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.Center,
         ) {
-            TextButton(onClick = onRepairRootfs, enabled = !isInstalling) { Text(stringResource(R.string.onb_repair)) }
+            ForgeTextButton(onClick = onRepairRootfs, enabled = !isInstalling) { Text(stringResource(R.string.onb_repair)) }
             Text("·", color = scheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
-            TextButton(onClick = onRefreshStatus) { Text(stringResource(R.string.onb_recheck)) }
+            ForgeTextButton(onClick = onRefreshStatus) { Text(stringResource(R.string.onb_recheck)) }
         }
         Divider(
             color = scheme.outlineVariant,
             thickness = 0.5.dp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
-        TextButton(
+        ForgeTextButton(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) { Text(stringResource(R.string.onb_continue_anyway), color = scheme.onSurfaceVariant) }

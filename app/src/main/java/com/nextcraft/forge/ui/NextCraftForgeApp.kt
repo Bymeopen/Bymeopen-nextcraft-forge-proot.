@@ -124,8 +124,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = viewModel::discardAndContinue) { Text(stringResource(R.string.files_unsaved_discard)) }
-                    TextButton(onClick = viewModel::cancelLeavingFile) { Text(stringResource(R.string.agent_cancel)) }
+                    ForgeTextButton(onClick = viewModel::discardAndContinue) { Text(stringResource(R.string.files_unsaved_discard)) }
+                    ForgeTextButton(onClick = viewModel::cancelLeavingFile) { Text(stringResource(R.string.agent_cancel)) }
                 }
             },
         )
@@ -240,7 +240,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().forgeLive(),
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
@@ -368,7 +368,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             onDismissRequest = { showGitHubDialog = false },
             title = { Text(stringResource(R.string.settings_github)) },
             text = { GitHubSection(state, viewModel) },
-            confirmButton = { TextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.agent_close)) } },
+            confirmButton = { ForgeTextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.agent_close)) } },
         )
     }
 

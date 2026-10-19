@@ -40,6 +40,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -53,6 +55,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
@@ -112,7 +118,7 @@ fun ForgeToggleRow(
                 checkedBorderColor = scheme.primary,
                 uncheckedThumbColor = scheme.onSurfaceVariant,
                 uncheckedTrackColor = scheme.surfaceVariant,
-                uncheckedBorderColor = scheme.outline,
+                uncheckedBorderColor = forgeControlBorder(),
             ),
         )
     }
@@ -149,6 +155,35 @@ fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
     ForgeTab.TERMINAL, ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
 }
 
+/**
+ * Text button in the theme's accent text colour. Material's default is `primary`, which is 3.7:1 on dark
+ * cards; accentText is checked >= 4.5:1 on every surface (ContrastTest).
+ */
+@Composable
+fun ForgeTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        colors = ButtonDefaults.textButtonColors(contentColor = LocalForgeThemeTokens.current.accentText),
+        content = content,
+    )
+}
+
+/** Screen and section titles: TalkBack users jump between them with heading navigation. */
+fun Modifier.forgeHeading(): Modifier = semantics { heading() }
+
+/** Text that appears or changes on its own (banners, errors) is announced without moving focus. */
+fun Modifier.forgeLive(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }
+
+/** Conveys "selected" for tabs and radio rows built on clickable (role alone only says "tab"). */
+fun Modifier.forgeSelected(isSelected: Boolean): Modifier = semantics { selected = isSelected }
+
 /** Large left-aligned screen title (Linear style) with an optional quiet subtitle. */
 @Composable
 fun ForgeLargeTitle(
@@ -164,7 +199,7 @@ fun ForgeLargeTitle(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
+            Text(text = title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp, modifier = Modifier.forgeHeading())
             if (subtitle != null) {
                 Text(text = subtitle, fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -189,7 +224,9 @@ fun ForgeSectionLabel(
         fontWeight = FontWeight.Medium,
         letterSpacing = ForgeType.sectionTracking,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = ForgeSpace.section, bottom = ForgeSpace.labelToCard),
+        modifier = modifier
+            .padding(start = horizontalPadding, end = horizontalPadding, top = ForgeSpace.section, bottom = ForgeSpace.labelToCard)
+            .forgeHeading(),
     )
 }
 
@@ -338,6 +375,7 @@ fun ForgePillTabs(
                         onLongClick = onLongPress?.let { cb -> { cb(index) } },
                         onClick = { onSelect(index) },
                     )
+                    .forgeSelected(selected)
                     .padding(horizontal = 15.dp),
                 contentAlignment = Alignment.Center,
             ) {

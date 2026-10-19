@@ -55,7 +55,7 @@ fun ProjectChatsScreen(
             title = project?.name ?: stringResource(R.string.shell_nextcraft_forge),
             subtitle = listOfNotNull(
                 project?.let { stringResource(if (it.type == com.nextcraft.forge.model.ProjectType.ANDROID) R.string.projects_android else R.string.projects_general) },
-                stringResource(R.string.chats_subtitle, chats.size),
+                quantityStringResource(R.plurals.chats_subtitle, chats.size, chats.size),
             ).joinToString(" · "),
             onBack = { viewModel.projectBack() },
             actions = {

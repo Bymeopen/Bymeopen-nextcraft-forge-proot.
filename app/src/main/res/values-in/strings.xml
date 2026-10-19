@@ -173,7 +173,6 @@
     <string name="launch_tab_issues_count">Masalah (%1$d)</string>
     <string name="launch_tab_log">Log</string>
     <string name="launch_tab_logcat">Logcat</string>
-    <string name="launch_errors_warnings">%1$d error · %2$d peringatan</string>
     <string name="launch_no_build_output">Belum ada output build. Ketuk putar untuk mengompilasi.</string>
     <string name="nav_projects">Proyek</string>
     <string name="nav_agent">Atur AI</string>
@@ -251,7 +250,6 @@
     <string name="tool_no_snapshots">Belum ada snapshot. Buat satu sebelum perubahan berisiko.</string>
     <string name="tool_no_targets">Target build tidak ditemukan. Tambahkan perintah sendiri di bawah.</string>
     <string name="tool_open">Buka</string>
-    <string name="tool_pending_changes">%1$d berkas yang diubah agen menunggu Simpan atau Batalkan.</string>
     <string name="tool_refresh">Muat ulang</string>
     <string name="tool_remove">Hapus</string>
     <string name="tool_restore">Pulihkan</string>
@@ -409,6 +407,34 @@
     <string name="theme_glass_sub">Permukaan tembus pandang di atas kanvas berwarna</string>
     <string name="theme_white_title">White</string>
     <string name="theme_white_sub">Putih bersih bergaya editorial siang hari</string>
+    <plurals name="tool_pending_changes">
+        <item quantity="other">%d berkas yang diubah agen menunggu Simpan atau Batalkan.</item>
+    </plurals>
+    <plurals name="nav_badge_files_changed">
+        <item quantity="other">%d file berubah</item>
+    </plurals>
+    <plurals name="chats_subtitle">
+        <item quantity="other">%d obrolan</item>
+    </plurals>
+    <plurals name="msg_files_uploaded">
+        <item quantity="other">%d file diunggah</item>
+    </plurals>
+    <plurals name="msg_zip_saved">
+        <item quantity="other">ZIP tersimpan · %d file</item>
+    </plurals>
+    <plurals name="launch_errors">
+        <item quantity="other">%d error</item>
+    </plurals>
+    <plurals name="launch_warnings">
+        <item quantity="other">%d peringatan</item>
+    </plurals>
+    <plurals name="settings_models_found">
+        <item quantity="other">%d model ditemukan · ketuk untuk memakai</item>
+    </plurals>
+    <plurals name="settings_core_plus_optional">
+        <item quantity="other">Perkakas inti + %d toolchain opsional</item>
+    </plurals>
+    <string name="launch_errors_warnings_join">%1$s · %2$s</string>
     <plurals name="time_minutes_ago">
         <item quantity="other">%d menit lalu</item>
     </plurals>
@@ -420,7 +446,6 @@
     </plurals>
     <string name="nav_terminal">Terminal</string>
     <string name="nav_badge_agent_running">Agen berjalan</string>
-    <string name="nav_badge_files_changed">%1$d file berubah</string>
     <string name="nav_badge_terminal_busy">Proses berjalan di terminal</string>
     <string name="agent_title">Agent</string>
     <string name="agent_switch_agent">Ganti agen</string>
@@ -465,6 +490,9 @@
     <string name="files_unsaved_save">Simpan</string>
     <string name="files_unsaved_discard">Buang</string>
     <string name="msg_busy_before_quick_project">Selesaikan atau hentikan tugas aktif sebelum memulai Quick project.</string>
+    <string name="field_error_url">Masukkan alamat lengkap yang diawali http:// atau https://</string>
+    <string name="field_error_required">Kolom ini wajib diisi</string>
+    <string name="field_error_port">Masukkan port 1 sampai 65535</string>
     <string name="msg_project_deleted">\"%1$s\" dihapus</string>
     <string name="action_undo">Urungkan</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>
@@ -503,7 +531,6 @@
     <string name="settings_runtime_updates">Pembaruan runtime</string>
     <string name="settings_installed_agents_current">Agen terpasang tetap mutakhir</string>
     <string name="settings_developer_tools">Perkakas pengembang</string>
-    <string name="settings_core_plus_optional">Perkakas inti + %1$d toolchain opsional</string>
     <string name="settings_included">Termasuk</string>
     <string name="settings_add">Tambah</string>
     <string name="settings_remove">Hapus</string>
@@ -518,7 +545,6 @@
     <string name="settings_repair_rootfs_sub">Perbaiki mount, symlink, dan skrip runtime yang rusak.</string>
     <string name="settings_version">Versi</string>
     <string name="settings_check_updates_sub">Mencari APK yang lebih baru</string>
-    <string name="settings_models_found">%1$d model ditemukan · ketuk untuk memakai</string>
     <string name="a11y_back">Kembali</string>
     <string name="agent_latest">Terbaru</string>
     <string name="agent_project_chats">Obrolan proyek</string>
@@ -536,7 +562,6 @@
     <string name="launch_force_rebuild">Build ulang paksa</string>
     <string name="launch_copy_apk_path">Salin path APK</string>
     <string name="agent_config_title">Atur AI</string>
-    <string name="chats_subtitle">%1$d obrolan</string>
     <string name="chats_empty">Belum ada obrolan. Mulai satu untuk membahas proyek ini dengan agen.</string>
     <string name="chats_empty_title">Belum ada obrolan</string>
     <string name="chats_open_project_tools">Perkakas proyek</string>
@@ -546,8 +571,6 @@
     <string name="nav_preview">Pratinjau</string>
     <string name="agent_greeting">Hai! Ceritakan apa yang ingin kamu bangun atau ubah.</string>
     <string name="agent_message_placeholder">Pesan untuk %1$s…</string>
-    <string name="msg_files_uploaded">%1$d file diunggah</string>
-    <string name="msg_zip_saved">ZIP tersimpan · %1$d file</string>
     <string name="msg_zip_failed">ZIP tidak bisa ditulis</string>
     <string name="files_download_zip">Unduh ZIP</string>
     <string name="files_save_copy">Simpan salinan</string>
