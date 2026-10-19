@@ -32,6 +32,7 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import com.nextcraft.forge.runtime.shellSingleQuote
 import com.nextcraft.forge.network.GitHubRepository
 import com.nextcraft.forge.network.GitHubTokenPoll
 import com.nextcraft.forge.network.LocalNetwork
@@ -167,6 +168,8 @@ data class ForgeUiState(
     val fileSavedBanner: String? = null,
     /** Files picked for the next prompt; copied into the workspace's attachments/ folder. */
     val pendingAttachments: List<ChatAttachment> = emptyList(),
+    /** Messages sent while the agent was busy; delivered as the next turn once the current one completes. */
+    val queuedPrompts: List<QueuedPrompt> = emptyList(),
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
     val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
@@ -201,6 +204,13 @@ data class ForgeUiState(
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
 }
+
+/** A message (and its attachments) the user sent while the agent was still working. */
+data class QueuedPrompt(
+    val id: String = UUID.randomUUID().toString(),
+    val text: String,
+    val attachments: List<ChatAttachment> = emptyList(),
+)
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = AppPreferences(application)
@@ -950,7 +960,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendPrompt(promptText: String) {
         val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
-        if ((cleanPrompt.isEmpty() && attachments.isEmpty()) || _state.value.sessionRunning) return
+        if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
+        if (_state.value.sessionRunning) {
+            // The agent keeps working; this message is sent automatically when its turn completes.
+            _state.update {
+                it.copy(
+                    queuedPrompts = it.queuedPrompts + QueuedPrompt(text = cleanPrompt, attachments = attachments),
+                    pendingAttachments = emptyList(),
+                )
+            }
+            return
+        }
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
@@ -1050,9 +1070,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeBuildJob?.cancel()
     }
 
+    fun removeQueuedPrompt(id: String) {
+        _state.update { st -> st.copy(queuedPrompts = st.queuedPrompts.filterNot { it.id == id }) }
+    }
+
+    /** Sends everything queued during the finished turn as one follow-up prompt. */
+    private fun dispatchQueuedPrompts() {
+        val queued = _state.value.queuedPrompts
+        if (queued.isEmpty() || _state.value.sessionRunning) return
+        val text = queued.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
+        _state.update {
+            it.copy(
+                queuedPrompts = emptyList(),
+                pendingAttachments = queued.flatMap { q -> q.attachments } + it.pendingAttachments,
+            )
+        }
+        sendPrompt(text)
+    }
+
+    /** Drops queued messages when the turn ended without completing (stopped or failed) and tells the user. */
+    private fun discardQueuedPrompts() {
+        if (_state.value.queuedPrompts.isEmpty()) return
+        _state.update { it.copy(queuedPrompts = emptyList(), bannerMessage = UiText.res(R.string.msg_queue_discarded)) }
+    }
+
     /** Stops the agent session only; a running Android build keeps going. */
     fun stopActiveTask() {
         val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
+        discardQueuedPrompts()
         val pendingApproval = _state.value.pendingToolRequest
         val bridge = activeRuntimeBridge
         RuntimeTaskController.stop(RuntimeTaskController.AGENT)
@@ -1141,10 +1186,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             is RuntimeEvent.SessionCompleted -> {
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
+                // Wait for the bridge call to fully unwind so the next turn cannot race its shared state.
+                val finishedJob = activeAgentJob
+                viewModelScope.launch {
+                    finishedJob?.join()
+                    dispatchQueuedPrompts()
+                }
             }
             is RuntimeEvent.SessionFailed -> {
                 appendAssistantText("\n\n[${event.reason}]")
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
+                discardQueuedPrompts()
             }
         }
     }
@@ -1903,8 +1955,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return output
     }
 
-    private fun shellSingleQuote(raw: String): String = "'" + raw.replace("'", "'\"'\"'") + "'"
-
     /**
      * Writes the GitHub PAT into the rootfs only while [block] runs, then removes it so agent
      * processes (UID 0 inside the chroot) can never read a long-lived credential file.
@@ -2467,12 +2517,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             var intervalSec = deviceCode.intervalSeconds
+            var networkFailures = 0
             val deadline = System.currentTimeMillis() + deviceCode.expiresInSeconds * 1000L
             while (isActive && System.currentTimeMillis() < deadline) {
                 delay(intervalSec * 1000L)
                 val poll = withContext(Dispatchers.IO) {
                     runCatching { githubClient.pollDeviceToken(cleanId, deviceCode.deviceCode) }
-                        .getOrElse { GitHubTokenPoll.Failure(it.message ?: "Polling error") }
+                        .onSuccess { networkFailures = 0 }
+                        .getOrElse { err ->
+                            // A network blip (e.g. while the user is in the browser entering the code) must not end the sign-in.
+                            if (err is java.io.IOException && ++networkFailures <= MAX_GITHUB_POLL_NETWORK_FAILURES) {
+                                GitHubTokenPoll.Pending()
+                            } else {
+                                GitHubTokenPoll.Failure(err.message ?: "Polling error")
+                            }
+                        }
                 }
                 when (poll) {
                     is GitHubTokenPoll.Success -> {
@@ -3104,6 +3163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val MAX_TERMINAL_CHARS = 128 * 1024
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
+        const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }
 }
 

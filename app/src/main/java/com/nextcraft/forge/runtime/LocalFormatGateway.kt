@@ -415,7 +415,7 @@ internal class LocalFormatGateway(
         } else {
             "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
         }
-        if (!isPlainHttpAllowedEndpoint(endpoint)) {
+        if (!com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(endpoint)) {
             return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for localhost")
         }
         val currentKey = activeApiKey
@@ -480,7 +480,7 @@ internal class LocalFormatGateway(
     ) {
         val rawBase = profile.resolvedBaseUrl.trim().trimEnd('/')
         val endpoint = "${rawBase.removeSuffix("/chat/completions")}/chat/completions"
-        if (!isPlainHttpAllowedEndpoint(endpoint)) {
+        if (!com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(endpoint)) {
             writeJson(output, 400, errorJson("invalid_request_error", "Plain http:// is only allowed for localhost"))
             return
         }
@@ -755,9 +755,6 @@ internal class LocalFormatGateway(
         )
         emitEvent("message_stop", JSONObject().put("type", "message_stop"))
     }
-
-    private fun isPlainHttpAllowedEndpoint(url: String): Boolean =
-        com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(url)
 
     private fun writeStream(output: BufferedOutputStream, message: JSONObject) {
         writeEventStreamHeaders(output)

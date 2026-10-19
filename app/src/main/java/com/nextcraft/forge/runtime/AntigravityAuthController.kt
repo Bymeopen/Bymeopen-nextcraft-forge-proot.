@@ -47,8 +47,6 @@ class AntigravityAuthController(
         "runtime/ubuntu/root/.gemini/antigravity-cli/antigravity-oauth-token",
     )
 
-    private fun shellSingleQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
-
     fun hasOfficialCredential(): Boolean {
         val file = officialCredentialFile()
         if (file.isFile) return true
