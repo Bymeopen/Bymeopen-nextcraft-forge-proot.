@@ -2483,11 +2483,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             var intervalSec = deviceCode.intervalSeconds
             val deadline = System.currentTimeMillis() + deviceCode.expiresInSeconds * 1000L
+            var consecutiveErrors = 0
             while (isActive && System.currentTimeMillis() < deadline) {
                 delay(intervalSec * 1000L)
                 val poll = withContext(Dispatchers.IO) {
                     runCatching { githubClient.pollDeviceToken(cleanId, deviceCode.deviceCode) }
-                        .getOrElse { GitHubTokenPoll.Failure(it.message ?: "Polling error") }
+                        .onSuccess { consecutiveErrors = 0 }
+                        .getOrElse {
+                            // One dropped request must not kill a sign-in the user already approved: retry a few times.
+                            if (++consecutiveErrors >= MAX_POLL_ERRORS) GitHubTokenPoll.Failure(it.message ?: "Polling error") else GitHubTokenPoll.Pending()
+                        }
                 }
                 when (poll) {
                     is GitHubTokenPoll.Success -> {
@@ -3129,6 +3134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        const val MAX_POLL_ERRORS = 5
         const val MAX_IMPORT_ENTRIES = 50_000
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024

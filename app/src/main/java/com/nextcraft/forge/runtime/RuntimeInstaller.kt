@@ -622,6 +622,8 @@ class RuntimeInstaller(private val context: Context) {
         verify: suspend () -> Unit,
     ) {
         val previous = File(target.parentFile, ".${target.name}.previous")
+        // An earlier update killed between the rename below and its cleanup leaves the only good binary in .previous.
+        if (previous.exists() && !target.exists()) runCatching { Os.rename(previous.absolutePath, target.absolutePath) }
         previous.delete()
         if (target.exists()) Os.rename(target.absolutePath, previous.absolutePath)
         try {

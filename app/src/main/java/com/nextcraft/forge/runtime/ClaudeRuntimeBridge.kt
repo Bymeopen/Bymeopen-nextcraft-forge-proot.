@@ -349,7 +349,8 @@ class ClaudeRuntimeBridge(
     suspend fun hello(provider: ProviderProfile, timeoutMillis: Long = 90_000L): String = withContext(Dispatchers.IO) {
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val storedLogin = usesStoredClaudeLogin(provider)
-        val secret = if (storedLogin) "" else secretFor(provider).orEmpty()
+        // Same fallback as startSession: local servers (LM Studio, Ollama) have no key, so test them with the placeholder.
+        val secret = if (storedLogin) "" else secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         check(secret.isNotBlank() || storedLogin) { "Not signed in to Claude." }
         val installed = installer.installedRuntime()
         val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
@@ -774,7 +775,9 @@ class ClaudeRuntimeBridge(
     private fun sanitizeForDisplay(value: String): String {
         return value
             .replace(Regex("sk-[A-Za-z0-9_-]{8,}"), "sk-••••")
-            .replace(Regex("(?i)(authorization|api[_-]?key)\\s*[:=]\\s*[^\\s,}]+"), "${'$'}1: ••••")
+            .replace(Regex("(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"), "gh_••••")
+            // Also covers JSON ("api_key":"x") and "Authorization: Bearer <token>", where the token follows the scheme word.
+            .replace(Regex("(?i)(authorization|api[_-]?key|(?:access|refresh|auth)[_-]?token|secret|password)[\"']?\\s*[:=]\\s*[\"']?(?:(?:bearer|basic|token)\\s+)?[^\\s,}\"']+"), "${'$'}1: ••••")
             .replace(Regex("\\s+"), " ")
             .trim()
             .take(600)
