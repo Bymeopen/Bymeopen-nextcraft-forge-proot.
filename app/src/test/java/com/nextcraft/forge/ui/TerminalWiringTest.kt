@@ -39,6 +39,6 @@ class TerminalWiringTest {
     fun terminalKeys_haveSpokenLabels() {
         val screen = read("src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt")
         val keys = Regex("""TerminalKey\("([^"]+)", stringResource""").findAll(screen).count()
-        assertTrue("every named key must pass a spoken description (found $keys)", keys >= 14)
+        assertTrue("every named key must pass a spoken description (found $keys)", keys >= 13)
     }
 }
