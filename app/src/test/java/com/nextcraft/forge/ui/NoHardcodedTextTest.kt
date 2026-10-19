@@ -12,7 +12,7 @@ import org.junit.Test
 class NoHardcodedTextTest {
     private val skipFiles = setOf(
         "Theme.kt", "MainViewModel.kt", "ModelLabels.kt",
-        "AndroidBuildText.kt", "AppLanguage.kt", "LocaleHelper.kt",
+        "AppLanguage.kt", "LocaleHelper.kt",
     )
 
     // Call sites that take user-visible text, followed by a quoted literal: Text("x"), contentDescription = "x", ...

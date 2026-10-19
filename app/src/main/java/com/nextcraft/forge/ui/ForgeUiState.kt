@@ -219,6 +219,7 @@ enum class BannerActionKind(@androidx.annotation.StringRes val label: Int) {
     SET_UP_RUNTIME(R.string.banner_action_setup),
     RETRY_IMPORT(R.string.action_retry),
     RETRY_UPDATE_CHECK(R.string.action_retry),
+    RETRY_APK_INSTALL(R.string.action_retry),
 }
 
 /** [forMessage] ties the action to one banner text, so a later unrelated banner never inherits a stale button. */

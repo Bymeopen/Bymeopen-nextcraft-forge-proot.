@@ -297,7 +297,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         stage = AndroidBuildStage.COMPLETE,
                         apkPath = existingApk.absolutePath,
                         apkSizeBytes = existingApk.length(),
-                        message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                        message = getApplication<Application>().getString(R.string.build_existing_apk, existingApk.name, existingApk.length() / 1024),
                     )
                 } else {
                     AndroidBuildRecord()
@@ -658,7 +658,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             stage = AndroidBuildStage.COMPLETE,
                             apkPath = existingApk.absolutePath,
                             apkSizeBytes = existingApk.length(),
-                            message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                            message = getApplication<Application>().getString(R.string.build_existing_apk, existingApk.name, existingApk.length() / 1024),
                         )
                     } else {
                         AndroidBuildRecord()
@@ -1978,7 +1978,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     stage = AndroidBuildStage.PREPARING,
                     action = if (installAfterBuild) AndroidAction.BUILD_AND_RUN else AndroidAction.BUILD,
                     startedAtMillis = startedAt,
-                    message = "Running Gradle $task…",
+                    message = getApplication<Application>().getString(R.string.build_running_gradle, task),
                     log = "",
                 ),
             )
@@ -2141,7 +2141,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
                         stage = AndroidBuildStage.INSTALLING,
-                        message = "Installing ${apkFile.name}…",
+                        message = getApplication<Application>().getString(R.string.build_installing_apk, apkFile.name),
                     ),
                 )
             }
@@ -2153,7 +2153,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         launchAfterInstall = true,
                     )
                     null
-                }.getOrElse { err -> err.message ?: "APK installation failed" }
+                }.getOrElse { err -> err.message ?: getApplication<Application>().getString(R.string.build_apk_install_failed) }
             }
             if (errorMsg != null) {
                 _state.update {
@@ -2163,6 +2163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             message = errorMsg,
                         ),
                         bannerMessage = UiText.Raw(errorMsg),
+                        bannerAction = BannerAction(BannerActionKind.RETRY_APK_INSTALL, UiText.Raw(errorMsg)),
                     )
                 }
             }
@@ -2219,7 +2220,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             available = false,
                             running = false,
                             packageName = pkg,
-                            message = "Root (su) or READ_LOGS permission is required for live logcat.",
+                            message = getApplication<Application>().getString(R.string.logcat_permission_required),
                         ),
                     )
                 }
@@ -2231,7 +2232,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         available = true,
                         running = true,
                         packageName = pkg,
-                        message = "Streaming logcat for $pkg…",
+                        message = getApplication<Application>().getString(R.string.logcat_streaming, pkg),
                     ),
                 )
             }
@@ -2273,7 +2274,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 it.copy(
                                     androidLogcat = it.androidLogcat.copy(
                                         running = false,
-                                        message = "Logcat stream ended for $pkg.",
+                                        message = getApplication<Application>().getString(R.string.logcat_ended, pkg),
                                     ),
                                 )
                             }
@@ -2301,7 +2302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeLogcatProcess = null
         activeLogcatJob?.cancel()
         _state.update {
-            it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = "Logcat paused"))
+            it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = getApplication<Application>().getString(R.string.logcat_paused)))
         }
     }
 
@@ -3165,6 +3166,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when (kind) {
             BannerActionKind.RETRY_IMPORT -> lastImportUri?.let(::importZipProject)
             BannerActionKind.RETRY_UPDATE_CHECK -> checkAgentUpdates()
+            BannerActionKind.RETRY_APK_INSTALL -> installBuiltApk()
             BannerActionKind.SET_UP_RUNTIME -> Unit
         }
     }

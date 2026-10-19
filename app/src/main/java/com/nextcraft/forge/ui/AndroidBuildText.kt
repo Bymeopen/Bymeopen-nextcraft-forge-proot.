@@ -1,24 +1,30 @@
 package com.nextcraft.forge.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 import com.nextcraft.forge.runtime.AndroidBuildIssue
-import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidBuildStage
 
-fun AndroidBuildStage.displayLabel(): String = when (this) {
-    AndroidBuildStage.IDLE -> "Idle"
-    AndroidBuildStage.PREPARING -> "Preparing workspace & Chroot mounts…"
-    AndroidBuildStage.RESOLVING -> "Resolving Maven dependencies…"
-    AndroidBuildStage.RESOURCES -> "Compiling Android resources (aapt2)…"
-    AndroidBuildStage.COMPILING -> "Compiling Kotlin & Java sources…"
-    AndroidBuildStage.PACKAGING -> "Packaging & signing Debug APK…"
-    AndroidBuildStage.FINDING_APK -> "Locating output Debug APK…"
-    AndroidBuildStage.INSTALLING -> "Installing APK on device…"
-    AndroidBuildStage.LAUNCHING -> "Launching installed application…"
-    AndroidBuildStage.COMPLETE -> "Build complete"
-    AndroidBuildStage.FAILED -> "Build failed"
-    AndroidBuildStage.CANCELLING -> "Cancelling build…"
-    AndroidBuildStage.CANCELLED -> "Build cancelled"
-}
+/** Stage text for the build screen (translated). */
+@Composable
+fun AndroidBuildStage.displayLabel(): String = stringResource(
+    when (this) {
+        AndroidBuildStage.IDLE -> R.string.build_stage_idle
+        AndroidBuildStage.PREPARING -> R.string.build_stage_preparing
+        AndroidBuildStage.RESOLVING -> R.string.build_stage_resolving
+        AndroidBuildStage.RESOURCES -> R.string.build_stage_resources
+        AndroidBuildStage.COMPILING -> R.string.build_stage_compiling
+        AndroidBuildStage.PACKAGING -> R.string.build_stage_packaging
+        AndroidBuildStage.FINDING_APK -> R.string.build_stage_finding_apk
+        AndroidBuildStage.INSTALLING -> R.string.build_stage_installing
+        AndroidBuildStage.LAUNCHING -> R.string.build_stage_launching
+        AndroidBuildStage.COMPLETE -> R.string.build_stage_complete
+        AndroidBuildStage.FAILED -> R.string.build_stage_failed
+        AndroidBuildStage.CANCELLING -> R.string.build_stage_cancelling
+        AndroidBuildStage.CANCELLED -> R.string.build_stage_cancelled
+    },
+)
 
 fun AndroidBuildStage.progressFraction(): Float = when (this) {
     AndroidBuildStage.IDLE -> 0f
@@ -36,16 +42,7 @@ fun AndroidBuildStage.progressFraction(): Float = when (this) {
     AndroidBuildStage.CANCELLED -> 0f
 }
 
-fun AndroidBuildPhase.displayBadge(): String = when (this) {
-    AndroidBuildPhase.IDLE -> "READY"
-    AndroidBuildPhase.PREPARING -> "PREPARING"
-    AndroidBuildPhase.BUILDING -> "BUILDING"
-    AndroidBuildPhase.CANCELLING -> "STOPPING"
-    AndroidBuildPhase.SUCCEEDED -> "PASSED"
-    AndroidBuildPhase.FAILED -> "FAILED"
-    AndroidBuildPhase.CANCELLED -> "CANCELLED"
-}
-
+/** Sent to the agent as its prompt (not shown to the user), so it stays English. */
 fun AndroidBuildIssue.formatForAgentPrompt(): String = buildString {
     append("Please fix this Android build error")
     filePath?.let { path ->
