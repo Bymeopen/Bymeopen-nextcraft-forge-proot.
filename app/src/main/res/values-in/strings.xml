@@ -546,6 +546,9 @@
     <string name="msg_zip_saved">ZIP tersimpan · %1$d file</string>
     <string name="msg_zip_failed">ZIP tidak bisa ditulis</string>
     <string name="files_download_zip">Unduh ZIP</string>
+    <string name="files_save_copy">Simpan salinan</string>
+    <string name="msg_file_saved">Salinan %1$s tersimpan</string>
+    <string name="msg_file_failed">Gagal menyimpan salinan</string>
     <string name="files_selected_count">%1$d dipilih</string>
     <string name="files_add_menu">Tambah</string>
     <string name="files_new_folder">Folder baru</string>

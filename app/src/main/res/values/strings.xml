@@ -549,6 +549,9 @@
     <string name="msg_zip_saved">ZIP saved · %1$d files</string>
     <string name="msg_zip_failed">Could not write the ZIP</string>
     <string name="files_download_zip">Download ZIP</string>
+    <string name="files_save_copy">Save a copy</string>
+    <string name="msg_file_saved">Saved a copy of %1$s</string>
+    <string name="msg_file_failed">Could not save a copy</string>
     <string name="files_selected_count">%1$d selected</string>
     <string name="files_add_menu">Add</string>
     <string name="files_new_folder">New folder</string>

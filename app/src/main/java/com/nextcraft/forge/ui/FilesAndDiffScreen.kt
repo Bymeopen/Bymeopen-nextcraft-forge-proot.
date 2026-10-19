@@ -101,6 +101,12 @@ fun FilesAndDiffScreen(
         selecting = false
         selectedPaths.clear()
     }
+    var saveCopyPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val fileSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+        val path = saveCopyPath
+        if (uri != null && path != null) viewModel.exportWorkspaceFile(uri, path)
+        saveCopyPath = null
+    }
     val inProject = state.activeTab == ForgeTab.PROJECTS
 
     androidx.compose.runtime.LaunchedEffect(state.selectedFilePath) {
@@ -156,6 +162,7 @@ fun FilesAndDiffScreen(
                     onNewFolderIn = { dir -> newFolderBaseDir = dir },
                     onUploadIn = { dir -> uploadDir = dir; uploadPicker.launch(arrayOf("*/*")) },
                     onRename = { path -> renameTarget = path },
+                    onSaveCopy = { path -> saveCopyPath = path; fileSaver.launch(path.substringAfterLast('/')) },
                     onDelete = { path -> pendingDeletePath = path },
                     modifier = Modifier.weight(1f),
                 )
@@ -345,6 +352,7 @@ private fun WorkspaceTreeList(
     onNewFolderIn: (String) -> Unit,
     onUploadIn: (String) -> Unit,
     onRename: (String) -> Unit,
+    onSaveCopy: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -452,6 +460,9 @@ private fun WorkspaceTreeList(
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
                                 Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                            }
+                            if (!entry.isDirectory) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
                             }
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }, onClick = { menuOpen = false; onRename(entry.path) })
                             DropdownMenuItem(

@@ -1655,6 +1655,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Copies one workspace file to a document the user chose (Storage Access Framework "save as"). */
+    fun exportWorkspaceFile(target: android.net.Uri, relativePath: String) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val source = checkpoints.safeWorkspaceFile(ws, relativePath.trim().trimStart('/'))
+                    check(source.isFile && !Files.isSymbolicLink(source.toPath())) { "Not a regular file" }
+                    getApplication<Application>().contentResolver.openOutputStream(target)?.use { os ->
+                        source.inputStream().use { it.copyTo(os) }
+                    } ?: error("Cannot open $target")
+                }.onFailure { Log.w("MainViewModel", "File export failed", it) }.isSuccess
+            }
+            val app = getApplication<Application>()
+            _state.update {
+                it.copy(
+                    fileSavedBanner = if (ok) app.getString(R.string.msg_file_saved, relativePath.substringAfterLast('/')) else app.getString(R.string.msg_file_failed),
+                )
+            }
+        }
+    }
+
     fun deleteWorkspaceFile(relativePath: String) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
