@@ -321,7 +321,6 @@
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
-    <string name="projects_build_from_your_phone">Build from your phone</string>
     <string name="projects_tagline">Chat, review changes, and preview your project.</string>
     <string name="projects_quick_project">Quick project</string>
     <string name="projects_bring_existing">Bring an existing project</string>
