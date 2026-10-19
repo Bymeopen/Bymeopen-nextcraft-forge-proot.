@@ -358,3 +358,5 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Motion batch 1 (ForgeMotion.kt): push/pop slide+fade antar kedalaman proyek, cross-fade tab/pane, pressed scale pada tombol/pill, tool-call expand + chevron putar, tombol kirim spring + warna animasi, caret streaming berkedip, dialog pop-in, animateItemPlacement. Semua snap saat reduce-motion.
 - Batch 2: ForgeType (24/17/16/15/13/12, label seksi uppercase tracking 0.6) dan ForgeSpace (20/14/16/56/24/8) dipakai komponen bersama; ukuran font ganjil disapu; tepi kartu Linear 1px putih 6%.
 - Batch 3: ForgeIcons (21 glyph stroke 1.8dp) dipakai baris Settings/Agent config, menu Files, pohon file, jenis tool-call, riwayat dan lampir di chat; divider pohon dihapus (hanya dalam kartu); placeholder 60%; haptic tick tab dan kirim.
+
+- Batch A (reset): shared ForgeProjectHeader / ForgeListRow / ForgeEmptyState (ForgeShared.kt); project header on Chats, Files, Terminal, Preview and tool screens; Tools launcher single-accent stroke tiles; uniform empty states (Projects, Chats, Preview); diff review buttons 48dp.
