@@ -431,4 +431,6 @@
     <string name="nav_chat">Chat</string>
     <string name="nav_files">Files</string>
     <string name="nav_preview">Preview</string>
+    <string name="agent_greeting">Hi! Tell me what you want to build or change.</string>
+    <string name="agent_message_placeholder">Message %1$s…</string>
 </resources>
