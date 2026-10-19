@@ -345,17 +345,6 @@ fun SettingsScreenModern(
                 }
             }
         }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.shell_nextcraft_forge), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(stringResource(R.string.projects_tagline), fontSize = 13.sp, color = scheme.onSurfaceVariant)
-            }
-            Text("v${BuildConfig.VERSION_NAME}", fontSize = 13.sp, color = scheme.onSurfaceVariant)
-        }
     }
 }
 
