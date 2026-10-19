@@ -451,7 +451,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             current.setupSnapshot.status == RuntimeSetupStatus.RUNNING -> UiText.res(R.string.msg_runtime_op_running)
             else -> return true
         }
-        _state.update { it.copy(bannerMessage = reason) }
+        _state.update {
+            it.copy(
+                bannerMessage = reason,
+                bannerAction = if (!current.runtimeInstalled) BannerAction(BannerActionKind.SET_UP_RUNTIME, reason) else null,
+            )
+        }
         return false
     }
 
@@ -506,6 +511,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         else -> it.bannerMessage
                     },
                 )
+            }
+            if (result.isFailure) {
+                _state.update { s -> s.copy(bannerAction = s.bannerMessage?.let { BannerAction(BannerActionKind.RETRY_UPDATE_CHECK, it) }) }
             }
         }
     }
@@ -2851,8 +2859,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /** Remembered so the banner's "Try again" can re-run a failed import without the file picker. */
+    private var lastImportUri: android.net.Uri? = null
+
     /** Unpacks a user-picked ZIP into a new workspace project named after the file. */
     fun importZipProject(uri: android.net.Uri) {
+        lastImportUri = uri
         val app = getApplication<Application>()
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -2923,7 +2935,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_imported, newProject.name)) }
                 leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
-                _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_import_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
+                val failed = UiText.res(R.string.msg_import_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))
+                _state.update { it.copy(bannerMessage = failed, bannerAction = BannerAction(BannerActionKind.RETRY_IMPORT, failed)) }
             }
         }
     }
@@ -3126,8 +3139,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setThemeMode(next.id)
     }
 
+    /** Runs the banner's recovery button. SET_UP_RUNTIME is the UI's job (it reopens the setup screen). */
+    fun runBannerAction(kind: BannerActionKind) {
+        _state.update { it.copy(bannerMessage = null, bannerAction = null) }
+        when (kind) {
+            BannerActionKind.RETRY_IMPORT -> lastImportUri?.let(::importZipProject)
+            BannerActionKind.RETRY_UPDATE_CHECK -> checkAgentUpdates()
+            BannerActionKind.SET_UP_RUNTIME -> Unit
+        }
+    }
+
     fun dismissBanner() {
-        _state.update { it.copy(bannerMessage = null) }
+        _state.update { it.copy(bannerMessage = null, bannerAction = null) }
     }
 
     override fun onCleared() {

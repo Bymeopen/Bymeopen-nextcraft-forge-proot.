@@ -219,8 +219,8 @@ fun AgentScreen(
                         if (state.sessionRunning) {
                             OutlinedButton(
                                 onClick = viewModel::stopActiveTask,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.heightIn(min = ForgeSpace.minTouch),
                             ) {
                                 Text(stringResource(R.string.agent_stop), fontSize = ForgeType.caption)
                             }
@@ -431,6 +431,7 @@ fun AgentScreen(
                 )
                 Box(
                     modifier = Modifier
+                        .forgeMinTouch()
                         .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
                         .size(40.dp)
                         .clip(CircleShape)
@@ -849,6 +850,7 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
     val label = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy)
     Box(
         modifier = modifier
+            .forgeMinTouch()
             .size(36.dp)
             .clip(CircleShape)
             .clickable(role = Role.Button, onClickLabel = label) {
@@ -1017,7 +1019,7 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, sh
             color = scheme.onSurfaceVariant,
         )
         if (onRemove != null) {
-            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(ForgeSpace.minTouch)) {
                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_remove_attachment), tint = scheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
             }
         }

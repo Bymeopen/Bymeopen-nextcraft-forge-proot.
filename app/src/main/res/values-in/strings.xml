@@ -493,6 +493,10 @@
     <string name="field_error_url">Masukkan alamat lengkap yang diawali http:// atau https://</string>
     <string name="field_error_required">Kolom ini wajib diisi</string>
     <string name="field_error_port">Masukkan port 1 sampai 65535</string>
+    <string name="md_run_in_terminal">Jalankan di terminal</string>
+    <string name="md_copy_code">Salin kode</string>
+    <string name="action_retry">Coba lagi</string>
+    <string name="banner_action_setup">Siapkan</string>
     <string name="msg_project_deleted">\"%1$s\" dihapus</string>
     <string name="action_undo">Urungkan</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>

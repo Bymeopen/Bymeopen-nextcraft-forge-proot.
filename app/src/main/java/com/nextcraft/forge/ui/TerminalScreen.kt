@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
@@ -267,6 +268,7 @@ fun TerminalScreen(
                 val canRun = commandInput.isNotBlank() && !state.terminalRunning
                 Box(
                     modifier = Modifier
+                        .forgeMinTouch()
                         .size(38.dp)
                         .clip(CircleShape)
                         .background(if (canRun) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
@@ -294,7 +296,7 @@ private fun TerminalKey(label: String, description: String, enabled: Boolean, on
         enabled = enabled,
         shape = RoundedCornerShape(100),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-        modifier = Modifier.height(36.dp).semantics { contentDescription = description },
+        modifier = Modifier.heightIn(min = ForgeSpace.minTouch).semantics { contentDescription = description },
     ) {
         Text(label, fontFamily = FontFamily.Monospace, fontSize = ForgeType.secondary, color = if (enabled) scheme.onSurface else scheme.onSurfaceVariant)
     }

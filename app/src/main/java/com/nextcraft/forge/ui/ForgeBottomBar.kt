@@ -64,6 +64,14 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.SideEffect
@@ -108,6 +116,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
+
+private const val NAV_MAX_FONT_SCALE = 1.3f
 
 internal data class NavEntry(val tab: ForgeTab, @StringRes val label: Int)
 
@@ -185,12 +195,16 @@ internal fun ForgeBottomBar(
             .fillMaxWidth()
             .padding(outerPadding),
     ) {
-        Column(modifier = Modifier.navigationBarsPadding()) {
+        Column(modifier = Modifier.navigationBarsPadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+            // Taller with larger system text, and labels stop scaling at 1.3x (five tabs share the width).
+            val density = LocalDensity.current
+            val navFontScale = density.fontScale.coerceAtMost(NAV_MAX_FONT_SCALE)
+            val barHeight = 72.dp + (navFontScale - 1f).coerceAtLeast(0f) * 16.dp
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
+                    .height(barHeight)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 val slot = maxWidth / entries.size
@@ -290,14 +304,16 @@ internal fun ForgeBottomBar(
                                 }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = label,
-                                fontSize = ForgeType.caption,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                color = tint,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            CompositionLocalProvider(LocalDensity provides Density(density.density, navFontScale)) {
+                                Text(
+                                    text = label,
+                                    fontSize = ForgeType.caption,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = tint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }

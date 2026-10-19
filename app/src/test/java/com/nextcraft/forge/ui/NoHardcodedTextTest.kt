@@ -11,7 +11,7 @@ import org.junit.Test
  */
 class NoHardcodedTextTest {
     private val skipFiles = setOf(
-        "Theme.kt", "MainViewModel.kt", "MarkdownText.kt", "ModelLabels.kt",
+        "Theme.kt", "MainViewModel.kt", "ModelLabels.kt",
         "AndroidBuildText.kt", "AppLanguage.kt", "LocaleHelper.kt",
     )
 
@@ -41,6 +41,6 @@ class NoHardcodedTextTest {
     }
 
     private companion object {
-        const val BASELINE = 13
+        const val BASELINE = 9
     }
 }

@@ -160,6 +160,7 @@ object ForgeSpace {
     val card = 14.dp
     val cardInner = 16.dp
     val row = 56.dp
+    val minTouch = 44.dp
     val section = 24.dp
     val labelToCard = 8.dp
     val header = 64.dp

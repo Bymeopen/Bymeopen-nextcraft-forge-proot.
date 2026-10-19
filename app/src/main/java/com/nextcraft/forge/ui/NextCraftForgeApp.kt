@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -64,6 +65,14 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.SideEffect
@@ -186,6 +195,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
+        // System bars plus the display cutout: in landscape the notch sits at the side, not the top.
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {},
         bottomBar = {
@@ -246,7 +257,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -260,11 +271,27 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 text = banner,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).padding(vertical = 6.dp),
                             )
+                            val bannerAction = state.bannerAction?.takeIf { it.forMessage == state.bannerMessage }
+                            if (bannerAction != null) {
+                                TextButton(
+                                    onClick = {
+                                        if (bannerAction.kind == BannerActionKind.SET_UP_RUNTIME) {
+                                            bypassSetupGate = false
+                                            viewModel.dismissBanner()
+                                        } else {
+                                            viewModel.runBannerAction(bannerAction.kind)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                                ) {
+                                    Text(stringResource(bannerAction.kind.label), fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                             IconButton(
                                 onClick = viewModel::dismissBanner,
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(ForgeSpace.minTouch),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,

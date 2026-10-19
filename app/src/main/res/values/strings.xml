@@ -505,6 +505,10 @@
     <string name="field_error_url">Enter a full address starting with http:// or https://</string>
     <string name="field_error_required">This field is required</string>
     <string name="field_error_port">Enter a port from 1 to 65535</string>
+    <string name="md_run_in_terminal">Run in terminal</string>
+    <string name="md_copy_code">Copy code</string>
+    <string name="action_retry">Try again</string>
+    <string name="banner_action_setup">Set up</string>
     <string name="msg_project_deleted">Deleted \"%1$s\"</string>
     <string name="action_undo">Undo</string>
     <string name="msg_busy_before_delete">Cannot delete a project while an agent session, build, or terminal command is running.</string>

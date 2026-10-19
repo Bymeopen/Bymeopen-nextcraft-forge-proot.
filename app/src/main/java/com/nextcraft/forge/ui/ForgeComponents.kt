@@ -15,6 +15,8 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -175,6 +177,13 @@ fun ForgeTextButton(
     )
 }
 
+/**
+ * Keeps a small control's look but reserves a 44dp square for it. Compose already widens hit-testing to 48dp,
+ * but neighbouring small controls then fight over the same pixels and TalkBack focus boxes stay tiny.
+ */
+fun Modifier.forgeMinTouch(): Modifier =
+    sizeIn(minWidth = ForgeSpace.minTouch, minHeight = ForgeSpace.minTouch).wrapContentSize(Alignment.Center)
+
 /** Screen and section titles: TalkBack users jump between them with heading navigation. */
 fun Modifier.forgeHeading(): Modifier = semantics { heading() }
 
@@ -306,7 +315,7 @@ fun ForgeActionPill(
 ) {
     Row(
         modifier = modifier
-            .height(38.dp)
+            .heightIn(min = ForgeSpace.minTouch)
             .clip(RoundedCornerShape(100))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
             .padding(horizontal = 4.dp),
@@ -365,7 +374,7 @@ fun ForgePillTabs(
             val selected = index == selectedIndex
             Box(
                 modifier = Modifier
-                    .heightIn(min = 34.dp)
+                    .heightIn(min = 40.dp)
                     .clip(RoundedCornerShape(100))
                     .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
                     .combinedClickable(

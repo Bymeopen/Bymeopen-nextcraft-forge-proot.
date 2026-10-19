@@ -200,12 +200,24 @@ data class ForgeUiState(
     val updateProgress: Float? = null,
     val checkingAppUpdate: Boolean = false,
     val bannerMessage: UiText? = null,
+    /** Recovery offered with [bannerMessage]; shown only while the banner still carries the message it was made for. */
+    val bannerAction: BannerAction? = null,
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
 ) {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
 }
+
+/** What the banner's button does. SET_UP_RUNTIME is handled by the UI (it reopens the setup screen). */
+enum class BannerActionKind(@androidx.annotation.StringRes val label: Int) {
+    SET_UP_RUNTIME(R.string.banner_action_setup),
+    RETRY_IMPORT(R.string.action_retry),
+    RETRY_UPDATE_CHECK(R.string.action_retry),
+}
+
+/** [forMessage] ties the action to one banner text, so a later unrelated banner never inherits a stale button. */
+data class BannerAction(val kind: BannerActionKind, val forMessage: UiText)
 
 /** A message (and its attachments) the user sent while the agent was still working. */
 data class QueuedPrompt(
