@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 
 package com.nextcraft.forge.ui
 
@@ -53,6 +53,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
@@ -250,6 +260,7 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
+                        Box(modifier = Modifier.animateItemPlacement()) {
                         ChatMessageCard(
                             message = message,
                             agentName = state.agentKind.displayTitle(),
@@ -258,6 +269,7 @@ fun AgentScreen(
                                 viewModel.selectTab(ForgeTab.TERMINAL)
                             },
                         )
+                        }
                     }
                 }
                 // "Latest" pill: shown once the reader has scrolled up from the newest message.
@@ -343,17 +355,27 @@ fun AgentScreen(
                         disabledIndicatorColor = Color.Transparent,
                     ),
                 )
+                val reduceMotion = rememberReduceMotion()
+                val sendScale by animateFloatAsState(
+                    targetValue = if (running || canSend) 1f else 0.86f,
+                    animationSpec = if (reduceMotion) snap() else ForgeMotion.springSnappy(),
+                    label = "sendScale",
+                )
+                val sendBg by animateColorAsState(
+                    targetValue = when {
+                        running -> MaterialTheme.colorScheme.error
+                        canSend -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                    },
+                    animationSpec = if (reduceMotion) snap() else tween(ForgeMotion.FADE_MS),
+                    label = "sendBg",
+                )
                 Box(
                     modifier = Modifier
+                        .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(
-                            when {
-                                running -> MaterialTheme.colorScheme.error
-                                canSend -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
-                            },
-                        )
+                        .background(sendBg)
                         .clickable(
                             enabled = running || canSend,
                             role = Role.Button,
@@ -463,6 +485,7 @@ private fun ProjectChatsDialog(
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     AlertDialog(
+        modifier = Modifier.forgePopIn(),
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(22.dp),
         containerColor = tokens.cardContainerColor,
@@ -707,19 +730,40 @@ private fun ChatMessageCard(
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
             )
         }
+        val streaming = message.id == "streaming-assistant"
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
                 Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                     MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+                    if (streaming) {
+                        // Blinking caret says "still arriving" without a spinner.
+                        val blink = rememberBlink()
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .size(width = 8.dp, height = 16.dp)
+                                .graphicsLayer { alpha = blink }
+                                .background(scheme.primary, RoundedCornerShape(2.dp)),
+                        )
+                    }
                 }
             }
         } else if (message.workItems.isEmpty()) {
-            Text(
-                text = stringResource(R.string.agent_thinking),
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp),
-            )
+            val blink = rememberBlink()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 8.dp, height = 16.dp)
+                        .graphicsLayer { alpha = blink }
+                        .background(scheme.primary, RoundedCornerShape(2.dp)),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.agent_thinking),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -774,14 +818,24 @@ private fun ToolCallRow(item: ActivityItem) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            val reduceMotion = rememberReduceMotion()
+            val rotation by animateFloatAsState(
+                targetValue = if (open) 180f else 0f,
+                animationSpec = if (reduceMotion) snap() else ForgeMotion.springSnappy(),
+                label = "chevron",
+            )
             Icon(
-                imageVector = if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                imageVector = Icons.Default.KeyboardArrowDown,
                 contentDescription = null,
                 tint = scheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation },
             )
         }
-        if (open && item.detail.isNotBlank()) {
+        AnimatedVisibility(
+            visible = open && item.detail.isNotBlank(),
+            enter = expandVertically(tween(ForgeMotion.EXPAND_MS)) + fadeIn(tween(ForgeMotion.FADE_MS)),
+            exit = shrinkVertically(tween(ForgeMotion.FADE_MS)) + fadeOut(tween(ForgeMotion.FADE_MS / 2)),
+        ) {
             Text(
                 text = item.detail,
                 fontSize = 12.5.sp,

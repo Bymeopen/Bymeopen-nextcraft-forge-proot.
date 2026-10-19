@@ -183,6 +183,7 @@ fun ProjectsScreen(
     }
     pendingDeleteProject?.let { target ->
         AlertDialog(
+            modifier = Modifier.forgePopIn(),
             onDismissRequest = { pendingDeleteProject = null },
             title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
             text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
