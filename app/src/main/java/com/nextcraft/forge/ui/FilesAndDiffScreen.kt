@@ -117,7 +117,13 @@ fun FilesAndDiffScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (!inProject) {
+        if (inProject) {
+            ForgeProjectHeader(
+                title = state.activeProject?.name ?: stringResource(R.string.files_files),
+                subtitle = stringResource(R.string.files_files),
+                onBack = { viewModel.projectBack() },
+            )
+        } else {
             ForgeLargeTitle(
                 title = stringResource(R.string.files_files),
                 subtitle = state.activeProject?.name,
@@ -725,7 +731,7 @@ private fun WorkspaceDiffReviewList(
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
                                 enabled = !sessionRunning,
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(48.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
@@ -737,7 +743,7 @@ private fun WorkspaceDiffReviewList(
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
                                 enabled = !sessionRunning,
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(48.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,

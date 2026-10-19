@@ -617,35 +617,11 @@ private fun StatusDot(active: Boolean) {
 
 @Composable
 private fun ProjectsEmptyState() {
-    val tokens = LocalForgeThemeTokens.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(tokens.cardContainerColor)
-            .padding(horizontal = 28.dp, vertical = 36.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            imageVector = Icons.Default.Home,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(34.dp),
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = stringResource(R.string.projects_no_projects_yet),
-            fontSize = ForgeType.cardTitle,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.projects_empty_hint),
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+    ForgeThemedCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+        ForgeEmptyState(
+            glyph = ForgeGlyph.FOLDER,
+            title = stringResource(R.string.projects_no_projects_yet),
+            message = stringResource(R.string.projects_empty_hint),
         )
     }
 }

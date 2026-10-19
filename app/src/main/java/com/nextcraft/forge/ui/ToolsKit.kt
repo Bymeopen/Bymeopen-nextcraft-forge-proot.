@@ -42,20 +42,7 @@ internal fun ToolScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 14.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.tool_back))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (subtitle != null) {
-                    Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
+        ForgeProjectHeader(title = title, subtitle = subtitle, onBack = onBack)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -77,13 +64,7 @@ internal fun ToolCard(modifier: Modifier = Modifier, content: @Composable Column
 
 @Composable
 internal fun ToolSectionLabel(text: String) {
-    Text(
-        text = text,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, top = 6.dp),
-    )
+    ForgeSectionLabel(text, horizontalPadding = 4.dp)
 }
 
 /** Monospace output box that follows the newest line. */
