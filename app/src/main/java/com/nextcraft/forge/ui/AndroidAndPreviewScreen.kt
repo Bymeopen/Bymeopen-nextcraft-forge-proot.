@@ -604,7 +604,11 @@ fun WebPreviewScreen(
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
-            webViewRef?.destroy()
+            // Detach before destroy(): destroying a WebView that is still attached throws on some WebView builds.
+            webViewRef?.let { view ->
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                runCatching { view.destroy() }
+            }
             webViewRef = null
         }
     }
@@ -732,7 +736,8 @@ fun WebPreviewScreen(
         }
 
         if (!serverUp) {
-            // Nothing is listening yet: say so instead of showing a blank WebView.
+            // Nothing is listening yet: say so instead of showing a blank WebView. (if/else, not an early return: a
+            // `return@Column` inside this composable lambda is a suspected cause of the Compose Stack.pop crash.)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -749,8 +754,7 @@ fun WebPreviewScreen(
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
-            return@Column
-        }
+        } else {
         AndroidView(
             modifier = Modifier
                 .weight(1f)
@@ -758,7 +762,9 @@ fun WebPreviewScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(16.dp)),
             factory = { context ->
-                WebView(context).apply {
+                // Devices without a usable WebView provider throw here; show an empty view instead of force-closing.
+                val created = runCatching { WebView(context) }.getOrNull()
+                created?.apply {
                     setBackgroundColor(webViewBgArgb)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -770,14 +776,17 @@ fun WebPreviewScreen(
                             request: android.webkit.WebResourceRequest,
                         ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
                     }
-                    loadUrl(state.previewUrl)
+                    runCatching { loadUrl(state.previewUrl) }
                     webViewRef = this
+                } ?: android.view.View(context)
+            },
+            update = { view ->
+                (view as? WebView)?.let { webView ->
+                    webView.setBackgroundColor(webViewBgArgb)
+                    webViewRef = webView
                 }
             },
-            update = { webView ->
-                webView.setBackgroundColor(webViewBgArgb)
-                webViewRef = webView
-            },
         )
+        }
     }
 }
