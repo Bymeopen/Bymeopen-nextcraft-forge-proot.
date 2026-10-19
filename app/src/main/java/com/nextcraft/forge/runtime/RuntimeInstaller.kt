@@ -2145,6 +2145,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         put("Read")
         put("Glob")
         put("Grep")
+        // Tools outside the permission hook (web, sub-agents, todos, skills) would otherwise be refused outright in a
+        // headless session, since nobody can answer Claude's own prompt. With auto-approve on, nothing may be refused.
+        if (runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(true)) {
+            listOf("WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "Skill").forEach(::put)
+        }
     }
 
     private fun writeResolver() {

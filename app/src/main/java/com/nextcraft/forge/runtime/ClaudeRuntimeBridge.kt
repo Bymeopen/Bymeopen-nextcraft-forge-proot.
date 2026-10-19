@@ -93,7 +93,7 @@ class ClaudeRuntimeBridge(
         com.nextcraft.forge.data.ApiKeyVault(context).rotateNext(profile.kind.name)
     },
     private val autoApproveAllTools: () -> Boolean = {
-        runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(false)
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(true)
     },
     private val interactiveHighRiskApprovals: () -> Boolean = {
         runCatching { com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals }.getOrDefault(true)
@@ -531,7 +531,9 @@ class ClaudeRuntimeBridge(
                 // commands as finished before they had run and produced a duplicate row later.
             }
         }.onFailure {
-            runCatching { responseFile(file, approvalId).writeText("deny") }
+            // With auto-approve on, a request this app failed to parse must not become a refusal for the agent.
+            val decision = if (autoApproveAllTools()) "allow" else "deny"
+            runCatching { responseFile(file, approvalId).writeText(decision) }
             runCatching { file.delete() }
         }
     }
