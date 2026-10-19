@@ -373,7 +373,7 @@ internal fun AntigravityAccountCard(
 
     ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.settings_google_account), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.settings_google_account), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = RoundedCornerShape(50), color = scheme.primary.copy(alpha = 0.16f), modifier = Modifier.size(44.dp)) {
                     Box(contentAlignment = Alignment.Center) {
@@ -390,7 +390,7 @@ internal fun AntigravityAccountCard(
                                 else -> R.string.settings_google_not_signed_in
                             },
                         ),
-                        fontSize = 17.sp,
+                        fontSize = ForgeType.cardTitle,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
@@ -511,7 +511,7 @@ internal fun AntigravityAccountCard(
                     Text(stringResource(R.string.settings_antigravity_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
                     Text(
                         text = agyModelInput.ifBlank { state.antigravityModel }.ifBlank { "—" }.let { if (it == "—") it else antigravityModelLabel(it) },
-                        fontSize = 17.sp,
+                        fontSize = ForgeType.cardTitle,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }

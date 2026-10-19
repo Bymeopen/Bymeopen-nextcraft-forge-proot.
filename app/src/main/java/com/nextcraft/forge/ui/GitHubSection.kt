@@ -96,7 +96,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
     Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.settings_repository_sync), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.settings_repository_sync), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 state.githubStatusMessage?.asString()?.let { status ->
                     Text(text = status, fontSize = 13.sp, color = scheme.onSurfaceVariant)
                 }
@@ -105,7 +105,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = stringResource(R.string.settings_one_time_device_code, dc.userCode),
-                                fontSize = 18.sp,
+                                fontSize = ForgeType.cardTitle,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -241,7 +241,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(repo.fullName, fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                     if (repo.description.isNotBlank()) {
-                                        Text(repo.description, fontSize = 12.5.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(repo.description, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                                 TextButton(onClick = { viewModel.cloneGitHubRepository(repo) }) { Text(stringResource(R.string.settings_clone)) }

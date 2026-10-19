@@ -232,7 +232,7 @@ private val DarkThemeTokens = ForgeThemeTokens(
     windowBackgroundArgb = Color(0xFF0B0B0B).toArgb(),
     cardContainerColor = Color(0xFF131313),
     cardElevatedColor = Color(0xFF1B1B1B),
-    cardBorderStroke = null,
+    cardBorderStroke = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)),
     elevatedBorderStroke = null,
     cardCornerRadius = 18.dp,
     topBarContainerColor = Color(0xFF0B0B0B),

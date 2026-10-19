@@ -74,7 +74,7 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
                         Text(target.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         Text(target.command, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    Text(matrix.statuses[target.id].mark(), fontSize = 18.sp, color = scheme.primary, modifier = Modifier.padding(horizontal = 6.dp))
+                    Text(matrix.statuses[target.id].mark(), fontSize = ForgeType.cardTitle, color = scheme.primary, modifier = Modifier.padding(horizontal = 6.dp))
                     if (!target.detected) {
                         TextButton(onClick = { viewModel.buildMatrix.remove(target.id) }, enabled = !matrix.running) { Text(stringResource(R.string.tool_delete)) }
                     }
@@ -159,7 +159,7 @@ fun SshScreen(viewModel: MainViewModel) {
                 }
             }
             ssh.publicKey?.let { key ->
-                Text(key, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                Text(key, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 TextButton(onClick = { clipboard.setText(AnnotatedString(key)) }) { Text(stringResource(R.string.tool_copy)) }
             }
         }

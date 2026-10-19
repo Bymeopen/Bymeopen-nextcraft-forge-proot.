@@ -217,7 +217,7 @@ fun AgentScreen(
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                 modifier = Modifier.height(28.dp),
                             ) {
-                                Text(stringResource(R.string.agent_stop), fontSize = 11.sp)
+                                Text(stringResource(R.string.agent_stop), fontSize = ForgeType.caption)
                             }
                         }
                     }
@@ -872,7 +872,7 @@ private fun ToolCallRow(item: ActivityItem) {
         ) {
             Text(
                 text = item.detail,
-                fontSize = 12.5.sp,
+                fontSize = ForgeType.secondary,
                 lineHeight = 18.sp,
                 color = tokens.terminalText,
                 fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,

@@ -138,7 +138,7 @@ fun ProjectsScreen(
         item(key = "header-yours") {
             Text(
                 text = stringResource(R.string.projects_your_projects),
-                fontSize = 17.sp,
+                fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 6.dp),
             )
@@ -252,7 +252,7 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
         )
         Text(
             text = stringResource(R.string.projects_build_from_your_phone),
-            fontSize = 27.sp,
+            fontSize = ForgeType.screenTitle,
             fontWeight = FontWeight.SemiBold,
             lineHeight = 32.sp,
             modifier = Modifier.padding(top = 2.dp),
@@ -516,7 +516,7 @@ private fun ProjectRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = project.name,
-                    fontSize = 19.sp,
+                    fontSize = ForgeType.cardTitle,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -634,7 +634,7 @@ private fun ProjectsEmptyState() {
         Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = stringResource(R.string.projects_no_projects_yet),
-            fontSize = 17.sp,
+            fontSize = ForgeType.cardTitle,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
         )

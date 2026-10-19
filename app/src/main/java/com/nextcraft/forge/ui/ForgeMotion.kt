@@ -28,6 +28,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -125,4 +127,28 @@ fun rememberBlink(): Float {
         animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
     )
     return if (t < 0.5f) 1f else 0.15f
+}
+
+/* ───────────────────────── Type and spacing scale ───────────────────────── */
+
+/** Fixed type scale: five sizes, nothing in between, so every screen reads with the same rhythm. */
+object ForgeType {
+    val screenTitle = 24.sp     // one per screen, SemiBold
+    val cardTitle = 17.sp       // card headings, SemiBold
+    val rowTitle = 16.sp        // list rows, Medium
+    val body = 15.sp            // prose, Normal
+    val secondary = 13.sp       // subtitles and metadata, muted
+    val caption = 12.sp         // section labels (uppercase, tracked) and badges
+    val sectionTracking = 0.6.sp
+}
+
+/** 4dp grid. Screen edge 20, card edge 14, card inner 16, row 56, section gap 24, label-to-card 8. */
+object ForgeSpace {
+    val screen = 20.dp
+    val card = 14.dp
+    val cardInner = 16.dp
+    val row = 56.dp
+    val section = 24.dp
+    val labelToCard = 8.dp
+    val header = 64.dp
 }

@@ -50,7 +50,7 @@ internal fun ToolScaffold(
                 Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.tool_back))
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (subtitle != null) {
                     Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

@@ -89,13 +89,13 @@ fun ForgeToggleRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 16.sp,
+                fontSize = ForgeType.rowTitle,
                 fontWeight = FontWeight.Medium,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    fontSize = 14.sp,
+                    fontSize = ForgeType.secondary,
                     color = scheme.onSurfaceVariant,
                 )
             }
@@ -158,9 +158,9 @@ fun ForgeLargeTitle(
     horizontalPadding: Dp = 20.dp,
 ) {
     Column(modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 2.dp)) {
-        Text(text = title, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
         if (subtitle != null) {
-            Text(text = subtitle, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = subtitle, fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -173,11 +173,12 @@ fun ForgeSectionLabel(
     horizontalPadding: Dp = 20.dp,
 ) {
     Text(
-        text = text,
-        fontSize = 13.sp,
+        text = text.uppercase(),
+        fontSize = ForgeType.caption,
         fontWeight = FontWeight.Medium,
+        letterSpacing = ForgeType.sectionTracking,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 10.dp),
+        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = ForgeSpace.section, bottom = ForgeSpace.labelToCard),
     )
 }
 
