@@ -13,8 +13,9 @@ android {
         applicationId = "com.nextcraft.forge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100
-        versionName = "1.0.0-forge"
+        // The release workflow passes -PversionCode=... -PversionName=...; local builds keep the defaults.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 100
+        versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-forge"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

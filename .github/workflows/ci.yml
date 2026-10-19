@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Build debug APK and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The repository has no Gradle wrapper; AGP 8.11 needs Gradle 8.13+.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+      - name: Assemble debug APK
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: |
+          sh -n scripts/runtime-bundles/chroot-exec.sh
+          sh -n scripts/runtime-bundles/unmount-chroot.sh
+          for s in scripts/runtime-bundles/build-*.sh scripts/make-update-manifest.sh; do bash -n "$s"; done
+      - name: Chroot supervisor rejects unsafe arguments
+        run: |
+          if sh scripts/runtime-bundles/chroot-exec.sh /tmp/r /tmp/w "/workspace/../../etc" /tmp/b 10000 true 2>/dev/null; then
+            echo "accepted a traversal path"; exit 1
+          fi
+          if sh scripts/runtime-bundles/chroot-exec.sh /tmp/r /tmp/w "/workspace/ok" /tmp/b "1000;id" true 2>/dev/null; then
+            echo "accepted a non-numeric uid"; exit 1
+          fi
+      - name: Shipped scripts match the copies in the repository
+        run: python3 scripts/check-embedded-scripts.py

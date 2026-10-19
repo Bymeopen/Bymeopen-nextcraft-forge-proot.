@@ -63,7 +63,7 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
                 )
                 if (!snapshot.indeterminate || !running) {
                     Text(
-                        text = "$percent%",
+                        text = "%d%%".format(percent),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(start = 8.dp),
