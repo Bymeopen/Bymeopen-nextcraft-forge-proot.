@@ -46,6 +46,8 @@ data class RuntimeInstallProgress(
     val terminalLine: String? = null,
     val indeterminate: Boolean = false,
     val event: RuntimeInstallEvent = RuntimeInstallEvent.STAGE,
+    /** True when [downloadedBytes] counts archive bytes unpacked rather than downloaded. */
+    val unpacking: Boolean = false,
 )
 
 data class AgentUpdateInfo(
@@ -232,7 +234,9 @@ class RuntimeInstaller(private val context: Context) {
             check(RootfsRepair.ensureUnmounted(staging)) { "Staging rootfs still has active mounts" }
             staging.deleteRecursively()
             staging.mkdirs()
-            extractZstdTar(archive, staging)
+            extractZstdTar(archive, staging) { done, total ->
+                onProgress(unpackProgress("Unpacking Core Linux rootfs…", 0.28f, 0.34f, done, total))
+            }
             stripMacosMetadataArtifacts(staging)
             ensureAndroidSocketGroupConfiguration(staging)
             RootfsRepair.activate(
@@ -1257,6 +1261,17 @@ class RuntimeInstaller(private val context: Context) {
             File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH).isFile &&
             File(runtimeRootfs, AndroidToolchain.MAVEN_HOST_DIR).let { it.isDirectory && !it.list().isNullOrEmpty() }
 
+    /** Unpack progress: bytes are the compressed archive consumed, so the UI can show MB/s like a download. */
+    private fun unpackProgress(message: String, from: Float, to: Float, done: Long, total: Long) =
+        RuntimeInstallProgress(
+            message = message,
+            fraction = from + (to - from) * (if (total > 0L) done.toFloat() / total else 0f),
+            downloadedBytes = done,
+            totalBytes = total.takeIf { it > 0L },
+            event = RuntimeInstallEvent.DOWNLOAD,
+            unpacking = true,
+        )
+
     private suspend fun installRuntimeOverlay(
         bundle: RuntimeBundle,
         message: String,
@@ -1269,7 +1284,9 @@ class RuntimeInstaller(private val context: Context) {
         val archive = obtainRuntimeBundle(bundle, preferEmbedded = preferEmbedded, from = from, to = to * 0.8f + from * 0.2f, onProgress = onProgress)
         onProgress(RuntimeInstallProgress(message, to * 0.8f + from * 0.2f, indeterminate = true))
         try {
-            extractZstdTar(archive, rootfs)
+            extractZstdTar(archive, rootfs) { done, total ->
+                onProgress(unpackProgress(message, to * 0.8f + from * 0.2f, to, done, total))
+            }
             stripMacosMetadataArtifacts(rootfs)
         } finally {
             if (archive.parentFile == downloads) archive.delete()
@@ -2214,8 +2231,18 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             .onFailure { Log.w("RuntimeInstaller", "Could not write /etc/hosts", it) }
     }
 
-    private fun openZstdInputStream(archive: File): java.io.InputStream {
-        val rawStream = BufferedInputStream(archive.inputStream())
+    private fun openZstdInputStream(
+        archive: File,
+        consumed: java.util.concurrent.atomic.AtomicLong? = null,
+    ): java.io.InputStream {
+        val fileStream = archive.inputStream()
+        // Counts compressed bytes read so unpacking can report MB/s; the external-zstd fallback is not counted.
+        val counted = if (consumed == null) fileStream else object : java.io.FilterInputStream(fileStream) {
+            override fun read(): Int = super.read().also { if (it >= 0) consumed.incrementAndGet() }
+            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                super.read(b, off, len).also { if (it > 0) consumed.addAndGet(it.toLong()) }
+        }
+        val rawStream = BufferedInputStream(counted)
         return try {
             ZstdCompressorInputStream(rawStream)
         } catch (_: Throwable) {
@@ -2256,13 +2283,28 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     }
 
     @Suppress("DEPRECATION")
-    private fun extractZstdTar(archive: File, destination: File) {
+    private suspend fun extractZstdTar(
+        archive: File,
+        destination: File,
+        /** Receives (compressed bytes consumed, archive size) at most every ~400 ms. */
+        report: (suspend (Long, Long) -> Unit)? = null,
+    ) {
+        val consumed = if (report != null) java.util.concurrent.atomic.AtomicLong() else null
+        val archiveSize = archive.length()
+        var lastReport = 0L
         val rootDir = destination.canonicalFile
         val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
-        TarArchiveInputStream(openZstdInputStream(archive)).use { tar ->
+        TarArchiveInputStream(openZstdInputStream(archive, consumed)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
             while (entry != null) {
+                if (report != null && consumed != null) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastReport >= 400L) {
+                        lastReport = now
+                        report(consumed.get().coerceAtMost(archiveSize), archiveSize)
+                    }
+                }
                 val currentEntry = entry
                 val cleanName = currentEntry.name.removePrefix("./").trimEnd('/')
                 if (cleanName.isNotBlank()) {
