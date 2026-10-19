@@ -156,11 +156,22 @@ fun ForgeLargeTitle(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     horizontalPadding: Dp = 20.dp,
+    /** Optional status chip or action at the end of the title row (e.g. the agent's connection state). */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    Column(modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 2.dp)) {
-        Text(text = title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-        if (subtitle != null) {
-            Text(text = subtitle, fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(
+        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
+            if (subtitle != null) {
+                Text(text = subtitle, fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (trailing != null) {
+            Spacer(modifier = Modifier.width(12.dp))
+            trailing()
         }
     }
 }

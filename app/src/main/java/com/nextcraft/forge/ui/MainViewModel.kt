@@ -154,7 +154,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return resolveProviderSecret(profile)
     }
 
-    val claudeAuth = ClaudeAuthController(application)
+    val claudeAuth = ClaudeAuthController(
+        context = application,
+        onSignedInChanged = { signedIn ->
+            // A finished sign-in only helps if Claude Code actually uses it: switch to the subscription provider.
+            if (signedIn && _state.value.agentKind == AgentKind.CLAUDE_CODE && _state.value.providerProfile.kind != ProviderKind.CLAUDE) {
+                updateProviderKind(ProviderKind.CLAUDE)
+            }
+        },
+    )
 
     // Developer tools (Tools tab). Each owns its state flow and runs its commands in the chroot.
     val diagnostics = DiagnosticsController(application)

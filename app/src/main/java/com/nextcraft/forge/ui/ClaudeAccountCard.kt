@@ -64,7 +64,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
     val waiting = auth.status == ClaudeAuthStatus.AWAITING_BROWSER || auth.status == ClaudeAuthStatus.COMPLETING
 
     ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.settings_claude_account), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
             Text(
                 text = stringResource(

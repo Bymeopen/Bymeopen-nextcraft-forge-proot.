@@ -14,13 +14,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,8 +45,9 @@ import com.nextcraft.forge.R
 data class ModelOption(val id: String, val label: String, val badge: String = "")
 
 /**
- * Searchable model list shared by every agent (Claude Code, DeepSeek Harness, Antigravity). Typing an id that is not in
- * the list offers it as a custom model, so models the lists do not know yet stay usable.
+ * Searchable model list shared by every agent (Claude Code, DeepSeek Harness, Antigravity), shown as a bottom sheet:
+ * title + "N available for <provider>", refresh, search, then one card per model. Typing an id that is not in the list
+ * offers it as a custom model, so models the lists do not know yet stay usable.
  */
 @Composable
 fun ModelPickerDialog(
@@ -62,85 +69,114 @@ fun ModelPickerDialog(
     }
     val offerCustom = needle.isNotEmpty() && options.none { it.id.equals(needle, ignoreCase = true) }
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text(stringResource(R.string.model_picker_search)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (loading) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
-                        Text(stringResource(R.string.model_picker_loading), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
-                    }
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = LocalForgeThemeTokens.current.cardContainerColor,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.model_picker_select), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        stringResource(R.string.model_picker_available, options.size, title),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.onSurfaceVariant,
+                    )
                 }
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
-                    if (offerCustom) {
-                        item(key = "custom:$needle") {
-                            ModelRow(
-                                label = stringResource(R.string.model_picker_use_custom, needle),
-                                id = "",
-                                badge = "",
-                                selected = false,
-                                onClick = { onSelect(needle) },
-                            )
-                        }
-                    }
-                    items(filtered, key = { it.id }) { option ->
-                        ModelRow(
-                            label = option.label,
-                            id = option.id,
-                            badge = option.badge,
-                            selected = option.id == selectedId,
-                            onClick = { onSelect(option.id) },
-                        )
-                    }
-                    if (filtered.isEmpty() && !offerCustom) {
-                        item(key = "empty") {
-                            Text(
-                                stringResource(R.string.model_picker_empty),
-                                fontSize = ForgeType.control,
-                                color = scheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 12.dp),
-                            )
-                        }
+                if (onRefresh != null) {
+                    IconButton(onClick = onRefresh, enabled = !loading) {
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.model_picker_refresh), tint = scheme.onSurfaceVariant)
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.model_picker_close)) } },
-        dismissButton = onRefresh?.let { refresh ->
-            { TextButton(onClick = refresh, enabled = !loading) { Text(stringResource(R.string.model_picker_refresh)) } }
-        },
-    )
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text(stringResource(R.string.model_picker_search)) },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (loading) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
+                    Text(stringResource(R.string.model_picker_loading), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                }
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (offerCustom) {
+                    item(key = "custom:$needle") {
+                        ModelRow(
+                            label = stringResource(R.string.model_picker_use_custom, needle),
+                            id = "",
+                            badge = "",
+                            selected = false,
+                            onClick = { onSelect(needle) },
+                        )
+                    }
+                }
+                items(filtered, key = { it.id }) { option ->
+                    ModelRow(
+                        label = option.label,
+                        id = option.id,
+                        badge = option.badge,
+                        selected = option.id == selectedId,
+                        onClick = { onSelect(option.id) },
+                    )
+                }
+                if (filtered.isEmpty() && !offerCustom) {
+                    item(key = "empty") {
+                        Text(
+                            stringResource(R.string.model_picker_empty),
+                            fontSize = ForgeType.body,
+                            color = scheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun ModelRow(label: String, id: String, badge: String, selected: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.RadioButton, onClick = onClick)
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val tokens = LocalForgeThemeTokens.current
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) tokens.cardElevatedColor else tokens.cardContainerColor,
+        border = tokens.cardBorderStroke,
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.RadioButton, onClick = onClick),
     ) {
-        RadioButton(selected = selected, onClick = null)
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, fontSize = ForgeType.body, fontWeight = FontWeight.Medium)
-            if (id.isNotEmpty() && id != label) {
-                Text(id, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+        Row(modifier = Modifier.padding(horizontal = ForgeSpace.cardInner, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
+                    if (badge.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(shape = RoundedCornerShape(8.dp), color = tokens.cardElevatedColor) {
+                            Text(
+                                badge,
+                                fontSize = ForgeType.caption,
+                                color = scheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
+                if (id.isNotEmpty() && id != label) {
+                    Text(id, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+                }
             }
-        }
-        if (badge.isNotEmpty()) {
-            Text(badge, fontSize = ForgeType.caption, color = scheme.primary, modifier = Modifier.padding(start = 8.dp))
+            RadioButton(selected = selected, onClick = null)
         }
     }
 }

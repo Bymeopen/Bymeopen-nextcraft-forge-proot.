@@ -463,7 +463,7 @@ internal fun AntigravityAccountCard(
                     }
                 }
             }
-            state.apiStatusMessage?.let { msg ->
+            if (!signedIn) state.apiStatusMessage?.let { msg ->
                 Text(text = msg.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
             }
             Text(
@@ -475,7 +475,6 @@ internal fun AntigravityAccountCard(
         }
     }
 
-    var modelOpen by rememberSaveable { mutableStateOf(false) }
     var showModelPicker by rememberSaveable { mutableStateOf(false) }
     // Models come from the signed-in account (`agy models`); load them once as soon as the account is connected.
     androidx.compose.runtime.LaunchedEffect(signedIn) {
@@ -497,45 +496,99 @@ internal fun AntigravityAccountCard(
             onDismiss = { showModelPicker = false },
         )
     }
-    DisclosureCard(
-        icon = ForgeGlyph.SPARK,
-        title = stringResource(R.string.settings_model_access),
-        subtitle = "${state.antigravityModel.takeIf { it.isNotBlank() }?.let(::antigravityModelLabel) ?: "—"} · ${state.antigravityEffort.uppercase()}",
-        expanded = modelOpen,
-        onToggle = { modelOpen = !modelOpen },
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_antigravity_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+    if (signedIn) {
+        val tokens = LocalForgeThemeTokens.current
+        val efforts = listOf("low", "medium", "high")
+        val effortIndex = efforts.indexOf(agyEffortInput).coerceAtLeast(0)
+        val currentModel = agyModelInput.ifBlank { state.antigravityModel }
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = agyModelInput.ifBlank { state.antigravityModel }.ifBlank { "—" }.let { if (it == "—") it else antigravityModelLabel(it) },
-                        fontSize = ForgeType.cardTitle,
-                        fontWeight = FontWeight.SemiBold,
+                        text = stringResource(R.string.agent_active_model),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::refreshAntigravityModels, enabled = !state.antigravityModelsLoading) {
+                        Text(stringResource(R.string.agent_sync))
+                    }
+                }
+                // Model tile: tap to open the bottom sheet with the models of the signed-in account.
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = tokens.cardElevatedColor,
+                    border = tokens.cardBorderStroke,
+                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { showModelPicker = true },
+                ) {
+                    Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = RoundedCornerShape(10.dp), color = tokens.cardContainerColor, modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) { ForgeIcon(glyph = ForgeGlyph.SPARK, tint = scheme.primary, size = 20.dp) }
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (currentModel.isBlank()) "—" else antigravityModelLabel(currentModel),
+                                fontSize = ForgeType.cardTitle,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (currentModel.isNotBlank()) {
+                                Text(currentModel, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+                            }
+                        }
+                        Chevron(expanded = false)
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.agent_reasoning_depth),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource(
+                            when (effortIndex) {
+                                0 -> R.string.agent_reasoning_low_hint
+                                1 -> R.string.agent_reasoning_medium_hint
+                                else -> R.string.agent_reasoning_high_hint
+                            },
+                        ),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.primary,
                     )
                 }
-                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
-                    Text(stringResource(R.string.settings_choose_model))
-                }
-            }
-            val efforts = listOf("low", "medium", "high")
-            ForgePillTabs(
-                items = efforts.map { stringResource(R.string.settings_effort, it.uppercase()) },
-                selectedIndex = efforts.indexOf(agyEffortInput).coerceAtLeast(0),
-                onSelect = { onAgyEffortChange(efforts[it]) },
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ForgePrimaryButton(
-                    text = stringResource(R.string.settings_save_antigravity_model),
-                    onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
-                    modifier = Modifier.weight(1f),
+                ForgePillTabs(
+                    items = listOf(stringResource(R.string.agent_effort_low), stringResource(R.string.agent_effort_medium), stringResource(R.string.agent_effort_high)),
+                    selectedIndex = effortIndex,
+                    onSelect = {
+                        onAgyEffortChange(efforts[it])
+                        // Saved right away: there is no separate Save button in this layout.
+                        viewModel.setAntigravityConfig(currentModel, efforts[it])
+                    },
                 )
                 OutlinedButton(
                     shape = RoundedCornerShape(100),
                     onClick = viewModel::validateAntigravityConnection,
                     enabled = !state.apiBusy,
-                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-                ) { Text(stringResource(R.string.settings_validate)) }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                ) {
+                    ForgeIcon(glyph = ForgeGlyph.REFRESH, tint = scheme.primary, size = 18.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.agent_test_connection))
+                }
+                state.apiStatusMessage?.let { msg ->
+                    val text = msg.asString()
+                    Text(
+                        text = text,
+                        fontSize = ForgeType.secondary,
+                        color = when {
+                            text.startsWith("✓") -> tokens.successText
+                            text.startsWith("✕") -> tokens.dangerText
+                            else -> scheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
         }
     }

@@ -573,4 +573,25 @@
     <string name="agent_attach_file">Photo or file</string>
     <string name="agent_remove_attachment">Remove attachment</string>
     <string name="settings_agent_wait_runtime">A runtime or tool install is running (see Settings). The agent can be installed after it finishes.</string>
+    <string name="model_picker_select">Select model</string>
+    <string name="model_picker_available">%1$d available for %2$s</string>
+    <string name="agent_ai_provider">AI provider</string>
+    <string name="agent_ai_model">AI model</string>
+    <string name="agent_credentials">Credentials</string>
+    <string name="agent_no_key_saved">No API key saved</string>
+    <string name="agent_keys_saved">%1$d saved · active: %2$s</string>
+    <string name="agent_status_online">Online</string>
+    <string name="agent_status_not_tested">Not tested</string>
+    <string name="agent_status_failed">Check failed</string>
+    <string name="agent_footer_security">API keys are encrypted in Android secure storage · Terminal is accessible from any project</string>
+    <string name="agent_active_model">Active intelligence model</string>
+    <string name="agent_sync">Sync</string>
+    <string name="agent_reasoning_depth">Reasoning depth</string>
+    <string name="agent_reasoning_low_hint">Fastest responses</string>
+    <string name="agent_reasoning_medium_hint">Balanced</string>
+    <string name="agent_reasoning_high_hint">Maximum reasoning depth</string>
+    <string name="agent_test_connection">Test connection</string>
+    <string name="agent_effort_low">Low</string>
+    <string name="agent_effort_medium">Medium</string>
+    <string name="agent_effort_high">High</string>
 </resources>
