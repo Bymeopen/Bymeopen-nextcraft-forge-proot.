@@ -552,9 +552,10 @@ private fun ForgeTopBar(
 
 private data class NavEntry(val tab: ForgeTab, @StringRes val label: Int)
 
-/** Global bar: four destinations. Terminal lives inside the project bar and in Tools. */
+/** Global bar: five destinations; Terminal also appears inside the project bar. */
 private val navEntries = listOf(
     NavEntry(ForgeTab.PROJECTS, R.string.nav_projects),
+    NavEntry(ForgeTab.TERMINAL, R.string.nav_terminal),
     NavEntry(ForgeTab.AGENT, R.string.nav_agent),
     NavEntry(ForgeTab.TOOLS, R.string.nav_tools),
     NavEntry(ForgeTab.SETTINGS, R.string.nav_settings),
@@ -569,7 +570,7 @@ private val projectEntries = listOf(
 )
 
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
-private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW, ForgeTab.TERMINAL)
+private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
 
 private fun ForgeTab.navIndex(): Int {
     val tab = if (this in toolsGroup) ForgeTab.TOOLS else this
