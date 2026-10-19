@@ -2467,12 +2467,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             var intervalSec = deviceCode.intervalSeconds
+            var networkFailures = 0
             val deadline = System.currentTimeMillis() + deviceCode.expiresInSeconds * 1000L
             while (isActive && System.currentTimeMillis() < deadline) {
                 delay(intervalSec * 1000L)
                 val poll = withContext(Dispatchers.IO) {
                     runCatching { githubClient.pollDeviceToken(cleanId, deviceCode.deviceCode) }
-                        .getOrElse { GitHubTokenPoll.Failure(it.message ?: "Polling error") }
+                        .onSuccess { networkFailures = 0 }
+                        .getOrElse { err ->
+                            // A network blip (e.g. while the user is in the browser entering the code) must not end the sign-in.
+                            if (err is java.io.IOException && ++networkFailures <= MAX_GITHUB_POLL_NETWORK_FAILURES) {
+                                GitHubTokenPoll.Pending()
+                            } else {
+                                GitHubTokenPoll.Failure(err.message ?: "Polling error")
+                            }
+                        }
                 }
                 when (poll) {
                     is GitHubTokenPoll.Success -> {
@@ -3104,6 +3113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val MAX_TERMINAL_CHARS = 128 * 1024
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
+        const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }
 }
 
