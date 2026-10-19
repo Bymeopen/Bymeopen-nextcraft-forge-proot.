@@ -311,17 +311,17 @@ private fun FilesHeaderCard(
                 DropdownMenu(expanded = addOpen, onDismissRequest = { addOpen = false }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_new_file)) },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) },
                         onClick = { addOpen = false; onNewFile() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_new_folder)) },
-                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) },
                         onClick = { addOpen = false; onNewFolder() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_upload_here)) },
-                        leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) },
                         onClick = { addOpen = false; onUpload() },
                     )
                 }
@@ -427,12 +427,11 @@ private fun WorkspaceTreeList(
                         Spacer(modifier = Modifier.width(18.dp))
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    // Folder tile vs file sheet: shape says which, the accent only marks folders.
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp, 18.dp)
-                            .clip(RoundedCornerShape(if (entry.isDirectory) 4.dp else 3.dp))
-                            .background(if (entry.isDirectory) scheme.primary.copy(alpha = 0.85f) else scheme.onSurfaceVariant.copy(alpha = 0.55f)),
+                    // Stroke glyphs at the same weight as the nav bar; the accent only marks folders.
+                    ForgeIcon(
+                        glyph = if (entry.isDirectory) ForgeGlyph.FOLDER else ForgeGlyph.FILE,
+                        tint = if (entry.isDirectory) scheme.primary else scheme.onSurfaceVariant,
+                        size = 20.dp,
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
@@ -457,25 +456,22 @@ private fun WorkspaceTreeList(
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             if (entry.isDirectory) {
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
                                 Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
                             }
                             if (!entry.isDirectory) {
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
                             }
-                            DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }, onClick = { menuOpen = false; onRename(entry.path) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.files_delete), color = tokens.dangerText) },
-                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = tokens.dangerText) },
+                                leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, tokens.dangerText) },
                                 onClick = { menuOpen = false; onDelete(entry.path) },
                             )
                         }
                     }
-                }
-                if (!entry.isDirectory) {
-                    Divider(color = scheme.outlineVariant, thickness = 0.5.dp, modifier = Modifier.padding(start = (56 + entry.depth * 14).dp, end = 12.dp))
                 }
             }
         }

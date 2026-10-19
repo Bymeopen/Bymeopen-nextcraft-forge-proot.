@@ -53,6 +53,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.snap
@@ -334,7 +336,7 @@ fun AgentScreen(
             ) {
                 // Attach: photos or any file; it lands in attachments/ inside the workspace.
                 IconButton(onClick = { attachPicker.launch(arrayOf("*/*")) }, enabled = !running) {
-                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ForgeIcon(glyph = ForgeGlyph.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 22.dp, description = stringResource(R.string.agent_attach))
                 }
                 TextField(
                     value = promptInput,
@@ -342,6 +344,7 @@ fun AgentScreen(
                     placeholder = {
                         Text(
                             stringResource(R.string.agent_message_placeholder, state.agentKind.displayTitle()),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -355,6 +358,7 @@ fun AgentScreen(
                         disabledIndicatorColor = Color.Transparent,
                     ),
                 )
+                val haptics = LocalHapticFeedback.current
                 val reduceMotion = rememberReduceMotion()
                 val sendScale by animateFloatAsState(
                     targetValue = if (running || canSend) 1f else 0.86f,
@@ -381,6 +385,7 @@ fun AgentScreen(
                             role = Role.Button,
                             onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
                         ) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             if (running) {
                                 viewModel.stopActiveTask()
                             } else {
@@ -452,7 +457,7 @@ private fun AgentHeader(
             )
         }
         IconButton(onClick = { chatsOpen = true }) {
-            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.agent_project_chats), tint = scheme.onSurface)
+            ForgeIcon(glyph = ForgeGlyph.HISTORY, tint = scheme.onSurface, size = 22.dp, description = stringResource(R.string.agent_project_chats))
         }
     }
 
@@ -826,12 +831,7 @@ private fun ToolCallRow(item: ActivityItem) {
         val kind = toolKind(item)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box {
-                Icon(
-                    imageVector = kind.icon,
-                    contentDescription = null,
-                    tint = kind.tint(scheme, tokens),
-                    modifier = Modifier.size(18.dp),
-                )
+                ForgeIcon(glyph = kind.glyph, tint = kind.tint(scheme, tokens), size = 18.dp)
                 if (!item.isComplete) {
                     Box(
                         modifier = Modifier
@@ -907,8 +907,8 @@ private fun MessageContainer(
 }
 
 /** Tool-call kinds, derived from the activity title, each with its own glyph and tint. */
-private enum class ToolKind(val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    THINK(Icons.Default.Star), BASH(Icons.Default.List), READ(Icons.Default.Info), WRITE(Icons.Default.Edit), OTHER(Icons.Default.Build);
+private enum class ToolKind(val glyph: ForgeGlyph) {
+    THINK(ForgeGlyph.SPARK), BASH(ForgeGlyph.TERMINAL), READ(ForgeGlyph.FILE), WRITE(ForgeGlyph.EDIT), OTHER(ForgeGlyph.BUILD);
 
     fun tint(scheme: androidx.compose.material3.ColorScheme, tokens: ForgeThemeTokens): Color = when (this) {
         THINK -> scheme.primary
