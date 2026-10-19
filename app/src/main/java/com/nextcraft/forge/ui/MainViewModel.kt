@@ -74,6 +74,7 @@ import com.nextcraft.forge.runtime.startPackageLogcatProcess
 import com.nextcraft.forge.runtime.supportsArm64Runtime
 import com.nextcraft.forge.update.AppUpdateInfo
 import com.nextcraft.forge.update.AppUpdater
+import com.nextcraft.forge.update.NoPublishedReleaseException
 import java.io.File
 import java.nio.file.Files
 import java.util.UUID
@@ -105,6 +106,8 @@ enum class ForgeTab(val title: String) {
     SETTINGS("Settings"),
 }
 
+enum class SetupScope { RUNTIME, AGENT }
+
 data class ForgeUiState(
     val arm64Supported: Boolean = true,
     val rootAvailable: Boolean = false,
@@ -114,6 +117,8 @@ data class ForgeUiState(
     val installedDevStacks: Set<DevStack> = emptySet(),
     val installedAgents: Set<AgentKind> = emptySet(),
     val agentUpdates: Map<AgentKind, AgentUpdateInfo> = emptyMap(),
+    /** Which Settings card owns the progress of the current runtime operation. */
+    val setupScope: SetupScope = SetupScope.RUNTIME,
     val checkingAgentUpdates: Boolean = false,
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     val activeTab: ForgeTab = ForgeTab.AGENT,
@@ -158,6 +163,9 @@ data class ForgeUiState(
     val antigravityEffort: String = "high",
     val updateInfo: AppUpdateInfo? = null,
     val updateStatusMessage: String? = null,
+    /** 0..1 while an app update APK is downloading, null otherwise. */
+    val updateProgress: Float? = null,
+    val checkingAppUpdate: Boolean = false,
     val bannerMessage: UiText? = null,
 ) {
     val activeProject: Project?
@@ -490,7 +498,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return false
     }
 
-    private fun startRuntimeOperation(configure: Intent.() -> Unit) {
+    private fun startRuntimeOperation(scope: SetupScope, configure: Intent.() -> Unit) {
+        _state.update { it.copy(setupScope = scope) }
         ContextCompat.startForegroundService(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java).apply(configure),
@@ -500,7 +509,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
     fun installAgent(agent: AgentKind) {
         if (!canRunRuntimeOperation()) return
-        startRuntimeOperation {
+        startRuntimeOperation(SetupScope.AGENT) {
             action = RuntimeSetupService.ACTION_INSTALL_AGENT
             putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
         }
@@ -508,7 +517,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeAgent(agent: AgentKind) {
         if (!canRunRuntimeOperation()) return
-        startRuntimeOperation {
+        startRuntimeOperation(SetupScope.AGENT) {
             action = RuntimeSetupService.ACTION_REMOVE_AGENT
             putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
         }
@@ -517,7 +526,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateAgent(agent: AgentKind) {
         val info = _state.value.agentUpdates[agent] ?: return
         if (!canRunRuntimeOperation()) return
-        startRuntimeOperation {
+        startRuntimeOperation(SetupScope.AGENT) {
             action = RuntimeSetupService.ACTION_UPDATE_AGENT
             putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
             putExtra(RuntimeSetupService.EXTRA_VERSION, info.latestVersion)
@@ -550,7 +559,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun runStackOperation(serviceAction: String, stack: DevStack) {
         if (!canRunRuntimeOperation()) return
-        startRuntimeOperation {
+        startRuntimeOperation(SetupScope.RUNTIME) {
             action = serviceAction
             putExtra(RuntimeSetupService.EXTRA_STACKS, stack.name)
         }
@@ -2591,21 +2600,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun checkForAppUpdates(manifestUrlOverride: String = "") {
+        if (_state.value.checkingAppUpdate) return
         viewModelScope.launch {
-            _state.update { it.copy(updateStatusMessage = "Checking for updates…") }
+            _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = "Checking for updates…") }
             val result = withContext(Dispatchers.IO) {
                 runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }
             }
             val info = result.getOrNull()
+            val error = result.exceptionOrNull()
             _state.update {
                 it.copy(
+                    checkingAppUpdate = false,
                     updateInfo = info,
-                    updateStatusMessage = if (result.isFailure) {
-                        "Update check failed: ${result.exceptionOrNull()?.message ?: "network error"}"
-                    } else if (info != null) {
-                        "Update available: v${info.versionName} (${info.versionCode})"
-                    } else {
-                        "NextCraft Forge is up to date."
+                    updateStatusMessage = when {
+                        error is NoPublishedReleaseException ->
+                            "No app release has been published yet. You are on the latest build."
+                        error is java.net.UnknownHostException || error is java.net.SocketTimeoutException ->
+                            "Update check failed: no internet connection."
+                        error != null -> "Update check failed: ${error.message ?: "network error"}"
+                        info != null -> "Update available: v${info.versionName} (${info.versionCode})"
+                        else -> "NextCraft Forge is up to date."
                     },
                 )
             }
@@ -2614,18 +2628,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadAndInstallAppUpdate() {
         val info = _state.value.updateInfo ?: return
+        if (_state.value.updateProgress != null) return
         viewModelScope.launch {
-            _state.update { it.copy(updateStatusMessage = "Downloading v${info.versionName}…") }
+            _state.update { it.copy(updateProgress = 0f, updateStatusMessage = "Downloading v${info.versionName}…") }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    var lastReported = -1
                     val apk = AppUpdater(getApplication()).download(info) { downloaded, total ->
-                        val pct = if (total > 0) ((downloaded * 100L) / total).coerceIn(0L, 100L) else -1L
-                        val msg = if (pct >= 0) {
-                            "Downloading v${info.versionName} ($pct%)…"
-                        } else {
-                            "Downloading v${info.versionName} (${downloaded / 1024} KB)…"
+                        val fraction = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else null
+                        // Report whole-percent steps only; per-chunk state updates would recompose the screen constantly.
+                        val step = fraction?.let { (it * 100).toInt() } ?: (downloaded / (512 * 1024)).toInt()
+                        if (step != lastReported) {
+                            lastReported = step
+                            val mb = "%.1f".format(downloaded / 1_048_576.0)
+                            val msg = if (fraction != null) {
+                                "Downloading v${info.versionName}: $mb / ${"%.1f".format(total / 1_048_576.0)} MB"
+                            } else {
+                                "Downloading v${info.versionName}: $mb MB"
+                            }
+                            _state.update { it.copy(updateProgress = fraction ?: 0f, updateStatusMessage = msg) }
                         }
-                        _state.update { it.copy(updateStatusMessage = msg) }
                     }
                     AndroidAppInstaller.install(
                         context = getApplication(),
@@ -2635,9 +2657,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess {
-                _state.update { it.copy(updateStatusMessage = "Update v${info.versionName} verified & installing…") }
+                _state.update { it.copy(updateProgress = null, updateStatusMessage = "Update v${info.versionName} verified & installing…") }
             }.onFailure { err ->
-                _state.update { it.copy(updateStatusMessage = "Update install failed: ${err.message}") }
+                _state.update { it.copy(updateProgress = null, updateStatusMessage = "Update install failed: ${err.message}") }
             }
         }
     }

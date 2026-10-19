@@ -21,7 +21,10 @@ android {
         }
 
         buildConfigField("String", "APP_VARIANT", "\"debug\"")
-        buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"\"")
+        // Manifest asset of the latest GitHub release; build with -PappUpdateManifestUrl=... to point elsewhere.
+        val updateManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
+            ?: "https://github.com/bymeopen/nextcraft-forge/releases/latest/download/update-manifest.json"
+        buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 
     // Release signing comes from the environment so no key material lives in the repo.

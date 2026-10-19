@@ -325,23 +325,7 @@ fun SettingsScreenModern(
                     }
                 }
 
-                if (state.setupSnapshot.status == RuntimeSetupStatus.RUNNING) {
-                    LinearProgressIndicator(
-                        progress = state.setupSnapshot.progress,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = state.setupSnapshot.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (state.setupSnapshot.status == RuntimeSetupStatus.ERROR) {
-                    Text(
-                        text = state.setupSnapshot.errorMessage.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                if (state.setupScope == SetupScope.AGENT) RuntimeProgressPanel(state.setupSnapshot)
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
                     var agyVerificationCode by rememberSaveable { mutableStateOf("") }
@@ -959,25 +943,7 @@ fun SettingsScreenModern(
                         }
                     }
                 }
-                if (state.setupSnapshot.status != com.nextcraft.forge.runtime.RuntimeSetupStatus.IDLE) {
-                    Text(
-                        text = state.setupSnapshot.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = tokens.accentText,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    state.setupSnapshot.errorMessage?.let { err ->
-                        Text(
-                            text = err,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.dangerText,
-                        )
-                    }
-                    LinearProgressIndicator(
-                        progress = state.setupSnapshot.progress.coerceIn(0f, 1f),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                if (state.setupScope == SetupScope.RUNTIME) RuntimeProgressPanel(state.setupSnapshot)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1031,12 +997,23 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
+                state.updateProgress?.let { fraction ->
+                    LinearProgressIndicator(progress = fraction, modifier = Modifier.fillMaxWidth())
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(shape = RoundedCornerShape(100), onClick = { viewModel.checkForAppUpdates() }) {
+                    Button(
+                        shape = RoundedCornerShape(100),
+                        onClick = { viewModel.checkForAppUpdates() },
+                        enabled = !state.checkingAppUpdate && state.updateProgress == null,
+                    ) {
                         Text(stringResource(R.string.settings_check_for_app_updates))
                     }
                     state.updateInfo?.let { info ->
-                        OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel::downloadAndInstallAppUpdate) {
+                        OutlinedButton(
+                            shape = RoundedCornerShape(100),
+                            onClick = viewModel::downloadAndInstallAppUpdate,
+                            enabled = state.updateProgress == null,
+                        ) {
                             Text(stringResource(R.string.settings_download_install_update, info.versionName))
                         }
                     }
