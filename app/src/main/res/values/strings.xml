@@ -427,4 +427,7 @@
     <string name="chats_empty">No chats yet. Start one to talk to the agent about this project.</string>
     <string name="chats_open_project_tools">Project tools</string>
     <string name="chats_new_chat">New chat</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_files">Files</string>
+    <string name="nav_preview">Preview</string>
 </resources>

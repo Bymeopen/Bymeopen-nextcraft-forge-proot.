@@ -55,7 +55,9 @@ fun NavGlyph(
             ForgeTab.PROJECTS -> drawTiles(tint, stroke, progress)
             ForgeTab.TERMINAL -> drawPrompt(tint, stroke, progress, blink = animate && t < 0.5f)
             ForgeTab.AGENT -> drawSpark(tint, stroke, progress, orbit = if (animate) t else null)
-            ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW -> drawWrench(tint, stroke, progress)
+            ForgeTab.TOOLS, ForgeTab.ANDROID -> drawWrench(tint, stroke, progress)
+            ForgeTab.FILES -> drawFile(tint, stroke, progress)
+            ForgeTab.PREVIEW -> drawPreview(tint, stroke, progress)
             ForgeTab.SETTINGS -> drawSliders(tint, stroke, progress)
         }
     }
@@ -161,4 +163,46 @@ private fun DrawScope.drawSliders(tint: Color, stroke: Stroke, p: Float) {
         val kx = w * (idle[i] + (sel[i] - idle[i]) * p)
         drawCircle(tint, radius = w * 0.075f, center = Offset(kx, y))
     }
+}
+
+/** Document sheet with a folded corner; the text lines slide in when selected. */
+private fun DrawScope.drawFile(tint: Color, stroke: Stroke, p: Float) {
+    val w = size.width
+    val h = size.height
+    val path = Path().apply {
+        moveTo(w * 0.25f, h * 0.12f)
+        lineTo(w * 0.62f, h * 0.12f)
+        lineTo(w * 0.78f, h * 0.28f)
+        lineTo(w * 0.78f, h * 0.88f)
+        lineTo(w * 0.25f, h * 0.88f)
+        close()
+    }
+    drawPath(path, tint, style = stroke)
+    drawLine(tint, Offset(w * 0.62f, h * 0.12f), Offset(w * 0.62f, h * 0.28f), stroke.width, StrokeCap.Round)
+    drawLine(tint, Offset(w * 0.78f, h * 0.28f), Offset(w * 0.62f, h * 0.28f), stroke.width, StrokeCap.Round)
+    val reach = w * (0.30f + 0.18f * p)
+    drawLine(tint, Offset(w * 0.37f, h * 0.52f), Offset(w * 0.37f + reach, h * 0.52f), stroke.width, StrokeCap.Round)
+    drawLine(tint, Offset(w * 0.37f, h * 0.68f), Offset(w * 0.37f + reach * 0.7f, h * 0.68f), stroke.width, StrokeCap.Round)
+}
+
+/** Browser window: title bar dot and a play triangle that fills in when selected. */
+private fun DrawScope.drawPreview(tint: Color, stroke: Stroke, p: Float) {
+    val w = size.width
+    val h = size.height
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(w * 0.12f, h * 0.18f),
+        size = androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.64f),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.08f),
+        style = stroke,
+    )
+    drawLine(tint, Offset(w * 0.12f, h * 0.36f), Offset(w * 0.88f, h * 0.36f), stroke.width, StrokeCap.Round)
+    drawCircle(tint, radius = w * 0.035f, center = Offset(w * 0.24f, h * 0.27f))
+    val tri = Path().apply {
+        moveTo(w * 0.42f, h * 0.46f)
+        lineTo(w * 0.64f, h * 0.59f)
+        lineTo(w * 0.42f, h * 0.72f)
+        close()
+    }
+    drawPath(tri, tint.copy(alpha = 0.25f + 0.75f * p), style = if (p > 0.5f) androidx.compose.ui.graphics.drawscope.Fill else stroke)
 }
