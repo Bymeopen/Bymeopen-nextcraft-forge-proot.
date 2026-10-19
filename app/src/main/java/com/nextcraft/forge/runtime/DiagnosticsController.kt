@@ -100,6 +100,7 @@ class DiagnosticsController(private val context: Context) {
         val installed = runCatching { installer.isInstalled() }.getOrDefault(false)
         return buildList {
             add("Root access" to if (runCatching { isRootAccessAvailable() }.getOrDefault(false)) "granted" else "not available")
+            add("Runtime engine" to (runCatching { installer.runtimeEngine() }.getOrNull()?.name?.lowercase() ?: "none"))
             add("Linux runtime" to if (installed) "installed" else "not installed")
             runCatching { File(rootfs, ".pocket-rootfs-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
                 ?.takeIf { it.isNotBlank() }?.let { add("Rootfs" to it) }

@@ -135,6 +135,8 @@ enum class SetupScope { RUNTIME, AGENT }
 data class ForgeUiState(
     val arm64Supported: Boolean = true,
     val rootAvailable: Boolean = false,
+    /** No root, but the APK's PRoot engine can run the runtime (slower; ADR-007). */
+    val prootAvailable: Boolean = false,
     val runtimeInstalled: Boolean = false,
     val setupSnapshot: RuntimeSetupSnapshot = RuntimeSetupSnapshot(),
     val selectedDevStacks: Set<DevStack> = setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID),

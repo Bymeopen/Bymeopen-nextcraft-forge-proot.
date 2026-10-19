@@ -77,7 +77,7 @@ import com.nextcraft.forge.runtime.findAndroidProjectRoot
 import com.nextcraft.forge.runtime.findDebugApk
 import com.nextcraft.forge.runtime.hasAndroidLogcatAccess
 import com.nextcraft.forge.runtime.inferAndroidBuildStage
-import com.nextcraft.forge.runtime.isRootAccessAvailable
+import com.nextcraft.forge.runtime.RuntimeEngine
 import com.nextcraft.forge.runtime.parseAndroidBuildIssues
 import com.nextcraft.forge.runtime.readBoundedText
 import com.nextcraft.forge.runtime.startPackageLogcatProcess
@@ -263,7 +263,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun bootstrap() {
         viewModelScope.launch {
             val arm64 = supportsArm64Runtime(Build.SUPPORTED_ABIS, System.getProperty("os.arch"))
-            val rootOk = withContext(Dispatchers.IO) { isRootAccessAvailable() }
+            val engine = withContext(Dispatchers.IO) { installer.runtimeEngine() }
+            val rootOk = engine == RuntimeEngine.CHROOT
             val savedAgent = AgentKind.fromStored(preferences.agentKind)
             val savedStacks = preferences.selectedDevStacks
                 .mapNotNull { runCatching { DevStack.valueOf(it) }.getOrNull() }
@@ -310,6 +311,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     arm64Supported = arm64,
                     rootAvailable = rootOk,
+                    prootAvailable = engine == RuntimeEngine.PROOT,
                     runtimeInstalled = installed,
                     selectedDevStacks = savedStacks,
                     installedDevStacks = installedStacks,
@@ -396,7 +398,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshRuntimeStatus() {
         viewModelScope.launch {
-            val rootOk = withContext(Dispatchers.IO) { isRootAccessAvailable() }
+            val engine = withContext(Dispatchers.IO) { installer.runtimeEngine() }
+            val rootOk = engine == RuntimeEngine.CHROOT
             val installed = withContext(Dispatchers.IO) { installer.isInstalled() }
             val installedStacks = if (installed) {
                 withContext(Dispatchers.IO) { installer.installedStacks() }
@@ -409,6 +412,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     rootAvailable = rootOk,
+                    prootAvailable = engine == RuntimeEngine.PROOT,
                     runtimeInstalled = installed,
                     installedDevStacks = installedStacks,
                     installedAgents = installedAgents,
@@ -1870,8 +1874,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
     private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
-        check(installer.isInstalled() && isRootAccessAvailable()) {
-            "Root access and the installed Linux runtime are required to run this."
+        check(installer.isInstalled() && installer.isRuntimeAccessAvailable()) {
+            "Root access (or the PRoot engine) and the installed Linux runtime are required to run this."
         }
         val (envFile, suCommand) = installer.prepareChrootShellCommand(
             workspace = workspaceDir,
@@ -1880,7 +1884,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             guestCommand = listOf("/bin/bash", "-lc", command),
         )
         return try {
-            ProcessBuilder("su", "-mm", "-c", suCommand).redirectErrorStream(true).start()
+            ProcessBuilder(installer.launchArgv(suCommand)).redirectErrorStream(true).start()
         } catch (error: Throwable) {
             envFile.delete()
             throw error
@@ -1894,7 +1898,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onOutputChunk: ((String) -> Unit)? = null,
     ): String {
         return runCatching {
-            val process = if (installer.isInstalled() && isRootAccessAvailable()) {
+            val process = if (installer.isInstalled() && installer.isRuntimeAccessAvailable()) {
                 val installed = installer.installedRuntime()
                 if (installed.chrootExec.isFile) {
                     startChrootProcess(projectSlug, workspaceDir, command)
