@@ -137,7 +137,11 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     val imeVisible by rememberImeVisible()
     val backTarget = forgeBackTarget(state.activeTab)
-    BackHandler(enabled = backTarget != null) { backTarget?.let(viewModel::selectTab) }
+    val insideProject = state.activeTab == ForgeTab.PROJECTS && state.projectView != ProjectView.LIST
+    // Inside a project, Back walks conversation → chats → list before the tab rules apply.
+    BackHandler(enabled = backTarget != null || insideProject) {
+        if (!viewModel.projectBack()) backTarget?.let(viewModel::selectTab)
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -205,24 +209,22 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.activeTab) {
-                    ForgeTab.PROJECTS -> ProjectsScreen(
-                        state = state,
-                        onOpenProject = viewModel::openProject,
-                        onNewProject = { showNewProjectDialog = true },
-                        onQuickProject = {
-                            viewModel.createQuickProject()
-                            viewModel.selectTab(ForgeTab.AGENT)
-                        },
-                        onImportZip = viewModel::importZipProject,
-                        onCloneGitUrl = viewModel::cloneGitUrl,
-                        onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
-                        onDeleteProject = viewModel::deleteProject,
-                        onNewQuickProject = {
-                            viewModel.createQuickProject()
-                            viewModel.selectTab(ForgeTab.AGENT)
-                        },
-                    )
-                    ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
+                    ForgeTab.PROJECTS -> when (state.projectView) {
+                        ProjectView.LIST -> ProjectsScreen(
+                            state = state,
+                            onOpenProject = viewModel::openProject,
+                            onNewProject = { showNewProjectDialog = true },
+                            onQuickProject = viewModel::createQuickProject,
+                            onImportZip = viewModel::importZipProject,
+                            onCloneGitUrl = viewModel::cloneGitUrl,
+                            onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                            onDeleteProject = viewModel::deleteProject,
+                            onNewQuickProject = viewModel::createQuickProject,
+                        )
+                        ProjectView.CHATS -> ProjectChatsScreen(state = state, viewModel = viewModel)
+                        ProjectView.CONVERSATION -> AgentScreen(state = state, viewModel = viewModel)
+                    }
+                    ForgeTab.AGENT -> AgentConfigScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)

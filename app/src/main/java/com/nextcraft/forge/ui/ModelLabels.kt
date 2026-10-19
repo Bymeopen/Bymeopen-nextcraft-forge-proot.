@@ -94,8 +94,17 @@ fun DevStack.displayDescription(): String = when (this) {
 
 /** "3m ago" style text for list rows; plurals come from resources so each locale decides the form. */
 @Composable
-fun Project.relativeUpdatedAt(nowMillis: Long = System.currentTimeMillis()): String {
-    val diff = (nowMillis - updatedAtMillis).coerceAtLeast(0L)
+fun Project.relativeUpdatedAt(nowMillis: Long = System.currentTimeMillis()): String =
+    relativeTime(updatedAtMillis, nowMillis, formattedUpdatedAt)
+
+/** Same wording for any timestamp (chat rows); past a week it shows the date. */
+@Composable
+fun formatRelativeTime(atMillis: Long, nowMillis: Long = System.currentTimeMillis()): String =
+    relativeTime(atMillis, nowMillis, java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(atMillis)))
+
+@Composable
+private fun relativeTime(atMillis: Long, nowMillis: Long, fallback: String): String {
+    val diff = (nowMillis - atMillis).coerceAtLeast(0L)
     val minutes = (diff / 60_000L).toInt()
     val hours = minutes / 60
     val days = hours / 24
@@ -105,7 +114,7 @@ fun Project.relativeUpdatedAt(nowMillis: Long = System.currentTimeMillis()): Str
         hours < 24 -> pluralStringResource(R.plurals.time_hours_ago, hours, hours)
         days == 1 -> stringResource(R.string.time_yesterday)
         days < 7 -> pluralStringResource(R.plurals.time_days_ago, days, days)
-        else -> formattedUpdatedAt
+        else -> fallback
     }
 }
 

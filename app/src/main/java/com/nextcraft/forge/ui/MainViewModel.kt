@@ -94,6 +94,9 @@ import kotlinx.coroutines.withContext
 import com.nextcraft.forge.model.generateQuickChatIdentity
 import com.nextcraft.forge.R
 
+/** What the Projects tab shows: the project list, the chats of the open project, or one conversation. */
+enum class ProjectView { LIST, CHATS, CONVERSATION }
+
 enum class ForgeTab(val title: String) {
     PROJECTS("Projects"),
     AGENT("Agent"),
@@ -116,7 +119,8 @@ data class ForgeUiState(
     val agentUpdates: Map<AgentKind, AgentUpdateInfo> = emptyMap(),
     val checkingAgentUpdates: Boolean = false,
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
-    val activeTab: ForgeTab = ForgeTab.AGENT,
+    val activeTab: ForgeTab = ForgeTab.PROJECTS,
+    val projectView: ProjectView = ProjectView.LIST,
     val themeMode: String = "dark",
     val projects: List<Project> = emptyList(),
     val activeProjectId: String = "",
@@ -723,7 +727,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     projects = updated,
-                    activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
+                    activeTab = ForgeTab.PROJECTS,
+                    projectView = ProjectView.CONVERSATION,
                 )
             }
             selectProject(newProject.id)
@@ -788,6 +793,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chats = updatedChats,
                 activeChatId = chat.id,
                 messages = emptyList(),
+                activeTab = ForgeTab.PROJECTS,
+                projectView = ProjectView.CONVERSATION,
             )
         }
     }
@@ -1213,7 +1220,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Opens a project from the project list, asking about unsaved edits first; shows the agent only if it switched. */
     fun openProject(projectId: String) = leaveOpenFile {
         selectProject(projectId)
-        if (_state.value.activeProjectId == projectId) selectTab(ForgeTab.AGENT)
+        if (_state.value.activeProjectId == projectId) {
+            _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CHATS) }
+        }
+    }
+
+    /** Shows the active chat's conversation under the Projects tab. */
+    fun openConversation() {
+        _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CONVERSATION) }
+    }
+
+    /** Opens one chat of the active project and shows its conversation. */
+    fun openChat(chatId: String) {
+        selectChat(chatId)
+        openConversation()
+    }
+
+    /** One step up inside the Projects tab; false when already on the project list. */
+    fun projectBack(): Boolean {
+        val next = when (_state.value.projectView) {
+            ProjectView.CONVERSATION -> ProjectView.CHATS
+            ProjectView.CHATS -> ProjectView.LIST
+            ProjectView.LIST -> return false
+        }
+        _state.update { it.copy(projectView = next) }
+        return true
     }
 
     fun openWorkspaceFile(relativePath: String) {
@@ -2444,6 +2475,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             configureAllProjectRoots(updated)
             _state.update { it.copy(projects = updated) }
             selectProject(project.id)
+            openConversation()
         }
     }
 
