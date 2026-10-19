@@ -505,25 +505,27 @@ private fun ProjectRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(enabled = !locked, role = Role.Button, onClick = onOpen, onLongClick = { menuOpen = true })
-                .padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(scheme.primary.copy(alpha = 0.12f)),
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
-            ) { FolderGlyph(tint = scheme.primary) }
+            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = 26.dp) }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = project.name,
-                    fontSize = ForgeType.cardTitle,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = if (locked) stringResource(R.string.projects_agent_running) else project.description.ifBlank { project.subtitle() },
-                    fontSize = 14.sp,
+                    fontSize = ForgeType.body,
                     color = muted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -551,7 +553,7 @@ private fun ProjectRow(
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.projects_rename)) },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, muted) },
                         onClick = {
                             menuOpen = false
                             onRename()
@@ -559,7 +561,7 @@ private fun ProjectRow(
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.shell_delete_project)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, LocalForgeThemeTokens.current.dangerText) },
                         enabled = canDelete,
                         onClick = {
                             menuOpen = false
