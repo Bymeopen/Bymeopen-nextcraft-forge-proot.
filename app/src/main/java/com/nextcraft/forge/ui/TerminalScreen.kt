@@ -33,6 +33,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.filled.List
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,10 +92,16 @@ fun TerminalScreen(
         scrollState.animateScrollTo(scrollState.maxValue)
     }
 
+    // Command history for the ↑ / ↓ keys below the output.
+    val history = remember { mutableStateListOf<String>() }
+    var historyIndex by remember { mutableStateOf(-1) }
+
     fun runCommand() {
         val cmd = commandInput.trim()
         if (cmd.isNotEmpty() && !state.terminalRunning) {
             commandInput = ""
+            if (history.lastOrNull() != cmd) history.add(cmd)
+            historyIndex = -1
             viewModel.runTerminalCommand(cmd)
         }
     }
@@ -96,14 +110,25 @@ fun TerminalScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(end = 14.dp),
+                .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ForgeLargeTitle(
-                title = stringResource(R.string.shell_terminal),
-                subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
-                modifier = Modifier.weight(1f),
-            )
+            Surface(shape = RoundedCornerShape(12.dp), color = tokens.cardElevatedColor, modifier = Modifier.size(44.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.List, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(22.dp))
+                }
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.terminal_project_terminal), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "/workspace/${state.activeProject?.slug ?: "sandbox"} · ${stringResource(R.string.terminal_env_root_chroot)}",
+                    fontSize = 13.sp,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             ForgeActionPill {
                 ForgePillIcon(
                     icon = Icons.Default.Share,
@@ -180,6 +205,37 @@ fun TerminalScreen(
             }
         }
 
+        // Key row: ↑ ↓ walk the command history, Ctrl+C stops the running command, Clear wipes the input.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TerminalKey(label = "↑", description = stringResource(R.string.terminal_key_previous), enabled = history.isNotEmpty()) {
+                val next = if (historyIndex < 0) history.lastIndex else (historyIndex - 1).coerceAtLeast(0)
+                historyIndex = next
+                commandInput = history[next]
+            }
+            TerminalKey(label = "↓", description = stringResource(R.string.terminal_key_next), enabled = historyIndex >= 0) {
+                val next = historyIndex + 1
+                if (next > history.lastIndex) {
+                    historyIndex = -1
+                    commandInput = ""
+                } else {
+                    historyIndex = next
+                    commandInput = history[next]
+                }
+            }
+            TerminalKey(label = "Ctrl+C", description = stringResource(R.string.terminal_stop_command), enabled = state.terminalRunning) {
+                viewModel.stopTerminal()
+            }
+            TerminalKey(label = stringResource(R.string.launch_clear_logcat), description = stringResource(R.string.terminal_key_clear_input), enabled = commandInput.isNotEmpty()) {
+                commandInput = ""
+                historyIndex = -1
+            }
+        }
+
         // Command line: one rounded surface, prompt glyph, round run button.
         Surface(
             shape = RoundedCornerShape(24.dp),
@@ -237,5 +293,20 @@ fun TerminalScreen(
                 }
             }
         }
+    }
+}
+
+/** Capsule key for the terminal key row. */
+@Composable
+private fun TerminalKey(label: String, description: String, enabled: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(100),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        modifier = Modifier.height(36.dp).semantics { contentDescription = description },
+    ) {
+        Text(label, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = if (enabled) scheme.onSurface else scheme.onSurfaceVariant)
     }
 }

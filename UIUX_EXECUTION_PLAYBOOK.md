@@ -351,3 +351,4 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 
 - Design study (semua layar, 4 tema, interaktif): `docs/design-study/` + artifact https://claude.ai/artifact/Mgq8C7tfQtXSS17fnjhy9Y
 - Settings ditata ulang mengikuti referensi: General (Appearance tiles, Language radio, Safety), tab agen + Access mode / Endpoint / Model & access, Google account card, Runtime updates, Developer tools (Add/Remove), Linux runtime, Danger zone, About.
+- Dalam-proyek mengikuti referensi: header proyek (kembali, nama, agen · chat, run, riwayat), dialog Project chats, baris tool-call terlipat + "Worked for", pill Latest; Terminal header proyek + baris tombol ↑↓ Ctrl+C Clear; Preview bilah URL berstatus + empty state; Android menu Force rebuild / Copy APK path.

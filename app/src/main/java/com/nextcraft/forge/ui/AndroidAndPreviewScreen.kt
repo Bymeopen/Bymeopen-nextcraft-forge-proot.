@@ -44,6 +44,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -144,6 +148,7 @@ fun AndroidBuildScreen(
     val tokens = LocalForgeThemeTokens.current
     var activeTab by rememberSaveable { mutableStateOf(0) } // 0 stages, 1 issues, 2 log, 3 logcat
     var menuOpen by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     // Stage events carry only the active stage, so remember the last real one to place success/failure.
     var lastRow by remember { mutableStateOf(-1) }
@@ -216,6 +221,23 @@ fun AndroidBuildScreen(
                                 viewModel.runAndroidBuild("clean", installAfterBuild = false)
                             },
                         )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.launch_force_rebuild)) },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.runAndroidBuild("clean assembleDebug", installAfterBuild = true)
+                            },
+                        )
+                        if (build.apkPath != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.launch_copy_apk_path)) },
+                                onClick = {
+                                    menuOpen = false
+                                    clipboard.setText(AnnotatedString(build.apkPath))
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -625,55 +647,65 @@ fun WebPreviewScreen(
                 subtitle = stringResource(R.string.launch_local_dev_server),
                 modifier = Modifier.weight(1f),
             )
-            ForgeActionPill {
-                ForgePillIcon(
-                    icon = Icons.Default.Refresh,
-                    description = stringResource(R.string.launch_scan_ports_and_reload),
-                    onClick = {
-                        viewModel.scanLocalPreviewPorts()
-                        webViewRef?.reload()
-                    },
-                )
-            }
         }
 
-        // Address bar: one rounded surface with a text-style "Open" action.
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = tokens.cardContainerColor,
-            contentColor = colors.onSurface,
-            border = tokens.cardBorderStroke,
+        // Address bar: status dot, URL, go arrow; refresh sits outside the bar.
+        var opened by rememberSaveable { mutableStateOf(false) }
+        val serverUp = state.activeLocalPorts.isNotEmpty() || opened
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+                .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier.padding(start = 6.dp, end = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = tokens.cardContainerColor,
+                contentColor = colors.onSurface,
+                border = tokens.cardBorderStroke,
+                modifier = Modifier.weight(1f),
             ) {
-                TextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    singleLine = true,
-                    placeholder = { Text("http://127.0.0.1:3000") },
-                    colors = TextFieldDefaults.textFieldColors(
-                        containerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                    ),
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = stringResource(R.string.launch_open),
-                    color = tokens.accentText,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(100))
-                        .clickable(role = Role.Button) { openUrl(urlInput) }
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                )
+                Row(
+                    modifier = Modifier.padding(start = 16.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (serverUp) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.5f)),
+                    )
+                    TextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.launch_preview_url)) },
+                        colors = TextFieldDefaults.textFieldColors(
+                            containerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                    ForgePillIcon(
+                        icon = Icons.Default.ArrowForward,
+                        description = stringResource(R.string.launch_open),
+                        onClick = {
+                            opened = true
+                            openUrl(urlInput)
+                        },
+                    )
+                }
             }
+            ForgePillIcon(
+                icon = Icons.Default.Refresh,
+                description = stringResource(R.string.launch_scan_ports_and_reload),
+                onClick = {
+                    viewModel.scanLocalPreviewPorts()
+                    webViewRef?.reload()
+                },
+            )
         }
 
         if (state.activeLocalPorts.isNotEmpty()) {
@@ -699,6 +731,26 @@ fun WebPreviewScreen(
             }
         }
 
+        if (!serverUp) {
+            // Nothing is listening yet: say so instead of showing a blank WebView.
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(56.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(stringResource(R.string.launch_preview_not_running), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.launch_preview_not_running_hint),
+                    fontSize = 14.sp,
+                    color = colors.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+            return@Column
+        }
         AndroidView(
             modifier = Modifier
                 .weight(1f)
