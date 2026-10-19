@@ -220,7 +220,7 @@
     <string name="settings_claude_footnote">Proses masuk memakai login resmi Claude Code. Setelah Anda menyetujui di browser, Anda otomatis kembali ke aplikasi; jika halaman menampilkan kode, tempel kode di atas. Mendukung Pro, Max, Team, dan Enterprise (termasuk SSO).</string>
     <string name="model_picker_search">Cari atau ketik ID model</string>
     <string name="model_picker_loading">Memuat model…</string>
-    <string name="model_picker_use_custom">Pakai "%1$s"</string>
+    <string name="model_picker_use_custom">Pakai \"%1$s\"</string>
     <string name="model_picker_empty">Tidak ada model yang cocok.</string>
     <string name="model_picker_close">Selesai</string>
     <string name="model_picker_refresh">Muat ulang</string>
