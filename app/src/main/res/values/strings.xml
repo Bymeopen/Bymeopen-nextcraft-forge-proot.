@@ -423,4 +423,12 @@
     <string name="launch_preview_not_running_hint">Enter a localhost URL above, or start a local web server in the project terminal.</string>
     <string name="launch_force_rebuild">Force rebuild</string>
     <string name="launch_copy_apk_path">Copy APK path</string>
+    <string name="agent_config_title">AI agent</string>
+    <string name="chats_subtitle">%1$d chats</string>
+    <string name="chats_empty">No chats yet. Start one to talk to the agent about this project.</string>
+    <string name="chats_open_project_tools">Project tools</string>
+    <string name="chats_new_chat">New chat</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_files">Files</string>
+    <string name="nav_preview">Preview</string>
 </resources>

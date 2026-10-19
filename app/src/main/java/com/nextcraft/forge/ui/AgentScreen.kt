@@ -148,9 +148,9 @@ fun AgentScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         AgentHeader(
             state = state,
-            onBack = { viewModel.selectTab(ForgeTab.PROJECTS) },
+            onBack = { viewModel.projectBack() },
             onRun = { viewModel.selectTab(ForgeTab.ANDROID) },
-            onSelectChat = viewModel::selectChat,
+            onSelectChat = viewModel::openChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
             onSelectAgent = viewModel::selectAgent,

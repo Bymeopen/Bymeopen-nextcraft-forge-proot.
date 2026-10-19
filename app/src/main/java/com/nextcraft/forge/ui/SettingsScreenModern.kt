@@ -92,21 +92,11 @@ fun SettingsScreenModern(
     state: ForgeUiState,
     viewModel: MainViewModel,
 ) {
-    val agyAuth by viewModel.antigravityAuth.state.collectAsState()
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
 
-    var baseUrlInput by rememberSaveable(state.providerProfile.kind) { mutableStateOf(state.providerProfile.baseUrl) }
-    var modelInput by rememberSaveable(state.providerProfile.kind, state.providerProfile.model) { mutableStateOf(state.providerProfile.model) }
-    var openRouterOrderInput by rememberSaveable(state.providerProfile.kind) { mutableStateOf(state.providerProfile.openRouterProviderOrder) }
-    var keyLabelInput by rememberSaveable { mutableStateOf("") }
-    // Secrets use plain remember: rememberSaveable would write them into the saved-instance Bundle.
-    var keySecretInput by remember { mutableStateOf("") }
-    var agyModelInput by rememberSaveable(state.antigravityModel) { mutableStateOf(state.antigravityModel) }
-    var agyEffortInput by rememberSaveable(state.antigravityEffort) { mutableStateOf(state.antigravityEffort) }
     var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
@@ -225,272 +215,6 @@ fun SettingsScreenModern(
                 onCheckedChange = viewModel::setAutoApproveAllTools,
                 modifier = Modifier.padding(horizontal = 6.dp),
             )
-        }
-
-        // ───────────────────────── AI agent ─────────────────────────
-        ForgeSectionLabel(stringResource(R.string.settings_ai), horizontalPadding = 6.dp)
-        val agents = AgentKind.entries
-        ForgePillTabs(
-            items = agents.map { it.displayTitle() },
-            selectedIndex = agents.indexOf(state.agentKind).coerceAtLeast(0),
-            onSelect = { viewModel.selectAgent(agents[it]) },
-        )
-        val agent = state.agentKind
-        val agentInstalled = agent in state.installedAgents
-
-        if (!agentInstalled) {
-            // Not installed: one card, one call to action (the reference's "X is not installed" state).
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        ForgeStatusIcon(ForgeStatus.TODO, iconSize = 18.dp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = stringResource(R.string.settings_agent_not_installed, agent.displayTitle()),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                    Text(
-                        text = stringResource(R.string.settings_agent_install_hint, agent.downloadNote),
-                        fontSize = 14.sp,
-                        color = scheme.onSurfaceVariant,
-                    )
-                    ForgePrimaryButton(
-                        text = stringResource(R.string.settings_agent_install_named, agent.displayTitle()),
-                        onClick = { viewModel.installAgent(agent) },
-                        enabled = !runtimeBusy,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    SetupProgress(state)
-                }
-            }
-        } else if (agent == AgentKind.ANTIGRAVITY) {
-            AntigravityAccountCard(
-                state = state,
-                viewModel = viewModel,
-                agyAuth = agyAuth,
-                agyModelInput = agyModelInput,
-                onAgyModelChange = { agyModelInput = it },
-                agyEffortInput = agyEffortInput,
-                onAgyEffortChange = { agyEffortInput = it },
-            )
-        } else {
-            val availableProviders = providersForAgent(agent)
-            val provider = state.providerProfile.kind
-
-            // Access mode: radio list of the providers this agent can talk to.
-            var accessOpen by rememberSaveable(agent) { mutableStateOf(false) }
-            DisclosureCard(
-                icon = Icons.Default.Share,
-                title = stringResource(R.string.settings_access_mode),
-                subtitle = provider.displayTitle(),
-                expanded = accessOpen,
-                onToggle = { accessOpen = !accessOpen },
-            ) {
-                availableProviders.forEach { kind ->
-                    RadioRow(
-                        title = kind.displayTitle(),
-                        subtitle = kind.displaySubtitle(),
-                        selected = kind == provider,
-                        onClick = { viewModel.updateProviderKind(kind) },
-                    )
-                }
-            }
-
-            // Endpoint & protocol: base URL, model id, OpenRouter order.
-            var endpointOpen by rememberSaveable(agent) { mutableStateOf(false) }
-            DisclosureCard(
-                icon = Icons.Default.Info,
-                title = stringResource(R.string.settings_endpoint_protocol),
-                subtitle = if (provider.fixedBaseUrl || provider == ProviderKind.CLAUDE) state.providerProfile.model.ifBlank { "default" } else state.providerProfile.baseUrl,
-                expanded = endpointOpen,
-                onToggle = { endpointOpen = !endpointOpen },
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (!provider.fixedBaseUrl && provider != ProviderKind.CLAUDE) {
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
-                            value = baseUrlInput,
-                            onValueChange = { baseUrlInput = it },
-                            label = { Text(stringResource(R.string.settings_api_base_url)) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
-                        value = modelInput,
-                        onValueChange = { modelInput = it },
-                        label = { Text(stringResource(R.string.settings_model_identifier)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (provider == ProviderKind.LLM_ROUTER) {
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
-                            value = openRouterOrderInput,
-                            onValueChange = { openRouterOrderInput = it },
-                            label = { Text(stringResource(R.string.settings_openrouter_provider_order_comma)) },
-                            placeholder = { Text("anthropic,google-vertex,deepseek") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    ForgePrimaryButton(
-                        text = stringResource(R.string.settings_save_config),
-                        onClick = { viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = modelInput, openRouterOrder = openRouterOrderInput) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-
-            // Model & access: discover / validate, discovered models as a radio list, keys.
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = stringResource(R.string.settings_model_access),
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
-                            Text(stringResource(R.string.settings_discover_models))
-                        }
-                    }
-                    if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    state.apiStatusMessage?.asString()?.let { msg ->
-                        Text(text = msg, fontSize = 13.sp, color = scheme.onSurfaceVariant)
-                    }
-                    if (state.discoveredModels.isNotEmpty()) {
-                        Text(
-                            text = stringResource(R.string.settings_models_found, state.discoveredModels.size),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = scheme.onSurfaceVariant,
-                        )
-                        state.discoveredModels.take(30).forEach { m ->
-                            RadioRow(
-                                title = m.displayName,
-                                subtitle = m.id,
-                                mono = true,
-                                selected = m.id == state.providerProfile.model,
-                                onClick = {
-                                    modelInput = m.id
-                                    viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
-                                },
-                                horizontalPadding = 0.dp,
-                            )
-                        }
-                    }
-                    OutlinedButton(
-                        shape = RoundedCornerShape(100),
-                        onClick = viewModel::validateProviderConnection,
-                        enabled = !state.apiBusy,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.settings_validate)) }
-
-                    ThinDivider()
-                    Text(
-                        text = stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    state.savedApiKeys.forEach { keyInfo ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable(role = Role.Button) { viewModel.selectActiveApiKey(keyInfo.id) }
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (keyInfo.isActive) {
-                                ForgeStatusIcon(ForgeStatus.DONE, iconSize = 18.dp)
-                            } else {
-                                Icon(Icons.Default.Lock, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = if (keyInfo.isActive) stringResource(R.string.settings_key_active, keyInfo.name) else keyInfo.name,
-                                modifier = Modifier.weight(1f),
-                                fontWeight = if (keyInfo.isActive) FontWeight.SemiBold else FontWeight.Normal,
-                            )
-                            IconButton(onClick = { viewModel.removeApiKey(keyInfo.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.settings_delete_key), modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
-                        value = keyLabelInput,
-                        onValueChange = { keyLabelInput = it },
-                        label = { Text(stringResource(R.string.settings_label)) },
-                        placeholder = { Text("Primary") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
-                        value = keySecretInput,
-                        onValueChange = { keySecretInput = it },
-                        label = { Text(stringResource(R.string.settings_api_key_token)) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    ForgePrimaryButton(
-                        text = stringResource(R.string.settings_add_key_to_android),
-                        onClick = {
-                            if (keySecretInput.isNotBlank()) {
-                                viewModel.addApiKey(keyLabelInput, keySecretInput)
-                                keyLabelInput = ""
-                                keySecretInput = ""
-                            }
-                        },
-                        enabled = keySecretInput.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-        }
-
-        // Runtime updates: installed agents, update / remove, check.
-        if (state.installedAgents.isNotEmpty()) {
-            var updatesOpen by rememberSaveable { mutableStateOf(false) }
-            DisclosureCard(
-                icon = Icons.Default.Refresh,
-                title = stringResource(R.string.settings_runtime_updates),
-                subtitle = stringResource(R.string.settings_installed_agents_current),
-                expanded = updatesOpen,
-                onToggle = { updatesOpen = !updatesOpen },
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.installedAgents.forEach { kind ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 44.dp)) {
-                            ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(kind.displayTitle(), fontSize = 15.sp, modifier = Modifier.weight(1f))
-                            state.agentUpdates[kind]?.let { info ->
-                                TextButton(onClick = { viewModel.updateAgent(kind) }, enabled = !runtimeBusy) {
-                                    Text(stringResource(R.string.settings_agent_update, info.latestVersion))
-                                }
-                            }
-                            TextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
-                                Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
-                            }
-                        }
-                    }
-                    OutlinedButton(
-                        shape = RoundedCornerShape(100),
-                        onClick = viewModel::checkAgentUpdates,
-                        enabled = !state.checkingAgentUpdates,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.settings_agent_check_updates)) }
-                    SetupProgress(state)
-                }
-            }
         }
 
         // ───────────────────────── GitHub ─────────────────────────
@@ -801,7 +525,7 @@ fun SettingsScreenModern(
 
 /** Google account card for Antigravity, plus its model and effort. */
 @Composable
-private fun AntigravityAccountCard(
+internal fun AntigravityAccountCard(
     state: ForgeUiState,
     viewModel: MainViewModel,
     agyAuth: com.nextcraft.forge.runtime.AntigravityAuthState,
@@ -971,7 +695,7 @@ private fun AntigravityAccountCard(
 
 /** 56dp list row: leading icon in a tinted square, title/subtitle, custom trailing. */
 @Composable
-private fun SettingsRow(
+internal fun SettingsRow(
     icon: ImageVector,
     title: String,
     modifier: Modifier = Modifier,
@@ -1010,7 +734,7 @@ private fun SettingsRow(
 
 /** Card with a SettingsRow header that reveals its body. */
 @Composable
-private fun DisclosureCard(
+internal fun DisclosureCard(
     icon: ImageVector,
     title: String,
     subtitle: String?,
@@ -1030,7 +754,7 @@ private fun DisclosureCard(
 }
 
 @Composable
-private fun Chevron(expanded: Boolean) {
+internal fun Chevron(expanded: Boolean) {
     Icon(
         imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
         contentDescription = stringResource(if (expanded) R.string.projects_collapse else R.string.projects_expand),
@@ -1039,13 +763,13 @@ private fun Chevron(expanded: Boolean) {
 }
 
 @Composable
-private fun ThinDivider() {
+internal fun ThinDivider() {
     Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 }
 
 /** Radio row: title + subtitle left, Material radio right; whole row is the target. */
 @Composable
-private fun RadioRow(
+internal fun RadioRow(
     title: String,
     subtitle: String?,
     selected: Boolean,
@@ -1080,7 +804,7 @@ private fun RadioRow(
 }
 
 @Composable
-private fun KeyValueRow(key: String, value: String) {
+internal fun KeyValueRow(key: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(key, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
         Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1089,7 +813,7 @@ private fun KeyValueRow(key: String, value: String) {
 
 /** Progress and message of the runtime setup service while it runs, errors in the danger colour. */
 @Composable
-private fun SetupProgress(state: ForgeUiState) {
+internal fun SetupProgress(state: ForgeUiState) {
     val status = state.setupSnapshot.status
     // Step, percent, MB transferred and the latest terminal lines while an install runs or after it failed.
     if (status == RuntimeSetupStatus.RUNNING || status == RuntimeSetupStatus.ERROR) {

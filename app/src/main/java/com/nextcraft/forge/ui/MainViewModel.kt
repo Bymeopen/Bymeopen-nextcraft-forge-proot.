@@ -96,6 +96,12 @@ import kotlinx.coroutines.withContext
 import com.nextcraft.forge.model.generateQuickChatIdentity
 import com.nextcraft.forge.R
 
+/** What the Projects tab shows: the project list, the chats of the open project, or one conversation. */
+enum class ProjectView { LIST, CHATS, CONVERSATION }
+
+/** The in-project bottom bar: Chat (chats + conversation), Files, Terminal, Preview. */
+enum class ProjectPane { CHAT, FILES, TERMINAL, PREVIEW }
+
 enum class ForgeTab(val title: String) {
     PROJECTS("Projects"),
     AGENT("Agent"),
@@ -122,7 +128,9 @@ data class ForgeUiState(
     val setupScope: SetupScope = SetupScope.RUNTIME,
     val checkingAgentUpdates: Boolean = false,
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
-    val activeTab: ForgeTab = ForgeTab.AGENT,
+    val activeTab: ForgeTab = ForgeTab.PROJECTS,
+    val projectView: ProjectView = ProjectView.LIST,
+    val projectPane: ProjectPane = ProjectPane.CHAT,
     val themeMode: String = "dark",
     val projects: List<Project> = emptyList(),
     val activeProjectId: String = "",
@@ -732,7 +740,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     projects = updated,
-                    activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
+                    activeTab = ForgeTab.PROJECTS,
+                    projectView = ProjectView.CONVERSATION,
                 )
             }
             leaveOpenFile { selectProject(newProject.id) }
@@ -817,6 +826,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chats = updatedChats,
                 activeChatId = chat.id,
                 messages = emptyList(),
+                activeTab = ForgeTab.PROJECTS,
+                projectView = ProjectView.CONVERSATION,
             )
         }
     }
@@ -1263,7 +1274,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Opens a project from the project list, asking about unsaved edits first; shows the agent only if it switched. */
     fun openProject(projectId: String) = leaveOpenFile {
         selectProject(projectId)
-        if (_state.value.activeProjectId == projectId) selectTab(ForgeTab.AGENT)
+        if (_state.value.activeProjectId == projectId) {
+            _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CHATS, projectPane = ProjectPane.CHAT) }
+        }
+    }
+
+    /** Switches the in-project bottom bar; Files and Preview refresh their data like the global tabs do. */
+    fun selectProjectPane(pane: ProjectPane) {
+        _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectPane = pane) }
+        if (pane == ProjectPane.FILES) _state.value.activeProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+        if (pane == ProjectPane.PREVIEW) scanLocalPreviewPorts()
+    }
+
+    /** Shows the active chat's conversation under the Projects tab. */
+    fun openConversation() {
+        _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CONVERSATION, projectPane = ProjectPane.CHAT) }
+    }
+
+    /** Opens one chat of the active project and shows its conversation. */
+    fun openChat(chatId: String) {
+        selectChat(chatId)
+        openConversation()
+    }
+
+    /** One step up inside the Projects tab; false when already on the project list. */
+    fun projectBack(): Boolean {
+        if (_state.value.projectPane != ProjectPane.CHAT) {
+            _state.update { it.copy(projectPane = ProjectPane.CHAT) }
+            return true
+        }
+        val next = when (_state.value.projectView) {
+            ProjectView.CONVERSATION -> ProjectView.CHATS
+            ProjectView.CHATS -> ProjectView.LIST
+            ProjectView.LIST -> return false
+        }
+        _state.update { it.copy(projectView = next) }
+        return true
     }
 
     fun openWorkspaceFile(relativePath: String) {
@@ -2505,7 +2551,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.saveProjects(updated)
             configureAllProjectRoots(updated)
             _state.update { it.copy(projects = updated) }
-            leaveOpenFile { selectProject(project.id) }
+            leaveOpenFile {
+                selectProject(project.id)
+                openConversation()
+            }
         }
     }
 

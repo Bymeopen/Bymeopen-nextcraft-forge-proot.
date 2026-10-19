@@ -420,4 +420,12 @@
     <string name="launch_preview_not_running_hint">Masukkan URL localhost di atas, atau jalankan server web lokal di terminal proyek.</string>
     <string name="launch_force_rebuild">Build ulang paksa</string>
     <string name="launch_copy_apk_path">Salin path APK</string>
+    <string name="agent_config_title">Agen AI</string>
+    <string name="chats_subtitle">%1$d obrolan</string>
+    <string name="chats_empty">Belum ada obrolan. Mulai satu untuk membahas proyek ini dengan agen.</string>
+    <string name="chats_open_project_tools">Perkakas proyek</string>
+    <string name="chats_new_chat">Obrolan baru</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_files">File</string>
+    <string name="nav_preview">Pratinjau</string>
 </resources>

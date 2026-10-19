@@ -281,7 +281,7 @@ fun AndroidBuildScreen(
                 text = stringResource(R.string.launch_fix_with_agent),
                 onClick = {
                     viewModel.sendPrompt(build.issues.joinToString("\n\n") { it.formatForAgentPrompt() })
-                    viewModel.selectTab(ForgeTab.AGENT)
+                    viewModel.openConversation()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -345,7 +345,7 @@ fun AndroidBuildScreen(
                 issues = build.issues,
                 onAskAgentToFix = { issue ->
                     viewModel.sendPrompt(issue.formatForAgentPrompt())
-                    viewModel.selectTab(ForgeTab.AGENT)
+                    viewModel.openConversation()
                 },
                 onOpenFile = { path ->
                     viewModel.openWorkspaceFile(path)
