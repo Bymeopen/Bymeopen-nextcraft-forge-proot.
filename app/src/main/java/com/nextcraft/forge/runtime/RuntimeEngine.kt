@@ -35,10 +35,16 @@ object RuntimeEngines {
     @Volatile
     private var detectionDone = false
 
+    const val PROOT_LOADER_LIBRARY = "libproot_loader.so"
+
     /** The PRoot binary lives in the APK's native library directory: the only place Android lets an app exec from. */
     fun prootBinary(context: Context): File = File(context.applicationInfo.nativeLibraryDir, PROOT_LIBRARY)
 
-    fun isProotAvailable(context: Context): Boolean = prootBinary(context).let { it.isFile && it.canExecute() }
+    /** proot's ELF loader, which every guest execve runs through; it must be exec-able too, so it ships beside proot. */
+    fun prootLoader(context: Context): File = File(context.applicationInfo.nativeLibraryDir, PROOT_LOADER_LIBRARY)
+
+    fun isProotAvailable(context: Context): Boolean =
+        prootBinary(context).let { it.isFile && it.canExecute() } && prootLoader(context).let { it.isFile && it.canExecute() }
 
     /**
      * Pure decision, kept separate from the probes so it can be unit-tested: which engine a [choice] yields given

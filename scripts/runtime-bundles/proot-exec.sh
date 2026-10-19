@@ -40,6 +40,12 @@ if [ -z "$PROOT" ] || [ ! -x "$PROOT" ]; then
 fi
 # proot keeps its own state (translated /proc entries, temporary files) here; it must be app-writable.
 export PROOT_TMP_DIR="${NEXTCRAFT_PROOT_TMP:-$ROOTFS/tmp}"
+# Every guest execve goes through proot's ELF loader. By default proot extracts it into PROOT_TMP_DIR, which Android
+# (SELinux, targetSdk >= 29) refuses to exec from app data, so nothing in the guest would start. The loader ships in
+# the APK next to proot itself (libproot_loader.so) and is named here.
+if [ -n "${NEXTCRAFT_PROOT_LOADER:-}" ]; then
+    export PROOT_LOADER="$NEXTCRAFT_PROOT_LOADER"
+fi
 HOST_RESP="$HOST_BRIDGE-responses"
 SHM_DIR="$ROOTFS/tmp/.nextcraft-shm"
 
