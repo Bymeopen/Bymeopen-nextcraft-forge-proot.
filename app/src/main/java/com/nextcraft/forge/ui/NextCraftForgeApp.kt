@@ -825,6 +825,7 @@ private fun RuntimeOnboardingScreen(
             label = stringResource(R.string.shell_check_rootfs),
             ok = state.runtimeInstalled,
             detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
+            inProgress = !state.runtimeInstalled && snap.status == RuntimeSetupStatus.RUNNING,
         )
 
         ForgeSectionLabel(stringResource(R.string.onb_stacks))
@@ -957,6 +958,8 @@ private fun StatusCheckRow(
     label: String,
     ok: Boolean,
     detail: String,
+    // True while the step is still being installed: shown as running instead of a red failure.
+    inProgress: Boolean = false,
 ) {
     Row(
         modifier = Modifier
@@ -965,7 +968,7 @@ private fun StatusCheckRow(
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ForgeStatusIcon(if (ok) ForgeStatus.DONE else ForgeStatus.FAILED, iconSize = 20.dp)
+        ForgeStatusIcon(if (ok) ForgeStatus.DONE else if (inProgress) ForgeStatus.RUNNING else ForgeStatus.FAILED, iconSize = 20.dp)
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium)

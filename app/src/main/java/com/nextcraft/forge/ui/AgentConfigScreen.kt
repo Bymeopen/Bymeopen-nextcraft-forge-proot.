@@ -126,7 +126,15 @@ fun AgentConfigScreen(
                         enabled = !isProvisioning,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    SetupProgress(state)
+                    if (isProvisioning && state.setupScope == SetupScope.RUNTIME) {
+                        // A stack/Core install holds the runtime lock; its progress is shown in Settings.
+                        Text(
+                            text = stringResource(R.string.settings_agent_wait_runtime),
+                            fontSize = 13.sp,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    SetupProgress(state, SetupScope.AGENT)
                 }
             }
         } else if (agent == AgentKind.ANTIGRAVITY) {
@@ -386,7 +394,7 @@ fun AgentConfigScreen(
                         enabled = !state.checkingAgentUpdates,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     ) { Text(stringResource(R.string.settings_agent_check_updates)) }
-                    SetupProgress(state)
+                    SetupProgress(state, SetupScope.AGENT)
                 }
             }
         }
