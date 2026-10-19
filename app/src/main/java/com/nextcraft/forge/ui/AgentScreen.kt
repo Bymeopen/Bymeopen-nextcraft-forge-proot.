@@ -208,7 +208,7 @@ fun AgentScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = statusLine,
+                            text = statusLine.asString(),
                             style = MaterialTheme.typography.labelMedium,
                             color = tokens.accentText,
                             fontWeight = FontWeight.SemiBold,
@@ -332,6 +332,21 @@ fun AgentScreen(
                 cameraUri = uri.toString()
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
+        }
+        val retry = state.retryPrompt?.takeIf { it.chatId == state.activeChatId && !state.sessionRunning }
+        if (retry != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.agent_turn_failed),
+                    fontSize = ForgeType.secondary,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeTextButton(onClick = viewModel::retryLastPrompt) { Text(stringResource(R.string.action_retry)) }
+            }
         }
         if (state.queuedPrompts.isNotEmpty()) {
             Column(

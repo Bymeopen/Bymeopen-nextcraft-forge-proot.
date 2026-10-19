@@ -155,7 +155,7 @@ data class ForgeUiState(
     val activeChatId: String = "main",
     val messages: List<ChatMessage> = emptyList(),
     val sessionRunning: Boolean = false,
-    val activeStatusLine: String? = null,
+    val activeStatusLine: UiText? = null,
     val pendingToolRequest: ToolRequest? = null,
     val changedItems: List<ChangeItem> = emptyList(),
     val workspaceFiles: List<WorkspaceEntry> = emptyList(),
@@ -202,12 +202,17 @@ data class ForgeUiState(
     val bannerMessage: UiText? = null,
     /** Recovery offered with [bannerMessage]; shown only while the banner still carries the message it was made for. */
     val bannerAction: BannerAction? = null,
+    /** The last message of a turn that failed (not stopped); offered as "Try again" above the composer. */
+    val retryPrompt: RetryPrompt? = null,
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
 ) {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
 }
+
+/** [chatId] keeps the offer in the chat where the failure happened. */
+data class RetryPrompt(val chatId: String, val prompt: QueuedPrompt)
 
 /** What the banner's button does. SET_UP_RUNTIME is handled by the UI (it reopens the setup screen). */
 enum class BannerActionKind(@androidx.annotation.StringRes val label: Int) {

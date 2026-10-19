@@ -939,6 +939,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
+        lastSentPrompt = RetryPrompt(chatId, QueuedPrompt(text = cleanPrompt, attachments = attachments))
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
         // The agent sees the attachments as workspace paths it can open with its own tools.
         val agentPrompt = if (attachments.isEmpty()) {
@@ -988,7 +989,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chats = updatedChats,
                 messages = updatedMessages,
                 sessionRunning = true,
-                activeStatusLine = "Starting ${_state.value.agentKind.title}…",
+                retryPrompt = null,
+                activeStatusLine = UiText.res(R.string.agent_status_starting, _state.value.agentKind.title),
                 pendingToolRequest = null,
                 pendingAttachments = emptyList(),
             )
@@ -1013,7 +1015,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } catch (error: Throwable) {
                 if (error !is CancellationException) {
-                    appendAssistantText("\n\nError: ${error.message ?: "Session failed"}")
+                    val app = getApplication<Application>()
+                    appendAssistantText("\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
+                    offerRetry()
                 }
                 finishAgentTurn(project.id)
             }
@@ -1027,6 +1031,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (activeAgentJob === turnJob) finishAgentTurn(project.id)
             }
         }
+    }
+
+    /** The prompt of the most recent turn, kept so a failed turn can be offered again. */
+    private var lastSentPrompt: RetryPrompt? = null
+
+    private fun offerRetry() {
+        _state.update { it.copy(retryPrompt = lastSentPrompt) }
+    }
+
+    /** "Try again" after a failed turn: sends the same message (and attachments) once more. */
+    fun retryLastPrompt() {
+        val retry = _state.value.retryPrompt ?: return
+        if (_state.value.sessionRunning || retry.chatId != _state.value.activeChatId) return
+        _state.update { it.copy(retryPrompt = null, pendingAttachments = retry.prompt.attachments) }
+        sendPrompt(retry.prompt.text)
     }
 
     /** Stops the Android build only; a running agent session keeps going. */
@@ -1070,7 +1089,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val agentJob = activeAgentJob
         agentJob?.cancel()
         if (wasSessionRunning) {
-            _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+            _state.update { it.copy(activeStatusLine = UiText.res(R.string.agent_status_stopping), pendingToolRequest = null) }
             // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
             // otherwise a new prompt could race with it over shared bridge state.
             viewModelScope.launch {
@@ -1080,7 +1099,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 agentJob?.join()
                 activeRuntimeBridge = null
                 _state.update {
-                    it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+                    it.copy(sessionRunning = false, activeStatusLine = UiText.res(R.string.agent_status_stopped), pendingToolRequest = null)
                 }
             }
         }
@@ -1103,29 +1122,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         when (event) {
             is RuntimeEvent.SessionStarted -> {
-                _state.update { it.copy(sessionRunning = true, activeStatusLine = "Session started…") }
+                _state.update { it.copy(sessionRunning = true, activeStatusLine = UiText.res(R.string.agent_status_started)) }
             }
             is RuntimeEvent.AssistantDelta -> {
                 appendAssistantText(event.text)
             }
             is RuntimeEvent.ReasoningProgress -> {
-                _state.update { it.copy(activeStatusLine = "Reasoning (${event.estimatedTokens} tokens)…") }
+                _state.update { it.copy(activeStatusLine = UiText.res(R.string.agent_status_reasoning, event.estimatedTokens)) }
             }
             is RuntimeEvent.ReasoningSummary -> {
-                _state.update { it.copy(activeStatusLine = event.summary.take(120)) }
+                _state.update { it.copy(activeStatusLine = UiText.Raw(event.summary.take(120))) }
             }
             is RuntimeEvent.ToolStarted -> {
                 recordActivityItem(event.toolName, event.detail, isComplete = false)
-                _state.update { it.copy(activeStatusLine = "${event.toolName}: ${event.detail}".take(120)) }
+                _state.update { it.copy(activeStatusLine = UiText.Raw("${event.toolName}: ${event.detail}".take(120))) }
             }
             is RuntimeEvent.ToolProgress -> {
-                _state.update { it.copy(activeStatusLine = "${event.toolName}: ${event.detail}".take(120)) }
+                _state.update { it.copy(activeStatusLine = UiText.Raw("${event.toolName}: ${event.detail}".take(120))) }
             }
             is RuntimeEvent.ToolCompleted -> {
                 recordActivityItem(event.toolName, event.summary, isComplete = true)
             }
             is RuntimeEvent.RuntimeLog -> {
-                _state.update { it.copy(activeStatusLine = "${event.title}: ${event.detail}".take(120)) }
+                _state.update { it.copy(activeStatusLine = UiText.Raw("${event.title}: ${event.detail}".take(120))) }
             }
             is RuntimeEvent.ToolRequested -> {
                 _state.update { it.copy(pendingToolRequest = event.request) }
@@ -1161,6 +1180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             is RuntimeEvent.SessionFailed -> {
                 appendAssistantText("\n\n[${event.reason}]")
+                offerRetry()
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
                 discardQueuedPrompts()
             }
@@ -1217,7 +1237,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val elapsed = (now - msg.createdAt.toEpochMilli()).coerceAtLeast(0L)
                 msg.copy(
                     id = UUID.randomUUID().toString(),
-                    text = msg.text.ifBlank { "Task finished." },
+                    text = msg.text.ifBlank { getApplication<Application>().getString(R.string.agent_task_finished) },
                     workedMillis = elapsed,
                 )
             } else {
@@ -1482,7 +1502,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         val path = _state.value.selectedFilePath ?: return
         if (!_state.value.selectedFileEditable) {
-            _state.update { it.copy(fileSavedBanner = "$path is read-only here") }
+            _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_file_readonly, path)) }
             return
         }
         val content = _state.value.selectedFileContent
@@ -1504,7 +1524,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         it.selectedFileDirty
                     },
-                    fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path",
+                    fileSavedBanner = if (saved) getApplication<Application>().getString(R.string.msg_file_saved_path, path) else getApplication<Application>().getString(R.string.msg_file_save_failed_path, path),
                 )
             }
             refreshWorkspaceFilesAndChanges(project.id)
@@ -1724,11 +1744,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             selectedFilePath = null,
                             selectedFileContent = "",
                             selectedFileDirty = false,
-                            fileSavedBanner = "Deleted $cleanPath",
+                            fileSavedBanner = getApplication<Application>().getString(R.string.msg_file_deleted, cleanPath),
                         )
                     }
                 } else {
-                    _state.update { it.copy(fileSavedBanner = "Deleted $cleanPath") }
+                    _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_file_deleted, cleanPath)) }
                 }
                 refreshWorkspaceFilesAndChanges(project.id)
             }
@@ -3001,7 +3021,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAntigravityModels() {
         if (_state.value.antigravityModelsLoading) return
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
-            _state.update { it.copy(apiStatusMessage = UiText.Raw("Install Antigravity CLI first.")) }
+            _state.update { it.copy(apiStatusMessage = UiText.res(R.string.msg_install_antigravity_first)) }
             return
         }
         _state.update { it.copy(antigravityModelsLoading = true) }
@@ -3064,7 +3084,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun checkForAppUpdates(manifestUrlOverride: String = "") {
         if (_state.value.checkingAppUpdate) return
         viewModelScope.launch {
-            _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = "Checking for updates…") }
+            _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = getApplication<Application>().getString(R.string.upd_checking)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }
             }
@@ -3076,12 +3096,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     updateInfo = info,
                     updateStatusMessage = when {
                         error is NoPublishedReleaseException ->
-                            "No app release has been published yet. You are on the latest build."
+                            getApplication<Application>().getString(R.string.upd_no_release)
                         error is java.net.UnknownHostException || error is java.net.SocketTimeoutException ->
-                            "Update check failed: no internet connection."
-                        error != null -> "Update check failed: ${error.message ?: "network error"}"
-                        info != null -> "Update available: v${info.versionName} (${info.versionCode})"
-                        else -> "NextCraft Forge is up to date."
+                            getApplication<Application>().getString(R.string.upd_no_internet)
+                        error != null -> getApplication<Application>().getString(R.string.upd_check_failed, error.message ?: getApplication<Application>().getString(R.string.upd_network_error))
+                        info != null -> getApplication<Application>().getString(R.string.upd_available, info.versionName, info.versionCode)
+                        else -> getApplication<Application>().getString(R.string.upd_up_to_date)
                     },
                 )
             }
@@ -3092,7 +3112,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val info = _state.value.updateInfo ?: return
         if (_state.value.updateProgress != null) return
         viewModelScope.launch {
-            _state.update { it.copy(updateProgress = 0f, updateStatusMessage = "Downloading v${info.versionName}…") }
+            _state.update { it.copy(updateProgress = 0f, updateStatusMessage = getApplication<Application>().getString(R.string.upd_downloading, info.versionName)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     var lastReported = -1
@@ -3104,9 +3124,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             lastReported = step
                             val mb = "%.1f".format(downloaded / 1_048_576.0)
                             val msg = if (fraction != null) {
-                                "Downloading v${info.versionName}: $mb / ${"%.1f".format(total / 1_048_576.0)} MB"
+                                getApplication<Application>().getString(R.string.upd_progress_total, info.versionName, mb, "%.1f".format(total / 1_048_576.0))
                             } else {
-                                "Downloading v${info.versionName}: $mb MB"
+                                getApplication<Application>().getString(R.string.upd_progress, info.versionName, mb)
                             }
                             _state.update { it.copy(updateProgress = fraction ?: 0f, updateStatusMessage = msg) }
                         }
@@ -3119,9 +3139,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess {
-                _state.update { it.copy(updateProgress = null, updateStatusMessage = "Update v${info.versionName} verified & installing…") }
+                _state.update { it.copy(updateProgress = null, updateStatusMessage = getApplication<Application>().getString(R.string.upd_installing, info.versionName)) }
             }.onFailure { err ->
-                _state.update { it.copy(updateProgress = null, updateStatusMessage = "Update install failed: ${err.message}") }
+                _state.update { it.copy(updateProgress = null, updateStatusMessage = getApplication<Application>().getString(R.string.upd_install_failed, err.message.orEmpty())) }
             }
         }
     }
