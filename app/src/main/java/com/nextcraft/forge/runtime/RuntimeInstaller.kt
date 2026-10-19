@@ -2193,6 +2193,25 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             resolvFile.delete()
         }
         resolvFile.writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        ensureLocalhostInHosts()
+    }
+
+    /**
+     * The Core rootfs ships an empty /etc/hosts, so `localhost` was resolved through DNS and failed. Anything that binds
+     * or connects to localhost then breaks: the OAuth callback listener of Antigravity ("listen tcp: lookup localhost ...
+     * no such host") and Claude Code logins, dev servers, Gradle and preview. Keeps whatever else the file holds.
+     */
+    private fun ensureLocalhostInHosts() {
+        val hosts = File(rootfs, "etc/hosts")
+        val current = runCatching { hosts.takeIf { it.isFile }?.readText().orEmpty() }.getOrDefault("")
+        val hasLocalhost = current.lineSequence().any { line ->
+            val fields = line.substringBefore('#').trim().split(Regex("\\s+"))
+            fields.size >= 2 && fields[0] == "127.0.0.1" && "localhost" in fields.drop(1)
+        }
+        if (hasLocalhost) return
+        val entries = "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n"
+        runCatching { writeRootfsFileAtomically(hosts, entries + current.trimStart('\n')) }
+            .onFailure { Log.w("RuntimeInstaller", "Could not write /etc/hosts", it) }
     }
 
     private fun openZstdInputStream(archive: File): java.io.InputStream {
