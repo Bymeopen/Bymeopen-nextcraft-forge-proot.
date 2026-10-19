@@ -1021,14 +1021,14 @@ private fun isSafeBashSegment(segment: String): Boolean {
         if (wrapped.isEmpty()) return first == "xargs"
         return isSafeBashSegment(wrapped.joinToString(" "))
     }
-    if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
-    if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
-    if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     // Allowlisted tools that can still run a program (rg --pre, sort --compress-program) or write a file
     // (find -fprint, git diff --output, sort/tree -o): never auto-approved.
     val args = words.drop(1).map { it.trim('\'', '"') }
     if (args.any { UNSAFE_TOOL_FLAG_REGEX.matches(it) }) return false
     if ((first == "sort" || first == "tree") && args.any { it == "-o" || (first == "tree" && it.startsWith("-o") && it.length > 2) }) return false
+    if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
+    if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
+    if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
 }
 
