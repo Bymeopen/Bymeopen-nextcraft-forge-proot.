@@ -622,6 +622,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
         val switchingProject = projectId != _state.value.activeProjectId
+        // Re-selecting the open project must not reload chats from disk: that would replace the streaming message
+        // of a running turn and wipe the build log, selected chat and open file.
+        if (!switchingProject) return
         // Switching mid-run would append streamed output to, and save over, another project's chat or race with a build/terminal process.
         if (switchingProject) {
             if (_state.value.sessionRunning) {
@@ -735,7 +738,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
                 )
             }
-            selectProject(newProject.id)
+            leaveOpenFile { selectProject(newProject.id) }
         }
     }
 
@@ -1113,7 +1116,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         null
     }
 
+    private var workspaceRefreshRequest = 0
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
+        val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {
             val (entries, changes) = workspaceIo("Could not read the project files") {
                 val ws = checkpoints.ensureWorkspace(projectId)
@@ -1174,11 +1180,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 files to changeDetails
             } ?: return@launch
+            // A slower walk of another project, or an older walk of this one, must not overwrite the newer result.
+            if (requestId != workspaceRefreshRequest || _state.value.activeProjectId != projectId) return@launch
             _state.update {
                 it.copy(
                     workspaceFiles = entries,
                     changedItems = changes,
                 )
+            }
+            // Agent, terminal, revert or git pull may have rewritten the open file; saving the stale copy would undo it.
+            _state.value.selectedFilePath?.takeIf { !_state.value.selectedFileDirty }?.let {
+                loadWorkspaceFile(it, onlyIfClean = true)
             }
         }
     }
@@ -1235,7 +1247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Loads [relativePath] into the editor, replacing whatever is open (callers decide about unsaved edits). */
-    private fun loadWorkspaceFile(relativePath: String) {
+    private fun loadWorkspaceFile(relativePath: String, onlyIfClean: Boolean = false) {
         val project = _state.value.activeProject ?: return
         val requestId = ++openFileRequest
         viewModelScope.launch {
@@ -1261,6 +1273,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // A slower earlier read must not overwrite the file the user opened afterwards, nor show up (and later be
             // saved) in another project the user switched to meanwhile.
             if (requestId != openFileRequest || _state.value.activeProjectId != project.id) return@launch
+            // A background reload must never replace what the user has started typing meanwhile.
+            if (onlyIfClean && (_state.value.selectedFileDirty || _state.value.selectedFilePath != relativePath)) return@launch
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
@@ -1627,9 +1641,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val guestCommand = if (relativeRoot.isEmpty()) cmd else "cd ${shellSingleQuote(relativeRoot)} && $cmd"
                     val process = startChrootProcess(project.slug, ws, guestCommand)
                     activeBuildProcess = process
+                    // Stop pressed while the process was still starting: the stop hook saw no process to kill.
+                    if (!isActive) {
+                        process.destroyForcibly()
+                        throw CancellationException("Build stopped")
+                    }
                     val logBuilder = StringBuilder()
                     process.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line ->
+                            if (!isActive) {
+                                process.destroyForcibly()
+                                throw CancellationException("Build stopped")
+                            }
                             logBuilder.append(line).append('\n')
                             val stage = inferAndroidBuildStage(line, _state.value.androidBuild.stage)
                             _state.update { current ->
@@ -2421,7 +2444,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         githubStatusMessage = UiText.res(R.string.msg_gh_cloned, repo.fullName, newProject.name),
                     )
                 }
-                selectProject(newProject.id)
+                leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
                 _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_clone_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
             }
@@ -2452,7 +2475,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.saveProjects(updated)
             configureAllProjectRoots(updated)
             _state.update { it.copy(projects = updated) }
-            selectProject(project.id)
+            leaveOpenFile { selectProject(project.id) }
         }
     }
 
@@ -2533,7 +2556,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 preferences.saveProjects(updated)
                 configureAllProjectRoots(updated)
                 _state.update { it.copy(projects = updated, bannerMessage = UiText.res(R.string.msg_imported, newProject.name)) }
-                selectProject(newProject.id)
+                leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_import_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
             }
