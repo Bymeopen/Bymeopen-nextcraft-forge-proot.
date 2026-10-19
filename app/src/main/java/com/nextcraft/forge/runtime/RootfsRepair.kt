@@ -89,6 +89,25 @@ internal object RootfsRepair {
         return true
     }
 
+    /**
+     * Gives [target] (recursively) back to [uid]. Commands inside the chroot run as root, so files they create
+     * (npm installs, Gradle/pip caches, Claude's own state) are root-owned and the app UID cannot change them.
+     */
+    fun reclaimOwnership(target: File, uid: Int): Boolean {
+        if (!target.exists() && !java.nio.file.Files.isSymbolicLink(target.toPath())) return true
+        val canonicalPath = target.canonicalPath.trimEnd('/')
+        require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
+            "Refusing to change ownership of invalid path: '$canonicalPath'"
+        }
+        // -h: change a symlink itself, never the file it points to (it may point outside the rootfs).
+        val exit = runRootCommand(
+            "su", "-c",
+            "chown -R -h $uid:$uid -- ${shellSingleQuote(canonicalPath)}",
+            timeoutSeconds = 120L,
+        )
+        return exit == 0
+    }
+
     fun safeDeleteRecursively(targetDir: File): Boolean {
         if (!targetDir.exists()) return true
         ensureUnmounted(targetDir)

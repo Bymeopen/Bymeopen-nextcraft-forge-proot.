@@ -369,9 +369,17 @@ class AppPreferences(private val context: Context) {
             out.write(content.toByteArray(Charsets.UTF_8))
             out.fd.sync()
         }
-        if (!temporary.renameTo(destination)) {
-            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
-            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
+        // rename(2) replaces the destination atomically; File.renameTo only reports false, without the reason.
+        val renamed = runCatching { android.system.Os.rename(temporary.absolutePath, destination.absolutePath) }
+        if (renamed.isFailure) {
+            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy", renamed.exceptionOrNull())
+            // Last resort: at least make the copy durable before the temp file goes away.
+            temporary.inputStream().use { src ->
+                java.io.FileOutputStream(destination).use { dst ->
+                    src.copyTo(dst)
+                    dst.fd.sync()
+                }
+            }
             temporary.delete()
         }
     }

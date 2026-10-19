@@ -186,6 +186,9 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         return runCatching {
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = method
+                // Redirects are not followed: HttpURLConnection drops Authorization on a cross-host redirect but not
+                // custom headers such as x-api-key, so a redirecting base URL could receive the key elsewhere.
+                instanceFollowRedirects = false
                 connectTimeout = connectTimeoutMs
                 readTimeout = readTimeoutMs
                 setRequestProperty("Accept", "application/json")

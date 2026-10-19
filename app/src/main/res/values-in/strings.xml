@@ -200,6 +200,13 @@
     <string name="shell_installed_ready">Terpasang &amp; siap</string>
     <string name="shell_resume_setup">Lanjutkan pemasangan</string>
     <string name="shell_install_runtime">Pasang runtime chroot</string>
+    <string name="settings_agent_install">Pasang</string>
+    <string name="settings_agent_installed">Terpasang</string>
+    <string name="settings_agent_update">Perbarui ke %1$s</string>
+    <string name="settings_agent_remove">Copot</string>
+    <string name="settings_agent_check_updates">Cek pembaruan agen</string>
+    <string name="settings_stack_install">Pasang %1$s</string>
+    <string name="settings_stack_remove">Hapus %1$s</string>
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
@@ -339,6 +346,10 @@
     <string name="agent_clear_chat">Bersihkan obrolan</string>
     <string name="launch_clear_logcat">Bersihkan</string>
     <string name="launch_filter_logcat">Filter logcat…</string>
+    <string name="files_unsaved_title">Perubahan belum disimpan</string>
+    <string name="files_unsaved_message">%1$s punya perubahan yang belum disimpan. Simpan sebelum lanjut?</string>
+    <string name="files_unsaved_save">Simpan</string>
+    <string name="files_unsaved_discard">Buang</string>
     <string name="msg_busy_before_quick_project">Selesaikan atau hentikan tugas aktif sebelum memulai Quick project.</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>
     <string name="msg_agy_probing">Memeriksa Antigravity CLI di dalam chroot…</string>

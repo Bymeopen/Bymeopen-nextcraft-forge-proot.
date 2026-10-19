@@ -3,6 +3,7 @@ package com.nextcraft.forge.ui
 import android.app.Application
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -53,6 +54,7 @@ import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
 import com.nextcraft.forge.runtime.RuntimeLaunchConfigBuilder
+import com.nextcraft.forge.runtime.AgentUpdateInfo
 import com.nextcraft.forge.runtime.RuntimeSetupController
 import com.nextcraft.forge.runtime.RuntimeSetupService
 import com.nextcraft.forge.runtime.RuntimeSetupSnapshot
@@ -110,6 +112,9 @@ data class ForgeUiState(
     val setupSnapshot: RuntimeSetupSnapshot = RuntimeSetupSnapshot(),
     val selectedDevStacks: Set<DevStack> = setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID),
     val installedDevStacks: Set<DevStack> = emptySet(),
+    val installedAgents: Set<AgentKind> = emptySet(),
+    val agentUpdates: Map<AgentKind, AgentUpdateInfo> = emptyMap(),
+    val checkingAgentUpdates: Boolean = false,
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     val activeTab: ForgeTab = ForgeTab.AGENT,
     val themeMode: String = "dark",
@@ -127,6 +132,8 @@ data class ForgeUiState(
     val selectedFileContent: String = "",
     val selectedFileEditable: Boolean = true,
     val selectedFileDirty: Boolean = false,
+    /** Set while the user is asked whether to save or discard unsaved editor changes before leaving the file. */
+    val unsavedChangesPrompt: String? = null,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -256,6 +263,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val completed = snap.status == RuntimeSetupStatus.COMPLETE
                 _state.update { it.copy(setupSnapshot = snap) }
                 if (completed) {
+                    _state.update { it.copy(agentUpdates = emptyMap()) }
                     refreshRuntimeStatus()
                 }
             }
@@ -428,11 +436,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptySet()
             }
+            val installedAgents = withContext(Dispatchers.IO) {
+                AgentKind.entries.filter { installer.isAgentInstalled(it) }.toSet()
+            }
             _state.update {
                 it.copy(
                     rootAvailable = rootOk,
                     runtimeInstalled = installed,
                     installedDevStacks = installedStacks,
+                    installedAgents = installedAgents,
                 )
             }
         }
@@ -462,6 +474,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeSetupService.EXTRA_STACKS, stacksCsv)
                 .putExtra(RuntimeSetupService.EXTRA_AGENT, current.agentKind.name),
         )
+    }
+
+    /** True when a manual runtime operation may start; otherwise posts the reason as a banner. */
+    private fun canRunRuntimeOperation(): Boolean {
+        val current = _state.value
+        val reason = when {
+            !current.runtimeInstalled -> "The base Ubuntu runtime (Core) is not installed. Run the runtime setup first."
+            current.sessionRunning || current.terminalRunning || current.androidBuild.phase == AndroidBuildPhase.BUILDING ->
+                "Wait for the running agent, terminal or build to finish."
+            current.setupSnapshot.status == RuntimeSetupStatus.RUNNING -> "Another runtime operation is already running."
+            else -> return true
+        }
+        _state.update { it.copy(bannerMessage = reason) }
+        return false
+    }
+
+    private fun startRuntimeOperation(configure: Intent.() -> Unit) {
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), RuntimeSetupService::class.java).apply(configure),
+        )
+    }
+
+    /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
+    fun installAgent(agent: AgentKind) {
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = RuntimeSetupService.ACTION_INSTALL_AGENT
+            putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
+        }
+    }
+
+    fun removeAgent(agent: AgentKind) {
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = RuntimeSetupService.ACTION_REMOVE_AGENT
+            putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
+        }
+    }
+
+    fun updateAgent(agent: AgentKind) {
+        val info = _state.value.agentUpdates[agent] ?: return
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = RuntimeSetupService.ACTION_UPDATE_AGENT
+            putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name)
+            putExtra(RuntimeSetupService.EXTRA_VERSION, info.latestVersion)
+        }
+    }
+
+    fun checkAgentUpdates() {
+        if (_state.value.checkingAgentUpdates) return
+        _state.update { it.copy(checkingAgentUpdates = true) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { installer.checkAgentUpdates() } }
+            _state.update {
+                it.copy(
+                    checkingAgentUpdates = false,
+                    agentUpdates = result.getOrDefault(emptyMap()),
+                    bannerMessage = when {
+                        result.isFailure -> "Could not check for agent updates: ${result.exceptionOrNull()?.message.orEmpty()}"
+                        result.getOrThrow().isEmpty() -> "All installed agents are up to date."
+                        else -> it.bannerMessage
+                    },
+                )
+            }
+        }
+    }
+
+    /** Installs or removes a single dev stack after onboarding, independent of the stack toggles. */
+    fun installStack(stack: DevStack) = runStackOperation(RuntimeSetupService.ACTION_INSTALL_STACK, stack)
+
+    fun removeStack(stack: DevStack) = runStackOperation(RuntimeSetupService.ACTION_REMOVE_STACK, stack)
+
+    private fun runStackOperation(serviceAction: String, stack: DevStack) {
+        if (!canRunRuntimeOperation()) return
+        startRuntimeOperation {
+            action = serviceAction
+            putExtra(RuntimeSetupService.EXTRA_STACKS, stack.name)
+        }
     }
 
     fun pauseRuntimeSetup() {
@@ -538,6 +630,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activeLogcatProcess?.destroyForcibly()
             activeLogcatProcess = null
             activeLogcatJob?.cancel()
+            // A file read still running for the previous project must not land in this one.
+            openFileRequest++
         }
         val chats = preferences.loadProjectChats(project.id)
         val chatId = chats.firstOrNull()?.id ?: "main"
@@ -815,18 +909,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 finishAgentTurn(project.id)
             }
+            // The bridge normally ends the turn with a SessionCompleted/SessionFailed event, but that event is dropped
+            // when its session id does not match (e.g. it failed before SessionStarted), leaving the UI "running" and
+            // blocking prompts and project switching. Events are delivered asynchronously, so give the real one a
+            // moment to arrive first; finishAgentTurn is idempotent, and a newer turn is left alone.
+            val turnJob = coroutineContext[Job]
+            viewModelScope.launch {
+                delay(AGENT_TURN_END_GRACE_MS)
+                if (activeAgentJob === turnJob) finishAgentTurn(project.id)
+            }
         }
     }
 
+    /** Stops the Android build only; a running agent session keeps going. */
+    fun stopAndroidBuild() {
+        RuntimeTaskController.stop(RuntimeTaskController.BUILD)
+        activeBuildProcess?.destroyForcibly()
+        activeBuildJob?.cancel()
+    }
+
+    /** Stops the agent session only; a running Android build keeps going. */
     fun stopActiveTask() {
         val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
         val pendingApproval = _state.value.pendingToolRequest
         val bridge = activeRuntimeBridge
-        RuntimeTaskController.requestStop()
+        RuntimeTaskController.stop(RuntimeTaskController.AGENT)
         val agentJob = activeAgentJob
         agentJob?.cancel()
-        activeBuildProcess?.destroyForcibly()
-        activeBuildJob?.cancel()
         if (wasSessionRunning) {
             _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
             // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
@@ -980,9 +1089,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Runs a workspace/checkpoint operation on IO and turns a failure into a banner. These throw for paths the agent
+     * turned into symlinks or that escape the workspace, and for IO errors; uncaught in viewModelScope that kills
+     * the app.
+     */
+    private suspend fun <T> workspaceIo(failure: String, block: () -> T): T? = try {
+        withContext(Dispatchers.IO) { block() }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w("MainViewModel", failure, e)
+        _state.update { it.copy(bannerMessage = "$failure: ${e.message ?: e.javaClass.simpleName}") }
+        null
+    }
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         viewModelScope.launch {
-            val (entries, changes) = withContext(Dispatchers.IO) {
+            val (entries, changes) = workspaceIo("Could not read the project files") {
                 val ws = checkpoints.ensureWorkspace(projectId)
                 val rootCanonical = runCatching { ws.canonicalFile.toPath() }.getOrNull()
                 val ignored = setOf(".git", ".gradle", "build", "node_modules", "__pycache__")
@@ -1040,7 +1164,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     emptyList()
                 }
                 files to changeDetails
-            }
+            } ?: return@launch
             _state.update {
                 it.copy(
                     workspaceFiles = entries,
@@ -1052,7 +1176,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var openFileRequest = 0
 
+    /** What to do once the user has answered [UiState.unsavedChangesPrompt]. */
+    private var afterUnsavedChoice: (() -> Unit)? = null
+
+    /** Runs [action] now, or first asks to save or discard unsaved edits in the open file. */
+    private fun leaveOpenFile(action: () -> Unit) {
+        val current = _state.value
+        val path = current.selectedFilePath
+        if (path == null || !current.selectedFileDirty || !current.selectedFileEditable) {
+            action()
+            return
+        }
+        afterUnsavedChoice = action
+        _state.update { it.copy(unsavedChangesPrompt = path) }
+    }
+
+    fun saveAndContinue() {
+        val next = afterUnsavedChoice
+        afterUnsavedChoice = null
+        _state.update { it.copy(unsavedChangesPrompt = null) }
+        saveSelectedFile(onSaved = next)
+    }
+
+    fun discardAndContinue() {
+        val next = afterUnsavedChoice
+        afterUnsavedChoice = null
+        _state.update { it.copy(unsavedChangesPrompt = null, selectedFileDirty = false) }
+        next?.invoke()
+    }
+
+    fun cancelLeavingFile() {
+        afterUnsavedChoice = null
+        _state.update { it.copy(unsavedChangesPrompt = null) }
+    }
+
+    /** Opens a project from the project list, asking about unsaved edits first; shows the agent only if it switched. */
+    fun openProject(projectId: String) = leaveOpenFile {
+        selectProject(projectId)
+        if (_state.value.activeProjectId == projectId) selectTab(ForgeTab.AGENT)
+    }
+
     fun openWorkspaceFile(relativePath: String) {
+        if (relativePath == _state.value.selectedFilePath) {
+            // Tapping the file that is already open keeps its unsaved edits; otherwise it is re-read from disk.
+            if (!_state.value.selectedFileDirty) loadWorkspaceFile(relativePath)
+            return
+        }
+        leaveOpenFile { loadWorkspaceFile(relativePath) }
+    }
+
+    /** Loads [relativePath] into the editor, replacing whatever is open (callers decide about unsaved edits). */
+    private fun loadWorkspaceFile(relativePath: String) {
         val project = _state.value.activeProject ?: return
         val requestId = ++openFileRequest
         viewModelScope.launch {
@@ -1075,8 +1249,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.getOrDefault("[Read-only: file could not be read]" to false)
             }
-            // A slower earlier read must not overwrite the file the user opened afterwards.
-            if (requestId != openFileRequest) return@launch
+            // A slower earlier read must not overwrite the file the user opened afterwards, nor show up (and later be
+            // saved) in another project the user switched to meanwhile.
+            if (requestId != openFileRequest || _state.value.activeProjectId != project.id) return@launch
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
@@ -1099,7 +1274,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveSelectedFile() {
+    fun saveSelectedFile(onSaved: (() -> Unit)? = null) {
         val project = _state.value.activeProject ?: return
         val path = _state.value.selectedFilePath ?: return
         if (!_state.value.selectedFileEditable) {
@@ -1119,7 +1294,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _state.update {
                 it.copy(
-                    selectedFileDirty = if (saved) false else it.selectedFileDirty,
+                    // Only clear dirty when the editor still holds what was written; newer typing stays unsaved.
+                    selectedFileDirty = if (saved && it.selectedFilePath == path && it.selectedFileContent == content) {
+                        false
+                    } else {
+                        it.selectedFileDirty
+                    },
                     fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path",
                 )
             }
@@ -1127,6 +1307,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (saved && preferences.autoSyncGitHub) {
                 syncProjectWithGitHub(project.id, "Update $path")
             }
+            if (saved) onSaved?.invoke()
         }
     }
 
@@ -1186,13 +1367,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            workspaceIo("Could not revert $path") {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertFile(project.id, ws, path)
-            }
+            } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
             if (_state.value.selectedFilePath == path) {
-                openWorkspaceFile(path)
+                // The user asked to revert this file, so the editor follows the file on disk.
+                loadWorkspaceFile(path)
             }
         }
     }
@@ -1201,10 +1383,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            workspaceIo("Could not keep $path") {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.acceptFile(project.id, ws, path)
-            }
+            } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1213,7 +1395,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { checkpoints.acceptAll(project.id) }
+            workspaceIo("Could not keep the changes") { checkpoints.acceptAll(project.id) } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1222,10 +1404,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            workspaceIo("Could not revert the changes") {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertLatestTurn(project.id, ws)
-            }
+            } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1414,7 +1596,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activeBuildProcess?.destroyForcibly()
             activeBuildJob?.cancel()
         }
-        RuntimeTaskController.stopAction = buildStopHook
+        RuntimeTaskController.register(RuntimeTaskController.BUILD, buildStopHook)
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
@@ -1422,13 +1604,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var builtApk: File? = null
             var fullLog = ""
             var exitCode = -1
-            val ws = withContext(Dispatchers.IO) { checkpoints.ensureWorkspace(project.id) }
-            val androidRoot = withContext(Dispatchers.IO) { findAndroidProjectRoot(ws) ?: ws }
+            // Resolved inside the try: a failure or a cancel here must still end the build (phase, service, stop
+            // hook) instead of leaving it BUILDING, which blocks switching projects.
+            var androidRoot: File? = null
 
             try {
-                val cmd = androidGradleCommand(androidRoot, task)
+                val ws = withContext(Dispatchers.IO) { checkpoints.ensureWorkspace(project.id) }
+                val root = withContext(Dispatchers.IO) { findAndroidProjectRoot(ws) ?: ws }
+                androidRoot = root
+                val cmd = androidGradleCommand(root, task)
                 withContext(Dispatchers.IO) {
-                    val relativeRoot = androidRoot.relativeTo(ws).invariantSeparatorsPath
+                    val relativeRoot = root.relativeTo(ws).invariantSeparatorsPath
                     val guestCommand = if (relativeRoot.isEmpty()) cmd else "cd ${shellSingleQuote(relativeRoot)} && $cmd"
                     val process = startChrootProcess(project.slug, ws, guestCommand)
                     activeBuildProcess = process
@@ -1449,7 +1635,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     exitCode = process.waitFor()
                     fullLog = logBuilder.toString()
-                    builtApk = if (exitCode == 0) findDebugApk(androidRoot) else null
+                    builtApk = if (exitCode == 0) findDebugApk(root) else null
                     succeeded = exitCode == 0 && (task == "clean" || builtApk != null)
                 }
             } catch (e: CancellationException) {
@@ -1466,13 +1652,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 RuntimeTaskController.release(buildStopHook)
             }
 
-            val issues = if (!succeeded && !cancelled && task != "clean") {
-                parseAndroidBuildIssues(fullLog, androidRoot, exitCode)
+            val resolvedRoot = androidRoot
+            val issues = if (!succeeded && !cancelled && task != "clean" && resolvedRoot != null) {
+                parseAndroidBuildIssues(fullLog, resolvedRoot, exitCode)
             } else {
                 emptyList()
             }
-            val finalApk = builtApk ?: if (!cancelled && task != "clean") {
-                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(androidRoot) }
+            val finalApk = builtApk ?: if (!cancelled && task != "clean" && resolvedRoot != null) {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(resolvedRoot) }
             } else {
                 null
             }
@@ -1502,25 +1689,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
             }
-            getApplication<Application>().startService(
-                Intent(getApplication(), RuntimeExecutionService::class.java)
-                    .setAction(
-                        when {
-                            cancelled -> RuntimeExecutionService.ACTION_CANCELLED
-                            succeeded -> RuntimeExecutionService.ACTION_COMPLETE
-                            else -> RuntimeExecutionService.ACTION_FAILED
-                        },
-                    )
-                    .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
-                    .putExtra(
-                        RuntimeExecutionService.EXTRA_DETAIL,
-                        when {
-                            cancelled -> "Android build cancelled"
-                            succeeded -> "Android build succeeded"
-                            else -> "Android build failed"
-                        },
-                    ),
-            )
+            // The agent shares this foreground service and may already have stopped it; starting a service from the
+            // background then throws (Android 8+), which would crash the app in viewModelScope.
+            runCatching {
+                getApplication<Application>().startService(
+                    Intent(getApplication(), RuntimeExecutionService::class.java)
+                        .setAction(
+                            when {
+                                cancelled -> RuntimeExecutionService.ACTION_CANCELLED
+                                succeeded -> RuntimeExecutionService.ACTION_COMPLETE
+                                else -> RuntimeExecutionService.ACTION_FAILED
+                            },
+                        )
+                        .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
+                        .putExtra(
+                            RuntimeExecutionService.EXTRA_DETAIL,
+                            when {
+                                cancelled -> "Android build cancelled"
+                                succeeded -> "Android build succeeded"
+                                else -> "Android build failed"
+                            },
+                        ),
+                )
+            }.onFailure { error ->
+                Log.w("MainViewModel", "Could not post the build result notification", error)
+                runCatching {
+                    getApplication<Application>().stopService(Intent(getApplication(), RuntimeExecutionService::class.java))
+                }
+            }
             if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
@@ -1634,40 +1830,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val proc = startPackageLogcatProcess(getApplication(), pkg)
                     activeLogcatProcess = proc
-                    proc.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { raw ->
-                            if (!isActive) return@forEach
-                            val level = when {
-                                " F " in raw -> AndroidLogLevel.FATAL
-                                " E " in raw -> AndroidLogLevel.ERROR
-                                " W " in raw -> AndroidLogLevel.WARNING
-                                " I " in raw -> AndroidLogLevel.INFO
-                                " D " in raw -> AndroidLogLevel.DEBUG
-                                else -> AndroidLogLevel.VERBOSE
+                    // A cancel between starting the process and publishing it above would leave nobody to stop it.
+                    if (!isActive) proc.destroyForcibly()
+                    try {
+                        proc.inputStream.bufferedReader().useLines { lines ->
+                            for (raw in lines) {
+                                // return@forEach only skipped one line and kept blocking on the stream.
+                                if (!isActive) break
+                                val level = when {
+                                    " F " in raw -> AndroidLogLevel.FATAL
+                                    " E " in raw -> AndroidLogLevel.ERROR
+                                    " W " in raw -> AndroidLogLevel.WARNING
+                                    " I " in raw -> AndroidLogLevel.INFO
+                                    " D " in raw -> AndroidLogLevel.DEBUG
+                                    else -> AndroidLogLevel.VERBOSE
+                                }
+                                val entry = AndroidLogLine(
+                                    id = logLineIdCounter.getAndIncrement(),
+                                    text = raw,
+                                    level = level,
+                                )
+                                _state.update { current ->
+                                    current.copy(
+                                        androidLogcat = current.androidLogcat.copy(
+                                            lines = (current.androidLogcat.lines + entry).takeLast(300),
+                                        ),
+                                    )
+                                }
                             }
-                            val entry = AndroidLogLine(
-                                id = logLineIdCounter.getAndIncrement(),
-                                text = raw,
-                                level = level,
-                            )
-                            _state.update { current ->
-                                current.copy(
-                                    androidLogcat = current.androidLogcat.copy(
-                                        lines = (current.androidLogcat.lines + entry).takeLast(300),
+                        }
+                        if (isActive) {
+                            _state.update {
+                                it.copy(
+                                    androidLogcat = it.androidLogcat.copy(
+                                        running = false,
+                                        message = "Logcat stream ended for $pkg.",
                                     ),
                                 )
                             }
                         }
-                    }
-                    if (isActive) {
-                        _state.update {
-                            it.copy(
-                                androidLogcat = it.androidLogcat.copy(
-                                    running = false,
-                                    message = "Logcat stream ended for $pkg.",
-                                ),
-                            )
-                        }
+                    } finally {
+                        proc.destroyForcibly()
+                        if (activeLogcatProcess === proc) activeLogcatProcess = null
                     }
                 }.onFailure { err ->
                     _state.update {
@@ -2468,3 +2672,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
     }
 }
+
+private const val AGENT_TURN_END_GRACE_MS = 2_000L

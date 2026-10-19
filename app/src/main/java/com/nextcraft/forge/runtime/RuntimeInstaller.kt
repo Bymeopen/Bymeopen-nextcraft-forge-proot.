@@ -121,7 +121,7 @@ class RuntimeInstaller(private val context: Context) {
 
     /** Returns the already verified Root Chroot runtime without performing network or update checks. */
     fun installedRuntime(): InstalledRuntime {
-        check(isInstalled()) { "NextCraft Forge Root Chroot runtime installation is incomplete." }
+        check(isInstalled()) { CORE_MISSING_MESSAGE }
         return InstalledRuntime(
             chrootExec = chrootExecFile,
             rootfs = rootfs,
@@ -345,6 +345,32 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("${agent.title} is ready", 1f))
     }
 
+    /**
+     * Removes one coding agent's binaries and version markers. Projects, API keys and the Core runtime are untouched;
+     * the agent's own login/config under /root is kept so a reinstall does not force a new sign-in.
+     */
+    fun removeAgent(agent: AgentKind) {
+        installedRuntime()
+        when (agent) {
+            AgentKind.CLAUDE_CODE -> {
+                removePath(File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")))
+                listOf(".pocket-claude-version", ".nextcraft-claude-version", ".pocket-bundled-claude-version")
+                    .forEach { File(rootfs, it).delete() }
+            }
+            AgentKind.DEEPSEEK_HARNESS -> {
+                removePath(File(rootfs, "usr/local/bin/dsh"))
+                removePath(File(rootfs, "usr/local/lib/dsh"))
+                listOf(".pocket-dsh-version", ".nextcraft-dsh-version", ".pocket-dsh-android-compat-version")
+                    .forEach { File(rootfs, it).delete() }
+            }
+            AgentKind.ANTIGRAVITY -> {
+                removePath(File(rootfs, AGY_GUEST_PATH.removePrefix("/")))
+                listOf(".pocket-agy-version", ".nextcraft-agy-version").forEach { File(rootfs, it).delete() }
+            }
+        }
+        check(!isAgentInstalled(agent)) { "Could not fully remove ${agent.title}" }
+    }
+
     fun isAgentInstalled(agent: AgentKind): Boolean {
         return when (agent) {
             AgentKind.CLAUDE_CODE -> {
@@ -446,19 +472,29 @@ class RuntimeInstaller(private val context: Context) {
         gitCredentials.writeText("https://$cleanLogin:$cleanToken@github.com\n")
         runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
 
+        // Merge instead of replacing: the user's own name, email, aliases and editor settings must survive connecting
+        // GitHub. Only the credential helper is forced; identity and default branch are filled in when missing.
         val gitConfig = File(rootHome, ".gitconfig")
-        gitConfig.writeText(
-            buildString {
-                appendLine("[user]")
-                appendLine("    name = $cleanLogin")
-                appendLine("    email = $cleanLogin@users.noreply.github.com")
-                appendLine("[init]")
-                appendLine("    defaultBranch = main")
-                appendLine("[credential]")
-                appendLine("    helper = store")
-                appendLine("[safe]")
-                appendLine("    directory = *")
-            },
+        if (gitConfig.exists() && !gitConfig.canRead()) RootfsRepair.reclaimOwnership(gitConfig, AndroidProcess.myUid())
+        val existingConfig = if (gitConfig.isFile) {
+            // An unreadable existing file must not be replaced by a template that drops the user's settings.
+            checkNotNull(runCatching { gitConfig.readText() }.getOrNull()) { "Could not read ~/.gitconfig" }
+        } else {
+            ""
+        }
+        writeRootfsFileAtomically(
+            gitConfig,
+            mergeGitConfig(
+                existingConfig,
+                listOf(
+                    GitConfigEntry("credential", "helper", "store", replace = true),
+                    GitConfigEntry("user", "name", cleanLogin),
+                    GitConfigEntry("user", "email", "$cleanLogin@users.noreply.github.com"),
+                    GitConfigEntry("init", "defaultBranch", "main"),
+                    // Workspaces belong to the app UID while git runs as root, so git needs this to trust them.
+                    GitConfigEntry("safe", "directory", "*", multiValue = true),
+                ),
+            ),
         )
         runCatching { Os.chmod(gitConfig.absolutePath, 384) } // 0600
 
@@ -639,7 +675,9 @@ class RuntimeInstaller(private val context: Context) {
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
                 "rm -rf \"${'$'}next\"; mkdir -p \"${'$'}next\"; " +
                 "cd \"${'$'}next\"; npm init -y >/dev/null; " +
-                "npm install --omit=dev --no-audit --no-fund @deepseek-ai/dsh@$quotedVersion",
+                "npm install --omit=dev --no-audit --no-fund @deepseek-ai/dsh@$quotedVersion; " +
+                // npm runs as root; the app patches the tree next (applyDshAndroidCompatibility) as its own UID.
+                "chown -R -h ${AndroidProcess.myUid()}:${AndroidProcess.myUid()} \"${'$'}next\"",
             displayCommand = "npm install @deepseek-ai/dsh@$quotedVersion",
             fraction = 0.55f,
             timeoutMs = 20 * 60 * 1_000L,
@@ -677,7 +715,10 @@ class RuntimeInstaller(private val context: Context) {
             }
             verified.getOrThrow()
         }
-        File(rootfs, "usr/local/lib/dsh.previous").deleteRecursively()
+        val previous = File(rootfs, "usr/local/lib/dsh.previous")
+        if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
+            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek Harness copy")
+        }
         dshMarker.writeText(expectedVersion)
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
@@ -841,7 +882,14 @@ class RuntimeInstaller(private val context: Context) {
      */
     fun ensureDshAndroidCompatibility() {
         if (!isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) return
-        applyDshAndroidCompatibility(File(rootfs, "usr/local/lib/dsh"), dshMarker.readTextOrNull().orEmpty())
+        val dshRoot = File(rootfs, "usr/local/lib/dsh")
+        try {
+            applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
+        } catch (e: java.io.IOException) {
+            // A tree installed by an earlier root npm is root-owned; take it back and retry once.
+            if (!RootfsRepair.reclaimOwnership(dshRoot, AndroidProcess.myUid())) throw e
+            applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
+        }
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
@@ -1006,10 +1054,13 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePath(file: File) {
-        if (file.isDirectory && !java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            check(file.deleteRecursively()) { "Could not remove ${file.name}" }
-        } else if (file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            check(file.delete()) { "Could not remove ${file.name}" }
+        val isLink = java.nio.file.Files.isSymbolicLink(file.toPath())
+        if (!file.exists() && !isLink) return
+        val removed = if (file.isDirectory && !isLink) file.deleteRecursively() else file.delete()
+        // Caches and packages created inside the chroot (Gradle, pip, Composer) are root-owned, so the app UID
+        // cannot delete them; fall back to a root rm, which first checks that nothing is mounted below the path.
+        if (!removed) {
+            check(RootfsRepair.safeDeleteRecursively(file)) { "Could not remove ${file.name}" }
         }
     }
 
@@ -1020,7 +1071,6 @@ class RuntimeInstaller(private val context: Context) {
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        var verified = true
         when (stack) {
             DevStack.WEB -> {
                 onProgress(RuntimeInstallProgress("Checking Node.js and npm…", from))
@@ -1028,16 +1078,18 @@ class RuntimeInstaller(private val context: Context) {
             }
             DevStack.PYTHON -> {
                 installRuntimeOverlay(pythonBundle(), "Installing Python toolchain…", from, to, onProgress)
+                // A failed check must fail the stack: returning normally reported "Python stack is ready" and left it
+                // out of the failures that ensureInstalled reports.
                 runCatching {
                     verifyGuest(chrootExec, "python3 --version && pip3 --version", "Failed to verify Python")
                 }.onFailure { error ->
-                    verified = false
                     onProgress(
                         RuntimeInstallProgress(
                             "Python verification failed: ${error.message?.take(120).orEmpty()}",
                             to,
                         ),
                     )
+                    throw error
                 }
             }
             DevStack.ANDROID -> {
@@ -1069,7 +1121,6 @@ class RuntimeInstaller(private val context: Context) {
                 verifyGuest(chrootExec, "php --version && composer --version", "Failed to verify PHP and Composer")
             }
         }
-        if (!verified) return
         writeDevStackState(readDevStackState().apply { put(stack.name, true) })
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
@@ -1351,7 +1402,8 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.parentFile?.mkdirs()
         val obj = JSONObject()
         state.forEach { (name, value) -> obj.put(name, value) }
-        devStacksFile.writeText(obj.toString())
+        // A truncated file reads back as "no stacks installed" and makes the next setup reinstall everything.
+        writeRootfsFileAtomically(devStacksFile, obj.toString())
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -1962,8 +2014,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             File(rootfs, "etc/claude/settings.json"),
         )
         for (target in settingsPaths) {
-            target.parentFile?.mkdirs()
-            target.writeText(settingsContent)
+            writeRootfsFileAtomically(target, settingsContent)
         }
         ensureWorkspaceTrust("/workspace")
     }
@@ -1971,9 +2022,22 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
     private fun ensureWorkspaceTrust(
         workspacePath: String,
         environment: Map<String, String> = emptyMap(),
-    ) {
+    ) = synchronized(CLAUDE_STATE_LOCK) {
         val stateFile = File(rootfs, "root/.claude.json")
-        val state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
+        if (stateFile.exists() && !(stateFile.canRead() && stateFile.canWrite())) {
+            // Claude runs as root inside the chroot and may have rewritten the file as root-owned 0600.
+            RootfsRepair.reclaimOwnership(stateFile, AndroidProcess.myUid())
+        }
+        val state = if (stateFile.exists()) {
+            // Claude may be writing the file right now (another session); never replace a file that does not parse,
+            // or the account, API-key approvals and project history in it would be lost.
+            readClaudeState(stateFile) ?: run {
+                Log.w("RuntimeInstaller", "Leaving ~/.claude.json untouched: it could not be parsed")
+                return@synchronized
+            }
+        } else {
+            JSONObject()
+        }
         listOf("disableAllHooks", "permissions", "hooks", "allowedTools", "autoApprove")
             .forEach { state.remove(it) }
         state.put("hasCompletedOnboarding", true)
@@ -1996,8 +2060,40 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
             state.put("customApiKeyResponses", responses)
         }
-        stateFile.parentFile?.mkdirs()
-        stateFile.writeText(state.toString())
+        writeRootfsFileAtomically(stateFile, state.toString())
+    }
+
+    /** Parses ~/.claude.json, retrying briefly in case Claude is in the middle of rewriting it. */
+    private fun readClaudeState(stateFile: File): JSONObject? {
+        repeat(3) { attempt ->
+            val parsed = runCatching { JSONObject(stateFile.readText()) }.getOrNull()
+            if (parsed != null) return parsed
+            if (attempt < 2) Thread.sleep(150)
+        }
+        return null
+    }
+
+    /**
+     * Writes [target] through a temp file in the same directory and an atomic rename, so a crash or a concurrent
+     * reader never sees a truncated file. A root-owned target (rewritten by a root process in the chroot) is
+     * reclaimed first.
+     */
+    private fun writeRootfsFileAtomically(target: File, content: String) {
+        val parent = checkNotNull(target.parentFile) { "No parent directory for ${target.name}" }
+        parent.mkdirs()
+        if (!parent.canWrite() || (target.exists() && !target.canWrite())) {
+            RootfsRepair.reclaimOwnership(if (parent.canWrite()) target else parent, AndroidProcess.myUid())
+        }
+        val temp = File(parent, ".${target.name}.${AndroidProcess.myPid()}.tmp")
+        try {
+            FileOutputStream(temp).use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
+            Os.rename(temp.absolutePath, target.absolutePath)
+        } finally {
+            temp.delete()
+        }
     }
 
     // Only auto-allow read-only tools. Bash/Edit/Write/NotebookEdit go through the
@@ -2368,12 +2464,17 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
+        private val CLAUDE_STATE_LOCK = Any()
+
         fun rootfsDir(context: Context): File = File(context.filesDir, "runtime/ubuntu")
         fun bridgeRootDir(context: Context): File = File(context.filesDir, "runtime-bridge")
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
         private const val AGY_VERSION = "1.1.27"
+        const val CORE_MISSING_MESSAGE =
+            "The base Ubuntu runtime (Core) is not installed or is incomplete. Run the runtime setup first, then retry."
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
         private const val GITHUB_CLI_RELEASE_SHA256 = "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961"
@@ -2731,9 +2832,29 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             fi
 
+            # Run the guest command as a child and forward INT/TERM to it. With a plain foreground command the shell only runs
+            # its trap after the command exits, so a cancelled npm install or Gradle build kept running until it finished, and
+            # a later SIGKILL of this script orphaned it and skipped the ownership fix. Stdin (the
+            # Claude prompt) is passed through fd 3: a non-interactive shell gives background commands /dev/null.
+            child_status=0
+            exec 3<&0
+            forward_signal() {
+                kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+            }
+
             ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
                 GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
-                /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@"
+                /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &
+            child=${'$'}!
+            trap 'forward_signal INT' INT
+            trap 'forward_signal TERM' TERM
+            # wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
+            while :; do
+                wait "${'$'}child"
+                child_status=${'$'}?
+                kill -0 "${'$'}child" 2>/dev/null || break
+            done
+            exit "${'$'}child_status"
         """.trimIndent() + "\n"
 
         private val UNMOUNT_CHROOT_SCRIPT = """
@@ -2771,4 +2892,47 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             exit 0
         """.trimIndent() + "\n"
     }
+}
+
+internal data class GitConfigEntry(
+    val section: String,
+    val key: String,
+    val value: String,
+    val replace: Boolean = false,
+    /** For multi-valued keys (safe.directory): add the value unless that exact value is already there. */
+    val multiValue: Boolean = false,
+)
+
+/**
+ * Adds [entries] to a git config text. An entry whose key already exists in its section is kept as the user set it,
+ * unless [GitConfigEntry.replace]. Sections are matched by exact `[name]` header (no subsections are needed here).
+ */
+internal fun mergeGitConfig(existing: String, entries: List<GitConfigEntry>): String {
+    val lines = existing.lines().dropLastWhile { it.isBlank() }.toMutableList()
+    fun sectionOf(line: String) = Regex("^\\s*\\[\\s*([A-Za-z0-9.-]+)\\s*]\\s*$").find(line)?.groupValues?.get(1)?.lowercase()
+    fun keyOf(line: String) = Regex("^\\s*([A-Za-z][A-Za-z0-9-]*)\\s*(=|$)").find(line)?.groupValues?.get(1)?.lowercase()
+    for (entry in entries) {
+        val wanted = entry.section.lowercase()
+        val start = lines.indexOfFirst { sectionOf(it) == wanted }
+        val formatted = "    ${entry.key} = ${entry.value}"
+        if (start < 0) {
+            lines += "[${entry.section}]"
+            lines += formatted
+            continue
+        }
+        var end = start + 1
+        while (end < lines.size && sectionOf(lines[end]) == null) end++
+        val sameKey = (start + 1 until end).filter { keyOf(lines[it]) == entry.key.lowercase() }
+        if (entry.multiValue) {
+            val present = sameKey.any { lines[it].substringAfter('=', "").trim() == entry.value }
+            if (!present) lines.add(end, formatted)
+            continue
+        }
+        val existingIndex = sameKey.firstOrNull()
+        when {
+            existingIndex == null -> lines.add(end, formatted)
+            entry.replace -> lines[existingIndex] = formatted
+        }
+    }
+    return lines.joinToString("\n") + "\n"
 }

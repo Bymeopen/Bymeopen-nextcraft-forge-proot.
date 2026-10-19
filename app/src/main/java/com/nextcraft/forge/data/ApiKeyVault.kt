@@ -17,7 +17,12 @@ import javax.crypto.spec.GCMParameterSpec
 
 class ApiKeyVault(context: Context) {
     private val preferences = context.getSharedPreferences("nextcraft_secrets", Context.MODE_PRIVATE)
-    private val alias = "nextcraft-provider-key"
+    /**
+     * The keystore alias that encrypts the stored secrets. A migration writes every re-encrypted secret together
+     * with a new alias in one commit, so storage never mixes ciphertexts of two keys.
+     */
+    private val alias: String
+        get() = preferences.getString(KEY_ALIAS_PREF, null) ?: LEGACY_KEY_ALIAS
 
     init {
         migrateAuthBoundKeyIfNeeded()
@@ -51,8 +56,27 @@ class ApiKeyVault(context: Context) {
                 cipher.init(Cipher.DECRYPT_MODE, oldKey, GCMParameterSpec(128, iv))
                 cipher.doFinal(encrypted).toString(Charsets.UTF_8)
             }
-            resetKeyStoreKey()
-            plaintexts.forEach { (storageId, secret) -> putEncrypted(storageId, secret) }
+            // Re-encrypt under a new alias and switch over in a single commit. Deleting the old key first (as before)
+            // lost every secret not yet rewritten if one encryption or the commit then failed.
+            val oldAlias = alias
+            val newAlias = "$LEGACY_KEY_ALIAS-${System.currentTimeMillis()}"
+            val newKey = createKey(newAlias)
+            val edit = preferences.edit()
+            try {
+                plaintexts.forEach { (storageId, secret) ->
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.ENCRYPT_MODE, newKey)
+                    val encrypted = cipher.doFinal(cleanSecret(secret).toByteArray(Charsets.UTF_8))
+                    edit.putString("$storageId.iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+                    edit.putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
+                }
+                edit.putString(KEY_ALIAS_PREF, newAlias)
+                check(edit.commit()) { "Could not store the re-encrypted secrets" }
+            } catch (e: Exception) {
+                runCatching { keyStore.deleteEntry(newAlias) }
+                throw e
+            }
+            runCatching { keyStore.deleteEntry(oldAlias) }
             android.util.Log.i("ApiKeyVault", "Migrated ${plaintexts.size} secrets to an unbound keystore key")
         }.onFailure { error ->
             android.util.Log.w("ApiKeyVault", "Keystore migration deferred: ${error::class.simpleName}")
@@ -240,13 +264,6 @@ class ApiKeyVault(context: Context) {
     private fun activeKey(providerId: String) = "$providerId.active"
     private fun secretKey(providerId: String, id: String) = "$providerId.pool.$id"
 
-    private fun resetKeyStoreKey() {
-        runCatching {
-            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
-        }
-    }
-
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (keyStore.containsAlias(alias)) {
@@ -255,17 +272,26 @@ class ApiKeyVault(context: Context) {
             return keyStore.getKey(alias, null) as? SecretKey
                 ?: throw IllegalStateException("AndroidKeyStore key '$alias' is unavailable")
         }
+        return createKey(alias)
+    }
+
+    private fun createKey(keyAlias: String): SecretKey {
         // No user-authentication binding: the app never shows a BiometricPrompt/Keyguard, so an
         // auth-bound key would throw UserNotAuthenticatedException minutes after each unlock.
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
             init(
-                KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                     .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                     .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                     .build(),
             )
             generateKey()
         }
+    }
+
+    private companion object {
+        const val LEGACY_KEY_ALIAS = "nextcraft-provider-key"
+        const val KEY_ALIAS_PREF = "keystore.alias"
     }
 }
 

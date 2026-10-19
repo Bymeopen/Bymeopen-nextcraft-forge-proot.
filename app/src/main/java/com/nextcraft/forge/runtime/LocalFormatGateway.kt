@@ -29,6 +29,7 @@ internal class LocalFormatGateway(
 ) : AutoCloseable {
     private val running = AtomicBoolean(true)
     private val rotationLock = Any()
+    private val upstreamConnections: MutableSet<HttpURLConnection> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     @Volatile private var activeApiKey: String = apiKey
     private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
     val url: String = "http://127.0.0.1:${server.localPort}"
@@ -78,28 +79,42 @@ internal class LocalFormatGateway(
             val split = line.indexOf(':')
             if (split > 0) headers[line.substring(0, split).lowercase()] = line.substring(split + 1).trim()
         }
-        val output = BufferedOutputStream(socket.getOutputStream())
+        val output = GatewayOutput(socket.getOutputStream())
         if (!isAuthorized(headers)) {
             writeJson(output, 401, errorJson("authentication_error", "Missing or invalid credentials"))
             return
         }
-        val length = headers["content-length"]?.toIntOrNull() ?: 0
-        if (length !in 0..MAX_REQUEST_BYTES) {
-            writeJson(output, 413, errorJson("invalid_request_error", "Request body is too large"))
-            return
+        if (headers["expect"]?.equals("100-continue", ignoreCase = true) == true) {
+            // Without this the client waits for a go-ahead until the socket timeout before sending the body.
+            output.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray())
+            output.flush()
         }
-        val bodyBytes = ByteArray(length)
-        var offset = 0
-        while (offset < length) {
-            val count = input.read(bodyBytes, offset, length - offset)
-            if (count < 0) break
-            offset += count
+        val chunked = headers["transfer-encoding"]?.lowercase()?.contains("chunked") == true
+        val bodyText = if (chunked) {
+            // No Content-Length: reading it as 0 turned the request into an empty body and a JSON parse error.
+            readChunkedBody(input) ?: run {
+                writeJson(output, 400, errorJson("invalid_request_error", "Malformed or too large chunked request body"))
+                return
+            }
+        } else {
+            val length = headers["content-length"]?.toIntOrNull() ?: 0
+            if (length !in 0..MAX_REQUEST_BYTES) {
+                writeJson(output, 413, errorJson("invalid_request_error", "Request body is too large"))
+                return
+            }
+            val bodyBytes = ByteArray(length)
+            var offset = 0
+            while (offset < length) {
+                val count = input.read(bodyBytes, offset, length - offset)
+                if (count < 0) break
+                offset += count
+            }
+            if (offset < length) {
+                writeJson(output, 400, errorJson("invalid_request_error", "Truncated request body"))
+                return
+            }
+            bodyBytes.decodeToString(0, offset)
         }
-        if (offset < length) {
-            writeJson(output, 400, errorJson("invalid_request_error", "Truncated request body"))
-            return
-        }
-        val bodyText = bodyBytes.decodeToString(0, offset)
         val path = requestLine.split(' ').getOrNull(1).orEmpty().substringBefore('?')
         if (path.endsWith("/count_tokens")) {
             val approximate = bodyText.length / 4 + 1
@@ -120,15 +135,41 @@ internal class LocalFormatGateway(
             }
             val upstream = callProvider(toOpenAi(anthropic))
             if (upstream.first !in 200..299) {
-                Log.w("FormatGateway", "Provider returned HTTP ${upstream.first}: ${providerError(upstream.second)}")
+                Log.w("FormatGateway", "Provider returned HTTP ${upstream.first}: ${logSafe(providerError(upstream.second))}")
                 writeJson(output, upstream.first, errorJson("api_error", providerError(upstream.second)))
             } else {
                 val translated = fromOpenAi(JSONObject(upstream.second), requestedModel)
                 if (wantsStream) writeStream(output, translated) else writeJson(output, 200, translated.toString())
             }
         }.onFailure { error ->
-            writeJson(output, 502, errorJson("api_error", error.message ?: "Provider request failed"))
+            writeFailure(output, error.message ?: "Provider request failed")
         }
+    }
+
+    /**
+     * Reports a failure on a response that may already be under way. Once the status line is out, a second HTTP
+     * response would land inside the event stream and break the client's parser, so an event stream gets an
+     * Anthropic `error` event instead, and any other partly written response is just closed.
+     */
+    internal fun writeFailure(output: GatewayOutput, message: String) {
+        runCatching {
+            when {
+                !output.committed -> writeJson(output, 502, errorJson("api_error", message))
+                output.eventStream -> writeStreamError(output, "api_error", message)
+                else -> Unit
+            }
+        }
+    }
+
+    private fun writeStreamError(output: BufferedOutputStream, type: String, message: String) {
+        val error = JSONObject().put("type", "error").put("error", JSONObject().put("type", type).put("message", message))
+        output.write("event: error\ndata: $error\n\n".toByteArray())
+        output.flush()
+    }
+
+    private fun writeEventStreamHeaders(output: BufferedOutputStream) {
+        (output as? GatewayOutput)?.eventStream = true
+        output.write(EVENT_STREAM_HEADERS.toByteArray())
     }
 
     private fun toOpenAi(source: JSONObject): JSONObject {
@@ -169,13 +210,20 @@ internal class LocalFormatGateway(
                     "tool_result" -> toolResults += JSONObject()
                         .put("role", "tool")
                         .put("tool_call_id", part.stringOrEmpty("tool_use_id"))
-                        .put("content", valueText(part.opt("content")))
+                        .put("content", toolResultText(part))
                 }
             }
             if (role == "user") {
                 toolResults.forEach(messages::put)
             }
-            if (text.isNotBlank() || toolCalls.length() > 0) {
+            val images = imageUrls(content)
+            if (images.isNotEmpty() && role == "user") {
+                // Image blocks (screenshots, pasted images) were dropped, so the model never saw them.
+                val parts = JSONArray()
+                if (text.isNotBlank()) parts.put(JSONObject().put("type", "text").put("text", text))
+                images.forEach { url -> parts.put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url))) }
+                messages.put(JSONObject().put("role", role).put("content", parts))
+            } else if (text.isNotBlank() || toolCalls.length() > 0) {
                 val converted = JSONObject().put("role", role).put("content", text.ifBlank { JSONObject.NULL })
                 if (toolCalls.length() > 0) converted.put("tool_calls", toolCalls)
                 messages.put(converted)
@@ -241,13 +289,19 @@ internal class LocalFormatGateway(
                     "tool_result" -> toolResults += JSONObject()
                         .put("type", "function_call_output")
                         .put("call_id", part.stringOrEmpty("tool_use_id"))
-                        .put("output", valueText(part.opt("content")))
+                        .put("output", toolResultText(part))
                 }
             }
             if (role == "user") {
                 toolResults.forEach(input::put)
             }
-            if (text.isNotBlank()) {
+            val images = imageUrls(content)
+            if (images.isNotEmpty() && role == "user") {
+                val parts = JSONArray()
+                if (text.isNotBlank()) parts.put(JSONObject().put("type", "input_text").put("text", text))
+                images.forEach { url -> parts.put(JSONObject().put("type", "input_image").put("image_url", url)) }
+                input.put(JSONObject().put("role", role).put("content", parts))
+            } else if (text.isNotBlank()) {
                 input.put(JSONObject().put("role", role).put("content", text))
             }
             toolCalls.forEach(input::put)
@@ -298,6 +352,8 @@ internal class LocalFormatGateway(
         val stopReason = when {
             calls.length() > 0 -> "tool_use"
             finishReason == "length" -> "max_tokens"
+            // Reported as a normal end_turn, a filtered answer looked complete; Anthropic calls this a refusal.
+            finishReason == "content_filter" -> "refusal"
             else -> "end_turn"
         }
         return JSONObject().put("id", source.stringOrEmpty("id").ifBlank { "msg_${UUID.randomUUID()}" })
@@ -343,7 +399,7 @@ internal class LocalFormatGateway(
         val outputTokens = usage.optInt("output_tokens", usage.optInt("completion_tokens"))
         return JSONObject().put("id", source.stringOrEmpty("id").ifBlank { "msg_${UUID.randomUUID()}" })
             .put("type", "message").put("role", "assistant").put("model", model)
-            .put("content", content).put("stop_reason", if (hasToolUse) "tool_use" else "end_turn")
+            .put("content", content).put("stop_reason", responsesStopReason(source, hasToolUse))
             .put("stop_sequence", JSONObject.NULL)
             .put("usage", JSONObject().put("input_tokens", inputTokens).put("output_tokens", outputTokens))
     }
@@ -359,7 +415,7 @@ internal class LocalFormatGateway(
             return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for localhost")
         }
         val currentKey = activeApiKey
-        val connection = URL(endpoint).openConnection() as HttpURLConnection
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add)
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
@@ -407,6 +463,7 @@ internal class LocalFormatGateway(
             }.orEmpty()
             code to responseText
         } finally {
+            upstreamConnections.remove(connection)
             connection.disconnect()
         }
     }
@@ -425,7 +482,7 @@ internal class LocalFormatGateway(
         }
         val body = toOpenAi(anthropic).put("stream", true)
         val currentKey = activeApiKey
-        val connection = URL(endpoint).openConnection() as HttpURLConnection
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add)
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
@@ -460,7 +517,7 @@ internal class LocalFormatGateway(
             }
             if (code !in 200..299) {
                 val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText().take(4096) }.orEmpty()
-                Log.w("FormatGateway", "Provider returned HTTP $code: ${providerError(errorText)}")
+                Log.w("FormatGateway", "Provider returned HTTP $code: ${logSafe(providerError(errorText))}")
                 writeJson(output, code, errorJson("api_error", providerError(errorText)))
                 return
             }
@@ -493,6 +550,7 @@ internal class LocalFormatGateway(
                 }
             }
         } finally {
+            upstreamConnections.remove(connection)
             connection.disconnect()
         }
     }
@@ -502,8 +560,7 @@ internal class LocalFormatGateway(
         output: BufferedOutputStream,
         requestedModel: String,
     ) {
-        val headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
-        output.write(headers.toByteArray())
+        writeEventStreamHeaders(output)
         fun emitEvent(name: String, data: JSONObject) {
             output.write("event: $name\ndata: $data\n\n".toByteArray())
             output.flush()
@@ -523,9 +580,12 @@ internal class LocalFormatGateway(
         var nextBlockIndex = 0
         var openBlockType: String? = null
         var openBlockIndex = -1
-        val activeToolSlots = HashMap<Int, Int>()
+        val pendingToolCalls = HashMap<Int, PendingToolCall>()
         var sawToolCalls = false
         var truncated = false
+        var filtered = false
+        // A stream that stops without [DONE] or a finish_reason was cut off (dropped connection, proxy timeout).
+        var finished = false
         var inputTokens = 0
         var outputTokens = 0
 
@@ -542,14 +602,29 @@ internal class LocalFormatGateway(
             if (!line.startsWith("data:")) continue
             val payload = line.removePrefix("data:").trim()
             if (payload.isEmpty()) continue
-            if (payload == "[DONE]") break
+            if (payload == "[DONE]") {
+                finished = true
+                break
+            }
             val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+            // OpenRouter, DeepSeek and vLLM report failures after the 200 as `data: {"error": {...}}`. Skipping it
+            // (no `choices`) turned a rate limit or context-length error into an empty, successful turn.
+            chunk.optJSONObject("error")?.let { error ->
+                closeOpenBlock()
+                val message = error.stringOrEmpty("message").ifEmpty { error.toString().take(500) }
+                Log.w("FormatGateway", "Provider reported an error mid-stream: ${logSafe(message)}")
+                writeStreamError(output, "api_error", message)
+                return
+            }
             chunk.optJSONObject("usage")?.let { usage ->
                 inputTokens = usage.optInt("prompt_tokens", usage.optInt("input_tokens", inputTokens))
                 outputTokens = usage.optInt("completion_tokens", usage.optInt("output_tokens", outputTokens))
             }
             val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
-            if (choice.stringOrEmpty("finish_reason") == "length") truncated = true
+            val finishReason = choice.stringOrEmpty("finish_reason")
+            if (finishReason.isNotEmpty()) finished = true
+            if (finishReason == "length") truncated = true
+            if (finishReason == "content_filter") filtered = true
             val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: continue
 
             val reasoningDelta = delta.stringOrEmpty("reasoning_content").ifEmpty { delta.stringOrEmpty("reasoning") }
@@ -600,52 +675,58 @@ internal class LocalFormatGateway(
                 )
             }
 
+            // Tool calls are collected per slot and emitted once the stream is done. Streaming them as they came closed
+            // one tool's block when the next slot opened, so providers that interleave the arguments of parallel calls
+            // (index 0, 1, 0, …) sent deltas to a block that was already stopped and the tool input broke.
             val toolCalls = delta.optJSONArray("tool_calls")
             if (toolCalls != null && toolCalls.length() > 0) {
                 for (tcIdx in 0 until toolCalls.length()) {
                     val tc = toolCalls.optJSONObject(tcIdx) ?: continue
                     sawToolCalls = true
-                    val slot = tc.optInt("index", tcIdx)
+                    val call = pendingToolCalls.getOrPut(tc.optInt("index", tcIdx)) { PendingToolCall() }
                     val fn = tc.optJSONObject("function")
-                    val id = tc.stringOrEmpty("id")
-                    val name = fn?.stringOrEmpty("name").orEmpty()
-                    val argsDelta = fn?.stringOrEmpty("arguments").orEmpty()
-                    if (slot !in activeToolSlots) {
-                        closeOpenBlock()
-                        val idx = nextBlockIndex++
-                        activeToolSlots[slot] = idx
-                        openBlockType = "tool_use"
-                        openBlockIndex = idx
-                        emitEvent(
-                            "content_block_start",
-                            JSONObject()
-                                .put("type", "content_block_start")
-                                .put("index", idx)
-                                .put(
-                                    "content_block",
-                                    JSONObject()
-                                        .put("type", "tool_use")
-                                        .put("id", id.ifBlank { "tool_${UUID.randomUUID()}" })
-                                        .put("name", name)
-                                        .put("input", JSONObject()),
-                                ),
-                        )
-                    }
-                    if (argsDelta.isNotEmpty()) {
-                        val targetIdx = activeToolSlots[slot] ?: openBlockIndex
-                        emitEvent(
-                            "content_block_delta",
-                            JSONObject()
-                                .put("type", "content_block_delta")
-                                .put("index", targetIdx)
-                                .put("delta", JSONObject().put("type", "input_json_delta").put("partial_json", argsDelta)),
-                        )
-                    }
+                    tc.stringOrEmpty("id").takeIf { it.isNotBlank() && call.id.isBlank() }?.let { call.id = it }
+                    fn?.stringOrEmpty("name")?.takeIf { it.isNotBlank() && call.name.isBlank() }?.let { call.name = it }
+                    fn?.stringOrEmpty("arguments")?.let { call.arguments.append(it) }
                 }
             }
         }
 
         closeOpenBlock()
+        if (finished) {
+            for ((_, call) in pendingToolCalls.toSortedMap()) {
+                val idx = nextBlockIndex++
+                emitEvent(
+                    "content_block_start",
+                    JSONObject()
+                        .put("type", "content_block_start")
+                        .put("index", idx)
+                        .put(
+                            "content_block",
+                            JSONObject()
+                                .put("type", "tool_use")
+                                .put("id", call.id.ifBlank { "tool_${UUID.randomUUID()}" })
+                                .put("name", call.name)
+                                .put("input", JSONObject()),
+                        ),
+                )
+                if (call.arguments.isNotEmpty()) {
+                    emitEvent(
+                        "content_block_delta",
+                        JSONObject()
+                            .put("type", "content_block_delta")
+                            .put("index", idx)
+                            .put("delta", JSONObject().put("type", "input_json_delta").put("partial_json", call.arguments.toString())),
+                    )
+                }
+                emitEvent("content_block_stop", JSONObject().put("type", "content_block_stop").put("index", idx))
+            }
+        }
+        if (!finished) {
+            Log.w("FormatGateway", "Provider stream ended before it finished")
+            writeStreamError(output, "api_error", "The provider closed the stream before the response finished")
+            return
+        }
         emitEvent(
             "message_delta",
             JSONObject()
@@ -653,7 +734,15 @@ internal class LocalFormatGateway(
                 .put(
                     "delta",
                     JSONObject()
-                        .put("stop_reason", if (sawToolCalls) "tool_use" else if (truncated) "max_tokens" else "end_turn")
+                        .put(
+                            "stop_reason",
+                            when {
+                                sawToolCalls -> "tool_use"
+                                truncated -> "max_tokens"
+                                filtered -> "refusal"
+                                else -> "end_turn"
+                            },
+                        )
                         .put("stop_sequence", JSONObject.NULL),
                 )
                 .put("usage", JSONObject().put("input_tokens", inputTokens).put("output_tokens", outputTokens)),
@@ -665,8 +754,7 @@ internal class LocalFormatGateway(
         com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(url)
 
     private fun writeStream(output: BufferedOutputStream, message: JSONObject) {
-        val headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
-        output.write(headers.toByteArray())
+        writeEventStreamHeaders(output)
         fun event(name: String, data: JSONObject) {
             output.write("event: $name\ndata: $data\n\n".toByteArray())
             output.flush()
@@ -726,6 +814,33 @@ internal class LocalFormatGateway(
         return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
 
+    /** Reads an HTTP/1.1 chunked body, or returns null when it is malformed or larger than [MAX_REQUEST_BYTES]. */
+    private fun readChunkedBody(input: BufferedInputStream): String? {
+        val body = ByteArrayOutputStream()
+        while (true) {
+            val sizeLine = readLine(input) ?: return null
+            val size = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: return null
+            if (size < 0 || body.size() + size > MAX_REQUEST_BYTES) return null
+            if (size == 0) {
+                // Trailer section, ended by an empty line.
+                while (true) {
+                    val trailer = readLine(input) ?: return null
+                    if (trailer.isEmpty()) break
+                }
+                return body.toByteArray().decodeToString()
+            }
+            val chunk = ByteArray(size)
+            var offset = 0
+            while (offset < size) {
+                val count = input.read(chunk, offset, size - offset)
+                if (count < 0) return null
+                offset += count
+            }
+            body.write(chunk)
+            if (readLine(input) != "") return null
+        }
+    }
+
     private fun readLine(input: BufferedInputStream): String? {
         val out = ByteArrayOutputStream(128)
         while (out.size() <= MAX_HEADER_LINE_BYTES) {
@@ -741,6 +856,28 @@ internal class LocalFormatGateway(
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
             if (item.stringOrEmpty("type") in setOf("text", "output_text")) append(item.stringOrEmpty("text"))
+        }
+    }
+
+    /** Tool output text; a failed tool is marked so the model does not read the error as a normal result. */
+    private fun toolResultText(part: JSONObject): String {
+        val text = valueText(part.opt("content"))
+        return if (part.optBoolean("is_error", false)) "Error: $text" else text
+    }
+
+    /** Anthropic image blocks as URLs an OpenAI-compatible API accepts (data: URLs for inline base64). */
+    private fun imageUrls(content: JSONArray): List<String> = buildList {
+        for (index in 0 until content.length()) {
+            val part = content.optJSONObject(index) ?: continue
+            if (part.stringOrEmpty("type") != "image") continue
+            val source = part.optJSONObject("source") ?: continue
+            when (source.stringOrEmpty("type")) {
+                "base64" -> {
+                    val data = source.stringOrEmpty("data")
+                    if (data.isNotEmpty()) add("data:${source.stringOrEmpty("media_type", "image/png")};base64,$data")
+                }
+                "url" -> source.stringOrEmpty("url").takeIf { it.isNotBlank() }?.let(::add)
+            }
         }
     }
 
@@ -768,6 +905,9 @@ internal class LocalFormatGateway(
         running.set(false)
         runCatching { server.close() }
         workers.shutdown()
+        // shutdown() does not interrupt workers, and HttpURLConnection ignores interrupts anyway: a provider call of
+        // up to 180 s would keep using the key and quota after the session ended. Disconnecting aborts it.
+        upstreamConnections.toList().forEach { runCatching { it.disconnect() } }
     }
 
     private companion object {
@@ -780,3 +920,52 @@ internal class LocalFormatGateway(
         const val SOCKET_TIMEOUT_MS = 30_000
     }
 }
+
+/** Socket output that remembers whether a response has started, so a late failure is reported the right way. */
+internal class GatewayOutput(out: java.io.OutputStream) : BufferedOutputStream(out) {
+    var committed = false
+        private set
+    var eventStream = false
+
+    override fun write(b: Int) {
+        committed = true
+        super.write(b)
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        if (len > 0) committed = true
+        super.write(b, off, len)
+    }
+}
+
+private const val EVENT_STREAM_HEADERS =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+
+/** One streamed OpenAI tool call, assembled from its deltas. */
+private class PendingToolCall {
+    var id = ""
+    var name = ""
+    val arguments = StringBuilder()
+}
+
+/** Anthropic stop_reason for an OpenAI Responses API result. */
+private fun responsesStopReason(source: JSONObject, hasToolUse: Boolean): String {
+    if (hasToolUse) return "tool_use"
+    if (source.stringOrEmpty("status") != "incomplete") return "end_turn"
+    return when (source.optJSONObject("incomplete_details")?.stringOrEmpty("reason")) {
+        "content_filter" -> "refusal"
+        else -> "max_tokens" // max_output_tokens, and any other reason the answer was cut short
+    }
+}
+
+/**
+ * Provider error bodies can echo the request (prompt, file contents) or key material; Logcat is readable by other
+ * tools on a debuggable or rooted device, so only a short, redacted excerpt is logged. The client still receives
+ * the full provider message in the response.
+ */
+private fun logSafe(text: String): String = text
+    .replace(Regex("(?i)(api[_-]?key|token|secret|password|authorization)(\\s*[=:]\\s*)(bearer\\s+)?[^\\s'\",}]+"), "$1$2••••")
+    .replace(Regex("\\b(sk|rk|pk)-[A-Za-z0-9_-]{8,}"), "$1-••••")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+    .take(200)

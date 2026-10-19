@@ -200,6 +200,13 @@
     <string name="shell_installed_ready">Installed &amp; ready</string>
     <string name="shell_resume_setup">Resume Setup</string>
     <string name="shell_install_runtime">Install Chroot Runtime</string>
+    <string name="settings_agent_install">Install</string>
+    <string name="settings_agent_installed">Installed</string>
+    <string name="settings_agent_update">Update to %1$s</string>
+    <string name="settings_agent_remove">Uninstall</string>
+    <string name="settings_agent_check_updates">Check agent updates</string>
+    <string name="settings_stack_install">Install %1$s</string>
+    <string name="settings_stack_remove">Remove %1$s</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
@@ -342,6 +349,10 @@
     <string name="agent_clear_chat">Clear Chat</string>
     <string name="launch_clear_logcat">Clear</string>
     <string name="launch_filter_logcat">Filter logcat…</string>
+    <string name="files_unsaved_title">Unsaved changes</string>
+    <string name="files_unsaved_message">%1$s has unsaved changes. Save them before continuing?</string>
+    <string name="files_unsaved_save">Save</string>
+    <string name="files_unsaved_discard">Discard</string>
     <string name="msg_busy_before_quick_project">Finish or stop the active task before starting a Quick project.</string>
     <string name="msg_busy_before_delete">Cannot delete a project while an agent session, build, or terminal command is running.</string>
     <string name="msg_agy_probing">Probing Antigravity CLI inside chroot…</string>

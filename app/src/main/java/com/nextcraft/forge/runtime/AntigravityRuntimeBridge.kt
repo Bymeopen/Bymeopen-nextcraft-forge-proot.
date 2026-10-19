@@ -12,10 +12,12 @@ import com.nextcraft.forge.model.ToolRequest
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
@@ -261,6 +263,8 @@ class AntigravityRuntimeBridge(
                     var done = false
                     InotifyLogTailer(outputFile).use { tailer ->
                         while (!done && (process.isAlive || tailer.hasUnreadBytes())) {
+                            // readLines blocks without suspending, so withTimeout (and a cancel) could never fire here.
+                            ensureActive()
                             for (line in tailer.readLines(timeoutMs = 50L)) {
                                 if (handleLine(line)) {
                                     done = true
@@ -297,6 +301,8 @@ class AntigravityRuntimeBridge(
                 antigravityFriendlyError(e.message.orEmpty(), diagnostic)
             }
             throw AntigravitySessionException(message)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             throw AntigravitySessionException(
                 antigravityFriendlyError(e.message.orEmpty(), recentAntigravityDiagnostic(startedAtMillis)),
@@ -344,7 +350,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
-            RuntimeTaskController.stopAction = stopHandler
+            RuntimeTaskController.register(RuntimeTaskController.AGENT, stopHandler)
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()

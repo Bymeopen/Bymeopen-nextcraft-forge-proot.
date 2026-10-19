@@ -65,19 +65,19 @@ enum class AgentKind(
         "claude-code",
         "Claude Code",
         "Anthropic's coding agent · broad provider support",
-        "71.8 MB",
+        "71.9 MB",
     ),
     DEEPSEEK_HARNESS(
         "deepseek-harness",
         "DeepSeek Harness",
         "Official DeepSeek coding agent · API-key providers",
-        "26.5 MB",
+        "26.8 MB",
     ),
     ANTIGRAVITY(
         "antigravity",
         "Antigravity CLI",
         "Google's official coding agent · Google account",
-        "39.9 MB",
+        "40.1 MB",
     ),
     ;
 

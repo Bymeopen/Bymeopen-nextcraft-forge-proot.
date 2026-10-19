@@ -172,7 +172,7 @@ fun AndroidBuildScreen(
                     ForgePillIcon(
                         icon = Icons.Default.Close,
                         description = stringResource(R.string.launch_cancel_build),
-                        onClick = viewModel::stopActiveTask,
+                        onClick = viewModel::stopAndroidBuild,
                         tint = MaterialTheme.colorScheme.error,
                     )
                 } else {

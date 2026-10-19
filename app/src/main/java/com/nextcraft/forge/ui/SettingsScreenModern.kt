@@ -62,6 +62,7 @@ import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
+import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
@@ -276,6 +277,33 @@ fun SettingsScreenModern(
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     },
                                 )
+                                val busy = !state.runtimeInstalled ||
+                                    state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (kind in state.installedAgents) {
+                                        Text(
+                                            text = stringResource(R.string.settings_agent_installed),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = tokens.successText,
+                                        )
+                                        state.agentUpdates[kind]?.let { info ->
+                                            Button(onClick = { viewModel.updateAgent(kind) }, enabled = !busy) {
+                                                Text(stringResource(R.string.settings_agent_update, info.latestVersion))
+                                            }
+                                        }
+                                        OutlinedButton(onClick = { viewModel.removeAgent(kind) }, enabled = !busy) {
+                                            Text(stringResource(R.string.settings_agent_remove))
+                                        }
+                                    } else {
+                                        OutlinedButton(onClick = { viewModel.installAgent(kind) }, enabled = !busy) {
+                                            Text("${stringResource(R.string.settings_agent_install)} · ${kind.downloadNote}")
+                                        }
+                                    }
+                                }
                             }
                             if (selected) {
                                 Icon(
@@ -286,6 +314,33 @@ fun SettingsScreenModern(
                             }
                         }
                     }
+                }
+
+                if (state.installedAgents.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = viewModel::checkAgentUpdates,
+                        enabled = !state.checkingAgentUpdates,
+                    ) {
+                        Text(stringResource(R.string.settings_agent_check_updates))
+                    }
+                }
+
+                if (state.setupSnapshot.status == RuntimeSetupStatus.RUNNING) {
+                    LinearProgressIndicator(
+                        progress = state.setupSnapshot.progress,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = state.setupSnapshot.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (state.setupSnapshot.status == RuntimeSetupStatus.ERROR) {
+                    Text(
+                        text = state.setupSnapshot.errorMessage.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {
@@ -889,6 +944,20 @@ fun SettingsScreenModern(
                         checked = selected,
                         onCheckedChange = { if (!isProvisioning) viewModel.toggleDevStack(stack) },
                     )
+                    if (stack != DevStack.WEB) {
+                        // Install or remove this one stack right away, without touching the other toggles.
+                        OutlinedButton(
+                            onClick = { if (installed) viewModel.removeStack(stack) else viewModel.installStack(stack) },
+                            enabled = !isProvisioning && state.runtimeInstalled,
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (installed) R.string.settings_stack_remove else R.string.settings_stack_install,
+                                    stack.displayLabel(),
+                                ),
+                            )
+                        }
+                    }
                 }
                 if (state.setupSnapshot.status != com.nextcraft.forge.runtime.RuntimeSetupStatus.IDLE) {
                     Text(

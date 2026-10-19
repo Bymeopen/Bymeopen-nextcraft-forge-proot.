@@ -182,7 +182,7 @@ class ClaudeRuntimeBridge(
                     }, "forge-claude-stop").apply { isDaemon = true }.start()
                 }
             }
-            RuntimeTaskController.stopAction = stopHandler
+            RuntimeTaskController.register(RuntimeTaskController.AGENT, stopHandler)
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
