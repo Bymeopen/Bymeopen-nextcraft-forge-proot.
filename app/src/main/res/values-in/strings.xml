@@ -317,6 +317,9 @@
     <string name="tools_ssh_desc">Sesi SSH jarak jauh dan port forwarding</string>
     <string name="tools_toolchains">Toolchains Manager</string>
     <string name="tools_toolchains_desc">Kelola compiler, SDK, dan paket bahasa</string>
+    <string name="tool_copied">Tersalin</string>
+    <string name="tool_last_crash">Laporan crash terakhir</string>
+    <string name="tool_no_crash">Belum ada crash. Jika aplikasi menutup sendiri, stack trace lengkapnya muncul di sini.</string>
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
