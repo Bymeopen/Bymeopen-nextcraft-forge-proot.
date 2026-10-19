@@ -328,6 +328,22 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
+        if (state.queuedPrompts.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    stringResource(R.string.agent_queued_title, state.queuedPrompts.size),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.queuedPrompts.forEach { queued ->
+                    val label = queued.text.ifBlank { queued.attachments.joinToString { it.displayName } }
+                    AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                }
+            }
+        }
         if (state.pendingAttachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -356,7 +372,7 @@ fun AgentScreen(
             ) {
                 // Attach: photos or any file; it lands in attachments/ inside the workspace.
                 Box {
-                    IconButton(onClick = { attachMenuOpen = true }, enabled = !running) {
+                    IconButton(onClick = { attachMenuOpen = true }) {
                         Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
@@ -397,8 +413,8 @@ fun AgentScreen(
                 )
                 val sendBg by animateColorAsState(
                     targetValue = when {
-                        running -> MaterialTheme.colorScheme.error
                         canSend -> MaterialTheme.colorScheme.primary
+                        running -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
                     },
                     animationSpec = if (reduceMotion) snap() else tween(ForgeMotion.FADE_MS),
@@ -413,26 +429,25 @@ fun AgentScreen(
                         .clickable(
                             enabled = running || canSend,
                             role = Role.Button,
-                            onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                            onClickLabel = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
                         ) {
-                            if (running) {
-                                viewModel.stopActiveTask()
-                            } else {
+                            // While the agent works, sending queues the message; stop is available when nothing is typed.
+                            if (canSend) {
                                 val text = promptInput.trim()
-                                if (text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) {
-                                    promptInput = ""
-                                    viewModel.sendPrompt(text)
-                                }
+                                promptInput = ""
+                                viewModel.sendPrompt(text)
+                            } else if (running) {
+                                viewModel.stopActiveTask()
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (running) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
-                        contentDescription = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                        imageVector = if (running && !canSend) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
+                        contentDescription = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
                         tint = when {
-                            running -> MaterialTheme.colorScheme.onError
                             canSend -> MaterialTheme.colorScheme.onPrimary
+                            running -> MaterialTheme.colorScheme.onError
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier.size(22.dp),
@@ -964,7 +979,7 @@ private fun toolKind(item: ActivityItem): ToolKind {
 
 /** Small capsule naming an attached file; [onRemove] null makes it read-only (sent messages). */
 @Composable
-private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?) {
+private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, showSize: Boolean = true) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
     Row(
@@ -975,8 +990,8 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
+        if (showSize) Spacer(modifier = Modifier.width(6.dp))
+        if (showSize) Text(
             text = if (size < 1024 * 1024) "${(size / 1024).coerceAtLeast(1)} KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", size / (1024.0 * 1024.0)),
             fontSize = 12.sp,
             color = scheme.onSurfaceVariant,

@@ -563,6 +563,8 @@
     <string name="files_ok">OK</string>
     <string name="files_row_menu">More actions</string>
     <string name="agent_attach">Attach photo or file</string>
+    <string name="agent_queued_title">Queued (%1$d) — sent when the agent finishes</string>
+    <string name="msg_queue_discarded">Queued messages were discarded because the turn did not complete</string>
     <string name="agent_attach_camera">Take photo</string>
     <string name="agent_attach_file">Photo or file</string>
     <string name="agent_remove_attachment">Remove attachment</string>
