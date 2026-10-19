@@ -30,3 +30,11 @@ fun UiText.asString(): String = when (this) {
     is UiText.Res -> stringResource(id, *args.toTypedArray())
     is UiText.Raw -> text
 }
+
+/** Plural-aware string for Compose: "1 file" vs "2 files" (and one form only in languages without plurals). */
+@androidx.compose.runtime.Composable
+fun quantityStringResource(@androidx.annotation.PluralsRes id: Int, quantity: Int, vararg args: Any): String {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.ui.platform.LocalConfiguration.current // re-read when the locale changes
+    return context.resources.getQuantityString(id, quantity, *args)
+}

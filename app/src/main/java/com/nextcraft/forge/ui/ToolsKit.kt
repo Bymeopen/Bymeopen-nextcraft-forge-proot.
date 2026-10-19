@@ -30,7 +30,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 
 /** Shared frame of the developer-tool screens: back arrow, title, subtitle and a scrolling body. */
@@ -80,7 +79,7 @@ internal fun LogBox(text: String, placeholder: String, modifier: Modifier = Modi
         Text(
             text = text.ifEmpty { placeholder },
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
+            fontSize = ForgeType.caption,
             color = if (text.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.verticalScroll(scroll).padding(12.dp),
         )

@@ -116,7 +116,9 @@ class RuntimeInstaller(private val context: Context) {
     private fun repairLegacyMacosMetadata() {
         if (macosMetadataRepairMarker.isFile) return
         if (!rootfs.isDirectory) return
-        stripMacosMetadataArtifacts(rootfs)
+        // isInstalled() can run while a chroot session is mounted: stay out of the bind mounts (/proc, /system,
+        // /workspace, ...) so the walk is neither huge nor able to delete "._*" files from a user's project.
+        stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         macosMetadataRepairMarker.parentFile?.mkdirs()
         macosMetadataRepairMarker.writeText("1")
     }
@@ -1296,7 +1298,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${bundle.label} runtime bundle", to))
     }
 
-    private fun stripMacosMetadataArtifacts(root: File) {
+    private fun stripMacosMetadataArtifacts(root: File, skipTopLevel: Set<String> = emptySet()) {
         if (!root.isDirectory) return
         val queue = ArrayDeque<File>()
         queue.add(root)
@@ -1305,6 +1307,7 @@ class RuntimeInstaller(private val context: Context) {
             val current = queue.removeFirst()
             val children = current.listFiles() ?: continue
             for (child in children) {
+                if (current == root && child.name in skipTopLevel) continue
                 if (child.name.startsWith("._")) {
                     if (child.isDirectory) child.deleteRecursively() else child.delete()
                     removed++
@@ -2034,7 +2037,10 @@ class RuntimeInstaller(private val context: Context) {
         // Hands every permission request to the app through the shared bridge directory and
         // waits for the user's/guardrail decision. The app classifies risk, auto-answers
         // SAFE/REVIEW and prompts for HIGH. No answer within the timeout means deny.
-        hook.writeText(
+        // Written atomically: a Claude session may be executing this script, and truncating it in place makes the hook
+        // answer nothing, which Claude Code treats as a refusal.
+        writeRootfsFileAtomically(
+            hook,
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
@@ -2056,21 +2062,22 @@ else
 fi
 printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
 """,
+            mode = 0b111101101,
         )
-        Os.chmod(hook.absolutePath, 0b111101101)
 
         // BROWSER handler for `claude auth login`: there is no browser in the chroot, so the sign-in URL is handed to
         // the app through the bridge directory and opened in the Android browser. The browser then redirects to
         // http://localhost:<port>/callback, which the CLI (same network namespace) is listening on.
         val openUrl = File(rootfs, "opt/pocket/open-url.sh")
-        openUrl.writeText(
+        writeRootfsFileAtomically(
+            openUrl,
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 [ -n "${'$'}1" ] && [ -d "${'$'}BRIDGE" ] || exit 0
 printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDGE/claude-login-url.tmp" "${'$'}BRIDGE/claude-login-url"
 """,
+            mode = 0b111101101,
         )
-        Os.chmod(openUrl.absolutePath, 0b111101101)
 
         val settingsContent = JSONObject()
             .put("disableAllHooks", false)
@@ -2168,7 +2175,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
      * reader never sees a truncated file. A root-owned target (rewritten by a root process in the chroot) is
      * reclaimed first.
      */
-    private fun writeRootfsFileAtomically(target: File, content: String) {
+    private fun writeRootfsFileAtomically(target: File, content: String, mode: Int? = null) {
         val parent = checkNotNull(target.parentFile) { "No parent directory for ${target.name}" }
         parent.mkdirs()
         if (!parent.canWrite() || (target.exists() && !target.canWrite())) {
@@ -2180,6 +2187,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 out.write(content.toByteArray(Charsets.UTF_8))
                 out.fd.sync()
             }
+            // Set the mode before the rename so the file is never visible without its execute bit.
+            if (mode != null) Os.chmod(temp.absolutePath, mode)
             Os.rename(temp.absolutePath, target.absolutePath)
         } finally {
             temp.delete()
@@ -2297,6 +2306,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         TarArchiveInputStream(openZstdInputStream(archive, consumed)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
             while (entry != null) {
+                // Pause/stop from the notification must end a long unpack instead of waiting for it to finish.
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (report != null && consumed != null) {
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (now - lastReport >= 400L) {
@@ -2603,6 +2614,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
@@ -2913,11 +2926,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     "${'$'}ROOTFS"|"${'$'}ROOTFS"/*)
                         ;;
                     *)
-                        chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_WORKSPACE" 2>/dev/null || true
+                        chown -R -h "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_WORKSPACE" 2>/dev/null || true
                         chmod -R u+rwX,g+rwX "${'$'}HOST_WORKSPACE" 2>/dev/null || true
                         ;;
                 esac
-                chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
+                chown -R -h "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
                 chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
             }
             # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
@@ -3050,6 +3063,7 @@ internal data class GitConfigEntry(
 internal fun mergeGitConfig(existing: String, entries: List<GitConfigEntry>): String {
     val lines = existing.lines().dropLastWhile { it.isBlank() }.toMutableList()
     fun sectionOf(line: String) = Regex("^\\s*\\[\\s*([A-Za-z0-9.-]+)\\s*]\\s*$").find(line)?.groupValues?.get(1)?.lowercase()
+    fun isHeader(line: String) = Regex("^\\s*\\[[^\\]]*]").containsMatchIn(line)
     fun keyOf(line: String) = Regex("^\\s*([A-Za-z][A-Za-z0-9-]*)\\s*(=|$)").find(line)?.groupValues?.get(1)?.lowercase()
     for (entry in entries) {
         val wanted = entry.section.lowercase()
@@ -3061,7 +3075,9 @@ internal fun mergeGitConfig(existing: String, entries: List<GitConfigEntry>): St
             continue
         }
         var end = start + 1
-        while (end < lines.size && sectionOf(lines[end]) == null) end++
+        // Any header ends the section, including subsections such as [credential "https://github.com"], so an entry is
+        // never appended inside (or matched against) another section's keys.
+        while (end < lines.size && !isHeader(lines[end])) end++
         val sameKey = (start + 1 until end).filter { keyOf(lines[it]) == entry.key.lowercase() }
         if (entry.multiValue) {
             val present = sameKey.any { lines[it].substringAfter('=', "").trim() == entry.value }

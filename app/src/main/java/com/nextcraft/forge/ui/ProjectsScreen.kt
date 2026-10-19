@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -194,11 +195,11 @@ fun ProjectsScreen(
             onDismissRequest = { pendingRenameProject = null },
             title = { Text(stringResource(R.string.projects_rename_title)) },
             text = {
-                OutlinedTextField(
+                ForgeTextField(
+                    kind = ForgeFieldKind.NAME, imeAction = ImeAction.Done, error = if (name.isBlank()) stringResource(R.string.field_error_required) else null,
                     value = name,
                     onValueChange = { name = it.take(MAX_PROJECT_NAME) },
                     label = { Text(stringResource(R.string.projects_rename_label)) },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -213,7 +214,7 @@ fun ProjectsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+                ForgeTextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -233,7 +234,7 @@ fun ProjectsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+                ForgeTextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -246,7 +247,7 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
     Column(modifier = Modifier.padding(horizontal = 20.dp)) {
         Text(
             text = stringResource(R.string.shell_nextcraft_forge),
-            fontSize = 14.sp,
+            fontSize = ForgeType.control,
             color = scheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 10.dp),
         )
@@ -259,7 +260,7 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
         )
         Text(
             text = stringResource(R.string.projects_tagline),
-            fontSize = 14.sp,
+            fontSize = ForgeType.control,
             color = scheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
         )
@@ -321,14 +322,14 @@ private fun BringExistingProjectCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.projects_bring_existing),
-                        fontSize = 16.sp,
+                        fontSize = ForgeType.rowTitle,
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
                         text = stringResource(
                             if (expanded) R.string.projects_bring_existing_expanded else R.string.projects_bring_existing_collapsed,
                         ),
-                        fontSize = 14.sp,
+                        fontSize = ForgeType.control,
                         color = scheme.onSurfaceVariant,
                     )
                 }
@@ -381,7 +382,7 @@ private fun BringExistingProjectCard(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = stringResource(R.string.projects_connect_github),
-                                fontSize = 15.sp,
+                                fontSize = ForgeType.body,
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
@@ -390,7 +391,7 @@ private fun BringExistingProjectCard(
                                 } else {
                                     stringResource(R.string.projects_github_connected, githubLogin)
                                 },
-                                fontSize = 13.sp,
+                                fontSize = ForgeType.secondary,
                                 color = scheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -435,7 +436,7 @@ private fun ImportTile(
             modifier = Modifier.size(18.dp),
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(text = label, fontSize = ForgeType.body, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -446,11 +447,11 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.projects_clone_title)) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.URL, imeAction = ImeAction.Done, error = url.takeIf { it.isNotBlank() && !FieldValidation.isHttpUrl(it) }?.let { stringResource(R.string.field_error_url) },
                 value = url,
                 onValueChange = { url = it },
                 placeholder = { Text(stringResource(R.string.projects_clone_hint)) },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -460,7 +461,7 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
         },
     )
 }
@@ -469,10 +470,10 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        fontSize = 12.sp,
+        fontSize = ForgeType.caption,
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp).forgeHeading(),
     )
 }
 
@@ -533,7 +534,7 @@ private fun ProjectRow(
                 val guestPath = "/workspace/${project.slug}"
                 Text(
                     text = guestPath,
-                    fontSize = 13.sp,
+                    fontSize = ForgeType.secondary,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     color = muted,
                     maxLines = 1,
@@ -541,7 +542,7 @@ private fun ProjectRow(
                 )
                 Text(
                     text = listOf(project.language, project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
-                    fontSize = 13.sp,
+                    fontSize = ForgeType.secondary,
                     color = muted,
                     maxLines = 1,
                 )

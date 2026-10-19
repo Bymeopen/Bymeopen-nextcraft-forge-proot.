@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,7 +37,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.runtime.ClaudeAuthStatus
 import com.nextcraft.forge.runtime.ClaudeLoginMode
@@ -65,7 +65,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
     val waiting = auth.status == ClaudeAuthStatus.AWAITING_BROWSER || auth.status == ClaudeAuthStatus.COMPLETING
 
     ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.settings_claude_account), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
             Text(
                 text = stringResource(
@@ -79,7 +79,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 fontWeight = FontWeight.SemiBold,
             )
             auth.message?.let {
-                Text(it, fontSize = 13.sp, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (inFlight) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
@@ -90,12 +90,11 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                     modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                 ) { Text(stringResource(R.string.settings_claude_sign_out)) }
             } else {
-                OutlinedTextField(
-                    shape = RoundedCornerShape(14.dp),
+                ForgeTextField(
+                    kind = ForgeFieldKind.EMAIL, imeAction = ImeAction.Done,
                     value = email,
                     onValueChange = { email = it },
                     label = { Text(stringResource(R.string.settings_claude_email_optional)) },
-                    singleLine = true,
                     enabled = !inFlight,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -128,12 +127,11 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                     }
                 }
                 if (waiting) {
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
+                    ForgeTextField(
+                        kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                         value = code,
                         onValueChange = { code = it },
                         label = { Text(stringResource(R.string.settings_one_time_code)) },
-                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(
@@ -150,7 +148,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                             enabled = code.isNotBlank() && auth.status == ClaudeAuthStatus.AWAITING_BROWSER,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = {
+                        ForgeTextButton(onClick = {
                             code = ""
                             viewModel.claudeAuth.cancel()
                         }) { Text(stringResource(R.string.agent_cancel)) }
@@ -159,7 +157,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
             }
             Text(
                 text = stringResource(R.string.settings_claude_footnote),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )

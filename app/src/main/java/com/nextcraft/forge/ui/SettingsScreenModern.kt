@@ -48,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,7 +72,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.BuildConfig
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
@@ -144,7 +144,8 @@ fun SettingsScreenModern(
                                         .weight(1f)
                                         .heightIn(min = 76.dp)
                                         .clip(RoundedCornerShape(14.dp))
-                                        .clickable(role = Role.RadioButton) { viewModel.setThemeMode(mode.id) },
+                                        .clickable(role = Role.RadioButton) { viewModel.setThemeMode(mode.id) }
+                                        .forgeSelected(selected),
                                 ) {
                                     Column(
                                         modifier = Modifier.padding(12.dp),
@@ -152,13 +153,13 @@ fun SettingsScreenModern(
                                     ) {
                                         Text(
                                             text = stringResource(mode.title),
-                                            fontSize = 15.sp,
+                                            fontSize = ForgeType.body,
                                             fontWeight = FontWeight.SemiBold,
                                             color = if (selected) scheme.primary else scheme.onSurface,
                                         )
                                         Text(
                                             text = stringResource(mode.subtitle),
-                                            fontSize = 12.sp,
+                                            fontSize = ForgeType.caption,
                                             color = scheme.onSurfaceVariant,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
@@ -173,7 +174,7 @@ fun SettingsScreenModern(
             }
             ThinDivider()
 
-            val languages = AppLanguage.entries
+            val languages = AppLanguage.selectable
             val activeLanguage = languages.firstOrNull { it.code.equals(state.languageCode, ignoreCase = true) } ?: languages.first()
             var languageOpen by rememberSaveable { mutableStateOf(false) }
             SettingsRow(
@@ -220,7 +221,7 @@ fun SettingsScreenModern(
         DisclosureCard(
             icon = ForgeGlyph.CODE,
             title = stringResource(R.string.settings_developer_tools),
-            subtitle = stringResource(R.string.settings_core_plus_optional, optionalInstalled),
+            subtitle = quantityStringResource(R.plurals.settings_core_plus_optional, optionalInstalled, optionalInstalled),
             expanded = toolsOpen,
             onToggle = { toolsOpen = !toolsOpen },
         ) {
@@ -232,15 +233,15 @@ fun SettingsScreenModern(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(stack.displayLabel(), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                            Text(stack.displayDescription(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                            Text(stack.displayLabel(), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
+                            Text(stack.displayDescription(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         when {
-                            stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = 14.sp, color = scheme.onSurfaceVariant)
+                            stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
                             installed -> Row(verticalAlignment = Alignment.CenterVertically) {
                                 ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
-                                TextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
+                                ForgeTextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
                                     Text(stringResource(R.string.settings_remove), color = tokens.dangerText)
                                 }
                             }
@@ -279,7 +280,7 @@ fun SettingsScreenModern(
                 KeyValueRow(stringResource(R.string.settings_active_agent), state.agentKind.displayTitle())
                 if (state.installedAgents.isNotEmpty()) {
                     ThinDivider()
-                    Text(stringResource(R.string.settings_installed_agents), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant)
+                    Text(stringResource(R.string.settings_installed_agents), fontSize = ForgeType.control, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant)
                     state.installedAgents.forEach { kind ->
                         KeyValueRow(kind.displayTitle(), state.agentUpdates[kind]?.latestVersion?.let { stringResource(R.string.settings_agent_update, it) } ?: stringResource(R.string.settings_agent_installed))
                     }
@@ -319,7 +320,7 @@ fun SettingsScreenModern(
             SettingsRow(
                 icon = ForgeGlyph.INFO,
                 title = stringResource(R.string.settings_version),
-                trailing = { Text("v${BuildConfig.VERSION_NAME}", color = scheme.onSurfaceVariant, fontSize = 14.sp) },
+                trailing = { Text("v${BuildConfig.VERSION_NAME}", color = scheme.onSurfaceVariant, fontSize = ForgeType.control) },
             )
             ThinDivider()
             SettingsRow(
@@ -395,7 +396,7 @@ internal fun AntigravityAccountCard(
                     )
                     Text(
                         text = agyAuth.message ?: stringResource(R.string.settings_google_required),
-                        fontSize = 13.sp,
+                        fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -432,16 +433,15 @@ internal fun AntigravityAccountCard(
                     }
                 }
                 if (!manualCode) {
-                    TextButton(onClick = { manualCode = true }, modifier = Modifier.align(Alignment.End)) {
+                    ForgeTextButton(onClick = { manualCode = true }, modifier = Modifier.align(Alignment.End)) {
                         Text(stringResource(R.string.settings_enter_code_manually))
                     }
                 } else {
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
+                    ForgeTextField(
+                        kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                         value = agyVerificationCode,
                         onValueChange = { agyVerificationCode = it },
                         label = { Text(stringResource(R.string.settings_one_time_code)) },
-                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -456,7 +456,7 @@ internal fun AntigravityAccountCard(
                             enabled = agyVerificationCode.isNotBlank(),
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = {
+                        ForgeTextButton(onClick = {
                             manualCode = false
                             agyVerificationCode = ""
                             viewModel.antigravityAuth.cancel()
@@ -464,19 +464,18 @@ internal fun AntigravityAccountCard(
                     }
                 }
             }
-            state.apiStatusMessage?.let { msg ->
-                Text(text = msg.asString(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+            if (!signedIn) state.apiStatusMessage?.let { msg ->
+                Text(text = msg.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
             }
             Text(
                 text = stringResource(R.string.settings_antigravity_footnote),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
     }
 
-    var modelOpen by rememberSaveable { mutableStateOf(false) }
     var showModelPicker by rememberSaveable { mutableStateOf(false) }
     // Models come from the signed-in account (`agy models`); load them once as soon as the account is connected.
     androidx.compose.runtime.LaunchedEffect(signedIn) {
@@ -498,45 +497,99 @@ internal fun AntigravityAccountCard(
             onDismiss = { showModelPicker = false },
         )
     }
-    DisclosureCard(
-        icon = ForgeGlyph.SPARK,
-        title = stringResource(R.string.settings_model_access),
-        subtitle = "${state.antigravityModel.takeIf { it.isNotBlank() }?.let(::antigravityModelLabel) ?: "—"} · ${state.antigravityEffort.uppercase()}",
-        expanded = modelOpen,
-        onToggle = { modelOpen = !modelOpen },
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_antigravity_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+    if (signedIn) {
+        val tokens = LocalForgeThemeTokens.current
+        val efforts = listOf("low", "medium", "high")
+        val effortIndex = efforts.indexOf(agyEffortInput).coerceAtLeast(0)
+        val currentModel = agyModelInput.ifBlank { state.antigravityModel }
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = agyModelInput.ifBlank { state.antigravityModel }.ifBlank { "—" }.let { if (it == "—") it else antigravityModelLabel(it) },
-                        fontSize = ForgeType.cardTitle,
-                        fontWeight = FontWeight.SemiBold,
+                        text = stringResource(R.string.agent_active_model),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ForgeTextButton(onClick = viewModel::refreshAntigravityModels, enabled = !state.antigravityModelsLoading) {
+                        Text(stringResource(R.string.agent_sync))
+                    }
+                }
+                // Model tile: tap to open the bottom sheet with the models of the signed-in account.
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = tokens.cardElevatedColor,
+                    border = tokens.cardBorderStroke,
+                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { showModelPicker = true },
+                ) {
+                    Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = RoundedCornerShape(10.dp), color = tokens.cardContainerColor, modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) { ForgeIcon(glyph = ForgeGlyph.SPARK, tint = scheme.primary, size = 20.dp) }
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (currentModel.isBlank()) "—" else antigravityModelLabel(currentModel),
+                                fontSize = ForgeType.cardTitle,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (currentModel.isNotBlank()) {
+                                Text(currentModel, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+                            }
+                        }
+                        Chevron(expanded = false)
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.agent_reasoning_depth),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource(
+                            when (effortIndex) {
+                                0 -> R.string.agent_reasoning_low_hint
+                                1 -> R.string.agent_reasoning_medium_hint
+                                else -> R.string.agent_reasoning_high_hint
+                            },
+                        ),
+                        fontSize = ForgeType.secondary,
+                        color = scheme.primary,
                     )
                 }
-                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
-                    Text(stringResource(R.string.settings_choose_model))
-                }
-            }
-            val efforts = listOf("low", "medium", "high")
-            ForgePillTabs(
-                items = efforts.map { stringResource(R.string.settings_effort, it.uppercase()) },
-                selectedIndex = efforts.indexOf(agyEffortInput).coerceAtLeast(0),
-                onSelect = { onAgyEffortChange(efforts[it]) },
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ForgePrimaryButton(
-                    text = stringResource(R.string.settings_save_antigravity_model),
-                    onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
-                    modifier = Modifier.weight(1f),
+                ForgePillTabs(
+                    items = listOf(stringResource(R.string.agent_effort_low), stringResource(R.string.agent_effort_medium), stringResource(R.string.agent_effort_high)),
+                    selectedIndex = effortIndex,
+                    onSelect = {
+                        onAgyEffortChange(efforts[it])
+                        // Saved right away: there is no separate Save button in this layout.
+                        viewModel.setAntigravityConfig(currentModel, efforts[it])
+                    },
                 )
                 OutlinedButton(
                     shape = RoundedCornerShape(100),
                     onClick = viewModel::validateAntigravityConnection,
                     enabled = !state.apiBusy,
-                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-                ) { Text(stringResource(R.string.settings_validate)) }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                ) {
+                    ForgeIcon(glyph = ForgeGlyph.REFRESH, tint = scheme.primary, size = 18.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.agent_test_connection))
+                }
+                state.apiStatusMessage?.let { msg ->
+                    val text = msg.asString()
+                    Text(
+                        text = text,
+                        fontSize = ForgeType.secondary,
+                        color = when {
+                            text.startsWith("✓") -> tokens.successText
+                            text.startsWith("✕") -> tokens.dangerText
+                            else -> scheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
         }
     }
@@ -573,9 +626,9 @@ internal fun SettingsRow(
         }
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
             if (subtitle != null) {
-                Text(subtitle, fontSize = 13.sp, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(modifier = Modifier.width(10.dp))
@@ -633,16 +686,17 @@ internal fun RadioRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.RadioButton, onClick = onClick)
+            .forgeSelected(selected)
             .heightIn(min = 56.dp)
             .padding(horizontal = horizontalPadding, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    fontSize = 13.sp,
+                    fontSize = ForgeType.secondary,
                     color = scheme.onSurfaceVariant,
                     fontFamily = if (mono) FontFamily.Monospace else null,
                     maxLines = 2,
@@ -657,8 +711,8 @@ internal fun RadioRow(
 @Composable
 internal fun KeyValueRow(key: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(key, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(key, fontSize = ForgeType.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, fontSize = ForgeType.body, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

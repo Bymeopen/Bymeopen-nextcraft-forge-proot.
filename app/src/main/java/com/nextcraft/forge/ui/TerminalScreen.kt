@@ -42,6 +42,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -159,7 +162,7 @@ fun TerminalScreen(
                     text = state.terminalOutput.ifEmpty { "Ready.\n" },
                     color = tokens.terminalText,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = ForgeType.caption,
                     lineHeight = 18.sp,
                 )
             }
@@ -181,7 +184,7 @@ fun TerminalScreen(
                         Text(
                             text = cmd,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                         )
                     },
                 )
@@ -245,12 +248,15 @@ fun TerminalScreen(
                         Text(
                             text = stringResource(R.string.terminal_run_command_in_the),
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
                         )
                     },
                     textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
                     singleLine = true,
+                    // Commands are exact strings (no autocorrect or capitals), and the keyboard's Send key runs them.
+                    keyboardOptions = ForgeFieldKind.IDENTIFIER.keyboardOptions(ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (commandInput.isNotBlank() && !state.terminalRunning) runCommand() }),
                     colors = TextFieldDefaults.textFieldColors(
                         containerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
@@ -262,6 +268,7 @@ fun TerminalScreen(
                 val canRun = commandInput.isNotBlank() && !state.terminalRunning
                 Box(
                     modifier = Modifier
+                        .forgeMinTouch()
                         .size(38.dp)
                         .clip(CircleShape)
                         .background(if (canRun) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
@@ -289,8 +296,8 @@ private fun TerminalKey(label: String, description: String, enabled: Boolean, on
         enabled = enabled,
         shape = RoundedCornerShape(100),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-        modifier = Modifier.height(36.dp).semantics { contentDescription = description },
+        modifier = Modifier.heightIn(min = ForgeSpace.minTouch).semantics { contentDescription = description },
     ) {
-        Text(label, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = if (enabled) scheme.onSurface else scheme.onSurfaceVariant)
+        Text(label, fontFamily = FontFamily.Monospace, fontSize = ForgeType.secondary, color = if (enabled) scheme.onSurface else scheme.onSurfaceVariant)
     }
 }

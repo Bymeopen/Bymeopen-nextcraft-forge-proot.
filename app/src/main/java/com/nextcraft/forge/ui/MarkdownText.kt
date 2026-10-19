@@ -27,6 +27,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.nextcraft.forge.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -262,11 +263,11 @@ private fun CodeSnippetBlock(
                     if (isShell && onRunCode != null && block.code.isNotBlank()) {
                         IconButton(
                             onClick = { onRunCode(block.code) },
-                            modifier = Modifier.size(26.dp),
+                            modifier = Modifier.size(ForgeSpace.minTouch),
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Run in Terminal",
+                                contentDescription = stringResource(R.string.md_run_in_terminal),
                                 tint = tokens.successText,
                                 modifier = Modifier.size(16.dp),
                             )
@@ -282,11 +283,11 @@ private fun CodeSnippetBlock(
                                 copied = false
                             }
                         },
-                        modifier = Modifier.size(26.dp),
+                        modifier = Modifier.size(ForgeSpace.minTouch),
                     ) {
                         Icon(
                             imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
-                            contentDescription = "Copy Code",
+                            contentDescription = stringResource(R.string.md_copy_code),
                             tint = if (copied) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(15.dp),
                         )

@@ -240,7 +240,7 @@ private val DarkThemeTokens = ForgeThemeTokens(
     accentText = Color(0xFFB9BFF5),
     successText = Color(0xFF4CB47F),
     warningText = Color(0xFFF2C94C),
-    dangerText = Color(0xFFE5484D),
+    dangerText = Color(0xFFE94D52), // E5484D was 4.4:1 on the elevated card
     terminalBackground = Color(0xFF070707),
     terminalHeaderBackground = Color(0xFF131313),
     terminalText = Color(0xFFE6E6E6),
@@ -358,7 +358,7 @@ val LocalForgeThemeTokens = staticCompositionLocalOf<ForgeThemeTokens> { DarkThe
 val ForgeCodeTextStyle = TextStyle(
     fontFamily = FontFamily.Monospace,
     fontWeight = FontWeight.Normal,
-    fontSize = 13.sp,
+    fontSize = ForgeType.secondary,
     lineHeight = 19.sp,
 )
 

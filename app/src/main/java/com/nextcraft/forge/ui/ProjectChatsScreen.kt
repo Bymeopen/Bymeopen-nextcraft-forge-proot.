@@ -35,7 +35,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 
 /**
@@ -56,7 +55,7 @@ fun ProjectChatsScreen(
             title = project?.name ?: stringResource(R.string.shell_nextcraft_forge),
             subtitle = listOfNotNull(
                 project?.let { stringResource(if (it.type == com.nextcraft.forge.model.ProjectType.ANDROID) R.string.projects_android else R.string.projects_general) },
-                stringResource(R.string.chats_subtitle, chats.size),
+                quantityStringResource(R.plurals.chats_subtitle, chats.size, chats.size),
             ).joinToString(" · "),
             onBack = { viewModel.projectBack() },
             actions = {
@@ -111,14 +110,14 @@ fun ProjectChatsScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = chat.displayTitle(),
-                            fontSize = 16.sp,
+                            fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = formatRelativeTime(chat.updatedAtMillis),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }

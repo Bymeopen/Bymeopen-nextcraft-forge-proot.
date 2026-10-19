@@ -163,11 +163,11 @@ fix_workspace_ownership() {
         "$ROOTFS"|"$ROOTFS"/*)
             ;;
         *)
-            chown -R "$APP_UID:$APP_UID" "$HOST_WORKSPACE" 2>/dev/null || true
+            chown -R -h "$APP_UID:$APP_UID" "$HOST_WORKSPACE" 2>/dev/null || true
             chmod -R u+rwX,g+rwX "$HOST_WORKSPACE" 2>/dev/null || true
             ;;
     esac
-    chown -R "$APP_UID:$APP_UID" "$HOST_BRIDGE" 2>/dev/null || true
+    chown -R -h "$APP_UID:$APP_UID" "$HOST_BRIDGE" 2>/dev/null || true
     chmod -R u+rwX,g+rwX "$HOST_BRIDGE" 2>/dev/null || true
 }
 # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
