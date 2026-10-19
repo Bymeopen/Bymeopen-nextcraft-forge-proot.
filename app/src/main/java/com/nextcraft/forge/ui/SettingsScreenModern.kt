@@ -62,6 +62,7 @@ import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
+import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
@@ -276,6 +277,21 @@ fun SettingsScreenModern(
                                     },
                                 )
                             }
+                            if (kind in state.installedAgents) {
+                                Text(
+                                    text = stringResource(R.string.settings_agent_installed),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = tokens.successText,
+                                )
+                            } else {
+                                OutlinedButton(
+                                    onClick = { viewModel.installAgent(kind) },
+                                    enabled = state.runtimeInstalled &&
+                                        state.setupSnapshot.status != RuntimeSetupStatus.RUNNING,
+                                ) {
+                                    Text("${stringResource(R.string.settings_agent_install)} · ${kind.downloadNote}")
+                                }
+                            }
                             if (selected) {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
@@ -285,6 +301,24 @@ fun SettingsScreenModern(
                             }
                         }
                     }
+                }
+
+                if (state.setupSnapshot.status == RuntimeSetupStatus.RUNNING) {
+                    LinearProgressIndicator(
+                        progress = state.setupSnapshot.progress,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = state.setupSnapshot.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (state.setupSnapshot.status == RuntimeSetupStatus.ERROR) {
+                    Text(
+                        text = state.setupSnapshot.errorMessage.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
 
                 if (state.agentKind == AgentKind.ANTIGRAVITY) {

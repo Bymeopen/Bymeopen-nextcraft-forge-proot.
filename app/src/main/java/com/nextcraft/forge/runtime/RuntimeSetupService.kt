@@ -289,14 +289,22 @@ class RuntimeSetupService : Service() {
                 .mapNotNull { name -> runCatching { DevStack.valueOf(name.trim()) }.getOrNull() }
                 .toSet()
             val agent = AgentKind.fromStored(intent?.getStringExtra(EXTRA_AGENT)?.trim())
+            // Manual install of a single agent on top of an existing Core runtime.
+            val agentOnly = intent?.action == ACTION_INSTALL_AGENT
             RuntimeSetupController.begin(this)
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     previousJob?.join()
-                    RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
+                    val installer = RuntimeInstaller(this@RuntimeSetupService)
+                    val onProgress: suspend (RuntimeInstallProgress) -> Unit = { progress ->
                         RuntimeSetupController.update(this@RuntimeSetupService, progress)
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
                         renewWakeLock()
+                    }
+                    if (agentOnly) {
+                        installer.ensureAgentInstalled(agent, onProgress)
+                    } else {
+                        installer.ensureInstalled(stacks, agent, onProgress)
                     }
                     AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
                     RuntimeSetupController.complete(this@RuntimeSetupService)
@@ -439,6 +447,7 @@ class RuntimeSetupService : Service() {
 
     companion object {
         const val ACTION_START = "com.nextcraft.forge.START_SETUP"
+        const val ACTION_INSTALL_AGENT = "com.nextcraft.forge.INSTALL_AGENT"
         const val ACTION_STOP = "com.nextcraft.forge.STOP_SETUP"
         const val EXTRA_STACKS = "selected_stacks"
         const val EXTRA_AGENT = "selected_agent"

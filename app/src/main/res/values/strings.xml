@@ -200,6 +200,8 @@
     <string name="shell_installed_ready">Installed &amp; ready</string>
     <string name="shell_resume_setup">Resume Setup</string>
     <string name="shell_install_runtime">Install Chroot Runtime</string>
+    <string name="settings_agent_install">Install</string>
+    <string name="settings_agent_installed">Installed</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>

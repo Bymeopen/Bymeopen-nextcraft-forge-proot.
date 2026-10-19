@@ -109,6 +109,7 @@ data class ForgeUiState(
     val setupSnapshot: RuntimeSetupSnapshot = RuntimeSetupSnapshot(),
     val selectedDevStacks: Set<DevStack> = setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID),
     val installedDevStacks: Set<DevStack> = emptySet(),
+    val installedAgents: Set<AgentKind> = emptySet(),
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     val activeTab: ForgeTab = ForgeTab.AGENT,
     val themeMode: String = "dark",
@@ -429,11 +430,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptySet()
             }
+            val installedAgents = withContext(Dispatchers.IO) {
+                AgentKind.entries.filter { installer.isAgentInstalled(it) }.toSet()
+            }
             _state.update {
                 it.copy(
                     rootAvailable = rootOk,
                     runtimeInstalled = installed,
                     installedDevStacks = installedStacks,
+                    installedAgents = installedAgents,
                 )
             }
         }
@@ -462,6 +467,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .setAction(RuntimeSetupService.ACTION_START)
                 .putExtra(RuntimeSetupService.EXTRA_STACKS, stacksCsv)
                 .putExtra(RuntimeSetupService.EXTRA_AGENT, current.agentKind.name),
+        )
+    }
+
+    /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
+    fun installAgent(agent: AgentKind) {
+        val current = _state.value
+        if (!current.runtimeInstalled || current.sessionRunning ||
+            current.setupSnapshot.status == RuntimeSetupStatus.RUNNING
+        ) {
+            _state.update { it.copy(bannerMessage = "Finish the base runtime setup first, and wait for any running task.") }
+            return
+        }
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), RuntimeSetupService::class.java)
+                .setAction(RuntimeSetupService.ACTION_INSTALL_AGENT)
+                .putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name),
         )
     }
 

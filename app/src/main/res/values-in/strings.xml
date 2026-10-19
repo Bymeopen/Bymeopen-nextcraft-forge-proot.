@@ -200,6 +200,8 @@
     <string name="shell_installed_ready">Terpasang &amp; siap</string>
     <string name="shell_resume_setup">Lanjutkan pemasangan</string>
     <string name="shell_install_runtime">Pasang runtime chroot</string>
+    <string name="settings_agent_install">Pasang</string>
+    <string name="settings_agent_installed">Terpasang</string>
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
