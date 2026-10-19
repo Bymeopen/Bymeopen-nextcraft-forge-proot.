@@ -482,7 +482,7 @@ private const val MAX_PROJECT_NAME = 80
 /** Project card: folder tile, name, description, guest path, language and age, plus a rename/delete menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProjectRow(
+internal fun ProjectRow(
     project: Project,
     active: Boolean,
     locked: Boolean,
@@ -494,6 +494,8 @@ private fun ProjectRow(
     var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val muted = scheme.onSurfaceVariant
+    // Phones up to ~6.3in report <= 400dp wide: a smaller tile and gaps give the text column 16dp more.
+    val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 400
 
     ForgeThemedCard(
         modifier = Modifier
@@ -506,14 +508,14 @@ private fun ProjectRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(enabled = !locked, role = Role.Button, onClick = onOpen, onLongClick = { menuOpen = true })
-                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
+                .padding(start = if (narrow) 12.dp else 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
+                modifier = Modifier.size(if (narrow) 44.dp else 52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
-            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = 26.dp) }
-            Spacer(modifier = Modifier.width(16.dp))
+            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = if (narrow) 22.dp else 26.dp) }
+            Spacer(modifier = Modifier.width(if (narrow) 12.dp else 16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = project.name,
@@ -544,7 +546,9 @@ private fun ProjectRow(
                     text = listOf(project.localizedLanguage(), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
                     fontSize = ForgeType.secondary,
                     color = muted,
-                    maxLines = 1,
+                    // Two lines: one line clipped "Kotlin / TypeScript / Python · 39" before the unit on 360-412dp phones.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Box {

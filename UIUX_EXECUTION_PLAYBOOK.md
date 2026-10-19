@@ -364,3 +364,5 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Batch A (reset): shared ForgeProjectHeader / ForgeListRow / ForgeEmptyState (ForgeShared.kt); project header on Chats, Files, Terminal, Preview and tool screens; Tools launcher single-accent stroke tiles; uniform empty states (Projects, Chats, Preview); diff review buttons 48dp.
 
 - UX audit fixes: removed doubled status-bar inset, compact user bubbles (long-press copy), Agent endpoint/credentials subtitles, localised model/auth/project strings, borderless GitHub dialog, auto-approve warning, aligned settings toggles, Android-only run button, active chat marked by weight, Editor duplicate removed from Tools, nav pill fits Pengaturan.
+
+- Phone sizes 6.1-6.9in: real Compose renders at 360/393/412/440dp (opt-in harness: gradle :app:testDebugUnitTest -PforgeScreenshots -PforgeRoboDir=<dir with android-all-instrumented-14-robolectric-10818077-i6.jar>, output app/build/screenshots). Fixed: two-line list subtitles, project card meta line + compact tile under 400dp, chat copy button no longer overlaps text, 10.5sp nav labels when 5 tabs share <76dp slots.

@@ -773,7 +773,7 @@ private fun ToolApprovalCard(
 }
 
 @Composable
-private fun ChatMessageCard(
+internal fun ChatMessageCard(
     message: ChatMessage,
     agentName: String,
     onRunSnippet: (String) -> Unit,
@@ -824,7 +824,8 @@ private fun ChatMessageCard(
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    Column(modifier = Modifier.padding(end = 32.dp)) {
+                    // 44dp: the copy button is a 48dp touch box; 32dp let it cover the end of the first lines.
+                    Column(modifier = Modifier.padding(end = 44.dp)) {
                         MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
                         if (streaming) {
                             // Blinking caret says "still arriving" without a spinner.

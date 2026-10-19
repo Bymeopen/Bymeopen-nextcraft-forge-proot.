@@ -97,6 +97,25 @@ android {
         }
     }
 
+    // Opt-in layout screenshots across phone sizes: ./gradlew :app:testDebugUnitTest -PforgeScreenshots
+    // (needs the Robolectric SDK download; default builds are unaffected).
+    if (project.hasProperty("forgeScreenshots")) {
+        testOptions {
+            unitTests {
+                isIncludeAndroidResources = true
+                all {
+                    // -PforgeRoboDir=<dir with android-all-instrumented-*.jar> runs Robolectric without network access.
+                    (project.findProperty("forgeRoboDir") as String?)?.let { dir ->
+                        it.systemProperty("robolectric.offline", "true")
+                        it.systemProperty("robolectric.dependency.dir", dir)
+                    }
+                    it.maxHeapSize = "2g"
+                }
+            }
+        }
+        sourceSets.getByName("test").java.srcDir("src/screenshotTest/java")
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -125,6 +144,10 @@ dependencies {
     // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
     implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     testImplementation("junit:junit:4.13.2")
+    if (project.hasProperty("forgeScreenshots")) {
+        testImplementation("org.robolectric:robolectric:4.12.2")
+        testImplementation("androidx.compose.ui:ui-test-junit4")
+    }
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
