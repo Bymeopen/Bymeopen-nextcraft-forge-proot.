@@ -70,6 +70,7 @@ import com.nextcraft.forge.runtime.RuntimeSetupService
 import com.nextcraft.forge.runtime.RuntimeSetupSnapshot
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import com.nextcraft.forge.runtime.RuntimeTaskController
+import com.termux.terminal.TerminalSession
 import com.nextcraft.forge.runtime.WorkspaceCheckpoints
 import org.json.JSONObject
 import com.nextcraft.forge.runtime.androidGradleCommand
@@ -211,7 +212,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeAgentJob: Job? = null
     private var activeBuildJob: Job? = null
     private var activeBuildProcess: Process? = null
-    private var activeTerminalJob: Job? = null
     @Volatile private var activeTerminalProcess: Process? = null
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
@@ -814,6 +814,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingDelete = null
         pendingDeleteJob?.cancel()
         val project = pending.project
+        stopTerminalSessionOf(project.id)
         synchronized(reservedSlugs) { reservedSlugs -= project.slug }
         _state.update { it.copy(undoDelete = null) }
         viewModelScope.launch(Dispatchers.IO) { wipeProjectData(project) }
@@ -1816,54 +1817,126 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun runTerminalCommand(command: String) {
-        val cleanCmd = command.trim()
-        if (cleanCmd.isEmpty() || _state.value.terminalRunning) return
+    // --- Interactive terminal ---------------------------------------------------------------------------------
+    // One persistent shell per project, run by the Termux terminal emulator on its own PTY: the root chroot when
+    // it is installed and root is granted, otherwise the Android shell in the workspace. The UI (TerminalScreen)
+    // attaches a TerminalView to the session; the shell starts when the view is first laid out.
+
+    private val terminalSessions = mutableMapOf<String, TerminalSession>()
+    private val terminalFinished = mutableSetOf<String>()
+    private val terminalStarting = mutableSetOf<String>()
+
+    /** Commands sent before the shell exists (e.g. "Run in terminal" from chat), per project. */
+    private val pendingTerminalInput = mutableMapOf<String, MutableList<String>>()
+
+    val terminalSessionClient = ForgeTerminalSessionClient(application) { session -> onTerminalSessionEnded(session) }
+
+    fun currentTerminalSession(): TerminalSession? = terminalSessions[_state.value.activeProjectId]
+
+    fun isTerminalFinished(): Boolean = _state.value.activeProjectId in terminalFinished
+
+    /** Starts the active project's shell if it has none. An ended shell is replaced only by [restartTerminalSession]. */
+    fun ensureTerminalSession() {
         val project = _state.value.activeProject ?: return
-        _state.update {
-            it.copy(
-                terminalRunning = true,
-                terminalOutput = (it.terminalOutput + "\n$ $cleanCmd\n").takeLast(MAX_TERMINAL_CHARS),
-            )
-        }
-        activeTerminalJob = viewModelScope.launch {
-            var streamedAny = false
-            var output = ""
+        if (project.id in terminalSessions || project.id in terminalStarting) return
+        terminalStarting += project.id
+        viewModelScope.launch {
             try {
-                output = withContext(Dispatchers.IO) {
-                    val ws = checkpoints.ensureWorkspace(project.id)
-                    runCommandInChrootOrHost(project.slug, ws, cleanCmd) { chunkText ->
-                        streamedAny = true
-                        _state.update { current ->
-                            current.copy(
-                                terminalOutput = (current.terminalOutput + chunkText).takeLast(MAX_TERMINAL_CHARS),
-                            )
-                        }
-                    }
-                }
+                val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec(project) }
+                terminalSessions[project.id] = TerminalSession(
+                    spec.shell,
+                    spec.cwd,
+                    spec.args,
+                    spec.env,
+                    TERMINAL_TRANSCRIPT_ROWS,
+                    terminalSessionClient,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w("MainViewModel", "terminal session failed to start", e)
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.terminal_start_failed, e.message.orEmpty())) }
             } finally {
-                activeTerminalProcess = null
-                _state.update {
-                    val tail = if (streamedAny) "\n" else (output + "\n")
-                    it.copy(
-                        terminalRunning = false,
-                        terminalOutput = (it.terminalOutput + tail).takeLast(MAX_TERMINAL_CHARS),
-                    )
-                }
-                refreshWorkspaceFilesAndChanges(project.id)
+                terminalStarting -= project.id
+                _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
             }
         }
     }
 
-    fun stopTerminal() {
-        // Killing the process unblocks the reader thread; the job then ends normally and resets state.
-        activeTerminalProcess?.destroyForcibly()
-        activeTerminalJob?.cancel()
+    /** "Restart" after the shell ended: discards the dead session and starts a fresh one. */
+    fun restartTerminalSession() {
+        val id = _state.value.activeProjectId
+        terminalSessions.remove(id)?.finishIfRunning()
+        terminalFinished -= id
+        pendingTerminalInput.remove(id)
+        _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
+        ensureTerminalSession()
+    }
+
+    /** Types [command] and Enter into the shell. Queued (and the shell started) when it is not up yet. */
+    fun runTerminalCommand(command: String) {
+        val clean = command.trim()
+        if (clean.isEmpty()) return
+        val id = _state.value.activeProjectId
+        pendingTerminalInput.getOrPut(id) { mutableListOf() } += clean + "\r"
+        ensureTerminalSession()
+        flushTerminalInput()
+    }
+
+    /** Sends queued input once the emulator behind the active session exists (it is created on first layout). */
+    fun flushTerminalInput() {
+        val id = _state.value.activeProjectId
+        val session = terminalSessions[id] ?: return
+        if (session.emulator == null || id in terminalFinished) return
+        pendingTerminalInput.remove(id)?.forEach { session.write(it) }
     }
 
     fun clearTerminal() {
-        _state.update { it.copy(terminalOutput = "") }
+        // reset() clears the screen and attributes; the shell redraws its prompt on the next key.
+        terminalSessions[_state.value.activeProjectId]?.reset()
     }
+
+    private fun onTerminalSessionEnded(session: TerminalSession) {
+        val id = terminalSessions.entries.firstOrNull { it.value === session }?.key ?: return
+        terminalFinished += id
+        pendingTerminalInput.remove(id)
+        _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
+    }
+
+    private fun stopTerminalSessionOf(projectId: String) {
+        terminalSessions.remove(projectId)?.finishIfRunning()
+        terminalFinished -= projectId
+        pendingTerminalInput.remove(projectId)
+    }
+
+    private class TerminalLaunchSpec(val shell: String, val cwd: String, val args: Array<String>, val env: Array<String>)
+
+    /** Blocking (file IO, root probe): call off the main thread. */
+    private fun buildTerminalLaunchSpec(project: Project): TerminalLaunchSpec {
+        val app = getApplication<Application>()
+        val workspace = checkpoints.ensureWorkspace(project.id)
+        val env = System.getenv().toMutableMap().apply {
+            put("TERM", "xterm-256color")
+            put("COLORTERM", "truecolor")
+            put("LANG", "C.UTF-8")
+        }
+        val chroot = installer.isInstalled() && isRootAccessAvailable() && installer.installedRuntime().chrootExec.isFile
+        return if (chroot) {
+            // The guest environment (PATH, HOME, TERM, provider keys) travels in a one-shot env file sourced by su.
+            val (_, suCommand) = installer.prepareChrootShellCommand(
+                workspace = workspace,
+                guestWorkspacePath = "/workspace/${project.slug}",
+                environment = activeChrootEnvironment(),
+                guestCommand = listOf("/bin/bash", "-l"),
+            )
+            TerminalLaunchSpec("su", app.filesDir.absolutePath, arrayOf("su", "-mm", "-c", suCommand), env.toEnvArray())
+        } else {
+            env["HOME"] = app.filesDir.absolutePath
+            TerminalLaunchSpec("/system/bin/sh", workspace.absolutePath, arrayOf("sh"), env.toEnvArray())
+        }
+    }
+
+    private fun Map<String, String>.toEnvArray(): Array<String> = map { "${it.key}=${it.value}" }.toTypedArray()
 
     private fun activeChrootEnvironment(): Map<String, String> {
         val profile = _state.value.providerProfile
@@ -3108,7 +3181,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun releaseMemoryCaches() {
         _state.update {
             it.copy(
-                terminalOutput = it.terminalOutput.takeLast(16 * 1024),
                 androidLogcat = it.androidLogcat.copy(lines = it.androidLogcat.lines.takeLast(100)),
             )
         }
@@ -3214,6 +3286,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
         activeTerminalProcess?.destroyForcibly()
+        terminalSessions.values.forEach { it.finishIfRunning() }
         super.onCleared()
     }
 
@@ -3224,6 +3297,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_IMPORT_ENTRIES = 50_000
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024
+        const val TERMINAL_TRANSCRIPT_ROWS = 4000
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
         const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }
