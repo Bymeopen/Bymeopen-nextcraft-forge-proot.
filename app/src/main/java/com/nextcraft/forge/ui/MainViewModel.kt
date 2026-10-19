@@ -1031,6 +1031,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is RuntimeEvent.ToolApproved, is RuntimeEvent.ToolRejected -> {
                 _state.update { it.copy(pendingToolRequest = null) }
             }
+            is RuntimeEvent.PermissionDenied -> {
+                // Say so in the chat instead of failing the session: the agent receives the refusal and carries on.
+                appendAssistantText(
+                    "\n\n" + getApplication<Application>().getString(
+                        R.string.msg_permission_denied,
+                        event.toolName,
+                        event.reason.take(300),
+                    ) + "\n",
+                )
+            }
             is RuntimeEvent.FilesChanged -> {
                 _state.update { it.copy(changedItems = event.changes) }
                 _state.value.activeProject?.let { refreshWorkspaceFilesAndChanges(it.id) }

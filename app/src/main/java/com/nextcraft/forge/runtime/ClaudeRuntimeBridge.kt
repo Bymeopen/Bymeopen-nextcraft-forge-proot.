@@ -476,6 +476,7 @@ class ClaudeRuntimeBridge(
                 if (pending.remove(expired.request.approvalId, expired)) {
                     runCatching { expired.response.writeText("deny") }
                     eventBus.emit(RuntimeEvent.ToolRejected(sessionId, expired.request.approvalId))
+                    eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, expired.request.toolName, "no answer was given in time"))
                 }
             }
     }
@@ -515,10 +516,10 @@ class ClaudeRuntimeBridge(
                     response.writeText("deny")
                     runCatching { file.delete() }
                     eventBus.emit(
-                        RuntimeEvent.RuntimeLog(
+                        RuntimeEvent.PermissionDenied(
                             sessionId,
-                            "Permission denied",
-                            sanitizeForDisplay("Blocked high-risk $toolName request: $explanation"),
+                            toolName,
+                            sanitizeForDisplay("high-risk request blocked: $explanation"),
                         ),
                     )
                 }
@@ -647,13 +648,21 @@ class ClaudeRuntimeBridge(
                         val result = extractedContent
                             .ifBlank { if (block.optBoolean("is_error")) "Tool failed" else "Completed successfully" }
                         eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, sanitizeForDisplay(result)))
+                        if (block.optBoolean("is_error") && isPermissionDenialText(result)) {
+                            eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, toolName, sanitizeForDisplay(result)))
+                        }
                     }
                 }
             }
             "result" -> {
                 if (json.optBoolean("is_error")) {
                     val message = json.stringOrEmpty("result").ifBlank { "Claude Code reported an error" }
-                    throw IllegalStateException(message)
+                    if (isPermissionDenialText(message)) {
+                        // A refusal is not a failed connection: tell the user and let the session carry on.
+                        eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, "Tool", sanitizeForDisplay(message)))
+                    } else {
+                        throw IllegalStateException(message)
+                    }
                 }
                 turnCompletedFromStream = true
                 terminateActiveProcessGracefully()
@@ -895,6 +904,14 @@ class ClaudeRuntimeBridge(
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
     }
 }
+
+private val PERMISSION_DENIAL_REGEX = Regex(
+    "permission.{0,60}denied|denied.{0,40}permission|not allowed|doesn't want to proceed|user rejected|blocked by|requires approval",
+    RegexOption.IGNORE_CASE,
+)
+
+/** True for Claude Code's text when a tool call was refused by permissions rather than failing for a technical reason. */
+internal fun isPermissionDenialText(text: String): Boolean = PERMISSION_DENIAL_REGEX.containsMatchIn(text)
 
 private val DANGEROUS_PATTERNS = listOf(
     "git push", "git reset", "git clean", "git checkout --", "sudo", "curl ", "wget ", "chmod ", "chown ", "mkfs",
