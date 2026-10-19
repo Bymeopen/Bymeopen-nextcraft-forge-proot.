@@ -241,7 +241,7 @@ fun AgentScreen(
 
         if (state.messages.isEmpty()) {
             // Empty chat: one quiet greeting from the agent, nothing else competing with the composer.
-            Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp)) {
+            Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp)) {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = tokens.cardContainerColor,
@@ -254,6 +254,28 @@ fun AgentScreen(
                         fontSize = ForgeType.rowTitle,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     )
+                }
+                // Starter prompts: tapping one fills the composer (it is not sent), so it can be edited first.
+                ForgeSectionLabel(stringResource(R.string.agent_suggest_title), horizontalPadding = 4.dp)
+                listOf(R.string.agent_suggest_explain, R.string.agent_suggest_fix, R.string.agent_suggest_feature).forEach { res ->
+                    val suggestion = stringResource(res)
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = tokens.cardContainerColor,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        border = tokens.cardBorderStroke,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(role = Role.Button) { promptInput = suggestion },
+                    ) {
+                        Text(
+                            text = suggestion,
+                            fontSize = ForgeType.body,
+                            modifier = Modifier.heightIn(min = ForgeSpace.minTouch).padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    }
                 }
             }
         } else {

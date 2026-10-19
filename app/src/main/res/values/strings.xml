@@ -556,6 +556,13 @@
     <string name="build_stage_failed">Build failed</string>
     <string name="build_stage_cancelling">Cancelling build…</string>
     <string name="build_stage_cancelled">Build cancelled</string>
+    <string name="files_empty_title">No files yet</string>
+    <string name="files_empty_message">Create a file, or ask the agent to scaffold the project.</string>
+    <string name="files_empty_action">New file</string>
+    <string name="agent_suggest_title">Try asking</string>
+    <string name="agent_suggest_explain">Explain how this project is structured</string>
+    <string name="agent_suggest_fix">Find and fix bugs in the code</string>
+    <string name="agent_suggest_feature">Add a new feature (I will describe it)</string>
     <string name="msg_project_deleted">Deleted \"%1$s\"</string>
     <string name="action_undo">Undo</string>
     <string name="msg_busy_before_delete">Cannot delete a project while an agent session, build, or terminal command is running.</string>

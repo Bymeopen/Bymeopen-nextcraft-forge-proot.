@@ -544,6 +544,13 @@
     <string name="build_stage_failed">Build gagal</string>
     <string name="build_stage_cancelling">Membatalkan build…</string>
     <string name="build_stage_cancelled">Build dibatalkan</string>
+    <string name="files_empty_title">Belum ada file</string>
+    <string name="files_empty_message">Buat file, atau minta agen menyusun kerangka proyek.</string>
+    <string name="files_empty_action">File baru</string>
+    <string name="agent_suggest_title">Coba tanyakan</string>
+    <string name="agent_suggest_explain">Jelaskan struktur proyek ini</string>
+    <string name="agent_suggest_fix">Cari dan perbaiki bug di kode</string>
+    <string name="agent_suggest_feature">Tambahkan fitur baru (saya akan jelaskan)</string>
     <string name="msg_project_deleted">\"%1$s\" dihapus</string>
     <string name="action_undo">Urungkan</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>

@@ -366,14 +366,15 @@ private fun WorkspaceTreeList(
     modifier: Modifier = Modifier,
 ) {
     if (entries.isEmpty()) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.files_workspace_is_empty_use),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
+        // An empty workspace is a starting point: offer the action instead of describing a "+" menu.
+        ForgeEmptyState(
+            glyph = ForgeGlyph.FOLDER,
+            title = stringResource(R.string.files_empty_title),
+            message = stringResource(R.string.files_empty_message),
+            actionLabel = stringResource(R.string.files_empty_action).takeIf { enabled },
+            onAction = if (enabled) { { onNewFileIn("") } } else null,
+            modifier = modifier.fillMaxSize(),
+        )
         return
     }
 
