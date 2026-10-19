@@ -65,19 +65,19 @@ enum class AgentKind(
         "claude-code",
         "Claude Code",
         "Anthropic's coding agent · broad provider support",
-        "71.8 MB",
+        "71.9 MB",
     ),
     DEEPSEEK_HARNESS(
         "deepseek-harness",
         "DeepSeek Harness",
         "Official DeepSeek coding agent · API-key providers",
-        "26.5 MB",
+        "26.8 MB",
     ),
     ANTIGRAVITY(
         "antigravity",
         "Antigravity CLI",
         "Google's official coding agent · Google account",
-        "39.9 MB",
+        "40.1 MB",
     ),
     ;
 
@@ -331,6 +331,8 @@ sealed interface RuntimeEvent {
     data class ToolRequested(override val sessionId: String, val request: ToolRequest) : RuntimeEvent
     data class ToolApproved(override val sessionId: String, val approvalId: String) : RuntimeEvent
     data class ToolRejected(override val sessionId: String, val approvalId: String) : RuntimeEvent
+    /** The system (not the user) refused a tool call. The session stays connected; the user is told what was refused. */
+    data class PermissionDenied(override val sessionId: String, val toolName: String, val reason: String) : RuntimeEvent
     data class ToolCompleted(override val sessionId: String, val toolName: String, val summary: String) : RuntimeEvent
     data class FilesChanged(override val sessionId: String, val changes: List<ChangeItem>) : RuntimeEvent {
         val paths: List<String> get() = changes.map { it.path }

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terminal screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>body{margin:0;font-family:Inter,system-ui,sans-serif}a{color:inherit;text-decoration:none}a:hover{color:inherit}.mono{font-family:"JetBrains Mono",ui-monospace,monospace}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: {{bg}}; color: {{text}}; position: relative; overflow: hidden">
+  <div style="height: 44px; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 28px 6px; font-size: 14px; font-weight: 600"><span>4:16</span><span>82</span></div>
+  <div style="display: flex; align-items: center; padding: 10px 14px 0 20px; gap: 10px">
+    <div style="flex: 1; display: flex; flex-direction: column"><div style="font-size: 27px; font-weight: 600">Terminal</div><div style="font-size: 14px; color: {{muted}}">my-todo-app · {{shellLabel}}</div></div>
+    <div style="height: 38px; border-radius: 19px; background: {{pillBg}}; display: flex; align-items: center; padding: 0 4px">
+      <button type="button" onClick="{{clear}}" aria-label="Clear output" style="width: 44px; height: 38px; border: 0; background: transparent; color: {{text}}; font-size: 16px; cursor: pointer; font-family: inherit">⌫</button>
+      <button type="button" onClick="{{toggleRun}}" aria-label="{{runLabel}}" style="width: 44px; height: 38px; border: 0; background: transparent; color: {{runColor}}; font-size: 16px; cursor: pointer; font-family: inherit">{{runGlyph}}</button>
+    </div>
+  </div>
+  <div style="display: flex; gap: 6px; padding: 10px 14px 6px; overflow: auto">
+    <sc-for list="{{quick}}" as="q" hint-placeholder-count="4">
+      <button type="button" onClick="{{q.pick}}" class="mono" style="height: 32px; padding: 0 12px; border-radius: 16px; border: 0; background: {{pillBg}}; color: {{text}}; font-size: 12.5px; cursor: pointer; white-space: nowrap">{{q.cmd}}</button>
+    </sc-for>
+  </div>
+  <div class="mono" style="flex: 1; margin: 6px 14px 0; border-radius: 16px; background: {{term}}; color: {{termText}}; font-size: 12.5px; line-height: 18px; padding: 14px; overflow: auto; white-space: pre-wrap; margin-bottom: 150px">{{output}}</div>
+  <div style="position: absolute; left: 14px; right: 14px; bottom: 86px; height: 52px; border-radius: 26px; background: {{card}}; border: {{cardBorder}}; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 16px; box-sizing: border-box">
+    <span class="mono" style="color: {{accent}}; font-size: 14px">$</span>
+    <label style="flex: 1; display: flex"><span style="position: absolute; left: -9999px">Command</span><input type="text" placeholder="Type a command…" class="mono" style="flex: 1; border: 0; background: transparent; color: {{text}}; font-size: 14px; outline: 0; font-family: inherit"></label>
+    <button type="button" aria-label="Run" style="width: 38px; height: 38px; border-radius: 50%; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 15px; cursor: pointer; font-family: inherit">↵</button>
+  </div>
+  <a href="Main.dc.html" style="position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: {{barBg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; color: {{muted}}; border-top: 0.5px solid {{line}}">Projects · Terminal · Agent · Tools · Settings — open Navigation for the live bar</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["linear","system","white","glass"],"default":"linear","section":"Theme"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = { running: false, lines: [
+      '$ ./gradlew assembleDebug',
+      '> Task :app:compileDebugKotlin',
+      'w: TodoList.kt:12 unused variable \'x\'',
+      '> Task :app:packageDebug',
+      'BUILD SUCCESSFUL in 41s',
+      '$ git status --short',
+      ' M app/src/main/java/TodoList.kt',
+      '?? app/src/main/java/TodoItem.kt',
+    ] };
+  }
+  renderVals() {
+    const t = this.props.theme ?? 'linear';
+    const P = {
+      linear: { bg: '#0B0B0B', text: '#EDEDED', muted: '#9C9C9C', line: '#1E1E1E', ring: '#4A4A4A', accent: '#5E6AD2', onAccent: '#FFFFFF', card: '#131313', cardBorder: '0', barBg: '#131313', pillBg: 'rgba(255,255,255,.07)', term: '#070707', termText: '#E6E6E6' },
+      system: { bg: '#141218', text: '#E6E0E9', muted: '#CAC4D0', line: '#2B2930', ring: '#6F6B76', accent: '#D0BCFF', onAccent: '#381E72', card: '#211F26', cardBorder: '0', barBg: '#211F26', pillBg: 'rgba(255,255,255,.08)', term: '#0F0D13', termText: '#E6E0E9' },
+      white:  { bg: '#FFFFFF', text: '#111111', muted: '#666666', line: '#E4E4E4', ring: '#BDBDBD', accent: '#D70F47', onAccent: '#FFFFFF', card: '#F7F7F7', cardBorder: '0.5px solid #E4E4E4', barBg: '#F7F7F7', pillBg: 'rgba(0,0,0,.06)', term: '#F3F3F3', termText: '#222222' },
+      glass:  { bg: 'linear-gradient(160deg,#0D1326 0%,#1A1038 55%,#0B1B2E 100%)', text: '#FFFFFF', muted: '#C3C8DC', line: 'rgba(255,255,255,.12)', ring: '#7A81A0', accent: '#7C8CFF', onAccent: '#0B1030', card: 'rgba(255,255,255,.06)', cardBorder: '1px solid rgba(255,255,255,.22)', barBg: 'rgba(255,255,255,.07)', pillBg: 'rgba(255,255,255,.10)', term: 'rgba(7,10,20,.58)', termText: '#F8FAFC' },
+    }[t];
+    const running = this.state.running;
+    const quick = ['ls -la', 'git status', './gradlew build', 'npm run dev'].map((cmd) => ({
+      cmd, pick: () => this.setState({ lines: [...this.state.lines, '$ ' + cmd, '… running'], running: true }),
+    }));
+    return {
+      ...P, quick,
+      shellLabel: running ? 'running' : 'bash · idle',
+      output: this.state.lines.join('\n') + (running ? '' : '\n$ '),
+      clear: () => this.setState({ lines: [], running: false }),
+      toggleRun: () => this.setState({ running: !running }),
+      runLabel: running ? 'Stop process' : 'Run last command', runGlyph: running ? '■' : '▶', runColor: running ? '#E5484D' : P.text,
+    };
+  }
+}
+</script>
+</body>
+</html>

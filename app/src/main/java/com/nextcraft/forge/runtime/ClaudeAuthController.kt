@@ -1,0 +1,389 @@
+package com.nextcraft.forge.runtime
+
+import android.content.Context
+import com.nextcraft.forge.model.AgentKind
+import java.io.File
+import java.io.RandomAccessFile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
+
+enum class ClaudeAuthStatus { SIGNED_OUT, STARTING, AWAITING_BROWSER, COMPLETING, SIGNED_IN, ERROR }
+
+/** How `claude auth login` should authenticate. */
+enum class ClaudeLoginMode(val flag: String?) {
+    /** Claude subscription (Pro, Max, Team, Enterprise) with the normal email / Google login. */
+    CLAUDE_ACCOUNT("--claudeai"),
+    /** Single sign-on of an organization (`--sso`), optionally with the email pre-filled. */
+    SSO("--sso"),
+    /** Anthropic Console account, billed per API usage. */
+    CONSOLE("--console"),
+}
+
+data class ClaudeAuthState(
+    val status: ClaudeAuthStatus = ClaudeAuthStatus.SIGNED_OUT,
+    /** Link to open in the Android browser; its redirect to http://localhost:<port>/callback finishes sign-in on its own. */
+    val authorizationUrl: String? = null,
+    /** Fallback link whose page shows a code to paste when the automatic redirect cannot reach the CLI. */
+    val manualUrl: String? = null,
+    val message: String? = null,
+    val accountEmail: String? = null,
+)
+
+/**
+ * Drives Claude Code's official `claude auth login` inside the Root Chroot. Browser sign-in (including SSO) is
+ * completed either by the localhost redirect, which reaches the CLI because the chroot shares the device's network
+ * namespace, or by pasting the code shown on the sign-in page. The tokens stay in `~/.claude/.credentials.json`,
+ * managed (and refreshed) by the CLI itself; this class never reads them.
+ */
+class ClaudeAuthController(
+    private val context: Context,
+    private val onSignedInChanged: (Boolean) -> Unit = {},
+) {
+    private val installer = RuntimeInstaller(context)
+    private val mutableState = MutableStateFlow(ClaudeAuthState())
+    val state: StateFlow<ClaudeAuthState> = mutableState.asStateFlow()
+    private val loginGeneration = java.util.concurrent.atomic.AtomicInteger()
+    private val authOutput = File(context.cacheDir, "claude-auth-output.log")
+    private val urlFile = File(RuntimeInstaller.bridgeRootDir(context), "claude-login-url")
+    @Volatile private var process: Process? = null
+    private val loginStarting = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var stateBeforeLogin: ClaudeAuthState? = null
+
+    init {
+        authOutput.delete()
+    }
+
+    fun hasCredential(): Boolean = installer.hasClaudeLoginCredential()
+
+    /** Marks the state as signed in when a previous session left a login behind (checked off the main thread). */
+    suspend fun refreshFromDisk() = withContext(Dispatchers.IO) {
+        val current = mutableState.value.status
+        if (current != ClaudeAuthStatus.SIGNED_OUT && current != ClaudeAuthStatus.SIGNED_IN) return@withContext
+        mutableState.value = if (hasCredential()) {
+            mutableState.value.copy(status = ClaudeAuthStatus.SIGNED_IN, message = null)
+        } else {
+            ClaudeAuthState()
+        }
+    }
+
+    suspend fun beginLogin(mode: ClaudeLoginMode, email: String = "") = withContext(Dispatchers.IO) {
+        if (!loginStarting.compareAndSet(false, true)) return@withContext
+        try {
+            beginLoginLocked(mode, email.trim())
+        } finally {
+            loginStarting.set(false)
+        }
+    }
+
+    private suspend fun beginLoginLocked(mode: ClaudeLoginMode, email: String) {
+        // Tapping "Sign in with SSO" while the account flow is still waiting must restart with the new mode; silently
+        // keeping the old process made the SSO button look dead. cancel() ends the old reader loop, which nulls `process`.
+        if (process?.isAlive == true) {
+            cancel()
+            val giveUp = android.os.SystemClock.elapsedRealtime() + RESTART_WAIT_MS
+            while (process != null && android.os.SystemClock.elapsedRealtime() < giveUp) delay(50)
+            if (process?.isAlive == true) {
+                mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Previous sign-in is still closing. Try again.")
+                return
+            }
+            process = null
+        }
+        if (!installer.isAgentInstalled(AgentKind.CLAUDE_CODE)) {
+            mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Install Claude Code first.")
+            return
+        }
+        if (email.isNotEmpty() && !EMAIL_PATTERN.matches(email)) {
+            mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Enter a valid email address.")
+            return
+        }
+        stateBeforeLogin = mutableState.value.takeIf { it.status == ClaudeAuthStatus.SIGNED_IN }
+        mutableState.value = ClaudeAuthState(ClaudeAuthStatus.STARTING, message = "Starting Claude sign-in…")
+        authOutput.delete()
+        urlFile.delete()
+        val running = try {
+            installer.ensureSettingsAndHooks() // installs the BROWSER helper
+            val runtime = installer.installedRuntime()
+            val workspace = File(context.filesDir, "workspaces/claude-auth").apply { mkdirs() }
+            val command = buildList {
+                add(CLAUDE_BINARY)
+                add("auth")
+                add("login")
+                mode.flag?.let(::add)
+                if (email.isNotEmpty()) {
+                    add("--email")
+                    add(email)
+                }
+            }
+            val spawned = installer.process(
+                runtime.chrootExec,
+                runtime.rootfs,
+                workspace,
+                mapOf(
+                    "BROWSER" to "/opt/pocket/open-url.sh",
+                    "TERM" to "xterm-256color",
+                    "NO_COLOR" to "1",
+                    "DISABLE_AUTOUPDATER" to "1",
+                ),
+                command,
+                guestWorkspacePath = "/workspace/claude-auth",
+                emulateHardLinks = false,
+                outputFile = authOutput,
+                pseudoTerminal = true,
+                ptyRows = 40,
+                ptyColumns = 160,
+            )
+            if (spawned !is NativeSpawnProcess) {
+                runCatching { spawned.destroyForcibly() }
+                error("Unsupported Claude authentication process")
+            }
+            spawned
+        } catch (error: Throwable) {
+            mutableState.value = ClaudeAuthState(
+                ClaudeAuthStatus.ERROR,
+                message = error.message?.take(240) ?: "Could not start Claude sign-in.",
+            )
+            return
+        }
+        process = running
+        // cancel()/logout() bump this so a loop that is still winding down cannot overwrite their state.
+        val generation = loginGeneration.get()
+        var offset = 0L
+        val output = StringBuilder()
+        val deadline = android.os.SystemClock.elapsedRealtime() + LOGIN_TIMEOUT_MS
+        var lastCredentialCheck = 0L
+        try {
+            RandomAccessFile(running.outputFile, "r").use { file ->
+                while (true) {
+                    if (generation != loginGeneration.get()) break
+                    if (android.os.SystemClock.elapsedRealtime() > deadline) error("Sign-in timed out. Start sign-in again.")
+                    val available = running.outputFile.length() - offset
+                    if (available > 0) {
+                        val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
+                        file.seek(offset)
+                        val count = file.read(bytes)
+                        if (count > 0) {
+                            val safe = completeUtf8PrefixLength(bytes, count).let { if (it > 0) it else count }
+                            offset += safe
+                            output.append(bytes.decodeToString(0, safe))
+                            if (output.length > MAX_OUTPUT_CHARS) output.delete(0, output.length - MAX_OUTPUT_CHARS / 2)
+                        }
+                    }
+                    val clean = sanitizeClaudeAuthOutput(output.toString())
+                    val manual = extractClaudeManualUrl(clean)
+                    val automatic = readAutomaticUrl()
+                    val current = mutableState.value
+                    val link = automatic ?: manual
+                    if (link != null &&
+                        (current.status == ClaudeAuthStatus.STARTING || current.status == ClaudeAuthStatus.AWAITING_BROWSER) &&
+                        (current.authorizationUrl != link || current.manualUrl != manual)
+                    ) {
+                        mutableState.value = ClaudeAuthState(
+                            ClaudeAuthStatus.AWAITING_BROWSER,
+                            authorizationUrl = link,
+                            manualUrl = manual,
+                            message = "Open the sign-in page. It finishes by itself; if it shows a code instead, paste it here.",
+                        )
+                    }
+                    if (clean.contains("authentication failed", true) || clean.contains("login failed", true) ||
+                        clean.contains("invalid code", true) || clean.contains("failed to exchange", true)
+                    ) {
+                        error("Claude sign-in failed. Start sign-in again.")
+                    }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val exited = !running.isAlive
+                    val looksDone = clean.contains("login successful", true) || clean.contains("logged in as", true)
+                    if (exited || looksDone || now - lastCredentialCheck > CREDENTIAL_POLL_MS) {
+                        lastCredentialCheck = now
+                        if ((exited || looksDone || mutableState.value.status == ClaudeAuthStatus.COMPLETING) && hasCredential()) {
+                            val account = readAccountEmail()
+                            mutableState.value = ClaudeAuthState(
+                                ClaudeAuthStatus.SIGNED_IN,
+                                message = account?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) } ?: context.getString(com.nextcraft.forge.R.string.auth_claude_connected),
+                                accountEmail = account,
+                            )
+                            onSignedInChanged(true)
+                            break
+                        }
+                    }
+                    if (exited && running.outputFile.length() <= offset) {
+                        error("Claude sign-in ended before completing (code ${runCatching { running.exitValue() }.getOrDefault(-1)}).")
+                    }
+                    delay(120)
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            if (mutableState.value.status != ClaudeAuthStatus.SIGNED_IN) {
+                mutableState.value = stateBeforeLogin ?: ClaudeAuthState()
+            }
+            throw cancelled
+        } catch (error: Throwable) {
+            if (generation == loginGeneration.get() && mutableState.value.status != ClaudeAuthStatus.SIGNED_IN) {
+                mutableState.value = ClaudeAuthState(
+                    ClaudeAuthStatus.ERROR,
+                    message = error.message?.take(240) ?: "Claude sign-in failed.",
+                )
+            }
+        } finally {
+            runCatching { running.outputStream.close() }
+            if (running.isAlive) {
+                runCatching { running.destroy() }
+                runCatching { if (running.isAlive) running.destroyForcibly() }
+            }
+            runCatching { running.waitFor() }
+            running.outputFile.delete() // OAuth terminal output is intentionally ephemeral.
+            urlFile.delete()
+            process = null
+        }
+    }
+
+    /** URL the CLI handed to its BROWSER helper: the one whose redirect is the CLI's own localhost listener. */
+    private fun readAutomaticUrl(): String? = runCatching {
+        urlFile.takeIf(File::isFile)?.readText()?.trim()?.takeIf { it.length < 4_096 && isTrustedSignInUrl(it) }
+    }.getOrNull()
+
+    /**
+     * The URL file is writable by any process in the chroot (including a prompt-injected agent), so only offer links
+     * to Anthropic's own sign-in hosts instead of whatever https:// string is found there.
+     */
+    private fun isTrustedSignInUrl(url: String): Boolean {
+        val host = runCatching { java.net.URI(url) }.getOrNull()?.takeIf { it.scheme == "https" }?.host?.lowercase() ?: return false
+        return TRUSTED_SIGN_IN_HOSTS.any { host == it || host.endsWith(".$it") }
+    }
+
+    /** Sends the code shown on the sign-in page (used when the automatic redirect did not reach the CLI). */
+    @Synchronized
+    fun submitCode(code: String) {
+        val value = code.trim()
+        require(value.isNotBlank()) { "Paste the code from the sign-in page first." }
+        try {
+            val running = process ?: error("Sign-in session is not active. Start sign-in again.")
+            check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
+            running.outputStream.write((value + "\r").toByteArray())
+            running.outputStream.flush()
+        } catch (error: Throwable) {
+            mutableState.value = ClaudeAuthState(
+                ClaudeAuthStatus.ERROR,
+                message = error.message?.take(240) ?: "Could not submit the code.",
+            )
+            throw error
+        }
+        mutableState.value = mutableState.value.copy(
+            status = ClaudeAuthStatus.COMPLETING,
+            message = "Completing Claude sign-in…",
+        )
+    }
+
+    suspend fun logout() = withContext(Dispatchers.IO) {
+        loginGeneration.incrementAndGet()
+        process?.let { running ->
+            runCatching { running.destroy() }
+            runCatching { if (running.isAlive) running.destroyForcibly() }
+        }
+        val previous = mutableState.value
+        mutableState.value = previous.copy(status = ClaudeAuthStatus.STARTING, message = "Signing out…")
+        try {
+            val runtime = installer.installedRuntime()
+            val workspace = File(context.filesDir, "workspaces/claude-auth").apply { mkdirs() }
+            val output = File(context.cacheDir, "claude-logout-output.log")
+            val logout = installer.process(
+                runtime.chrootExec,
+                runtime.rootfs,
+                workspace,
+                mapOf("DISABLE_AUTOUPDATER" to "1"),
+                listOf(CLAUDE_BINARY, "auth", "logout"),
+                guestWorkspacePath = "/workspace/claude-auth",
+                emulateHardLinks = false,
+                outputFile = output,
+            )
+            runCatching { logout.outputStream.close() }
+            if (!logout.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) logout.destroyForcibly()
+            output.delete()
+            check(!hasCredential()) { "Claude sign-out is incomplete." }
+            onSignedInChanged(false)
+            mutableState.value = ClaudeAuthState(message = "Signed out of Claude.")
+        } catch (error: Throwable) {
+            mutableState.value = previous.copy(message = error.message?.take(240) ?: "Could not sign out of Claude.")
+            throw error
+        }
+    }
+
+    fun cancel() {
+        loginGeneration.incrementAndGet()
+        val running = process
+        if (running != null) {
+            Thread {
+                runCatching {
+                    running.destroy()
+                    Thread.sleep(200)
+                    if (running.isAlive) running.destroyForcibly()
+                    running.waitFor()
+                }
+            }.apply { isDaemon = true }.start()
+        }
+        mutableState.value = stateBeforeLogin ?: ClaudeAuthState()
+    }
+
+    /** Email of the signed-in account from `claude auth status --json`; null when it cannot be determined. */
+    private fun readAccountEmail(): String? = runCatching {
+        val runtime = installer.installedRuntime()
+        val workspace = File(context.filesDir, "workspaces/claude-auth").apply { mkdirs() }
+        val output = File(context.cacheDir, "claude-status-output.log")
+        val status = installer.process(
+            runtime.chrootExec,
+            runtime.rootfs,
+            workspace,
+            mapOf("DISABLE_AUTOUPDATER" to "1"),
+            listOf(CLAUDE_BINARY, "auth", "status", "--json"),
+            guestWorkspacePath = "/workspace/claude-auth",
+            emulateHardLinks = false,
+            outputFile = output,
+        )
+        runCatching { status.outputStream.close() }
+        if (!status.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) status.destroyForcibly()
+        val text = output.readText()
+        output.delete()
+        val json = org.json.JSONObject(text.substring(text.indexOf('{')))
+        json.optString("email").takeIf { it.isNotBlank() }
+            ?: json.optJSONObject("account")?.optString("email")?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    private companion object {
+        const val CLAUDE_BINARY = "/usr/local/bin/claude"
+        val TRUSTED_SIGN_IN_HOSTS = listOf("claude.ai", "claude.com", "anthropic.com")
+        const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
+        const val RESTART_WAIT_MS = 5_000L
+        const val CREDENTIAL_POLL_MS = 2_000L
+        const val MAX_OUTPUT_CHARS = 100_000
+        val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
+    }
+}
+
+// OSC sequences (the hyperlink wrapper around the URL) are removed lazily so the visible URL text between the
+// opening and closing hyperlink escapes survives; other CSI/charset escapes are dropped.
+private val CLAUDE_AUTH_ANSI = Regex(
+    "\\u001B\\][^\\u0007\\u001B]*(?:\\u0007|\\u001B\\\\)|\\u001B\\[[0-?]*[ -/]*[@-~]|\\u001B[()][A-Z0-9]",
+)
+
+internal fun sanitizeClaudeAuthOutput(text: String): String = text
+    .replace(CLAUDE_AUTH_ANSI, "")
+    .filter { it == '\n' || it == '\r' || it == '\t' || it.code >= 0x20 }
+
+/**
+ * The fallback link printed after "visit:". It is long enough to wrap in the terminal, so everything up to the
+ * "Paste code" prompt is joined without whitespace.
+ */
+internal fun extractClaudeManualUrl(cleanOutput: String): String? {
+    val start = cleanOutput.indexOf("https://claude.")
+    if (start < 0) return null
+    val end = cleanOutput.indexOf("Paste code", start).takeIf { it > start } ?: return null
+    val joined = cleanOutput.substring(start, end).replace(Regex("\\s+"), "")
+    // If the terminal printed the link twice (hyperlink target and visible text), keep the first copy only.
+    val second = joined.indexOf("https://", startIndex = 8)
+    val url = if (second > 0) joined.substring(0, second) else joined
+    return url.takeIf { "state=" in it && "code_challenge=" in it }
+}

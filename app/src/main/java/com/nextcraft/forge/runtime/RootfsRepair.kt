@@ -11,9 +11,6 @@ import java.util.concurrent.TimeUnit
  */
 internal object RootfsRepair {
 
-    private fun shellSingleQuote(value: String): String =
-        "'" + value.replace("'", "'\"'\"'") + "'"
-
     private fun runRootCommand(vararg command: String, timeoutSeconds: Long = 15L): Int =
         runCatching {
             // Output is never used; discarding it avoids a full pipe blocking the child until the timeout.
@@ -89,6 +86,25 @@ internal object RootfsRepair {
         return true
     }
 
+    /**
+     * Gives [target] (recursively) back to [uid]. Commands inside the chroot run as root, so files they create
+     * (npm installs, Gradle/pip caches, Claude's own state) are root-owned and the app UID cannot change them.
+     */
+    fun reclaimOwnership(target: File, uid: Int): Boolean {
+        if (!target.exists() && !java.nio.file.Files.isSymbolicLink(target.toPath())) return true
+        val canonicalPath = target.canonicalPath.trimEnd('/')
+        require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
+            "Refusing to change ownership of invalid path: '$canonicalPath'"
+        }
+        // -h: change a symlink itself, never the file it points to (it may point outside the rootfs).
+        val exit = runRootCommand(
+            "su", "-c",
+            "chown -R -h $uid:$uid -- ${shellSingleQuote(canonicalPath)}",
+            timeoutSeconds = 120L,
+        )
+        return exit == 0
+    }
+
     fun safeDeleteRecursively(targetDir: File): Boolean {
         if (!targetDir.exists()) return true
         ensureUnmounted(targetDir)
@@ -103,6 +119,9 @@ internal object RootfsRepair {
             "su",
             "-c",
             "rm -rf --one-file-system -- $quotedPath 2>/dev/null || rm -rf -- $quotedPath",
+            // A multi-GB tree with root-owned apt/npm files takes far longer than the 15 s default; a timeout here
+            // used to make activate() roll back a rootfs that had already validated.
+            timeoutSeconds = 30 * 60L,
         )
         return exit == 0 && !targetDir.exists()
     }
@@ -159,9 +178,9 @@ internal object RootfsRepair {
             check(moveDirectory(staging, rootfs)) { "Could not activate the rebuilt Linux environment" }
             if (hadRootfs) restoreHome(backup, rootfs)
             check(validate(rootfs)) { "Rebuilt Linux environment failed validation after activation" }
-            if (hadRootfs) {
-                check(safeDeleteRecursively(backup)) { "Could not remove the previous Linux environment" }
-            }
+            // The new rootfs is validated and active. Failing to delete the old copy must not roll it back: a leftover
+            // backup is cleaned up by reconcileInterruptedSwap on the next start.
+            if (hadRootfs) safeDeleteRecursively(backup)
         } catch (error: Throwable) {
             if (hadRootfs && backup.exists()) {
                 runCatching { rollback(rootfs, staging, backup) }

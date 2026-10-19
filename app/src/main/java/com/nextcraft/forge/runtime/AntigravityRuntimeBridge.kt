@@ -12,10 +12,12 @@ import com.nextcraft.forge.model.ToolRequest
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
@@ -191,10 +193,9 @@ class AntigravityRuntimeBridge(
     @Volatile private var activeProcess: Process? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested = false
-    @Volatile private var foregroundResultPosted = false
+    private val foreground = ForegroundSession(context, "AntigravityBridge")
+
     @Volatile private var activeProjectSlug = ""
-    @Volatile private var taskStartedAtElapsedRealtime = 0L
-    @Volatile private var lastForegroundProgressAt = 0L
 
     fun configureProjectRoot(projectId: String, rootPath: String) = checkpoints.configureProjectRoot(projectId, rootPath)
 
@@ -261,6 +262,8 @@ class AntigravityRuntimeBridge(
                     var done = false
                     InotifyLogTailer(outputFile).use { tailer ->
                         while (!done && (process.isAlive || tailer.hasUnreadBytes())) {
+                            // readLines blocks without suspending, so withTimeout (and a cancel) could never fire here.
+                            ensureActive()
                             for (line in tailer.readLines(timeoutMs = 50L)) {
                                 if (handleLine(line)) {
                                     done = true
@@ -297,6 +300,8 @@ class AntigravityRuntimeBridge(
                 antigravityFriendlyError(e.message.orEmpty(), diagnostic)
             }
             throw AntigravitySessionException(message)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             throw AntigravitySessionException(
                 antigravityFriendlyError(e.message.orEmpty(), recentAntigravityDiagnostic(startedAtMillis)),
@@ -316,10 +321,8 @@ class AntigravityRuntimeBridge(
         val sessionStartedAtMillis = System.currentTimeMillis()
         activeSessionId = sessionId
         userStopRequested = false
-        foregroundResultPosted = false
         activeProjectSlug = projectSlug
-        taskStartedAtElapsedRealtime = android.os.SystemClock.elapsedRealtime()
-        lastForegroundProgressAt = 0L
+        foreground.begin()
         finished.remove(sessionId)
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
@@ -344,7 +347,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
-            RuntimeTaskController.stopAction = stopHandler
+            stopHandler?.let { RuntimeTaskController.register(RuntimeTaskController.AGENT, it) }
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()
@@ -487,7 +490,7 @@ class AntigravityRuntimeBridge(
         activeProcess = null
         activeSessionId = null
         activeProjectSlug = ""
-        taskStartedAtElapsedRealtime = 0L
+        foreground.clearStart()
         RuntimeTaskController.release(stopHandler)
         sessionId
     }
@@ -540,38 +543,18 @@ class AntigravityRuntimeBridge(
         if (finished.add(sessionId)) eventBus.emit(RuntimeEvent.SessionFailed(sessionId, reason))
     }
 
-    private fun startForegroundRuntime(projectName: String) {
-        RuntimeExecutionServiceContract.startForeground(context, projectName)
-    }
+    private fun startForegroundRuntime(projectName: String) = foreground.start(projectName)
 
     /** Keeps long, silent Antigravity turns visibly active in Android's foreground service. */
     private fun pushForegroundProgress(detailRaw: String) {
         if (activeSessionId == null) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastForegroundProgressAt < FOREGROUND_PROGRESS_MIN_INTERVAL_MS) return
-        lastForegroundProgressAt = now
-        val detail = detailRaw.replace(Regex("\\s+"), " ").trim().take(110)
-        val elapsed = (now - taskStartedAtElapsedRealtime).coerceAtLeast(0L) / 1_000L
-        val minutes = elapsed / 60L
-        val seconds = elapsed % 60L
-        RuntimeExecutionServiceContract.pushProgress(
-            context,
-            activeProjectSlug,
-            "$detail · $minutes:${seconds.toString().padStart(2, '0')}",
-        )
+        foreground.progress(activeProjectSlug, detailRaw)
     }
 
-    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, "AntigravityBridge")
-    }
+    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
+        foreground.finish(completed, projectName, detail)
 
-    private fun cancelForegroundRuntime() {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.cancelForeground(context)
-    }
+    private fun cancelForegroundRuntime() = foreground.cancel()
 
     private fun friendlyError(raw: String): String = antigravityFriendlyError(raw)
 
@@ -586,31 +569,32 @@ class AntigravityRuntimeBridge(
             ?: return@runCatching ""
         latest.readTailText(12_000)
     }.getOrDefault("")
-
-    private companion object {
-        const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
-    }
 }
 
 internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): String {
-    val value = "$raw $diagnostic".replace(Regex("\\s+"), " ").trim()
-    return when {
-        ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
-            "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
-        value.contains("authentication required", true) ||
-            value.contains("authentication failed", true) ||
-            value.contains("not signed in", true) ||
-            value.contains("not logged in", true) ->
-            "Antigravity needs Google sign-in. Open Settings → Coding agent."
-        value.contains("out of credits", true) || value.contains("quota", true) ->
-            "Your Antigravity account is out of credits. Check the account plan or wait for credits to reset."
-        value.contains("timed out", true) || value.contains("timeout", true) ->
-            "Antigravity reached the 60-minute task limit. Your files were kept."
-        value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
-            "The selected Antigravity model is unavailable. Refresh models in Settings."
-        value.isBlank() -> "Antigravity could not complete the task."
-        else -> raw.replace(Regex("\\s+"), " ").trim().take(500)
-    }
+    val rawValue = raw.replace(Regex("\\s+"), " ").trim()
+    // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
+    // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
+    return classifyAntigravityError(rawValue, allowTimeout = true)
+        ?: classifyAntigravityError("$rawValue ${diagnostic.replace(Regex("\\s+"), " ").trim()}", allowTimeout = false)
+        ?: rawValue.ifBlank { "Antigravity could not complete the task." }.take(500)
+}
+
+private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
+    ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
+        "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
+    value.contains("authentication required", true) ||
+        value.contains("authentication failed", true) ||
+        value.contains("not signed in", true) ||
+        value.contains("not logged in", true) ->
+        "Antigravity needs Google sign-in. Open Settings → Coding agent."
+    value.contains("out of credits", true) || value.contains("quota", true) ->
+        "Your Antigravity account is out of credits. Check the account plan or wait for credits to reset."
+    allowTimeout && (value.contains("timed out", true) || value.contains("timeout", true)) ->
+        "Antigravity reached the 60-minute task limit. Your files were kept."
+    value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
+        "The selected Antigravity model is unavailable. Refresh models in Settings."
+    else -> null
 }
 
 private val ANTIGRAVITY_NETWORK_ERRORS = listOf(

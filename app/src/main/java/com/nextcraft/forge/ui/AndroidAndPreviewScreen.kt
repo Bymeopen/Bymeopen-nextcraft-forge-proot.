@@ -44,7 +44,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -144,6 +150,7 @@ fun AndroidBuildScreen(
     val tokens = LocalForgeThemeTokens.current
     var activeTab by rememberSaveable { mutableStateOf(0) } // 0 stages, 1 issues, 2 log, 3 logcat
     var menuOpen by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     // Stage events carry only the active stage, so remember the last real one to place success/failure.
     var lastRow by remember { mutableStateOf(-1) }
@@ -162,9 +169,10 @@ fun AndroidBuildScreen(
                 .padding(end = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Launch is reached from a project's header, so it reads as a project page: name first, "Launch" under it.
             ForgeLargeTitle(
-                title = stringResource(R.string.launch_launch),
-                subtitle = state.activeProject?.name,
+                title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
+                subtitle = stringResource(R.string.launch_launch),
                 modifier = Modifier.weight(1f),
             )
             ForgeActionPill {
@@ -172,7 +180,7 @@ fun AndroidBuildScreen(
                     ForgePillIcon(
                         icon = Icons.Default.Close,
                         description = stringResource(R.string.launch_cancel_build),
-                        onClick = viewModel::stopActiveTask,
+                        onClick = viewModel::stopAndroidBuild,
                         tint = MaterialTheme.colorScheme.error,
                     )
                 } else {
@@ -216,6 +224,23 @@ fun AndroidBuildScreen(
                                 viewModel.runAndroidBuild("clean", installAfterBuild = false)
                             },
                         )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.launch_force_rebuild)) },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.runAndroidBuild("clean assembleDebug", installAfterBuild = true)
+                            },
+                        )
+                        if (build.apkPath != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.launch_copy_apk_path)) },
+                                onClick = {
+                                    menuOpen = false
+                                    clipboard.setText(AnnotatedString(build.apkPath))
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -233,14 +258,18 @@ fun AndroidBuildScreen(
             ForgeStatusIcon(build.phase.overallStatus(), iconSize = 22.dp)
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(build.phase.headline()), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(build.phase.headline()), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
-                        stringResource(R.string.launch_errors_warnings, errorCount, warningCount)
+                        stringResource(
+                            R.string.launch_errors_warnings_join,
+                            quantityStringResource(R.plurals.launch_errors, errorCount, errorCount),
+                            quantityStringResource(R.plurals.launch_warnings, warningCount, warningCount),
+                        )
                     } else {
                         build.message ?: build.stage.displayLabel()
                     },
-                    fontSize = 14.sp,
+                    fontSize = ForgeType.control,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -259,7 +288,7 @@ fun AndroidBuildScreen(
                 text = stringResource(R.string.launch_fix_with_agent),
                 onClick = {
                     viewModel.sendPrompt(build.issues.joinToString("\n\n") { it.formatForAgentPrompt() })
-                    viewModel.selectTab(ForgeTab.AGENT)
+                    viewModel.openConversation()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -311,7 +340,7 @@ fun AndroidBuildScreen(
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
                             text = stringResource(row.title),
-                            fontSize = 16.sp,
+                            fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.Medium,
                             color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         )
@@ -323,7 +352,7 @@ fun AndroidBuildScreen(
                 issues = build.issues,
                 onAskAgentToFix = { issue ->
                     viewModel.sendPrompt(issue.formatForAgentPrompt())
-                    viewModel.selectTab(ForgeTab.AGENT)
+                    viewModel.openConversation()
                 },
                 onOpenFile = { path ->
                     viewModel.openWorkspaceFile(path)
@@ -355,7 +384,7 @@ fun AndroidBuildScreen(
                             text = build.log.ifBlank { stringResource(R.string.launch_no_build_output) },
                             color = tokens.terminalText,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             lineHeight = 17.sp,
                         )
                     }
@@ -429,7 +458,7 @@ private fun BuildIssuesList(
                                 issue.line?.let { append(":").append(it) }
                             },
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             fontWeight = FontWeight.SemiBold,
                             color = tokens.accentText,
                         )
@@ -530,11 +559,11 @@ private fun LogcatPanel(
             }
         }
 
-        OutlinedTextField(
+        ForgeTextField(
+            kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Search,
             value = logcat.query,
             onValueChange = onSetQuery,
             placeholder = { Text(stringResource(R.string.launch_filter_logcat)) },
-            singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -560,7 +589,7 @@ private fun LogcatPanel(
                     text = line.text,
                     color = color,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
+                    fontSize = ForgeType.caption,
                     lineHeight = 15.sp,
                 )
             }
@@ -582,7 +611,11 @@ fun WebPreviewScreen(
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
-            webViewRef?.destroy()
+            // Detach before destroy(): destroying a WebView that is still attached throws on some WebView builds.
+            webViewRef?.let { view ->
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                runCatching { view.destroy() }
+            }
             webViewRef = null
         }
     }
@@ -614,66 +647,78 @@ fun WebPreviewScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        if (state.activeTab == ForgeTab.PROJECTS) {
+            ForgeProjectHeader(
+                title = state.activeProject?.name ?: stringResource(R.string.launch_preview),
+                subtitle = stringResource(R.string.launch_preview) + " · " + stringResource(R.string.launch_local_dev_server),
+                onBack = { viewModel.projectBack() },
+            )
+        } else {
             ForgeLargeTitle(
                 title = stringResource(R.string.launch_preview),
                 subtitle = stringResource(R.string.launch_local_dev_server),
-                modifier = Modifier.weight(1f),
             )
-            ForgeActionPill {
-                ForgePillIcon(
-                    icon = Icons.Default.Refresh,
-                    description = stringResource(R.string.launch_scan_ports_and_reload),
-                    onClick = {
-                        viewModel.scanLocalPreviewPorts()
-                        webViewRef?.reload()
-                    },
-                )
-            }
         }
 
-        // Address bar: one rounded surface with a text-style "Open" action.
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = tokens.cardContainerColor,
-            contentColor = colors.onSurface,
-            border = tokens.cardBorderStroke,
+        // Address bar: status dot, URL, go arrow; refresh sits outside the bar.
+        var opened by rememberSaveable { mutableStateOf(false) }
+        val serverUp = state.activeLocalPorts.isNotEmpty() || opened
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+                .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier.padding(start = 6.dp, end = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = tokens.cardContainerColor,
+                contentColor = colors.onSurface,
+                border = tokens.cardBorderStroke,
+                modifier = Modifier.weight(1f),
             ) {
-                TextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    singleLine = true,
-                    placeholder = { Text("http://127.0.0.1:3000") },
-                    colors = TextFieldDefaults.textFieldColors(
-                        containerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                    ),
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = stringResource(R.string.launch_open),
-                    color = tokens.accentText,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(100))
-                        .clickable(role = Role.Button) { openUrl(urlInput) }
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                )
+                Row(
+                    modifier = Modifier.padding(start = 16.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (serverUp) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.5f)),
+                    )
+                    TextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        singleLine = true,
+                        keyboardOptions = ForgeFieldKind.URL.keyboardOptions(ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { opened = true; openUrl(urlInput) }),
+                        placeholder = { Text(stringResource(R.string.launch_preview_url), color = colors.onSurfaceVariant.copy(alpha = 0.6f)) },
+                        colors = TextFieldDefaults.textFieldColors(
+                            containerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                    ForgePillIcon(
+                        icon = Icons.Default.ArrowForward,
+                        description = stringResource(R.string.launch_open),
+                        onClick = {
+                            opened = true
+                            openUrl(urlInput)
+                        },
+                    )
+                }
             }
+            ForgePillIcon(
+                icon = Icons.Default.Refresh,
+                description = stringResource(R.string.launch_scan_ports_and_reload),
+                onClick = {
+                    viewModel.scanLocalPreviewPorts()
+                    webViewRef?.reload()
+                },
+            )
         }
 
         if (state.activeLocalPorts.isNotEmpty()) {
@@ -699,6 +744,17 @@ fun WebPreviewScreen(
             }
         }
 
+        if (!serverUp) {
+            // Nothing is listening yet: say so instead of showing a blank WebView. (if/else, not an early return: a
+            // `return@Column` inside this composable lambda is a suspected cause of the Compose Stack.pop crash.)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.GLOBE,
+                    title = stringResource(R.string.launch_preview_not_running),
+                    message = stringResource(R.string.launch_preview_not_running_hint),
+                )
+            }
+        } else {
         AndroidView(
             modifier = Modifier
                 .weight(1f)
@@ -706,7 +762,9 @@ fun WebPreviewScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(16.dp)),
             factory = { context ->
-                WebView(context).apply {
+                // Devices without a usable WebView provider throw here; show an empty view instead of force-closing.
+                val created = runCatching { WebView(context) }.getOrNull()
+                created?.apply {
                     setBackgroundColor(webViewBgArgb)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -717,15 +775,29 @@ fun WebPreviewScreen(
                             view: WebView,
                             request: android.webkit.WebResourceRequest,
                         ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+
+                        // Without this the app process is killed when the renderer dies (e.g. low memory).
+                        override fun onRenderProcessGone(
+                            view: WebView,
+                            detail: android.webkit.RenderProcessGoneDetail,
+                        ): Boolean {
+                            if (webViewRef === view) webViewRef = null
+                            (view.parent as? android.view.ViewGroup)?.removeView(view)
+                            runCatching { view.destroy() }
+                            return true
+                        }
                     }
-                    loadUrl(state.previewUrl)
+                    runCatching { loadUrl(state.previewUrl) }
                     webViewRef = this
+                } ?: android.view.View(context)
+            },
+            update = { view ->
+                (view as? WebView)?.let { webView ->
+                    webView.setBackgroundColor(webViewBgArgb)
+                    webViewRef = webView
                 }
             },
-            update = { webView ->
-                webView.setBackgroundColor(webViewBgArgb)
-                webViewRef = webView
-            },
         )
+        }
     }
 }

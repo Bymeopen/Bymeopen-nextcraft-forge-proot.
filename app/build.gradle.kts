@@ -13,15 +13,19 @@ android {
         applicationId = "com.nextcraft.forge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100
-        versionName = "1.0.0-forge"
+        // The release workflow passes -PversionCode=... -PversionName=...; local builds keep the defaults.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 100
+        versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-forge"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
 
         buildConfigField("String", "APP_VARIANT", "\"debug\"")
-        buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"\"")
+        // Manifest asset of the latest GitHub release; build with -PappUpdateManifestUrl=... to point elsewhere.
+        val updateManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
+            ?: "https://github.com/bymeopen/nextcraft-forge/releases/latest/download/update-manifest.json"
+        buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 
     // Release signing comes from the environment so no key material lives in the repo.
@@ -101,14 +105,14 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2022.10.00"))
+    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.core:core-ktx:1.8.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.5.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.1")
-    implementation("androidx.activity:activity-compose:1.5.1")
+    implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")

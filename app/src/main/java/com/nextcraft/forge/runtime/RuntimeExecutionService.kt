@@ -20,7 +20,14 @@ class RuntimeExecutionService : Service() {
     private val notificationTitle: String
         get() = notificationTitleOverride ?: "Forge Runtime Active"
     private var canStop: Boolean = true
-    private var taskRunning: Boolean = false
+    /**
+     * The agent and the Android build share this service and can run at the same time. Each START counts one
+     * task and each COMPLETE/FAILED/CANCELLED ends one; foreground mode and the wake lock stay until the last
+     * one ends, so one finishing does not take the protection away from the other.
+     */
+    private var activeTasks: Int = 0
+    private val taskRunning: Boolean
+        get() = activeTasks > 0
 
     override fun onCreate() {
         super.onCreate()
@@ -55,7 +62,7 @@ class RuntimeExecutionService : Service() {
             ACTION_PROGRESS, LEGACY_ACTION_PROGRESS -> {
                 if (!taskRunning) {
                     // Stray progress for a finished task must not leave an idle service running.
-                    stopSelf()
+                    stopSelf(startId)
                     return START_NOT_STICKY
                 }
                 incomingTitle?.takeIf(String::isNotBlank)?.let { notificationTitleOverride = it }
@@ -82,10 +89,12 @@ class RuntimeExecutionService : Service() {
                 failed = true,
             )
             ACTION_CANCELLED, LEGACY_ACTION_CANCELLED -> {
-                taskRunning = false
-                releaseWakeLock()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                activeTasks = (activeTasks - 1).coerceAtLeast(0)
+                if (!taskRunning) {
+                    releaseWakeLock()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
             }
             else -> {
                 // Reset per-task overrides on fresh start so previous non-stoppable or custom-titled
@@ -96,7 +105,7 @@ class RuntimeExecutionService : Service() {
                     intent?.hasExtra(LEGACY_EXTRA_CAN_STOP) == true -> intent.getBooleanExtra(LEGACY_EXTRA_CAN_STOP, true)
                     else -> true
                 }
-                taskRunning = true
+                activeTasks++
                 val detail = incomingDetail?.takeIf(String::isNotBlank)
                     ?: "Working in $projectName"
                 startForeground(
@@ -133,9 +142,11 @@ class RuntimeExecutionService : Service() {
     }
 
     private fun finishTask(title: String, detail: String, failed: Boolean) {
-        taskRunning = false
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        activeTasks = (activeTasks - 1).coerceAtLeast(0)
+        if (!taskRunning) {
+            releaseWakeLock()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
         val notification = NotificationCompat.Builder(this, RESULT_CHANNEL_ID)
             .setSmallIcon(smallIconRes())
             .setContentTitle(title)
@@ -147,7 +158,7 @@ class RuntimeExecutionService : Service() {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
         getSystemService(NotificationManager::class.java)?.notify(RESULT_NOTIFICATION_ID, notification)
-        stopSelf()
+        if (!taskRunning) stopSelf()
     }
 
     // Ikon status bar harus siluet satu warna, bukan ikon launcher adaptif

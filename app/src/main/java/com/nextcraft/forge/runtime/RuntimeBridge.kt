@@ -25,25 +25,36 @@ data class RuntimeLaunchConfig(
  * coding agent session in ClaudeRuntimeBridge, AntigravityRuntimeBridge, or DshRuntimeBridge.
  */
 object RuntimeTaskController {
-    @Volatile
-    var stopAction: (() -> Unit)? = null
+    const val AGENT = "agent"
+    const val BUILD = "build"
+
+    /**
+     * Stop hooks by task kind. The agent and the Android build can run at the same time; a single slot let one
+     * overwrite the other's hook, and stopping the agent also killed the build.
+     */
+    private val hooks = LinkedHashMap<String, () -> Unit>()
 
     @Synchronized
-    fun stopCurrentTask() {
-        val action = stopAction
-        stopAction = null
+    fun register(kind: String, action: () -> Unit) {
+        hooks[kind] = action
+    }
+
+    /** Clears [action] only if it is still registered, so a finishing task cannot drop another task's stop hook. */
+    @Synchronized
+    fun release(action: (() -> Unit)?) {
+        if (action != null) hooks.entries.removeAll { it.value === action }
+    }
+
+    /** Stops only the task of [kind]. */
+    fun stop(kind: String) {
+        val action = synchronized(this) { hooks.remove(kind) }
         action?.invoke()
     }
 
-    /** Clears [action] only if it is still the registered one, so a finishing task cannot drop another task's stop hook. */
-    @Synchronized
-    fun release(action: (() -> Unit)?) {
-        if (action != null && stopAction === action) stopAction = null
-    }
-
-    @Synchronized
+    /** Stops every running task (the shared notification's Stop action, app teardown). */
     fun requestStop() {
-        stopCurrentTask()
+        val actions = synchronized(this) { hooks.values.toList().also { hooks.clear() } }
+        actions.forEach { it() }
     }
 }
 
@@ -160,6 +171,11 @@ object RuntimeLaunchConfigBuilder {
         profile: ProviderProfile,
         authToken: String? = null,
         localGatewayUrl: String? = null,
+        /**
+         * Claude subscription signed in with `claude auth login`: the CLI reads and refreshes its own credentials file,
+         * so no token is passed. (A token in CLAUDE_CODE_OAUTH_TOKEN is never refreshed and expires within hours.)
+         */
+        useStoredLogin: Boolean = false,
     ): RuntimeLaunchConfig {
         val cleanToken = authToken?.trim().orEmpty()
         val isClaudeOAuthToken = cleanToken.startsWith("sk-ant-oat")
@@ -176,8 +192,13 @@ object RuntimeLaunchConfigBuilder {
         )
         when (profile.kind.protocol) {
             ProviderProtocol.CLAUDE_LOGIN -> {
-                require(cleanToken.isNotBlank()) { "Enter a Claude subscription token first" }
-                if (isAnthropicApiKey) {
+                require(cleanToken.isNotBlank() || useStoredLogin) { "Sign in to Claude or enter a subscription token first" }
+                if (useStoredLogin && cleanToken.isBlank()) {
+                    // Claude Code gives API-key variables precedence over the stored login; make sure none leaks in.
+                    environment["ANTHROPIC_API_KEY"] = ""
+                    environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                    environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
+                } else if (isAnthropicApiKey) {
                     environment["ANTHROPIC_BASE_URL"] = ProviderKind.ANTHROPIC.defaultBaseUrl
                     environment["ANTHROPIC_MODEL"] = profile.model
                         .takeUnless { it.isBlank() || it == "default" }

@@ -1,139 +1,126 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.nextcraft.forge.ui
 
-import androidx.compose.foundation.clickable
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
-import androidx.annotation.StringRes
 
 private data class ToolEntry(
     val tab: ForgeTab,
-    val icon: ImageVector,
+    val glyph: ForgeGlyph,
     @StringRes val title: Int,
     @StringRes val subtitle: Int,
 )
 
-private val developmentTools = listOf(
-    ToolEntry(ForgeTab.FILES, Icons.Default.Edit, R.string.tools_files, R.string.tools_files_desc),
-    ToolEntry(ForgeTab.TERMINAL, Icons.Default.List, R.string.shell_terminal, R.string.tools_terminal_desc),
-    ToolEntry(ForgeTab.PREVIEW, Icons.Default.PlayArrow, R.string.tools_web_preview, R.string.tools_web_preview_desc),
+private data class ToolSection(@StringRes val label: Int, val entries: List<ToolEntry>)
+
+private val toolSections = listOf(
+    ToolSection(
+        R.string.tools_section_development,
+        listOf(
+            ToolEntry(ForgeTab.TOOLCHAINS, ForgeGlyph.BUILD, R.string.tools_toolchains, R.string.tools_toolchains_desc),
+            ToolEntry(ForgeTab.DIAGNOSTICS, ForgeGlyph.SHIELD, R.string.tools_diagnostics, R.string.tools_diagnostics_desc),
+            ToolEntry(ForgeTab.TERMINAL, ForgeGlyph.TERMINAL, R.string.shell_terminal, R.string.tools_terminal_desc),
+            ToolEntry(ForgeTab.FILES, ForgeGlyph.FOLDER, R.string.tools_files, R.string.tools_files_desc),
+            ToolEntry(ForgeTab.PREVIEW, ForgeGlyph.GLOBE, R.string.tools_web_preview, R.string.tools_web_preview_desc),
+        ),
+    ),
+    ToolSection(
+        R.string.tools_section_build_deploy,
+        listOf(
+            ToolEntry(ForgeTab.BUILD_MATRIX, ForgeGlyph.SLIDERS, R.string.tools_build_matrix, R.string.tools_build_matrix_desc),
+            ToolEntry(ForgeTab.ANDROID, ForgeGlyph.BUILD, R.string.tools_android_builder, R.string.tools_android_builder_desc),
+        ),
+    ),
+    ToolSection(
+        R.string.tools_section_infrastructure,
+        listOf(
+            ToolEntry(ForgeTab.SSH, ForgeGlyph.LOCK, R.string.tools_ssh, R.string.tools_ssh_desc),
+            ToolEntry(ForgeTab.CICD, ForgeGlyph.REFRESH, R.string.tools_cicd, R.string.tools_cicd_desc),
+        ),
+    ),
+    ToolSection(
+        R.string.tools_section_system,
+        listOf(
+            ToolEntry(ForgeTab.ROM, ForgeGlyph.CODE, R.string.tools_rom, R.string.tools_rom_desc),
+            ToolEntry(ForgeTab.CHECKPOINTS, ForgeGlyph.HISTORY, R.string.tools_checkpoints, R.string.tools_checkpoints_desc),
+        ),
+    ),
 )
 
-private val buildTools = listOf(
-    ToolEntry(ForgeTab.ANDROID, Icons.Default.Build, R.string.tools_android_builder, R.string.tools_android_builder_desc),
-)
-
-/**
- * Linear-style launcher: big title, quiet section labels, flat rows (no cards), one muted icon per row.
- * It only routes to the existing tool screens, so it adds no logic of its own.
- */
+/** Developer Tools launcher: one shared list row per tool (single accent tile, stroke glyph), grouped by purpose, with search. */
 @Composable
 fun ToolsScreen(
     onOpen: (ForgeTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        Text(
-            text = stringResource(R.string.tools_tools),
-            fontSize = 27.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 4.dp),
-        )
-        ToolsSection(stringResource(R.string.tools_section_development), developmentTools, onOpen)
-        ToolsSection(stringResource(R.string.tools_section_build_deploy), buildTools, onOpen)
-    }
-}
+    val scheme = MaterialTheme.colorScheme
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val needle = query.trim()
 
-@Composable
-private fun ToolsSection(
-    label: String,
-    entries: List<ToolEntry>,
-    onOpen: (ForgeTab) -> Unit,
-) {
-    Text(
-        text = label,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 4.dp),
-    )
-    entries.forEach { entry ->
-        ToolRow(entry = entry, onClick = { onOpen(entry.tab) })
-    }
-}
-
-@Composable
-private fun ToolRow(entry: ToolEntry, onClick: () -> Unit) {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 62.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Decorative: the row title already names the destination for TalkBack.
-        Icon(
-            imageVector = entry.icon,
-            contentDescription = null,
-            tint = muted,
-            modifier = Modifier.size(22.dp),
+    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        ForgeProjectHeader(
+            title = stringResource(R.string.tools_header_title),
+            subtitle = stringResource(R.string.tools_header_subtitle),
+            actions = {
+                ForgeGlyphPillIcon(
+                    glyph = ForgeGlyph.SEARCH,
+                    description = stringResource(R.string.tools_search),
+                    tint = if (searching) scheme.primary else scheme.onSurface,
+                    onClick = {
+                        searching = !searching
+                        if (!searching) query = ""
+                    },
+                )
+            },
         )
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(entry.title),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = stringResource(entry.subtitle),
-                fontSize = 14.sp,
-                color = muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        if (searching) {
+            ForgeTextField(
+                kind = ForgeFieldKind.TEXT, imeAction = ImeAction.Search,
+                value = query,
+                onValueChange = { query = it },
+                label = { Text(stringResource(R.string.tools_search)) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
-            contentDescription = null,
-            tint = muted.copy(alpha = 0.6f),
-            modifier = Modifier.size(20.dp),
-        )
+        toolSections.forEach { section ->
+            val rows = section.entries.filter { entry ->
+                needle.isEmpty() ||
+                    stringResource(entry.title).contains(needle, ignoreCase = true) ||
+                    stringResource(entry.subtitle).contains(needle, ignoreCase = true)
+            }
+            if (rows.isNotEmpty()) {
+                ForgeSectionLabel(stringResource(section.label))
+                rows.forEach { entry ->
+                    ForgeListRow(
+                        glyph = entry.glyph,
+                        title = stringResource(entry.title),
+                        subtitle = stringResource(entry.subtitle),
+                        onClick = { onOpen(entry.tab) },
+                    )
+                }
+            }
+        }
     }
 }
+

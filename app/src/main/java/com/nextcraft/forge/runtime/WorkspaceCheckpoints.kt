@@ -23,9 +23,9 @@ class WorkspaceCheckpoints(
     private data class FileKey(val path: String, val mtime: Long, val size: Long)
 
     private val projectRoots = ConcurrentHashMap<String, String>()
-    private val projectLocks = ConcurrentHashMap<String, Any>()
     private val sha256Cache = ConcurrentHashMap<FileKey, String>()
 
+    // Shared by every instance: the ViewModel and each runtime bridge own a WorkspaceCheckpoints.
     private fun lockFor(projectId: String): Any = projectLocks.computeIfAbsent(projectId) { Any() }
 
     private fun safeProjectId(projectId: String): String {
@@ -66,8 +66,9 @@ class WorkspaceCheckpoints(
             "Unsafe project root"
         }
         synchronized(lockFor(safeId)) {
-            val previous = projectRoots.put(safeId, normalized).orEmpty()
-            if (previous != normalized) checkpointDir(safeId).deleteRecursively()
+            // First call after a process start has no previous root; the pending Keep/Undo baseline on disk must survive.
+            val previous = projectRoots.put(safeId, normalized)
+            if (previous != null && previous != normalized) checkpointDir(safeId).deleteRecursively()
         }
     }
 
@@ -543,5 +544,6 @@ class WorkspaceCheckpoints(
             "venv",
         )
         private val BUILD_OUTPUT_DIRECTORY_NAMES = setOf("build", "dist", "target")
+        private val projectLocks = ConcurrentHashMap<String, Any>()
     }
 }

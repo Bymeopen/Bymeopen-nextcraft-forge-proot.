@@ -13,7 +13,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +42,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -52,9 +57,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.combinedClickable
 
 /**
  * Linear-style toggle cell: label and optional description on the left, switch on the right.
@@ -86,13 +97,13 @@ fun ForgeToggleRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 16.sp,
+                fontSize = ForgeType.rowTitle,
                 fontWeight = FontWeight.Medium,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    fontSize = 14.sp,
+                    fontSize = ForgeType.secondary,
                     color = scheme.onSurfaceVariant,
                 )
             }
@@ -109,7 +120,7 @@ fun ForgeToggleRow(
                 checkedBorderColor = scheme.primary,
                 uncheckedThumbColor = scheme.onSurfaceVariant,
                 uncheckedTrackColor = scheme.surfaceVariant,
-                uncheckedBorderColor = scheme.outline,
+                uncheckedBorderColor = forgeControlBorder(),
             ),
         )
     }
@@ -136,13 +147,51 @@ fun rememberImeVisible(): State<Boolean> {
 
 /**
  * Where the system Back button goes from [tab]; null = let the system leave the app.
- * Tool screens return to the Tools launcher, top-level tabs return to Projects.
+ * Tool screens return to the Tools launcher; the five bottom tabs return to Projects.
  */
 fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
     ForgeTab.PROJECTS -> null
-    ForgeTab.FILES, ForgeTab.TERMINAL, ForgeTab.ANDROID, ForgeTab.PREVIEW -> ForgeTab.TOOLS
-    ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
+    ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+    -> ForgeTab.TOOLS
+    ForgeTab.TERMINAL, ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
 }
+
+/**
+ * Text button in the theme's accent text colour. Material's default is `primary`, which is 3.7:1 on dark
+ * cards; accentText is checked >= 4.5:1 on every surface (ContrastTest).
+ */
+@Composable
+fun ForgeTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        colors = ButtonDefaults.textButtonColors(contentColor = LocalForgeThemeTokens.current.accentText),
+        content = content,
+    )
+}
+
+/**
+ * Keeps a small control's look but reserves a 44dp square for it. Compose already widens hit-testing to 48dp,
+ * but neighbouring small controls then fight over the same pixels and TalkBack focus boxes stay tiny.
+ */
+fun Modifier.forgeMinTouch(): Modifier =
+    sizeIn(minWidth = ForgeSpace.minTouch, minHeight = ForgeSpace.minTouch).wrapContentSize(Alignment.Center)
+
+/** Screen and section titles: TalkBack users jump between them with heading navigation. */
+fun Modifier.forgeHeading(): Modifier = semantics { heading() }
+
+/** Text that appears or changes on its own (banners, errors) is announced without moving focus. */
+fun Modifier.forgeLive(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }
+
+/** Conveys "selected" for tabs and radio rows built on clickable (role alone only says "tab"). */
+fun Modifier.forgeSelected(isSelected: Boolean): Modifier = semantics { selected = isSelected }
 
 /** Large left-aligned screen title (Linear style) with an optional quiet subtitle. */
 @Composable
@@ -151,11 +200,22 @@ fun ForgeLargeTitle(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     horizontalPadding: Dp = 20.dp,
+    /** Optional status chip or action at the end of the title row (e.g. the agent's connection state). */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    Column(modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 2.dp)) {
-        Text(text = title, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
-        if (subtitle != null) {
-            Text(text = subtitle, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(
+        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp, modifier = Modifier.forgeHeading())
+            if (subtitle != null) {
+                Text(text = subtitle, fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (trailing != null) {
+            Spacer(modifier = Modifier.width(12.dp))
+            trailing()
         }
     }
 }
@@ -168,11 +228,14 @@ fun ForgeSectionLabel(
     horizontalPadding: Dp = 20.dp,
 ) {
     Text(
-        text = text,
-        fontSize = 13.sp,
+        text = text.uppercase(),
+        fontSize = ForgeType.caption,
         fontWeight = FontWeight.Medium,
+        letterSpacing = ForgeType.sectionTracking,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(start = horizontalPadding, end = horizontalPadding, top = 10.dp),
+        modifier = modifier
+            .padding(start = horizontalPadding, end = horizontalPadding, top = ForgeSpace.section, bottom = ForgeSpace.labelToCard)
+            .forgeHeading(),
     )
 }
 
@@ -252,7 +315,7 @@ fun ForgeActionPill(
 ) {
     Row(
         modifier = modifier
-            .height(38.dp)
+            .heightIn(min = ForgeSpace.minTouch)
             .clip(RoundedCornerShape(100))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
             .padding(horizontal = 4.dp),
@@ -270,11 +333,13 @@ fun ForgePillIcon(
     enabled: Boolean = true,
     tint: Color = MaterialTheme.colorScheme.onSurface,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
+            .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 44.dp, height = 38.dp)
             .clip(RoundedCornerShape(100))
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -288,11 +353,14 @@ fun ForgePillIcon(
 
 /** Text tabs; the selected one sits in a soft pill. */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun ForgePillTabs(
     items: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onLongPress: ((Int) -> Unit)? = null,
+    longPressLabel: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Row(
@@ -306,16 +374,23 @@ fun ForgePillTabs(
             val selected = index == selectedIndex
             Box(
                 modifier = Modifier
-                    .heightIn(min = 34.dp)
+                    .heightIn(min = 40.dp)
                     .clip(RoundedCornerShape(100))
                     .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
-                    .clickable(role = Role.Tab, onClickLabel = label) { onSelect(index) }
+                    .combinedClickable(
+                        role = Role.Tab,
+                        onClickLabel = label,
+                        onLongClickLabel = longPressLabel,
+                        onLongClick = onLongPress?.let { cb -> { cb(index) } },
+                        onClick = { onSelect(index) },
+                    )
+                    .forgeSelected(selected)
                     .padding(horizontal = 15.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = label,
-                    fontSize = 15.sp,
+                    fontSize = ForgeType.body,
                     color = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
                     maxLines = 1,
                 )
@@ -332,12 +407,27 @@ fun ForgePrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(100),
-        modifier = modifier.heightIn(min = 44.dp),
+        interactionSource = interaction,
+        modifier = modifier.forgePressScale(interaction).heightIn(min = 44.dp),
     ) {
         Text(text = text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** True when the user disabled animations (Android "Remove animations" / animator scale 0). */
+@Composable
+fun rememberReduceMotion(): Boolean {
+    val context = LocalContext.current
+    return remember(context) {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
     }
 }

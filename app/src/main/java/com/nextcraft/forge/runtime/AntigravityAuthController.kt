@@ -4,6 +4,7 @@ import android.content.Context
 import com.nextcraft.forge.model.AgentKind
 import java.io.File
 import java.io.RandomAccessFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,7 +23,7 @@ class AntigravityAuthController(
     private val mutableState = MutableStateFlow(
         AntigravityAuthState(
             status = if (initiallySignedIn) AntigravityAuthStatus.SIGNED_IN else AntigravityAuthStatus.SIGNED_OUT,
-            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { "Connected as $it" },
+            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) },
             accountEmail = initialAccountEmail.takeIf(String::isNotBlank),
         ),
     )
@@ -45,8 +46,6 @@ class AntigravityAuthController(
         context.filesDir,
         "runtime/ubuntu/root/.gemini/antigravity-cli/antigravity-oauth-token",
     )
-
-    private fun shellSingleQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
 
     fun hasOfficialCredential(): Boolean {
         val file = officialCredentialFile()
@@ -205,7 +204,7 @@ class AntigravityAuthController(
                         onSignedInChanged(true, email)
                         mutableState.value = AntigravityAuthState(
                             AntigravityAuthStatus.SIGNED_IN,
-                            message = email?.let { "Connected as $it" } ?: "Google account connected",
+                            message = email?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) } ?: context.getString(com.nextcraft.forge.R.string.auth_google_connected),
                             accountEmail = email,
                         )
                         // Leave the official CLI cleanly so it flushes credential/session state.
@@ -281,6 +280,13 @@ class AntigravityAuthController(
                 }
                 else -> Unit
             }
+        } catch (cancelled: CancellationException) {
+            // The caller went away (screen closed, scope cleared): not a sign-in failure. Restore the previous state
+            // instead of showing an error, and let the cancellation reach the parent scope.
+            if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
+                mutableState.value = stateBeforeLogin ?: AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
+            }
+            throw cancelled
         } catch (error: Throwable) {
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
                 mutableState.value = AntigravityAuthState(
@@ -419,9 +425,14 @@ internal fun extractGoogleOAuthUrl(output: String): String? {
 }
 
 internal fun isSignedInScreen(output: String): Boolean {
-    if (output.contains("error", true) || output.contains("failed", true)) return false
-    return output.contains("for shortcuts", true) ||
-        (output.contains("Antigravity CLI", true) && output.contains("Google AI", true))
+    // [output] is a long tail of the TUI, so a transient "error"/"failed" from an earlier retry used to keep this
+    // false for the rest of the flow. Only text after the newest signed-in screen can veto it.
+    val shortcuts = output.lastIndexOf("for shortcuts", ignoreCase = true)
+    val banner = if (output.contains("Google AI", true)) output.lastIndexOf("Antigravity CLI", ignoreCase = true) else -1
+    val screenStart = maxOf(shortcuts, banner)
+    if (screenStart < 0) return false
+    val after = output.substring(screenStart)
+    return !after.contains("error", true) && !after.contains("failed", true)
 }
 
 private fun extractSignedInEmail(output: String): String? =

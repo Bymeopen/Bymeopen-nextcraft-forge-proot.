@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.nextcraft.forge.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -23,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
@@ -30,8 +34,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +60,29 @@ import com.nextcraft.forge.model.ProjectType
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 
 /**
  * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
@@ -64,7 +93,12 @@ fun ProjectsScreen(
     state: ForgeUiState,
     onOpenProject: (String) -> Unit,
     onNewProject: () -> Unit,
+    onQuickProject: () -> Unit,
+    onImportZip: (Uri) -> Unit,
+    onCloneGitUrl: (String) -> Unit,
+    onConnectGitHub: () -> Unit,
     onDeleteProject: (String) -> Unit,
+    onRenameProject: (String, String) -> Unit = { _, _ -> },
     onNewQuickProject: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -80,43 +114,294 @@ fun ProjectsScreen(
     // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while tasks run.
     val canDelete = state.projects.size > 1 && !busy
     var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
+    var pendingRenameProject by remember { mutableStateOf<Project?>(null) }
+    var showCloneDialog by rememberSaveable { mutableStateOf(false) }
+    val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(onImportZip)
+    }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        ProjectsHeader(
-            onNewProject = onNewProject,
-            onNewQuickProject = onNewQuickProject,
-        )
-        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-
+    LazyColumn(modifier = modifier.fillMaxSize()) {
+        item(key = "hero") {
+            ProjectsHero(
+                onQuickProject = onQuickProject,
+                onNewProject = onNewProject,
+            )
+        }
+        item(key = "import") {
+            BringExistingProjectCard(
+                githubLogin = state.githubLogin,
+                // Any type: file managers often label .zip as application/octet-stream, which would grey it out.
+                onPickZip = { zipPicker.launch(arrayOf("*/*")) },
+                onGitUrl = { showCloneDialog = true },
+                onConnectGitHub = onConnectGitHub,
+            )
+        }
+        item(key = "header-yours") {
+            Text(
+                text = stringResource(R.string.projects_your_projects),
+                fontSize = ForgeType.cardTitle,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 6.dp),
+            )
+        }
         if (state.projects.isEmpty()) {
-            ProjectsEmptyState(onNewProject = onNewProject)
+            item(key = "empty") { ProjectsEmptyState() }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (regular.isNotEmpty()) {
-                    item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
-                    items(regular, key = { it.id }) { project ->
-                        ProjectRow(
-                            project = project,
-                            active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while active tasks run.
-                            locked = busy && project.id != state.activeProjectId,
-                            canDelete = canDelete,
-                            onOpen = { onOpenProject(project.id) },
-                            onDelete = { pendingDeleteProject = project },
+            if (regular.isNotEmpty()) {
+                if (quick.isNotEmpty()) item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
+                items(regular, key = { it.id }) { project ->
+                    ProjectRow(
+                        project = project,
+                        active = project.id == state.activeProjectId,
+                        // MainViewModel.selectProject ignores switches while active tasks run.
+                        locked = busy && project.id != state.activeProjectId,
+                        canDelete = canDelete,
+                        onOpen = { onOpenProject(project.id) },
+                        onDelete = { pendingDeleteProject = project },
+                        onRename = { pendingRenameProject = project },
+                    )
+                }
+            }
+            if (quick.isNotEmpty()) {
+                item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
+                items(quick, key = { it.id }) { project ->
+                    ProjectRow(
+                        project = project,
+                        active = project.id == state.activeProjectId,
+                        locked = busy && project.id != state.activeProjectId,
+                        canDelete = canDelete,
+                        onOpen = { onOpenProject(project.id) },
+                        onDelete = { pendingDeleteProject = project },
+                        onRename = { pendingRenameProject = project },
+                    )
+                }
+            }
+        }
+        item(key = "bottom-space") { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+
+    if (showCloneDialog) {
+        CloneUrlDialog(
+            onDismiss = { showCloneDialog = false },
+            onClone = { url ->
+                showCloneDialog = false
+                onCloneGitUrl(url)
+            },
+        )
+    }
+    pendingRenameProject?.let { target ->
+        var name by remember(target.id) { mutableStateOf(target.name) }
+        AlertDialog(
+            onDismissRequest = { pendingRenameProject = null },
+            title = { Text(stringResource(R.string.projects_rename_title)) },
+            text = {
+                ForgeTextField(
+                    kind = ForgeFieldKind.NAME, imeAction = ImeAction.Done, error = if (name.isBlank()) stringResource(R.string.field_error_required) else null,
+                    value = name,
+                    onValueChange = { name = it.take(MAX_PROJECT_NAME) },
+                    label = { Text(stringResource(R.string.projects_rename_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                ForgePrimaryButton(
+                    text = stringResource(R.string.projects_rename_save),
+                    enabled = name.isNotBlank(),
+                    onClick = {
+                        onRenameProject(target.id, name)
+                        pendingRenameProject = null
+                    },
+                )
+            },
+            dismissButton = {
+                ForgeTextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+            },
+        )
+    }
+    pendingDeleteProject?.let { target ->
+        AlertDialog(
+            modifier = Modifier.forgePopIn(),
+            onDismissRequest = { pendingDeleteProject = null },
+            title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+            text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+            confirmButton = {
+                ForgePrimaryButton(
+                    text = stringResource(R.string.shell_confirm_delete),
+                    onClick = {
+                        onDeleteProject(target.id)
+                        pendingDeleteProject = null
+                    },
+                )
+            },
+            dismissButton = {
+                ForgeTextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+            },
+        )
+    }
+}
+
+/** Title, tagline and the two entry actions (filled Quick project, outlined New project). */
+@Composable
+private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+        Text(
+            text = stringResource(R.string.shell_nextcraft_forge),
+            fontSize = ForgeType.control,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+        Text(
+            text = stringResource(R.string.projects_build_from_your_phone),
+            fontSize = ForgeType.screenTitle,
+            fontWeight = FontWeight.SemiBold,
+            lineHeight = 32.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Text(
+            text = stringResource(R.string.projects_tagline),
+            fontSize = ForgeType.control,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ForgePrimaryButton(
+                text = stringResource(R.string.projects_quick_project),
+                onClick = onQuickProject,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(
+                onClick = onNewProject,
+                shape = RoundedCornerShape(100),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/** Collapsible import card: header toggles; body offers ZIP, Git URL and GitHub. */
+@Composable
+private fun BringExistingProjectCard(
+    githubLogin: String,
+    onPickZip: () -> Unit,
+    onGitUrl: () -> Unit,
+    onConnectGitHub: () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val toggleLabel = stringResource(if (expanded) R.string.projects_collapse else R.string.projects_expand)
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = tokens.cardContainerColor,
+        contentColor = scheme.onSurface,
+        border = tokens.cardBorderStroke,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClickLabel = toggleLabel) { expanded = !expanded }
+                    .padding(start = 16.dp, end = 10.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.projects_bring_existing),
+                        fontSize = ForgeType.rowTitle,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = stringResource(
+                            if (expanded) R.string.projects_bring_existing_expanded else R.string.projects_bring_existing_collapsed,
+                        ),
+                        fontSize = ForgeType.control,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = scheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            // Height-only animation keeps the LazyColumn item from jumping while the body appears.
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
+                exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+            ) {
+                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ImportTile(
+                            icon = Icons.Default.KeyboardArrowDown,
+                            label = stringResource(R.string.projects_zip_file),
+                            onClick = onPickZip,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ImportTile(
+                            icon = Icons.Default.Edit,
+                            label = stringResource(R.string.projects_git_url),
+                            onClick = onGitUrl,
+                            modifier = Modifier.weight(1f),
                         )
                     }
-                }
-                if (quick.isNotEmpty()) {
-                    item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
-                    items(quick, key = { it.id }) { project ->
-                        ProjectRow(
-                            project = project,
-                            active = project.id == state.activeProjectId,
-                            // MainViewModel.selectProject ignores switches while active tasks run.
-                            locked = busy && project.id != state.activeProjectId,
-                            canDelete = canDelete,
-                            onOpen = { onOpenProject(project.id) },
-                            onDelete = { pendingDeleteProject = project },
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(tokens.cardElevatedColor)
+                            .clickable(role = Role.Button, onClick = onConnectGitHub)
+                            .heightIn(min = 60.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            tint = scheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.projects_connect_github),
+                                fontSize = ForgeType.body,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = if (githubLogin.isBlank()) {
+                                    stringResource(R.string.projects_browse_remote)
+                                } else {
+                                    stringResource(R.string.projects_github_connected, githubLogin)
+                                },
+                                fontSize = ForgeType.secondary,
+                                color = scheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
@@ -124,74 +409,77 @@ fun ProjectsScreen(
         }
     }
 
-    pendingDeleteProject?.let { target ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { pendingDeleteProject = null },
-            title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
-            text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onDeleteProject(target.id)
-                        pendingDeleteProject = null
-                    },
-                ) {
-                    Text(stringResource(R.string.shell_confirm_delete))
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { pendingDeleteProject = null }) {
-                    Text(stringResource(R.string.agent_cancel))
-                }
-            },
+}
+
+@Composable
+private fun ImportTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(tokens.cardElevatedColor)
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
         )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = label, fontSize = ForgeType.body, fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
-private fun ProjectsHeader(
-    onNewProject: () -> Unit,
-    onNewQuickProject: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .padding(start = 16.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = stringResource(R.string.projects_projects),
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        androidx.compose.material3.TextButton(onClick = onNewQuickProject) {
-            Text(stringResource(R.string.projects_new_quick_chat), fontSize = 12.sp)
-        }
-        // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
-        IconButton(onClick = onNewProject) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = stringResource(R.string.projects_new_project),
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
+private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
+    var url by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.projects_clone_title)) },
+        text = {
+            ForgeTextField(
+                kind = ForgeFieldKind.URL, imeAction = ImeAction.Done, error = url.takeIf { it.isNotBlank() && !FieldValidation.isHttpUrl(it) }?.let { stringResource(R.string.field_error_url) },
+                value = url,
+                onValueChange = { url = it },
+                placeholder = { Text(stringResource(R.string.projects_clone_hint)) },
+                modifier = Modifier.fillMaxWidth(),
             )
-        }
-    }
+        },
+        confirmButton = {
+            Button(onClick = { onClone(url) }, enabled = url.isNotBlank()) {
+                Text(stringResource(R.string.projects_clone))
+            }
+        },
+        dismissButton = {
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
+        },
+    )
 }
 
 @Composable
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        fontSize = 12.sp,
+        fontSize = ForgeType.caption,
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp).forgeHeading(),
     )
 }
 
+private const val MAX_PROJECT_NAME = 80
+
+/** Project card: folder tile, name, description, guest path, language and age, plus a rename/delete menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProjectRow(
@@ -201,69 +489,110 @@ private fun ProjectRow(
     canDelete: Boolean,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
+    onRename: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val scheme = MaterialTheme.colorScheme
+    val muted = scheme.onSurfaceVariant
 
-    Box {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .alpha(if (locked) 0.5f else 1f)
-                    .combinedClickable(
-                        enabled = !locked,
-                        role = Role.Button,
-                        onClick = onOpen,
-                        onLongClickLabel = if (canDelete) stringResource(R.string.shell_delete_project) else null,
-                        onLongClick = if (canDelete) ({ menuOpen = true }) else null,
-                    )
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusDot(active = active)
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = project.name,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = if (locked) stringResource(R.string.projects_agent_running) else project.subtitle(),
-                        fontSize = 12.5.sp,
-                        color = muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
+    ForgeThemedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .alpha(if (locked) 0.5f else 1f),
+        border = if (active) androidx.compose.foundation.BorderStroke(1.dp, scheme.primary.copy(alpha = 0.6f)) else LocalForgeThemeTokens.current.cardBorderStroke,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(enabled = !locked, role = Role.Button, onClick = onOpen, onLongClick = { menuOpen = true })
+                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = 26.dp) }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = project.formattedUpdatedAt,
-                    fontSize = 12.sp,
+                    text = project.name,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = if (locked) stringResource(R.string.projects_agent_running) else project.localizedDescription().ifBlank { project.subtitle() },
+                    fontSize = ForgeType.body,
+                    color = muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val guestPath = "/workspace/${project.slug}"
+                Text(
+                    text = guestPath,
+                    fontSize = ForgeType.secondary,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = listOf(project.localizedLanguage(), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
+                    fontSize = ForgeType.secondary,
                     color = muted,
                     maxLines = 1,
                 )
             }
-            Divider(
-                color = MaterialTheme.colorScheme.outlineVariant,
-                thickness = 0.5.dp,
-                modifier = Modifier.padding(start = 16.dp),
-            )
+            Box {
+                IconButton(onClick = { menuOpen = true }, enabled = !locked) {
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.projects_more_actions), tint = muted)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.projects_rename)) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, muted) },
+                        onClick = {
+                            menuOpen = false
+                            onRename()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.shell_delete_project)) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, LocalForgeThemeTokens.current.dangerText) },
+                        enabled = canDelete,
+                        onClick = {
+                            menuOpen = false
+                            onDelete()
+                        },
+                    )
+                }
+            }
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.shell_delete_project)) },
-                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                onClick = {
-                    menuOpen = false
-                    onDelete()
-                },
-            )
-        }
+    }
+}
+
+/** Folder drawn from two rounded rectangles; the icon set in use has no folder glyph. */
+@Composable
+private fun FolderGlyph(tint: androidx.compose.ui.graphics.Color) {
+    androidx.compose.foundation.Canvas(modifier = Modifier.size(28.dp)) {
+        val w = size.width
+        val h = size.height
+        drawRoundRect(
+            color = tint,
+            topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.12f),
+            size = androidx.compose.ui.geometry.Size(w * 0.45f, h * 0.3f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.08f),
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.26f),
+            size = androidx.compose.ui.geometry.Size(w, h * 0.62f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.12f),
+        )
     }
 }
 
@@ -288,35 +617,13 @@ private fun StatusDot(active: Boolean) {
 }
 
 @Composable
-private fun ProjectsEmptyState(onNewProject: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = stringResource(R.string.projects_no_projects_yet),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
+private fun ProjectsEmptyState() {
+    ForgeThemedCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+        ForgeEmptyState(
+            glyph = ForgeGlyph.FOLDER,
+            title = stringResource(R.string.projects_no_projects_yet),
+            message = stringResource(R.string.projects_empty_hint),
         )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.projects_create_a_project_to),
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = onNewProject,
-            shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.heightIn(min = 44.dp),
-        ) {
-            Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
-        }
     }
 }
 
@@ -326,3 +633,14 @@ private fun Project.subtitle(): String = when {
     type == ProjectType.ANDROID -> stringResource(R.string.projects_android) + (androidTemplate?.let { " · ${it.label}" } ?: "")
     else -> stringResource(R.string.projects_general)
 }
+
+/** Projects saved by older builds store English defaults; show them in the current language. */
+@Composable
+private fun Project.localizedDescription(): String = when (description) {
+    "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
+    "General coding workspace" -> stringResource(R.string.project_general_desc)
+    else -> description
+}
+
+@Composable
+private fun Project.localizedLanguage(): String = if (language == "Multi-language") stringResource(R.string.project_lang_multi) else language

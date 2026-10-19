@@ -11,8 +11,8 @@ import org.junit.Test
  */
 class NoHardcodedTextTest {
     private val skipFiles = setOf(
-        "Theme.kt", "MainViewModel.kt", "MarkdownText.kt", "ModelLabels.kt",
-        "AndroidBuildText.kt", "AppLanguage.kt", "LocaleHelper.kt",
+        "Theme.kt", "MainViewModel.kt", "ModelLabels.kt",
+        "AppLanguage.kt", "LocaleHelper.kt",
     )
 
     // Call sites that take user-visible text, followed by a quoted literal: Text("x"), contentDescription = "x", ...
@@ -41,6 +41,6 @@ class NoHardcodedTextTest {
     }
 
     private companion object {
-        const val BASELINE = 13
+        const val BASELINE = 9
     }
 }

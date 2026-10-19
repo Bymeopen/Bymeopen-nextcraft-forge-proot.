@@ -101,7 +101,7 @@ object RuntimeSetupController {
         val current = mutableSnapshot.value
         val line = event.terminalLine ?: when {
             event.downloadedBytes != null && event.totalBytes != null ->
-                "Downloading: %.1f / %.1f MB".format(event.downloadedBytes / MB, event.totalBytes / MB)
+                "${if (event.unpacking) UNPACK_PREFIX else DOWNLOAD_PREFIX} %.1f / %.1f MB".format(event.downloadedBytes / MB, event.totalBytes / MB)
             event.event == RuntimeInstallEvent.STAGE -> "• ${event.message}"
             else -> null
         }
@@ -109,11 +109,11 @@ object RuntimeSetupController {
         val isDownloadUpdate = event.downloadedBytes != null && event.totalBytes != null
         val logs = when {
             sanitizedLine == null -> current.logs
-            isDownloadUpdate && current.logs.lastOrNull()?.startsWith(DOWNLOAD_PREFIX) == true ->
+            isDownloadUpdate && current.logs.lastOrNull().isProgressLine() ->
                 (current.logs.dropLast(1) + sanitizedLine).takeLast(MAX_LOG_LINES)
             else -> (current.logs + sanitizedLine).takeLast(MAX_LOG_LINES)
         }
-        if (!isDownloadUpdate || current.logs.lastOrNull()?.startsWith(DOWNLOAD_PREFIX) != true) {
+        if (!isDownloadUpdate || !current.logs.lastOrNull().isProgressLine()) {
             appendLog(context, sanitizedLine)
         }
         val safeFraction = if (event.fraction.isFinite()) event.fraction.coerceIn(0f, 1f) else current.progress
@@ -254,6 +254,9 @@ object RuntimeSetupController {
     private const val MAX_LOG_BYTES = 1_000_000L
     private const val MB = 1_048_576.0
     private const val DOWNLOAD_PREFIX = "Downloading:"
+    private const val UNPACK_PREFIX = "Unpacking:"
+
+    private fun String?.isProgressLine() = this != null && (startsWith(DOWNLOAD_PREFIX) || startsWith(UNPACK_PREFIX))
 }
 
 class RuntimeSetupService : Service() {
@@ -261,6 +264,8 @@ class RuntimeSetupService : Service() {
     private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
     private var installJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wakeLockAcquiredAt = 0L
+    private var lastWakeLockRenewAt = 0L
     private var lastNotificationAt = 0L
 
     override fun onCreate() {
@@ -271,8 +276,12 @@ class RuntimeSetupService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            installJob?.cancel(CancellationException("Stopped by user"))
-            RuntimeSetupController.cancelled(this)
+            // A stale Pause tap (after the setup finished or failed) must not overwrite that result with "cancelled".
+            val running = installJob?.takeIf { it.isActive }
+            if (running != null) {
+                running.cancel(CancellationException("Stopped by user"))
+                RuntimeSetupController.cancelled(this)
+            }
             releaseWakeLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -287,19 +296,37 @@ class RuntimeSetupService : Service() {
                 .mapNotNull { name -> runCatching { DevStack.valueOf(name.trim()) }.getOrNull() }
                 .toSet()
             val agent = AgentKind.fromStored(intent?.getStringExtra(EXTRA_AGENT)?.trim())
+            val action = intent?.action
+            val expectedVersion = intent?.getStringExtra(EXTRA_VERSION).orEmpty()
             RuntimeSetupController.begin(this)
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     previousJob?.join()
-                    RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
+                    val installer = RuntimeInstaller(this@RuntimeSetupService)
+                    val onProgress: suspend (RuntimeInstallProgress) -> Unit = { progress ->
                         RuntimeSetupController.update(this@RuntimeSetupService, progress)
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
+                        renewWakeLock()
                     }
-                    AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
+                    // Manual per-component operations work on top of an existing Core runtime.
+                    when (action) {
+                        ACTION_INSTALL_AGENT -> installer.ensureAgentInstalled(agent, onProgress)
+                        ACTION_UPDATE_AGENT -> installer.updateAgent(agent, expectedVersion, onProgress)
+                        ACTION_REMOVE_AGENT -> {
+                            onProgress(RuntimeInstallProgress("Removing ${agent.title}…", 0.5f, indeterminate = true))
+                            installer.removeAgent(agent)
+                            onProgress(RuntimeInstallProgress("Removed ${agent.title}", 1f))
+                        }
+                        ACTION_INSTALL_STACK -> stacks.forEach { installer.ensureStackInstalled(it, onProgress) }
+                        ACTION_REMOVE_STACK -> stacks.forEach { installer.removeStack(it, onProgress) }
+                        else -> installer.ensureInstalled(stacks, agent, onProgress)
+                    }
+                    if (action == ACTION_START) AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
                     RuntimeSetupController.complete(this@RuntimeSetupService)
                     showFinishedNotification(success = true)
                 } catch (_: CancellationException) {
-                    RuntimeSetupController.cancelled(this@RuntimeSetupService)
+                    // Stop followed by an immediate restart: the old job unwinding must not mark the new run as paused.
+                    if (installJob === coroutineContext[Job]) RuntimeSetupController.cancelled(this@RuntimeSetupService)
                 } catch (error: Throwable) {
                     RuntimeSetupController.fail(this@RuntimeSetupService, error)
                     showFinishedNotification(success = false)
@@ -396,9 +423,27 @@ class RuntimeSetupService : Service() {
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
+        wakeLockAcquiredAt = SystemClock.elapsedRealtime()
+        lastWakeLockRenewAt = wakeLockAcquiredAt
         wakeLock = getSystemService(PowerManager::class.java)
             ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.nextcraft.forge:runtime-setup")
+            // Not reference counted, so acquire() can re-arm the timeout without needing a matching release().
+            ?.apply { setReferenceCounted(false) }
             ?.apply { acquire(MAX_WAKE_LOCK_MS) }
+    }
+
+    /**
+     * A full setup (system maintenance up to 35 min, each apt step up to 30 min, plus downloads) can outlast one
+     * wake lock timeout; once it expired the CPU could sleep with the screen off and stall the setup. Progress
+     * re-arms it, up to [MAX_SETUP_WAKE_MS] in total so a hung setup cannot keep the device awake forever.
+     */
+    private fun renewWakeLock() {
+        val lock = wakeLock ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWakeLockRenewAt < WAKE_LOCK_RENEW_INTERVAL_MS) return
+        if (now - wakeLockAcquiredAt > MAX_SETUP_WAKE_MS) return
+        lastWakeLockRenewAt = now
+        runCatching { lock.acquire(MAX_WAKE_LOCK_MS) }
     }
 
     private fun releaseWakeLock() {
@@ -418,6 +463,12 @@ class RuntimeSetupService : Service() {
 
     companion object {
         const val ACTION_START = "com.nextcraft.forge.START_SETUP"
+        const val ACTION_INSTALL_AGENT = "com.nextcraft.forge.INSTALL_AGENT"
+        const val ACTION_UPDATE_AGENT = "com.nextcraft.forge.UPDATE_AGENT"
+        const val ACTION_REMOVE_AGENT = "com.nextcraft.forge.REMOVE_AGENT"
+        const val ACTION_INSTALL_STACK = "com.nextcraft.forge.INSTALL_STACK"
+        const val ACTION_REMOVE_STACK = "com.nextcraft.forge.REMOVE_STACK"
+        const val EXTRA_VERSION = "target_version"
         const val ACTION_STOP = "com.nextcraft.forge.STOP_SETUP"
         const val EXTRA_STACKS = "selected_stacks"
         const val EXTRA_AGENT = "selected_agent"
@@ -426,6 +477,8 @@ class RuntimeSetupService : Service() {
         private const val RESULT_NOTIFICATION_ID = 52
         private const val NOTIFICATION_THROTTLE_MS = 750L
         private const val MAX_WAKE_LOCK_MS = 45 * 60 * 1_000L
+        private const val WAKE_LOCK_RENEW_INTERVAL_MS = 5 * 60 * 1_000L
+        private const val MAX_SETUP_WAKE_MS = 4 * 60 * 60 * 1_000L
 
         fun ensureNotificationChannel(context: Context) {
             context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(

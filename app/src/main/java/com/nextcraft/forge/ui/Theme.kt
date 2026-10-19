@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.annotation.StringRes
+import com.nextcraft.forge.R
 
 // Base palette constants retained for binary/source compatibility
 val ForgeCyan = Color(0xFF38BDF8)
@@ -57,34 +60,14 @@ val ForgeDarkElevated = Color(0xFF1E293B)
  */
 enum class ForgeThemeMode(
     val id: String,
-    val title: String,
-    val subtitle: String,
+    @StringRes val title: Int,
+    @StringRes val subtitle: Int,
     val badge: String,
 ) {
-    SYSTEM(
-        id = "system",
-        title = "Bawaan System",
-        subtitle = "Ikuti mode siang/malam otomatis dari sistem Android",
-        badge = "AUTO",
-    ),
-    DARK(
-        id = "dark",
-        title = "Linear (Dark)",
-        subtitle = "Abu netral dengan satu aksen indigo, tenang untuk kerja lama",
-        badge = "DARK",
-    ),
-    GLASS(
-        id = "glass",
-        title = "Glass (Liquid)",
-        subtitle = "Permukaan kaca transparan 3D & kapsul navigasi melayang",
-        badge = "GLASS",
-    ),
-    WHITE(
-        id = "white",
-        title = "White (Daylight)",
-        subtitle = "Putih murni bersih bergaya editorial siang hari",
-        badge = "WHITE",
-    );
+    SYSTEM(id = "system", title = R.string.theme_system_title, subtitle = R.string.theme_system_sub, badge = "AUTO"),
+    DARK(id = "dark", title = R.string.theme_linear_title, subtitle = R.string.theme_linear_sub, badge = "DARK"),
+    GLASS(id = "glass", title = R.string.theme_glass_title, subtitle = R.string.theme_glass_sub, badge = "GLASS"),
+    WHITE(id = "white", title = R.string.theme_white_title, subtitle = R.string.theme_white_sub, badge = "WHITE");
 
     companion object {
         fun fromStored(raw: String?): ForgeThemeMode {
@@ -249,7 +232,7 @@ private val DarkThemeTokens = ForgeThemeTokens(
     windowBackgroundArgb = Color(0xFF0B0B0B).toArgb(),
     cardContainerColor = Color(0xFF131313),
     cardElevatedColor = Color(0xFF1B1B1B),
-    cardBorderStroke = null,
+    cardBorderStroke = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)),
     elevatedBorderStroke = null,
     cardCornerRadius = 18.dp,
     topBarContainerColor = Color(0xFF0B0B0B),
@@ -257,7 +240,7 @@ private val DarkThemeTokens = ForgeThemeTokens(
     accentText = Color(0xFFB9BFF5),
     successText = Color(0xFF4CB47F),
     warningText = Color(0xFFF2C94C),
-    dangerText = Color(0xFFE5484D),
+    dangerText = Color(0xFFE94D52), // E5484D was 4.4:1 on the elevated card
     terminalBackground = Color(0xFF070707),
     terminalHeaderBackground = Color(0xFF131313),
     terminalText = Color(0xFFE6E6E6),
@@ -375,7 +358,7 @@ val LocalForgeThemeTokens = staticCompositionLocalOf<ForgeThemeTokens> { DarkThe
 val ForgeCodeTextStyle = TextStyle(
     fontFamily = FontFamily.Monospace,
     fontWeight = FontWeight.Normal,
-    fontSize = 13.sp,
+    fontSize = ForgeType.secondary,
     lineHeight = 19.sp,
 )
 
@@ -420,8 +403,15 @@ fun NextCraftForgeTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = ForgeTypography,
-            content = content,
-        )
+        ) {
+            // The app draws on a transparent Scaffold over its own canvas, so no Surface sets the
+            // content colour. Without this, LocalContentColor stays black and every Text that
+            // relies on the default is unreadable on the dark themes.
+            CompositionLocalProvider(
+                LocalContentColor provides colorScheme.onBackground,
+                content = content,
+            )
+        }
     }
 }
 
@@ -472,13 +462,14 @@ fun ForgeElevatedCard(
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape((tokens.cardCornerRadius - 4.dp).coerceAtLeast(10.dp))
-    val container = if (selected) scheme.primaryContainer else tokens.cardElevatedColor
-    val contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurface
+    val shape = RoundedCornerShape(14.dp)
+    // Selected = soft accent tint + accent edge; text keeps the normal surface colour (no filled container).
+    val container = if (selected) scheme.primary.copy(alpha = 0.10f) else tokens.cardElevatedColor
+    val contentColor = scheme.onSurface
     val border = if (selected) {
-        BorderStroke(1.2.dp, scheme.primary.copy(alpha = 0.65f))
+        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.45f))
     } else {
-        tokens.elevatedBorderStroke
+        null
     }
     val cardModifier = if (onClick != null) {
         modifier

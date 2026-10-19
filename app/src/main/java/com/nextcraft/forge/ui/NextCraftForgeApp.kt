@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,11 +53,29 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +92,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
@@ -81,12 +99,50 @@ import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
+
+    state.unsavedChangesPrompt?.let { path ->
+        AlertDialog(
+            modifier = Modifier.forgePopIn(),
+            onDismissRequest = viewModel::cancelLeavingFile,
+            title = { Text(stringResource(R.string.files_unsaved_title)) },
+            text = { Text(stringResource(R.string.files_unsaved_message, path)) },
+            confirmButton = {
+                Button(onClick = viewModel::saveAndContinue) { Text(stringResource(R.string.files_unsaved_save)) }
+            },
+            dismissButton = {
+                Row {
+                    ForgeTextButton(onClick = viewModel::discardAndContinue) { Text(stringResource(R.string.files_unsaved_discard)) }
+                    ForgeTextButton(onClick = viewModel::cancelLeavingFile) { Text(stringResource(R.string.agent_cancel)) }
+                }
+            },
+        )
+    }
+
     var bypassSetupGate by rememberSaveable { mutableStateOf(false) }
     var showNewProjectDialog by rememberSaveable { mutableStateOf(false) }
+    var showGitHubDialog by rememberSaveable { mutableStateOf(false) }
 
     if (!state.runtimeInstalled && !bypassSetupGate) {
         RuntimeOnboardingScreen(
@@ -103,48 +159,106 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     val imeVisible by rememberImeVisible()
     val backTarget = forgeBackTarget(state.activeTab)
-    BackHandler(enabled = backTarget != null) { backTarget?.let(viewModel::selectTab) }
+    val insideProject = state.activeTab == ForgeTab.PROJECTS && state.projectView != ProjectView.LIST
+    // Tablets, foldables and landscape: a project shows its chat and one workspace pane side by side.
+    val expanded = rememberIsExpanded()
+    val splitPane = expanded && insideProject
+    var lastSidePane by rememberSaveable { mutableStateOf(ProjectPane.FILES.name) }
+    SideEffect { if (state.projectPane != ProjectPane.CHAT) lastSidePane = state.projectPane.name }
+    val sidePane = if (state.projectPane != ProjectPane.CHAT) state.projectPane else ProjectPane.valueOf(lastSidePane)
+    LaunchedEffect(splitPane, sidePane, state.activeProjectId) {
+        if (splitPane && state.projectPane == ProjectPane.CHAT) viewModel.onSidePaneShown(sidePane)
+    }
+    // Inside a project, Back walks conversation → chats → list before the tab rules apply.
+    BackHandler(enabled = backTarget != null || insideProject) {
+        if (!viewModel.projectBack(paneBesideChat = splitPane)) backTarget?.let(viewModel::selectTab)
+    }
 
+    // Undo Snackbar for project deletion: the files stay on disk until the VM's undo window closes.
+    val snackbarHostState = remember { SnackbarHostState() }
+    val undoDelete = state.undoDelete
+    val deletedMessage = undoDelete?.let { stringResource(R.string.msg_project_deleted, it.name) }
+    val undoLabel = stringResource(R.string.action_undo)
+    LaunchedEffect(undoDelete) {
+        if (undoDelete == null || deletedMessage == null) return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = deletedMessage,
+            actionLabel = undoLabel,
+            withDismissAction = true,
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) viewModel.undoDeleteProject() else viewModel.clearUndoPrompt()
+    }
+
+    // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
+    // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
-        topBar = {
-            // Every screen except Agent now draws its own large title; Agent keeps the project/agent switcher bar.
-            if (state.activeTab == ForgeTab.AGENT) ForgeTopBar(
-                state = state,
-                onSelectProject = viewModel::selectProject,
-                onDeleteProject = viewModel::deleteProject,
-                onOpenNewProject = { showNewProjectDialog = true },
-                onSelectAgent = viewModel::selectAgent,
-                onSelectThemeMode = viewModel::setThemeMode,
-            )
-        },
+        // System bars plus the display cutout: in landscape the notch sits at the side, not the top.
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {},
         bottomBar = {
             // adjustResize lifts the bar above the keyboard and eats the composer's space; hide it while typing.
             if (!imeVisible) {
-                ForgeBottomBar(
-                    activeTab = state.activeTab,
-                    changedCount = state.changedItems.size,
-                    onSelectTab = viewModel::selectTab,
-                )
+                val inProject = state.activeTab == ForgeTab.PROJECTS && state.projectView != ProjectView.LIST
+                if (inProject) {
+                    // Inside a project the bar belongs to the project: Chat · Files · Terminal · Preview.
+                    ForgeBottomBar(
+                        // Two-pane: the chat is always visible, so the bar only switches the workspace pane.
+                        entries = if (splitPane) projectEntries.drop(1) else projectEntries,
+                        selectedTab = when (if (splitPane) sidePane else state.projectPane) {
+                            ProjectPane.CHAT -> ForgeTab.AGENT
+                            ProjectPane.FILES -> ForgeTab.FILES
+                            ProjectPane.TERMINAL -> ForgeTab.TERMINAL
+                            ProjectPane.PREVIEW -> ForgeTab.PREVIEW
+                        },
+                        changedCount = state.changedItems.size,
+                        agentRunning = state.sessionRunning,
+                        terminalBusy = state.terminalRunning,
+                        onSelectTab = { tab ->
+                            viewModel.selectProjectPane(
+                                when (tab) {
+                                    ForgeTab.FILES -> ProjectPane.FILES
+                                    ForgeTab.TERMINAL -> ProjectPane.TERMINAL
+                                    ForgeTab.PREVIEW -> ProjectPane.PREVIEW
+                                    else -> ProjectPane.CHAT
+                                },
+                            )
+                        },
+                    )
+                } else {
+                    ForgeBottomBar(
+                        entries = navEntries,
+                        selectedTab = state.activeTab,
+                        changedCount = state.changedItems.size,
+                        agentRunning = state.sessionRunning,
+                        terminalBusy = state.terminalRunning,
+                        onSelectTab = viewModel::selectTab,
+                    )
+                }
             }
         },
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // innerPadding already carries the status bar and cutout (contentWindowInsets); adding
+                // statusBarsPadding() here doubled the top gap.
                 .padding(innerPadding),
         ) {
-            state.bannerMessage?.let { banner ->
+            state.bannerMessage?.asString()?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().forgeLive(),
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -158,11 +272,27 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 text = banner,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).padding(vertical = 6.dp),
                             )
+                            val bannerAction = state.bannerAction?.takeIf { it.forMessage == state.bannerMessage }
+                            if (bannerAction != null) {
+                                TextButton(
+                                    onClick = {
+                                        if (bannerAction.kind == BannerActionKind.SET_UP_RUNTIME) {
+                                            bypassSetupGate = false
+                                            viewModel.dismissBanner()
+                                        } else {
+                                            viewModel.runBannerAction(bannerAction.kind)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                                ) {
+                                    Text(stringResource(bannerAction.kind.label), fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                             IconButton(
                                 onClick = viewModel::dismissBanner,
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(ForgeSpace.minTouch),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -177,31 +307,97 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 }
             }
 
-            Box(modifier = Modifier.weight(1f)) {
-                when (state.activeTab) {
-                    ForgeTab.PROJECTS -> ProjectsScreen(
-                        state = state,
-                        onOpenProject = { id ->
-                            viewModel.selectProject(id)
-                            viewModel.selectTab(ForgeTab.AGENT)
-                        },
-                        onNewProject = { showNewProjectDialog = true },
-                        onDeleteProject = viewModel::deleteProject,
-                        onNewQuickProject = {
-                            viewModel.createQuickProject()
-                            viewModel.selectTab(ForgeTab.AGENT)
-                        },
-                    )
-                    ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
+            // Screen host: inside Projects, going deeper (list → chats → conversation) pushes from the right and
+            // Back pops; tab and pane changes cross-fade. One key per visible screen.
+            val depth = when (state.projectView) { ProjectView.LIST -> 0; ProjectView.CHATS -> 1; ProjectView.CONVERSATION -> 2 }
+            var lastDepth by remember { mutableStateOf(depth) }
+            val forward = depth >= lastDepth
+            val slide = state.activeTab == ForgeTab.PROJECTS && state.projectPane == ProjectPane.CHAT && depth != lastDepth
+            androidx.compose.runtime.SideEffect { lastDepth = depth }
+            // Single-pane screens stop at a readable width on wide displays; workspace screens use all of it.
+            val capWidth = expanded && !splitPane && state.activeTab !in fullWidthTabs
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            ForgeScreenHost(
+                key = Triple(state.activeTab, state.projectView, if (splitPane) ProjectPane.CHAT else state.projectPane),
+                forward = forward,
+                slide = slide,
+                modifier = Modifier.widthIn(max = if (capWidth) ForgeBreakpoint.readableMaxWidth else Dp.Infinity).fillMaxSize(),
+            ) { (tab, view, pane) ->
+                when (tab) {
+                    ForgeTab.PROJECTS -> when (view) {
+                        ProjectView.LIST -> ProjectsScreen(
+                            state = state,
+                            onOpenProject = viewModel::openProject,
+                            onNewProject = { showNewProjectDialog = true },
+                            onQuickProject = viewModel::createQuickProject,
+                            onImportZip = viewModel::importZipProject,
+                            onCloneGitUrl = viewModel::cloneGitUrl,
+                            onConnectGitHub = { showGitHubDialog = true },
+                            onDeleteProject = viewModel::deleteProject,
+                            onRenameProject = viewModel::renameProject,
+                            onNewQuickProject = viewModel::createQuickProject,
+                        )
+                        ProjectView.CHATS, ProjectView.CONVERSATION -> if (splitPane) {
+                            Row(modifier = Modifier.fillMaxSize()) {
+                                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                    if (view == ProjectView.CHATS) {
+                                        ProjectChatsScreen(state = state, viewModel = viewModel)
+                                    } else {
+                                        AgentScreen(state = state, viewModel = viewModel)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                    when (sidePane) {
+                                        ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                                        ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
+                                        else -> FilesAndDiffScreen(state = state, viewModel = viewModel)
+                                    }
+                                }
+                            }
+                        } else when (pane) {
+                            ProjectPane.CHAT -> if (view == ProjectView.CHATS) {
+                                ProjectChatsScreen(state = state, viewModel = viewModel)
+                            } else {
+                                AgentScreen(state = state, viewModel = viewModel)
+                            }
+                            ProjectPane.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
+                            ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                            ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
+                        }
+                    }
+                    ForgeTab.AGENT -> AgentConfigScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
                     ForgeTab.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                     ForgeTab.SETTINGS -> SettingsScreenModern(state = state, viewModel = viewModel)
+                    ForgeTab.TOOLCHAINS -> ToolchainsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
+                    ForgeTab.BUILD_MATRIX -> BuildMatrixScreen(state = state, viewModel = viewModel)
+                    ForgeTab.SSH -> SshScreen(viewModel = viewModel)
+                    ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
+                    ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
+                    ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
                 }
             }
+            }
         }
+    }
+
+    if (showGitHubDialog) {
+        AlertDialog(
+            onDismissRequest = { showGitHubDialog = false },
+            title = { Text(stringResource(R.string.settings_github)) },
+            text = { GitHubSection(state, viewModel) },
+            confirmButton = { ForgeTextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.agent_close)) } },
+        )
     }
 
     if (showNewProjectDialog) {
@@ -213,660 +409,4 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             },
         )
     }
-}
-
-@Composable
-private fun ForgeTopBar(
-    state: ForgeUiState,
-    onSelectProject: (String) -> Unit,
-    onDeleteProject: (String) -> Unit,
-    onOpenNewProject: () -> Unit,
-    onSelectAgent: (AgentKind) -> Unit,
-    onSelectThemeMode: (String) -> Unit,
-) {
-    var projectMenuExpanded by remember { mutableStateOf(false) }
-    var agentMenuExpanded by remember { mutableStateOf(false) }
-    var themeMenuExpanded by remember { mutableStateOf(false) }
-    var pendingDeleteProjectId by remember { mutableStateOf<String?>(null) }
-    val activeProject = state.activeProject
-    val tokens = LocalForgeThemeTokens.current
-    val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
-    val canDeleteProject = state.projects.size > 1 &&
-        !state.sessionRunning &&
-        state.androidBuild.phase != com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING &&
-        !state.terminalRunning
-
-    pendingDeleteProjectId?.let { targetId ->
-        val target = state.projects.firstOrNull { it.id == targetId }
-        if (target != null) {
-            AlertDialog(
-                onDismissRequest = { pendingDeleteProjectId = null },
-                title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
-                text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            onDeleteProject(target.id)
-                            pendingDeleteProjectId = null
-                        },
-                    ) {
-                        Text(stringResource(R.string.shell_confirm_delete))
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingDeleteProjectId = null }) {
-                        Text(stringResource(R.string.agent_cancel))
-                    }
-                },
-            )
-        } else {
-            pendingDeleteProjectId = null
-        }
-    }
-
-    Surface(
-        color = tokens.topBarContainerColor,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (state.rootAvailable && state.runtimeInstalled) {
-                                tokens.successText
-                            } else {
-                                tokens.warningText
-                            },
-                        ),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Box {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(role = Role.Button) { projectMenuExpanded = true }
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column {
-                            Text(
-                                text = activeProject?.name ?: stringResource(R.string.shell_nextcraft_forge),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = "/workspace/${activeProject?.slug ?: "sandbox"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = stringResource(R.string.shell_switch_project),
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = projectMenuExpanded,
-                        onDismissRequest = { projectMenuExpanded = false },
-                    ) {
-                        state.projects.forEach { project ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            text = project.name,
-                                            fontWeight = if (project.id == state.activeProjectId) {
-                                                FontWeight.Bold
-                                            } else {
-                                                FontWeight.Normal
-                                            },
-                                        )
-                                        Text(
-                                            text = "${project.language} • /workspace/${project.slug}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                },
-                                leadingIcon = {
-                                    if (project.id == state.activeProjectId) {
-                                        Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected))
-                                    }
-                                },
-                                trailingIcon = {
-                                    if (canDeleteProject) {
-                                        IconButton(
-                                            onClick = {
-                                                projectMenuExpanded = false
-                                                pendingDeleteProjectId = project.id
-                                            },
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Delete,
-                                                contentDescription = stringResource(R.string.shell_delete_project),
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    projectMenuExpanded = false
-                                    onSelectProject(project.id)
-                                },
-                            )
-                        }
-                        Divider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.shell_new_workspace_project), fontWeight = FontWeight.SemiBold) },
-                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                            onClick = {
-                                projectMenuExpanded = false
-                                onOpenNewProject()
-                            },
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                Box {
-                    AssistChip(
-                        onClick = { agentMenuExpanded = true },
-                        label = {
-                            Text(
-                                text = state.agentKind.displayTitle(),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        },
-                    )
-                    DropdownMenu(
-                        expanded = agentMenuExpanded,
-                        onDismissRequest = { agentMenuExpanded = false },
-                    ) {
-                        AgentKind.entries.forEach { kind ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(kind.displayTitle(), fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            text = kind.displaySubtitle(),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                },
-                                leadingIcon = {
-                                    if (kind == state.agentKind) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
-                                    }
-                                },
-                                onClick = {
-                                    agentMenuExpanded = false
-                                    onSelectAgent(kind)
-                                },
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-                IconButton(onClick = onOpenNewProject) {
-                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.shell_new_project))
-                }
-
-                // Perbaikan THEME-BUG-021: Lencana pemilih 4 mode tema langsung di Top Bar
-                Box {
-                    AssistChip(
-                        onClick = { themeMenuExpanded = true },
-                        label = {
-                            Text(
-                                text = activeThemeMode.badge,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        },
-                    )
-                    DropdownMenu(
-                        expanded = themeMenuExpanded,
-                        onDismissRequest = { themeMenuExpanded = false },
-                    ) {
-                        ForgeThemeMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(mode.title, fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            text = mode.subtitle,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                },
-                                leadingIcon = {
-                                    if (mode == activeThemeMode) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
-                                    }
-                                },
-                                onClick = {
-                                    themeMenuExpanded = false
-                                    onSelectThemeMode(mode.id)
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-            Divider(color = MaterialTheme.colorScheme.outlineVariant)
-        }
-    }
-}
-
-private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, @StringRes val label: Int)
-
-private val navEntries = listOf(
-    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, R.string.nav_projects),
-    NavEntry(ForgeTab.AGENT, Icons.Default.Star, R.string.nav_agent),
-    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, R.string.nav_tools),
-    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, R.string.nav_settings),
-)
-
-// Screens reachable from the Tools launcher keep the Tools tab highlighted (Terminal has its own round button).
-private val toolsGroup = setOf(
-    ForgeTab.TOOLS,
-    ForgeTab.FILES,
-    ForgeTab.ANDROID,
-    ForgeTab.PREVIEW,
-)
-
-/**
- * Linear-style floating capsule: four icon-only tabs (selected = soft pill) plus a detached
- * round button for the terminal. Same shape in every theme; only colours/border come from tokens.
- */
-@Composable
-private fun ForgeBottomBar(
-    activeTab: ForgeTab,
-    changedCount: Int,
-    onSelectTab: (ForgeTab) -> Unit,
-) {
-    val tokens = LocalForgeThemeTokens.current
-    val scheme = MaterialTheme.colorScheme
-    val barBorder = if (tokens.isGlass || tokens.isWhite) tokens.cardBorderStroke else null
-    val barShadow = if (tokens.isGlass) 12.dp else 0.dp
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 25.dp, end = 25.dp, top = 8.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Surface(
-            shape = RoundedCornerShape(100),
-            color = tokens.bottomBarContainerColor,
-            contentColor = scheme.onSurface,
-            border = barBorder,
-            shadowElevation = barShadow,
-            modifier = Modifier
-                .weight(1f)
-                .height(53.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                navEntries.forEach { entry ->
-                    val label = stringResource(entry.label)
-                    val selected = if (entry.tab == ForgeTab.TOOLS) activeTab in toolsGroup else activeTab == entry.tab
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(100))
-                            .background(if (selected) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                            .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = entry.icon,
-                            contentDescription = label,
-                            tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp),
-                        )
-                        // Pending file changes live under Tools; show a quiet accent dot when it is not open.
-                        if (entry.tab == ForgeTab.TOOLS && changedCount > 0 && !selected) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 9.dp, end = 18.dp)
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(scheme.primary),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        Surface(
-            shape = CircleShape,
-            color = tokens.bottomBarContainerColor,
-            contentColor = scheme.onSurface,
-            border = barBorder,
-            shadowElevation = barShadow,
-            modifier = Modifier.size(53.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                    .background(if (activeTab == ForgeTab.TERMINAL) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_terminal)) { onSelectTab(ForgeTab.TERMINAL) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.List,
-                    contentDescription = stringResource(R.string.shell_terminal),
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RuntimeOnboardingScreen(
-    state: ForgeUiState,
-    onToggleStack: (DevStack) -> Unit,
-    onStartSetup: () -> Unit,
-    onPauseSetup: () -> Unit,
-    onRepairRootfs: () -> Unit,
-    onRefreshStatus: () -> Unit,
-    onEnterWorkspaceAnyway: () -> Unit,
-) {
-    val snap = state.setupSnapshot
-    val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
-    val tokens = LocalForgeThemeTokens.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.shell_nextcraft_forge),
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "Ubuntu 24.04 LTS ARM64 Root Chroot (`su -mm`) Environment Setup",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_arm64),
-                    ok = state.arm64Supported,
-                    detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
-                )
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_root),
-                    ok = state.rootAvailable,
-                    detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
-                )
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_rootfs),
-                    ok = state.runtimeInstalled,
-                    detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
-                )
-            }
-        }
-
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.shell_select_development_stacks_to),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                DevStack.entries.forEach { stack ->
-                    val selected = stack in state.selectedDevStacks
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isInstalling, role = Role.Button) { onToggleStack(stack) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = selected,
-                            onCheckedChange = { if (!isInstalling) onToggleStack(stack) },
-                            enabled = !isInstalling,
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stack.displayLabel(), fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = stack.displayDescription(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = stack.installsSummary,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = tokens.accentText,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (snap.status != RuntimeSetupStatus.IDLE) {
-            val pct = (snap.progress.coerceIn(0f, 1f) * 100f).toInt()
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(snap.message, style = MaterialTheme.typography.titleMedium)
-                    snap.errorMessage?.let { err ->
-                        Text(
-                            text = err,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.dangerText,
-                        )
-                    }
-                    LinearProgressIndicator(
-                        progress = snap.progress.coerceIn(0f, 1f),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "$pct% • Status: ${snap.status.name}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Button(
-                onClick = onStartSetup,
-                enabled = state.arm64Supported && !isInstalling,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime))
-            }
-            if (isInstalling) {
-                OutlinedButton(onClick = onPauseSetup) {
-                    Text(stringResource(R.string.launch_pause))
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            OutlinedButton(
-                onClick = onRepairRootfs,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.shell_repair_mounts_dpkg))
-            }
-            OutlinedButton(
-                onClick = onRefreshStatus,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.shell_re_check_root))
-            }
-        }
-
-        TextButton(
-            onClick = onEnterWorkspaceAnyway,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-        ) {
-            Text(stringResource(R.string.shell_continue_to_ide_workspace))
-        }
-    }
-}
-
-@Composable
-private fun StatusCheckRow(
-    label: String,
-    ok: Boolean,
-    detail: String,
-) {
-    val tokens = LocalForgeThemeTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
-            contentDescription = null,
-            tint = if (ok) tokens.successText else tokens.warningText,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun NewProjectDialog(
-    onDismiss: () -> Unit,
-    onCreate: (name: String, description: String, isAndroid: Boolean, template: AndroidTemplate) -> Unit,
-) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var description by rememberSaveable { mutableStateOf("") }
-    var isAndroid by rememberSaveable { mutableStateOf(false) }
-    var template by rememberSaveable { mutableStateOf(AndroidTemplate.COMPOSE) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.shell_create_workspace_project)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.shell_project_name)) },
-                    placeholder = { Text(stringResource(R.string.shell_my_awesome_app)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text(stringResource(R.string.shell_description)) },
-                    placeholder = { Text(stringResource(R.string.shell_optional_project_summary)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Switch(
-                        checked = isAndroid,
-                        onCheckedChange = { isAndroid = it },
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(stringResource(R.string.shell_generate_android_app_template))
-                }
-                if (isAndroid) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        AndroidTemplate.entries.forEach { item ->
-                            FilterChip(
-                                selected = template == item,
-                                onClick = { template = item },
-                                label = { Text(item.label) },
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onCreate(name, description, isAndroid, template) },
-            ) {
-                Text(stringResource(R.string.files_create))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.agent_cancel))
-            }
-        },
-    )
 }
