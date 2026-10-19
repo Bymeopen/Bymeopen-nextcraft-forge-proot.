@@ -306,6 +306,28 @@ fun AgentScreen(
         val attachPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNotEmpty()) viewModel.attachFilesToPrompt(uris)
         }
+        // Camera: the photo is written to a FileProvider URI in the app cache, then imported like any picked file.
+        val cameraContext = LocalContext.current
+        var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
+        var attachMenuOpen by remember { mutableStateOf(false) }
+        val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+            val uri = cameraUri?.let(android.net.Uri::parse)
+            if (saved && uri != null) viewModel.attachFilesToPrompt(listOf(uri))
+            cameraUri = null
+        }
+        fun launchCamera() {
+            runCatching {
+                val dir = java.io.File(cameraContext.cacheDir, "camera").apply { mkdirs() }
+                val photo = java.io.File.createTempFile("IMG_${System.currentTimeMillis()}_", ".jpg", dir)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    cameraContext,
+                    "${cameraContext.packageName}.fileprovider",
+                    photo,
+                )
+                cameraUri = uri.toString()
+                cameraLauncher.launch(uri)
+            }.onFailure { cameraUri = null }
+        }
         if (state.pendingAttachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -333,8 +355,20 @@ fun AgentScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Attach: photos or any file; it lands in attachments/ inside the workspace.
-                IconButton(onClick = { attachPicker.launch(arrayOf("*/*")) }, enabled = !running) {
-                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box {
+                    IconButton(onClick = { attachMenuOpen = true }, enabled = !running) {
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.agent_attach_camera)) },
+                            onClick = { attachMenuOpen = false; launchCamera() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.agent_attach_file)) },
+                            onClick = { attachMenuOpen = false; attachPicker.launch(arrayOf("*/*")) },
+                        )
+                    }
                 }
                 TextField(
                     value = promptInput,

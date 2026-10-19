@@ -563,5 +563,7 @@
     <string name="files_ok">OK</string>
     <string name="files_row_menu">More actions</string>
     <string name="agent_attach">Attach photo or file</string>
+    <string name="agent_attach_camera">Take photo</string>
+    <string name="agent_attach_file">Photo or file</string>
     <string name="agent_remove_attachment">Remove attachment</string>
 </resources>
