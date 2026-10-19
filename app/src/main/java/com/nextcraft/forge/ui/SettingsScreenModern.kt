@@ -652,22 +652,48 @@ internal fun AntigravityAccountCard(
     }
 
     var modelOpen by rememberSaveable { mutableStateOf(false) }
+    var showModelPicker by rememberSaveable { mutableStateOf(false) }
+    // Models come from the signed-in account (`agy models`); load them once as soon as the account is connected.
+    androidx.compose.runtime.LaunchedEffect(signedIn) {
+        if (signedIn && state.antigravityModels.isEmpty()) viewModel.refreshAntigravityModels()
+    }
+    if (showModelPicker) {
+        ModelPickerDialog(
+            title = stringResource(R.string.settings_antigravity_model),
+            options = antigravityModelOptions(state.antigravityModels, state.antigravityModel),
+            selectedId = state.antigravityModel,
+            loading = state.antigravityModelsLoading,
+            onRefresh = viewModel::refreshAntigravityModels,
+            onSelect = { id ->
+                viewModel.selectAntigravityModel(id)
+                onAgyModelChange(id)
+                Regex("-(low|medium|high)$").find(id)?.groupValues?.get(1)?.let(onAgyEffortChange)
+                showModelPicker = false
+            },
+            onDismiss = { showModelPicker = false },
+        )
+    }
     DisclosureCard(
         icon = Icons.Default.Info,
         title = stringResource(R.string.settings_model_access),
-        subtitle = "${state.antigravityModel} · ${state.antigravityEffort.uppercase()}",
+        subtitle = "${state.antigravityModel.takeIf { it.isNotBlank() }?.let(::antigravityModelLabel) ?: "—"} · ${state.antigravityEffort.uppercase()}",
         expanded = modelOpen,
         onToggle = { modelOpen = !modelOpen },
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(
-                shape = RoundedCornerShape(14.dp),
-                value = agyModelInput,
-                onValueChange = onAgyModelChange,
-                label = { Text(stringResource(R.string.settings_antigravity_model)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_antigravity_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                    Text(
+                        text = agyModelInput.ifBlank { state.antigravityModel }.ifBlank { "—" }.let { if (it == "—") it else antigravityModelLabel(it) },
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
+                    Text(stringResource(R.string.settings_choose_model))
+                }
+            }
             val efforts = listOf("low", "medium", "high")
             ForgePillTabs(
                 items = efforts.map { stringResource(R.string.settings_effort, it.uppercase()) },

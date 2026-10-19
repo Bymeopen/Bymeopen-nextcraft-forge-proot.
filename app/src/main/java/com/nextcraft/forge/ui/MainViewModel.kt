@@ -47,6 +47,7 @@ import com.nextcraft.forge.runtime.AndroidLogcatState
 import com.nextcraft.forge.runtime.AndroidProjectTemplateGenerator
 import com.nextcraft.forge.runtime.AntigravityAuthController
 import com.nextcraft.forge.runtime.ClaudeAuthController
+import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
 import com.nextcraft.forge.runtime.DshRuntimeBridge
@@ -171,6 +172,9 @@ data class ForgeUiState(
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
+    /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
+    val antigravityModels: List<String> = emptyList(),
+    val antigravityModelsLoading: Boolean = false,
     val updateInfo: AppUpdateInfo? = null,
     val updateStatusMessage: String? = null,
     /** 0..1 while an app update APK is downloading, null otherwise. */
@@ -2693,6 +2697,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 antigravityModel = cleanModel,
                 antigravityEffort = cleanEffort,
             )
+        }
+    }
+
+    /** Picks an Antigravity model; an id ending in -low/-medium/-high also sets the matching effort. */
+    fun selectAntigravityModel(model: String) {
+        val effort = Regex("-(low|medium|high)$").find(model)?.groupValues?.get(1) ?: _state.value.antigravityEffort
+        setAntigravityConfig(model, effort)
+    }
+
+    /** Lists the models the signed-in Google account can use by running `agy models` in the chroot. */
+    fun refreshAntigravityModels() {
+        if (_state.value.antigravityModelsLoading) return
+        if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
+            _state.update { it.copy(apiStatusMessage = UiText.Raw("Install Antigravity CLI first.")) }
+            return
+        }
+        _state.update { it.copy(antigravityModelsLoading = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val runtime = installer.installedRuntime()
+                val workspace = File(getApplication<Application>().filesDir, "workspaces/antigravity-models").apply { mkdirs() }
+                val output = File(getApplication<Application>().cacheDir, "antigravity-models-${System.nanoTime()}.log")
+                val process = installer.process(
+                    runtime.chrootExec,
+                    runtime.rootfs,
+                    workspace,
+                    mapOf("NO_COLOR" to "1", "TERM" to "xterm-256color"),
+                    listOf(RuntimeInstaller.AGY_GUEST_PATH, "models"),
+                    guestWorkspacePath = "/workspace/antigravity-models",
+                    emulateHardLinks = false,
+                    outputFile = output,
+                )
+                runCatching { process.outputStream.close() }
+                try {
+                    if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                        error("Listing Antigravity models timed out.")
+                    }
+                    val text = sanitizeClaudeAuthOutput(output.takeIf(File::exists)?.readText().orEmpty())
+                    check(!text.contains("sign in", ignoreCase = true)) { "Sign in to Antigravity first." }
+                    text.lineSequence()
+                        .mapNotNull { line -> line.trim().split(Regex("\\s+"), limit = 2).firstOrNull() }
+                        .filter { it.matches(Regex("[a-z0-9][a-z0-9._-]+")) }
+                        .distinct()
+                        .toList()
+                        .also { check(it.isNotEmpty()) { "Antigravity returned no models." } }
+                } finally {
+                    output.delete()
+                }
+            }
+            _state.update { current ->
+                result.fold(
+                    onSuccess = { models -> current.copy(antigravityModelsLoading = false, antigravityModels = models) },
+                    onFailure = { error ->
+                        current.copy(
+                            antigravityModelsLoading = false,
+                            apiStatusMessage = UiText.Raw(error.message ?: "Could not load Antigravity models."),
+                        )
+                    },
+                )
+            }
         }
     }
 

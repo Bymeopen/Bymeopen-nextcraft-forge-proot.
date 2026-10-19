@@ -218,6 +218,14 @@
     <string name="settings_claude_open_page">Buka halaman masuk</string>
     <string name="settings_claude_sign_out">Keluar dari Claude</string>
     <string name="settings_claude_footnote">Proses masuk memakai login resmi Claude Code. Setelah Anda menyetujui di browser, Anda otomatis kembali ke aplikasi; jika halaman menampilkan kode, tempel kode di atas. Mendukung Pro, Max, Team, dan Enterprise (termasuk SSO).</string>
+    <string name="model_picker_search">Cari atau ketik ID model</string>
+    <string name="model_picker_loading">Memuat model…</string>
+    <string name="model_picker_use_custom">Pakai "%1$s"</string>
+    <string name="model_picker_empty">Tidak ada model yang cocok.</string>
+    <string name="model_picker_close">Selesai</string>
+    <string name="model_picker_refresh">Muat ulang</string>
+    <string name="settings_choose_model">Pilih model</string>
+    <string name="settings_current_model">Model</string>
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>

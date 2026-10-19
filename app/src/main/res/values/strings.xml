@@ -218,6 +218,14 @@
     <string name="settings_claude_open_page">Open sign-in page</string>
     <string name="settings_claude_sign_out">Sign out of Claude</string>
     <string name="settings_claude_footnote">Sign-in runs Claude Code's official login. After you approve in the browser it returns to the app by itself; if the page shows a code instead, paste it above. Pro, Max, Team and Enterprise (including SSO) are supported.</string>
+    <string name="model_picker_search">Search or type a model id</string>
+    <string name="model_picker_loading">Loading models…</string>
+    <string name="model_picker_use_custom">Use "%1$s"</string>
+    <string name="model_picker_empty">No models match.</string>
+    <string name="model_picker_close">Done</string>
+    <string name="model_picker_refresh">Refresh</string>
+    <string name="settings_choose_model">Choose model</string>
+    <string name="settings_current_model">Model</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
