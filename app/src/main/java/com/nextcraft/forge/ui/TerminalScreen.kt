@@ -107,29 +107,12 @@ fun TerminalScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(shape = RoundedCornerShape(12.dp), color = tokens.cardElevatedColor, modifier = Modifier.size(44.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.List, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(22.dp))
-                }
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.terminal_project_terminal), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
-                Text(
-                    text = "/workspace/${state.activeProject?.slug ?: "sandbox"} · ${stringResource(R.string.terminal_env_root_chroot)}",
-                    fontSize = 13.sp,
-                    color = scheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            ForgeActionPill {
+        val inProject = state.activeTab == ForgeTab.PROJECTS
+        ForgeProjectHeader(
+            title = if (inProject) state.activeProject?.name ?: stringResource(R.string.terminal_project_terminal) else stringResource(R.string.terminal_project_terminal),
+            subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"} · ${stringResource(R.string.terminal_env_root_chroot)}",
+            onBack = if (inProject) ({ viewModel.projectBack() }) else null,
+            actions = {
                 ForgePillIcon(
                     icon = Icons.Default.Share,
                     description = stringResource(R.string.terminal_copy_terminal_output),
@@ -149,8 +132,8 @@ fun TerminalScreen(
                         onClick = viewModel::clearTerminal,
                     )
                 }
-            }
-        }
+            },
+        )
         if (state.terminalRunning) {
             LinearProgressIndicator(
                 modifier = Modifier

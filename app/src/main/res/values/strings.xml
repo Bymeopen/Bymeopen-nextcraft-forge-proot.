@@ -538,6 +538,7 @@
     <string name="agent_config_title">AI agent</string>
     <string name="chats_subtitle">%1$d chats</string>
     <string name="chats_empty">No chats yet. Start one to talk to the agent about this project.</string>
+    <string name="chats_empty_title">No chats yet</string>
     <string name="chats_open_project_tools">Project tools</string>
     <string name="chats_new_chat">New chat</string>
     <string name="nav_chat">Chat</string>

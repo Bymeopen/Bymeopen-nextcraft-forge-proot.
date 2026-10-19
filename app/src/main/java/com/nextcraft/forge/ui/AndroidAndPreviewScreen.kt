@@ -167,9 +167,10 @@ fun AndroidBuildScreen(
                 .padding(end = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Launch is reached from a project's header, so it reads as a project page: name first, "Launch" under it.
             ForgeLargeTitle(
-                title = stringResource(R.string.launch_launch),
-                subtitle = state.activeProject?.name,
+                title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
+                subtitle = stringResource(R.string.launch_launch),
                 modifier = Modifier.weight(1f),
             )
             ForgeActionPill {
@@ -640,16 +641,16 @@ fun WebPreviewScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        if (state.activeTab == ForgeTab.PROJECTS) {
+            ForgeProjectHeader(
+                title = state.activeProject?.name ?: stringResource(R.string.launch_preview),
+                subtitle = stringResource(R.string.launch_preview) + " · " + stringResource(R.string.launch_local_dev_server),
+                onBack = { viewModel.projectBack() },
+            )
+        } else {
             ForgeLargeTitle(
                 title = stringResource(R.string.launch_preview),
                 subtitle = stringResource(R.string.launch_local_dev_server),
-                modifier = Modifier.weight(1f),
             )
         }
 
@@ -738,20 +739,11 @@ fun WebPreviewScreen(
         if (!serverUp) {
             // Nothing is listening yet: say so instead of showing a blank WebView. (if/else, not an early return: a
             // `return@Column` inside this composable lambda is a suspected cause of the Compose Stack.pop crash.)
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(56.dp))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(stringResource(R.string.launch_preview_not_running), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = stringResource(R.string.launch_preview_not_running_hint),
-                    fontSize = 14.sp,
-                    color = colors.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.GLOBE,
+                    title = stringResource(R.string.launch_preview_not_running),
+                    message = stringResource(R.string.launch_preview_not_running_hint),
                 )
             }
         } else {
