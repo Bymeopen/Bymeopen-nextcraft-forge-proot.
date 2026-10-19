@@ -12,6 +12,12 @@ fi
 ROOTFS_REAL=$(realpath "$1" 2>/dev/null || printf '%s' "$1")
 ROOTFS_PATH="${ROOTFS_REAL%/}"
 
+# Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
+# shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
+for mp in $(awk -v prefix="$ROOTFS_PATH/" -v exact="$ROOTFS_PATH" 'index($2, prefix) == 1 || $2 == exact { print $2 }' /proc/mounts | sort); do
+    mount --make-private "$mp" 2>/dev/null || mount -o private "$mp" 2>/dev/null || true
+done
+
 # Lepaskan seluruh mount di bawah $ROOTFS_PATH dari urutan terdalam ke terluar (sort -r)
 for pass in 1 2 3; do
     MOUNTS=$(awk -v prefix="${ROOTFS_PATH}/" -v exact="${ROOTFS_PATH}" 'index($2, prefix) == 1 || $2 == exact { print $2 }' /proc/mounts | sort -r)

@@ -118,7 +118,7 @@ Berbeda dengan aplikasi SaaS yang menarik biaya langganan untuk mem-proxy API di
 
 #### ADR-002: Container Runtime Engine Selection (Pure Root Chroot vs PRoot)
 * **Status**: Accepted
-* **Context**: CLI Agent (`Claude Code`, `Antigravity CLI`, `DeepSeek Harness`) dan toolchain kompilasi (`OpenJDK 17`, `Gradle`, `Node.js 22`, `Python 3.12`, `Git`) membutuhkan lingkungan filesystem Linux (`glibc`) standar di atas kernel Android.
+* **Context**: CLI Agent (`Claude Code`, `Antigravity CLI`, `DeepSeek Harness`) dan toolchain kompilasi (`OpenJDK 21`, `Gradle 9.8`, `Node.js 24`, `Python 3.12`, `Git`) membutuhkan lingkungan filesystem Linux (`glibc`) standar di atas kernel Android.
 * **Options**:
   1. *PRoot (`libproot.so`)*: Berjalan tanpa root menggunakan `ptrace` untuk memalsukan path syscall. Sangat lambat pada beban kerja I/O tinggi (seperti Gradle & `node_modules`) karena setiap syscall mengalami 2x *context switch* ke proses tracer.
   2. *Dual-Runtime (PRoot + Chroot)*: Menyimpan kode PRoot sekaligus Chroot. Membuat kode instalasi, ekstraksi, dan terminasi proses menjadi rumit serta membengkakkan ukuran native library (`talloc` + `proot` + `shmem`).
@@ -197,7 +197,7 @@ flowchart TB
     subgraph ChrootGuest["Ubuntu 24.04 LTS (noble) ARM64 Chroot (/data/data/com.nextcraft.forge/files/runtime/ubuntu)"]
         Agents["Official CLI Agents<br/>(claude | agy | dsh)"]
         Hook["Permission Hook (/opt/nextcraft/permission-hook.sh)<br/>↔ /nextcraft-bridge IPC"]
-        Toolchains["Polyglot & Android Build Toolchain<br/>(OpenJDK 17, Gradle 8.x, Bionic aapt2, Node 22, Python 3.12, Git, rg)"]
+        Toolchains["Polyglot & Android Build Toolchain<br/>(OpenJDK 21, Gradle 9.8, AGP 9.4, static Bionic aapt2, Node 24, Python 3.12, Git, rg)"]
         Workspace["Mounted Project Workspace<br/>(/workspace/nextcraft) + Offline Maven (/root/maven)"]
     end
 

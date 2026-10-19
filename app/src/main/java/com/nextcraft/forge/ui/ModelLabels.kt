@@ -13,6 +13,7 @@ import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
 import com.nextcraft.forge.model.ProviderKind
+import com.nextcraft.forge.runtime.AndroidToolchain
 
 // Product and brand names stay as written; only descriptive text goes through resources.
 
@@ -80,7 +81,16 @@ fun DevStack.descriptionRes(): Int = when (this) {
 fun DevStack.displayLabel(): String = stringResource(labelRes())
 
 @Composable
-fun DevStack.displayDescription(): String = stringResource(descriptionRes())
+fun DevStack.displayDescription(): String = when (this) {
+    // Versions come from the toolchain constants so the label never drifts from the bundle.
+    DevStack.ANDROID -> stringResource(
+        descriptionRes(),
+        AndroidToolchain.JDK_MAJOR,
+        AndroidToolchain.GRADLE_VERSION,
+        AndroidToolchain.COMPILE_SDK,
+    )
+    else -> stringResource(descriptionRes())
+}
 
 /** "3m ago" style text for list rows; plurals come from resources so each locale decides the form. */
 @Composable

@@ -241,6 +241,7 @@
     <string name="msg_gh_repo_name_empty">Repository name cannot be empty.</string>
     <string name="msg_gh_creating_repo">Creating GitHub repository \'%1$s\'…</string>
     <string name="msg_gh_created_pushed">Created &amp; pushed to %1$s</string>
+    <string name="msg_gh_created_push_failed">Created %1$s, but the initial push failed: %2$s</string>
     <string name="msg_gh_create_failed">Failed to create repository: %1$s</string>
     <string name="msg_gh_connect_first_pull">Connect GitHub first before pulling.</string>
     <string name="msg_gh_pulling">Pulling latest changes from GitHub for %1$s…</string>
@@ -274,7 +275,7 @@
     <string name="stack_php">PHP Runtime</string>
     <string name="stack_web_desc">Node.js 24, npm, TypeScript, Vite, Next.js</string>
     <string name="stack_python_desc">Python 3.12, pip, venv, FastAPI, data tools</string>
-    <string name="stack_android_desc">OpenJDK 17, Gradle, Android SDK 35/36, Bionic aapt2</string>
+    <string name="stack_android_desc">OpenJDK %1$s, Gradle %2$s, Android SDK %3$s, Bionic aapt2</string>
     <string name="stack_cpp_desc">Clang/GCC, CMake, Make, Ninja, gdb</string>
     <string name="stack_php_desc">PHP CLI, Composer, SQLite/PDO extensions</string>
     <string name="chat_main">Main chat</string>
@@ -327,4 +328,28 @@
     <string name="np_title">New project</string>
     <string name="np_android_template">Android app template</string>
     <string name="np_android_template_sub">Generate a Kotlin project (SDK 35)</string>
+    <string name="settings_auto_approve_all_tools">Auto-approve all tools</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Skip confirmation prompts for all tool executions</string>
+    <string name="settings_download_install_update">Download &amp; Install v%1$s</string>
+    <string name="files_read_only_badge">Read-Only</string>
+    <string name="files_delete_file">Delete file</string>
+    <string name="files_delete_file_confirm_title">Delete File</string>
+    <string name="files_delete_file_confirm_message">Are you sure you want to delete %1$s from this workspace?</string>
+    <string name="shell_delete_project_confirm_title">Delete Project</string>
+    <string name="shell_delete_project_confirm_message">Permanently delete %1$s and all files inside /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Delete</string>
+    <string name="projects_new_quick_chat">New quick chat</string>
+    <string name="agent_clear_chat">Clear Chat</string>
+    <string name="launch_clear_logcat">Clear</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
+    <string name="msg_busy_before_quick_project">Finish or stop the active task before starting a Quick project.</string>
+    <string name="msg_busy_before_delete">Cannot delete a project while an agent session, build, or terminal command is running.</string>
+    <string name="msg_agy_probing">Probing Antigravity CLI inside chroot…</string>
+    <string name="msg_agy_verified">Antigravity CLI verified: %1$s</string>
+    <string name="msg_agy_probe_failed">Antigravity probe failed: %1$s</string>
+    <string name="msg_switch_blocked_agent">Stop the running agent session before switching projects.</string>
+    <string name="msg_switch_blocked_build">Wait for the Android APK build to finish or stop it before switching projects.</string>
+    <string name="msg_switch_blocked_terminal">Wait for the active terminal command to finish before switching projects.</string>
+    <string name="msg_busy_before_new_project">Finish or stop the active task before creating and switching to a new project.</string>
+    <string name="msg_gh_code_expired">GitHub sign-in code expired. Start sign-in again.</string>
 </resources>

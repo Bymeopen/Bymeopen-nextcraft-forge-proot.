@@ -201,6 +201,10 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         onCloneGitUrl = viewModel::cloneGitUrl,
                         onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
                         onDeleteProject = viewModel::deleteProject,
+                        onNewQuickProject = {
+                            viewModel.createQuickProject()
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
                     )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
@@ -237,9 +241,42 @@ private fun ForgeTopBar(
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
     var themeMenuExpanded by remember { mutableStateOf(false) }
+    var pendingDeleteProjectId by remember { mutableStateOf<String?>(null) }
     val activeProject = state.activeProject
     val tokens = LocalForgeThemeTokens.current
     val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+    val canDeleteProject = state.projects.size > 1 &&
+        !state.sessionRunning &&
+        state.androidBuild.phase != com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING &&
+        !state.terminalRunning
+
+    pendingDeleteProjectId?.let { targetId ->
+        val target = state.projects.firstOrNull { it.id == targetId }
+        if (target != null) {
+            AlertDialog(
+                onDismissRequest = { pendingDeleteProjectId = null },
+                title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+                text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            onDeleteProject(target.id)
+                            pendingDeleteProjectId = null
+                        },
+                    ) {
+                        Text(stringResource(R.string.shell_confirm_delete))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteProjectId = null }) {
+                        Text(stringResource(R.string.agent_cancel))
+                    }
+                },
+            )
+        } else {
+            pendingDeleteProjectId = null
+        }
+    }
 
     Surface(
         color = tokens.topBarContainerColor,
@@ -325,11 +362,11 @@ private fun ForgeTopBar(
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1) {
+                                    if (canDeleteProject) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
-                                                onDeleteProject(project.id)
+                                                pendingDeleteProjectId = project.id
                                             },
                                         ) {
                                             Icon(

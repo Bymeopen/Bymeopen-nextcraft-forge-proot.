@@ -3,6 +3,7 @@ package com.nextcraft.forge.update
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -54,15 +55,15 @@ class AppUpdater(
             val artifact = root.optJSONObject("artifacts")?.optJSONObject(variant)
                 ?: root.optJSONObject(variant)
                 ?: root
-            val url = artifact.optString("url").ifBlank { artifact.optString("apkUrl") }.trim()
+            val url = artifact.stringOrEmpty("url").ifBlank { artifact.stringOrEmpty("apkUrl") }.trim()
             if (!url.startsWith("https://")) return null
             AppUpdateInfo(
                 versionCode = versionCode,
-                versionName = root.optString("versionName", versionCode.toString()),
+                versionName = root.stringOrEmpty("versionName", versionCode.toString()),
                 apkUrl = url,
-                sha256 = artifact.optString("sha256").trim().lowercase(),
+                sha256 = artifact.stringOrEmpty("sha256").trim().lowercase(),
                 sizeBytes = artifact.optLong("sizeBytes", -1L),
-                notes = root.optString("notes"),
+                notes = root.stringOrEmpty("notes"),
             )
         } finally {
             connection.disconnect()

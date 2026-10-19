@@ -1,6 +1,7 @@
 package com.nextcraft.forge.runtime
 
 import android.content.Context
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
@@ -46,29 +47,29 @@ internal sealed interface AntigravityParsedEvent {
 internal object AntigravityEventParser {
     fun parse(line: String): AntigravityParsedEvent? {
         val root = runCatching { JSONObject(line) }.getOrNull() ?: return null
-        return when (root.optString("event")) {
-            "init" -> root.optString("conversation_id")
+        return when (root.stringOrEmpty("event")) {
+            "init" -> root.stringOrEmpty("conversation_id")
                 .takeIf(String::isNotBlank)
                 ?.let(AntigravityParsedEvent::Initialized)
             "step_update" -> {
                 val step = root.optJSONObject("step_update") ?: return null
-                val delta = step.optString("text_delta")
+                val delta = step.stringOrEmpty("text_delta")
                 if (delta.isNotEmpty()) return AntigravityParsedEvent.Text(delta)
-                val type = step.optString("step_type")
+                val type = step.stringOrEmpty("step_type")
                 if (type.contains("tool", true) || type.contains("command", true)) {
-                    val rawName = step.optString("tool_name").ifBlank {
-                        step.optJSONObject("tool_info")?.optString("name").orEmpty()
+                    val rawName = step.stringOrEmpty("tool_name").ifBlank {
+                        step.optJSONObject("tool_info")?.stringOrEmpty("name").orEmpty()
                     }.ifBlank { type.ifBlank { "Tool" } }
                     val name = antigravityToolDisplayName(rawName)
                     val detail = antigravityToolDetail(step, rawName).ifBlank { name }
-                    if (step.optString("state") in setOf("DONE", "ERROR")) {
+                    if (step.stringOrEmpty("state") in setOf("DONE", "ERROR")) {
                         val output = step.optJSONObject("tool_info")
-                            ?.optString("output")
+                            ?.stringOrEmpty("output")
                             ?.takeIf(String::isNotBlank)
                             ?.let(::antigravityToolOutput)
                         val error = step.optJSONObject("tool_info")
                             ?.optJSONObject("error")
-                            ?.optString("message")
+                            ?.stringOrEmpty("message")
                             ?.takeIf(String::isNotBlank)
                             ?.let(::redactToolDetail)
                         AntigravityParsedEvent.ToolCompleted(name, output ?: error ?: detail)
@@ -80,10 +81,10 @@ internal object AntigravityEventParser {
             "result" -> {
                 val result = root.optJSONObject("result") ?: root
                 AntigravityParsedEvent.Result(
-                    result.optString("conversation_id").takeIf(String::isNotBlank),
-                    result.optString("status", "ERROR"),
-                    result.optString("response").takeIf(String::isNotBlank),
-                    result.optString("error").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("conversation_id").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("status", "ERROR"),
+                    result.stringOrEmpty("response").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("error").takeIf(String::isNotBlank),
                 )
             }
             else -> null // Forward compatible with new agy event types.
@@ -103,7 +104,7 @@ private fun antigravityToolDisplayName(name: String): String = when (name.lowerc
 }
 
 private fun antigravityToolDetail(step: JSONObject, rawName: String): String {
-    step.optString("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
+    step.stringOrEmpty("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
     val info = step.optJSONObject("tool_info")
     val parameters = info?.optJSONObject("parameters")
     val preferredKeys = when (rawName.lowercase()) {
@@ -323,12 +324,14 @@ class AntigravityRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             emitFailure(sessionId, "Antigravity CLI is not installed. Open Settings → Coding agent to install it.")
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -341,6 +344,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()
@@ -468,6 +472,8 @@ class AntigravityRuntimeBridge(
             finishForegroundRuntime(true, projectSlug, "Antigravity finished in $projectSlug")
         }.onFailure {
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = if (userStopRequested) {
                 "Stopped by user"
             } else {
@@ -482,7 +488,7 @@ class AntigravityRuntimeBridge(
         activeSessionId = null
         activeProjectSlug = ""
         taskStartedAtElapsedRealtime = 0L
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 
@@ -654,10 +660,10 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String): St
 
     For Android projects, never use plain `gradle build` or start a Gradle daemon. Build only the debug APK. First check whether `app/build/outputs/apk/debug/` already contains an APK.
     - For a first build with no existing debug APK, allow dependency resolution and use:
-      `timeout 15m gradle -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 --init-script /root/.gradle/init.d/pocketdev-android.gradle -Pandroid.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2 assembleDebug --console=plain --stacktrace`
+      `timeout 15m gradle ${AndroidToolchain.GRADLE_BASE_FLAGS} assembleDebug --console=plain --stacktrace`
     - For a later build with an existing debug APK, prefer the cached fast path:
-      `timeout 5m gradle -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 --offline --init-script /root/.gradle/init.d/pocketdev-android.gradle -Pandroid.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2 assembleDebug --console=plain --stacktrace`
-    NextCraft Forge bundles the standard Android dependencies locally. If and only if the cached build finishes with a clear missing-cached-dependency error, retry once online with `timeout 15m`, removing only `--offline` and retaining all other flags. Do not retry a timed-out or resource-failed build unchanged.
+      `timeout 5m gradle -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 --offline --init-script ${AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH} -Pandroid.aapt2FromMavenOverride=${AndroidToolchain.AAPT2_GUEST_PATH} assembleDebug --console=plain --stacktrace`
+    NextCraft Forge bundles the standard Android dependencies locally (AGP ${AndroidToolchain.AGP_VERSION}, Kotlin ${AndroidToolchain.KOTLIN_VERSION}, compileSdk ${AndroidToolchain.COMPILE_SDK}, JDK ${AndroidToolchain.JDK_MAJOR}). New projects must use these versions and the AGP 9 DSL (built-in Kotlin, no org.jetbrains.kotlin.android plugin, no kotlinOptions, Compose via org.jetbrains.kotlin.plugin.compose). Projects made with AGP 8.x / Kotlin 1.9 are not cached offline anymore: migrate them or build them online once. If and only if the cached build finishes with a clear missing-cached-dependency error, retry once online with `timeout 15m`, removing only `--offline` and retaining all other flags. Do not retry a timed-out or resource-failed build unchanged.
     Start the optimized Android build with `run_command` normally inside the Root Chroot workspace. If Antigravity moves the command into a managed task, immediately use `manage_task` to check its status and obtain its log path. Poll that managed task and tail its log with short commands about every 10 seconds so the user receives progress, then read the final output and exit status. Never wait silently on a long foreground command.
     </pocketdev_workspace>
 

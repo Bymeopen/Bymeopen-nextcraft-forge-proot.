@@ -2,6 +2,7 @@ package com.nextcraft.forge.runtime
 
 import android.content.Context
 import android.util.Log
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
@@ -73,6 +74,7 @@ class DshRuntimeBridge(
         val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         if (secret.isBlank()) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
+            activeSessionId = null
             return@withContext sessionId
         }
         if (provider.kind == ProviderKind.CLAUDE) {
@@ -82,13 +84,15 @@ class DshRuntimeBridge(
                     "Claude subscription login is not supported by DeepSeek Harness. Pick a key-based provider in Settings.",
                 ),
             )
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var openRouterGateway: OpenRouterRoutingGateway? = null
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -101,6 +105,7 @@ class DshRuntimeBridge(
                     }, "forge-dsh-stop").apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             check(installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
@@ -175,6 +180,8 @@ class DshRuntimeBridge(
             }
         }.onFailure { error ->
             Log.e("DshBridge", "Session failed: ${error::class.simpleName}")
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = friendlyError(error)
             emitFailureOnce(sessionId, message)
             if (userStopRequested) {
@@ -191,7 +198,7 @@ class DshRuntimeBridge(
         runCatching { spawnedOutputFile?.delete() }
         activeProcess = null
         activeSessionId = null
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 
@@ -534,11 +541,7 @@ class DshRuntimeBridge(
             sb.appendLine("When giving commands to the user, make them runnable from this project root.")
         }
         if (installer.isStackInstalled(DevStack.ANDROID)) {
-            sb.appendLine("If this is an Android project, the phone already provides JDK 17, Android SDK 36, ARM64 Build Tools 35.0.0, Gradle 8.14.3, and an offline Maven repository.")
-            sb.appendLine("For newly created Android projects, use AGP 8.11.0, Kotlin 1.9.22, compileSdk 36, and Java 17 so the preinstalled offline toolchain can build immediately.")
-            sb.appendLine("The bundled Maven cache handles the base toolchain; Gradle may download project-specific libraries normally. Set android.useAndroidX=true for AndroidX or Compose projects.")
-            sb.appendLine("NextCraft Forge globally configures Gradle to use the SDK's ARM64 aapt2. Do not use the x86_64 Maven aapt2, investigate its architecture, or add android.aapt2FromMavenOverride to the project.")
-            sb.appendLine("Use the installed `gradle` command for Android builds; do not ask the user to install Android Studio, an SDK, Gradle, ADB, or Termux.")
+            AndroidToolchain.AGENT_PROMPT_LINES.forEach(sb::appendLine)
         } else {
             sb.appendLine("The optional Android build toolchain is not installed in this NextCraft Forge runtime. You may create Android project files, but do not claim that Gradle, the Android SDK, or aapt2 is available and do not present build or install commands as verified. Tell the user to add the Android development stack in NextCraft Forge Settings before building.")
         }
@@ -631,6 +634,11 @@ internal data class DshRoute(
 
 internal data class DshCustomRoute(val api: String, val baseUrl: String)
 
+private val DSH_WIRE_APIS = setOf("anthropic-messages", "openai-completions", "openai-responses")
+
+/** dshApi is user-editable and written unquoted into settings.yaml, so only known wire protocols pass through. */
+internal fun safeDshApi(value: String): String = value.trim().takeIf { it in DSH_WIRE_APIS } ?: "anthropic-messages"
+
 internal object DshRouteMapper {
     fun forProfile(profile: ProviderProfile): DshRoute {
         val model = profile.model.ifBlank { profile.kind.defaultModel }
@@ -659,7 +667,7 @@ internal object DshRouteMapper {
                 name = "mh-kimi",
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
-                custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
+                custom = DshCustomRoute(safeDshApi(profile.dshApi), profile.resolvedBaseUrl),
             )
             ProviderKind.OPENCODE_ZEN -> DshRoute(
                 name = "opencode-zen",
@@ -677,7 +685,7 @@ internal object DshRouteMapper {
                 name = "mh-custom",
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
-                custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
+                custom = DshCustomRoute(safeDshApi(profile.dshApi), profile.resolvedBaseUrl),
             )
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
         }
@@ -761,7 +769,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             val id = frame.optInt("id", -1)
             frame.optJSONObject("error")?.let { error ->
                 return DshSdkProtocolEvent.Failed(
-                    error.optString("message").meaningfulDshText("DeepSeek Harness SDK request $id failed"),
+                    error.stringOrEmpty("message").meaningfulDshText("DeepSeek Harness SDK request $id failed"),
                 )
             }
             return when (id) {
@@ -773,10 +781,10 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         }
 
         val params = frame.optJSONObject("params") ?: return DshSdkProtocolEvent.Ignored
-        return when (frame.optString("method")) {
+        return when (frame.stringOrEmpty("method")) {
             "session.status" -> {
-                if (params.optString("sessionId") != expectedSessionId) DshSdkProtocolEvent.Ignored
-                else DshSdkProtocolEvent.Status(params.optString("status") == "running")
+                if (params.stringOrEmpty("sessionId") != expectedSessionId) DshSdkProtocolEvent.Ignored
+                else DshSdkProtocolEvent.Status(params.stringOrEmpty("status") == "running")
             }
             "session.event" -> parseSessionEvent(params)
             else -> DshSdkProtocolEvent.Ignored
@@ -784,10 +792,10 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
     }
 
     private fun parseSessionEvent(params: JSONObject): DshSdkProtocolEvent {
-        if (params.optString("sessionId") != expectedSessionId) return DshSdkProtocolEvent.Ignored
+        if (params.stringOrEmpty("sessionId") != expectedSessionId) return DshSdkProtocolEvent.Ignored
         val event = params.optJSONObject("event") ?: return DshSdkProtocolEvent.Ignored
         val data = event.optJSONObject("data") ?: return DshSdkProtocolEvent.Ignored
-        return when (event.optString("type")) {
+        return when (event.stringOrEmpty("type")) {
             "assistant/chunk" -> parseAssistantChunk(data)
             "assistant/message" -> {
                 val content = data.optJSONObject("message")?.optJSONArray("content")
@@ -802,9 +810,9 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
                 }
             }
             "tool/call" -> {
-                val callId = data.optString("callId")
-                val rawName = data.optString("name").ifBlank { "Tool" }
-                val arguments = data.optString("arguments")
+                val callId = data.stringOrEmpty("callId")
+                val rawName = data.stringOrEmpty("name").ifBlank { "Tool" }
+                val arguments = data.stringOrEmpty("arguments")
                 val displayName = displayToolName(rawName, arguments)
                 toolNames[callId] = displayName
                 DshSdkProtocolEvent.ToolStarted(callId, displayName, toolDetail(arguments))
@@ -812,11 +820,11 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             "tool/result" -> {
                 val message = data.optJSONObject("message")
                 val resultBlock = message?.optJSONArray("content")?.optJSONObject(0)
-                val callId = resultBlock?.optString("toolCallId").orEmpty()
+                val callId = resultBlock?.stringOrEmpty("toolCallId").orEmpty()
                 val name = toolNames.remove(callId) ?: "Tool"
                 val error = data.optJSONObject("error")
                 val text = contentText(resultBlock?.optJSONArray("content"))
-                val summary = error?.optString("message").orEmpty()
+                val summary = error?.stringOrEmpty("message").orEmpty()
                     .meaningfulDshText(text)
                     .let { compactDshText(it, MAX_DSH_TOOL_RAW_TEXT, 180) }
                     .ifBlank { "$name completed" }
@@ -824,9 +832,9 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             }
             "turn/end" -> {
                 val reason = data.optJSONObject("reason")
-                when (reason?.optString("kind")) {
+                when (reason?.stringOrEmpty("kind")) {
                     "error" -> DshSdkProtocolEvent.Failed(
-                        reason.optJSONObject("error")?.optString("message").orEmpty()
+                        reason.optJSONObject("error")?.stringOrEmpty("message").orEmpty()
                             .meaningfulDshText("DeepSeek Harness turn failed"),
                     )
                     "blocked" -> DshSdkProtocolEvent.Failed("DeepSeek Harness was blocked from completing the task")
@@ -844,9 +852,9 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val chunk = data.optJSONObject("chunk") ?: return DshSdkProtocolEvent.Ignored
         val index = chunk.optInt("index", 0)
         val blockId = data.optInt("turn", 0) * 1_000_000L + data.optInt("step", 0) * 1_000L + index
-        return when (chunk.optString("type")) {
+        return when (chunk.stringOrEmpty("type")) {
             "text-delta" -> {
-                val delta = chunk.optString("text")
+                val delta = chunk.stringOrEmpty("text")
                 if (delta.isEmpty()) return DshSdkProtocolEvent.Ignored
                 textByBlock.getOrPut(blockId) { StringBuilder() }
                     .appendBounded(delta, MAX_DSH_TEXT_BLOCK_BUFFER)
@@ -856,21 +864,21 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             "reasoning-delta" -> {
                 val buffer = reasoningByBlock.getOrPut(blockId) { StringBuilder() }
                 val starts = buffer.isEmpty()
-                buffer.appendBounded(chunk.optString("text"), MAX_DSH_REASONING_BUFFER)
+                buffer.appendBounded(chunk.stringOrEmpty("text"), MAX_DSH_REASONING_BUFFER)
                 DshSdkProtocolEvent.Reasoning(blockId, buffer.toString(), starts, isFinal = false)
             }
             "block-end" -> {
                 val block = chunk.optJSONObject("block")
-                if (block?.optString("type") == "text") {
+                if (block?.stringOrEmpty("type") == "text") {
                     val streamed = textByBlock.remove(blockId)?.toString().orEmpty()
-                    val complete = block.optString("text")
+                    val complete = block.stringOrEmpty("text")
                     val missingSuffix = if (streamed.isEmpty()) complete.takeLast(MAX_DSH_TEXT_BLOCK_BUFFER) else ""
                     if (missingSuffix.isBlank()) return DshSdkProtocolEvent.Ignored
                     streamedTextSinceMessage = true
                     return DshSdkProtocolEvent.AssistantText(missingSuffix)
                 }
-                if (block?.optString("type") != "reasoning") return DshSdkProtocolEvent.Ignored
-                val text = block.optString("text")
+                if (block?.stringOrEmpty("type") != "reasoning") return DshSdkProtocolEvent.Ignored
+                val text = block.stringOrEmpty("text")
                     .ifBlank { reasoningByBlock[blockId]?.toString().orEmpty() }
                     .takeLast(MAX_DSH_REASONING_BUFFER)
                 val starts = blockId !in reasoningByBlock
@@ -883,7 +891,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
     }
 
     private fun displayToolName(rawName: String, arguments: String): String {
-        val operation = runCatching { JSONObject(arguments).optString("command") }.getOrDefault("")
+        val operation = runCatching { JSONObject(arguments).stringOrEmpty("command") }.getOrDefault("")
         return when (rawName.lowercase()) {
             "bash", "shell" -> "Bash"
             "read", "view" -> "Read"
@@ -903,7 +911,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val parsed = runCatching { JSONObject(arguments) }.getOrNull()
         val detail = parsed?.let { json ->
             listOf("path", "file_path", "command", "pattern", "query")
-                .firstNotNullOfOrNull { key -> json.optString(key).takeIf(String::isNotBlank) }
+                .firstNotNullOfOrNull { key -> json.stringOrEmpty(key).takeIf(String::isNotBlank) }
         }.orEmpty()
         return compactDshText(detail.ifBlank { arguments }, MAX_DSH_TOOL_RAW_TEXT, 240)
             .ifBlank { "Working in the project" }
@@ -914,8 +922,8 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val result = StringBuilder()
         for (index in 0 until content.length()) {
             val block = content.optJSONObject(index) ?: continue
-            val text = when (block.optString("type")) {
-                "text" -> block.optString("text")
+            val text = when (block.stringOrEmpty("type")) {
+                "text" -> block.stringOrEmpty("text")
                 "tool-result" -> contentText(block.optJSONArray("content"))
                 else -> ""
             }

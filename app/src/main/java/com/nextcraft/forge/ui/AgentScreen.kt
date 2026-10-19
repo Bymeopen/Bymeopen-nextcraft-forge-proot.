@@ -122,9 +122,21 @@ fun AgentScreen(
         }
     }
 
+    var previousMessageCount by remember { mutableStateOf(state.messages.size) }
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+            val lastIdx = state.messages.lastIndex
+            if (state.messages.size != previousMessageCount) {
+                previousMessageCount = state.messages.size
+                listState.animateScrollToItem(lastIdx)
+            } else {
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                if (lastVisible >= lastIdx - 1) {
+                    listState.scrollToItem(lastIdx)
+                }
+            }
+        } else {
+            previousMessageCount = 0
         }
     }
 
@@ -135,6 +147,7 @@ fun AgentScreen(
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
             onSelectAgent = viewModel::selectAgent,
+            onClearChat = viewModel::clearActiveChat,
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -332,6 +345,7 @@ private fun AgentHeader(
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
     onSelectAgent: (AgentKind) -> Unit,
+    onClearChat: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
@@ -383,6 +397,17 @@ private fun AgentHeader(
                                 onClick = {
                                     menuOpen = false
                                     onSelectAgent(kind)
+                                },
+                            )
+                        }
+                        if (state.messages.isNotEmpty()) {
+                            Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.agent_clear_chat)) },
+                                enabled = !state.sessionRunning,
+                                onClick = {
+                                    menuOpen = false
+                                    onClearChat()
                                 },
                             )
                         }

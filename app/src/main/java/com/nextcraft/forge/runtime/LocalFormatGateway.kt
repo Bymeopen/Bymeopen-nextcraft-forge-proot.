@@ -3,6 +3,7 @@ package com.nextcraft.forge.runtime
 import android.util.Log
 import com.nextcraft.forge.model.ProviderProtocol
 import com.nextcraft.forge.model.ProviderProfile
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
@@ -111,7 +112,7 @@ internal class LocalFormatGateway(
         }
         runCatching {
             val anthropic = JSONObject(bodyText)
-            val requestedModel = anthropic.optString("model", profile.model)
+            val requestedModel = anthropic.stringOrEmpty("model", profile.model)
             val wantsStream = anthropic.optBoolean("stream", false)
             if (wantsStream && !isResponsesProtocol) {
                 streamFromProvider(anthropic, requestedModel, output)
@@ -148,7 +149,7 @@ internal class LocalFormatGateway(
         val sourceMessages = source.optJSONArray("messages") ?: JSONArray()
         for (index in 0 until sourceMessages.length()) {
             val message = sourceMessages.getJSONObject(index)
-            val role = message.optString("role")
+            val role = message.stringOrEmpty("role")
             val content = message.opt("content")
             if (content !is JSONArray) {
                 messages.put(JSONObject().put("role", role).put("content", content ?: ""))
@@ -159,15 +160,15 @@ internal class LocalFormatGateway(
             val toolResults = mutableListOf<JSONObject>()
             for (partIndex in 0 until content.length()) {
                 val part = content.optJSONObject(partIndex) ?: continue
-                when (part.optString("type")) {
+                when (part.stringOrEmpty("type")) {
                     "tool_use" -> toolCalls.put(
-                        JSONObject().put("id", part.optString("id"))
+                        JSONObject().put("id", part.stringOrEmpty("id"))
                             .put("type", "function")
-                            .put("function", JSONObject().put("name", part.optString("name")).put("arguments", part.optJSONObject("input")?.toString() ?: "{}")),
+                            .put("function", JSONObject().put("name", part.stringOrEmpty("name")).put("arguments", part.optJSONObject("input")?.toString() ?: "{}")),
                     )
                     "tool_result" -> toolResults += JSONObject()
                         .put("role", "tool")
-                        .put("tool_call_id", part.optString("tool_use_id"))
+                        .put("tool_call_id", part.stringOrEmpty("tool_use_id"))
                         .put("content", valueText(part.opt("content")))
                 }
             }
@@ -192,8 +193,8 @@ internal class LocalFormatGateway(
                     JSONObject().put("type", "function").put(
                         "function",
                         JSONObject()
-                            .put("name", tool.optString("name"))
-                            .put("description", tool.optString("description"))
+                            .put("name", tool.stringOrEmpty("name"))
+                            .put("description", tool.stringOrEmpty("description"))
                             .put("parameters", tool.optJSONObject("input_schema") ?: JSONObject().put("type", "object")),
                     ),
                 )
@@ -220,7 +221,7 @@ internal class LocalFormatGateway(
         val sourceMessages = source.optJSONArray("messages") ?: JSONArray()
         for (index in 0 until sourceMessages.length()) {
             val message = sourceMessages.getJSONObject(index)
-            val role = message.optString("role")
+            val role = message.stringOrEmpty("role")
             val content = message.opt("content")
             if (content !is JSONArray) {
                 input.put(JSONObject().put("role", role).put("content", content?.toString().orEmpty()))
@@ -231,15 +232,15 @@ internal class LocalFormatGateway(
             val toolResults = mutableListOf<JSONObject>()
             for (partIndex in 0 until content.length()) {
                 val part = content.optJSONObject(partIndex) ?: continue
-                when (part.optString("type")) {
+                when (part.stringOrEmpty("type")) {
                     "tool_use" -> toolCalls += JSONObject()
                         .put("type", "function_call")
-                        .put("call_id", part.optString("id"))
-                        .put("name", part.optString("name"))
+                        .put("call_id", part.stringOrEmpty("id"))
+                        .put("name", part.stringOrEmpty("name"))
                         .put("arguments", part.optJSONObject("input")?.toString() ?: "{}")
                     "tool_result" -> toolResults += JSONObject()
                         .put("type", "function_call_output")
-                        .put("call_id", part.optString("tool_use_id"))
+                        .put("call_id", part.stringOrEmpty("tool_use_id"))
                         .put("output", valueText(part.opt("content")))
                 }
             }
@@ -262,8 +263,8 @@ internal class LocalFormatGateway(
                 converted.put(
                     JSONObject()
                         .put("type", "function")
-                        .put("name", tool.optString("name"))
-                        .put("description", tool.optString("description"))
+                        .put("name", tool.stringOrEmpty("name"))
+                        .put("description", tool.stringOrEmpty("description"))
                         .put("parameters", tool.optJSONObject("input_schema") ?: JSONObject().put("type", "object")),
                 )
             }
@@ -278,24 +279,30 @@ internal class LocalFormatGateway(
         }
         val message = source.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: JSONObject()
         val content = JSONArray()
-        val text = message.optString("content")
+        val text = message.stringOrEmpty("content")
         if (text.isNotBlank()) content.put(JSONObject().put("type", "text").put("text", text))
         val calls = message.optJSONArray("tool_calls") ?: JSONArray()
         for (index in 0 until calls.length()) {
             val call = calls.getJSONObject(index)
             val function = call.optJSONObject("function") ?: JSONObject()
-            val arguments = runCatching { JSONObject(function.optString("arguments", "{}")) }.getOrDefault(JSONObject())
+            val arguments = runCatching { JSONObject(function.stringOrEmpty("arguments", "{}")) }.getOrDefault(JSONObject())
             content.put(
                 JSONObject().put("type", "tool_use")
-                    .put("id", call.optString("id").ifBlank { "tool_${UUID.randomUUID()}" })
-                    .put("name", function.optString("name"))
+                    .put("id", call.stringOrEmpty("id").ifBlank { "tool_${UUID.randomUUID()}" })
+                    .put("name", function.stringOrEmpty("name"))
                     .put("input", arguments),
             )
         }
         val usage = source.optJSONObject("usage") ?: JSONObject()
-        return JSONObject().put("id", source.optString("id").ifBlank { "msg_${UUID.randomUUID()}" })
+        val finishReason = source.optJSONArray("choices")?.optJSONObject(0)?.stringOrEmpty("finish_reason").orEmpty()
+        val stopReason = when {
+            calls.length() > 0 -> "tool_use"
+            finishReason == "length" -> "max_tokens"
+            else -> "end_turn"
+        }
+        return JSONObject().put("id", source.stringOrEmpty("id").ifBlank { "msg_${UUID.randomUUID()}" })
             .put("type", "message").put("role", "assistant").put("model", model)
-            .put("content", content).put("stop_reason", if (calls.length() > 0) "tool_use" else "end_turn")
+            .put("content", content).put("stop_reason", stopReason)
             .put("stop_sequence", JSONObject.NULL)
             .put("usage", JSONObject().put("input_tokens", usage.optInt("prompt_tokens")).put("output_tokens", usage.optInt("completion_tokens")))
     }
@@ -306,27 +313,27 @@ internal class LocalFormatGateway(
         var hasToolUse = false
         for (index in 0 until output.length()) {
             val item = output.optJSONObject(index) ?: continue
-            when (item.optString("type")) {
+            when (item.stringOrEmpty("type")) {
                 "message" -> {
                     val parts = item.optJSONArray("content")
-                    val text = if (parts != null) contentText(parts) else item.optString("content")
+                    val text = if (parts != null) contentText(parts) else item.stringOrEmpty("content")
                     if (text.isNotBlank()) content.put(JSONObject().put("type", "text").put("text", text))
                 }
                 "function_call" -> {
                     hasToolUse = true
-                    val arguments = runCatching { JSONObject(item.optString("arguments", "{}")) }.getOrDefault(JSONObject())
-                    val callId = item.optString("call_id").ifBlank { item.optString("id") }.ifBlank { "tool_${UUID.randomUUID()}" }
+                    val arguments = runCatching { JSONObject(item.stringOrEmpty("arguments", "{}")) }.getOrDefault(JSONObject())
+                    val callId = item.stringOrEmpty("call_id").ifBlank { item.stringOrEmpty("id") }.ifBlank { "tool_${UUID.randomUUID()}" }
                     content.put(
                         JSONObject().put("type", "tool_use")
                             .put("id", callId)
-                            .put("name", item.optString("name"))
+                            .put("name", item.stringOrEmpty("name"))
                             .put("input", arguments),
                     )
                 }
             }
         }
         if (content.length() == 0) {
-            val fallbackText = source.optString("output_text")
+            val fallbackText = source.stringOrEmpty("output_text")
             if (fallbackText.isNotBlank()) {
                 content.put(JSONObject().put("type", "text").put("text", fallbackText))
             }
@@ -334,7 +341,7 @@ internal class LocalFormatGateway(
         val usage = source.optJSONObject("usage") ?: JSONObject()
         val inputTokens = usage.optInt("input_tokens", usage.optInt("prompt_tokens"))
         val outputTokens = usage.optInt("output_tokens", usage.optInt("completion_tokens"))
-        return JSONObject().put("id", source.optString("id").ifBlank { "msg_${UUID.randomUUID()}" })
+        return JSONObject().put("id", source.stringOrEmpty("id").ifBlank { "msg_${UUID.randomUUID()}" })
             .put("type", "message").put("role", "assistant").put("model", model)
             .put("content", content).put("stop_reason", if (hasToolUse) "tool_use" else "end_turn")
             .put("stop_sequence", JSONObject.NULL)
@@ -518,6 +525,7 @@ internal class LocalFormatGateway(
         var openBlockIndex = -1
         val activeToolSlots = HashMap<Int, Int>()
         var sawToolCalls = false
+        var truncated = false
         var inputTokens = 0
         var outputTokens = 0
 
@@ -541,9 +549,10 @@ internal class LocalFormatGateway(
                 outputTokens = usage.optInt("completion_tokens", usage.optInt("output_tokens", outputTokens))
             }
             val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
+            if (choice.stringOrEmpty("finish_reason") == "length") truncated = true
             val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: continue
 
-            val reasoningDelta = delta.optString("reasoning_content").ifEmpty { delta.optString("reasoning") }
+            val reasoningDelta = delta.stringOrEmpty("reasoning_content").ifEmpty { delta.stringOrEmpty("reasoning") }
             if (reasoningDelta.isNotEmpty()) {
                 if (openBlockType != "thinking") {
                     closeOpenBlock()
@@ -567,7 +576,7 @@ internal class LocalFormatGateway(
                 )
             }
 
-            val textDelta = if (delta.isNull("content")) "" else delta.optString("content")
+            val textDelta = delta.stringOrEmpty("content")
             if (textDelta.isNotEmpty()) {
                 if (openBlockType != "text") {
                     closeOpenBlock()
@@ -598,9 +607,9 @@ internal class LocalFormatGateway(
                     sawToolCalls = true
                     val slot = tc.optInt("index", tcIdx)
                     val fn = tc.optJSONObject("function")
-                    val id = tc.optString("id")
-                    val name = fn?.optString("name").orEmpty()
-                    val argsDelta = fn?.optString("arguments").orEmpty()
+                    val id = tc.stringOrEmpty("id")
+                    val name = fn?.stringOrEmpty("name").orEmpty()
+                    val argsDelta = fn?.stringOrEmpty("arguments").orEmpty()
                     if (slot !in activeToolSlots) {
                         closeOpenBlock()
                         val idx = nextBlockIndex++
@@ -644,7 +653,7 @@ internal class LocalFormatGateway(
                 .put(
                     "delta",
                     JSONObject()
-                        .put("stop_reason", if (sawToolCalls) "tool_use" else "end_turn")
+                        .put("stop_reason", if (sawToolCalls) "tool_use" else if (truncated) "max_tokens" else "end_turn")
                         .put("stop_sequence", JSONObject.NULL),
                 )
                 .put("usage", JSONObject().put("input_tokens", inputTokens).put("output_tokens", outputTokens)),
@@ -731,7 +740,7 @@ internal class LocalFormatGateway(
     private fun contentText(array: JSONArray): String = buildString {
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
-            if (item.optString("type") in setOf("text", "output_text")) append(item.optString("text"))
+            if (item.stringOrEmpty("type") in setOf("text", "output_text")) append(item.stringOrEmpty("text"))
         }
     }
 
@@ -743,7 +752,7 @@ internal class LocalFormatGateway(
     }
 
     private fun providerError(body: String): String = runCatching {
-        JSONObject(body).optJSONObject("error")?.optString("message").orEmpty().ifBlank { body.take(500) }
+        JSONObject(body).optJSONObject("error")?.stringOrEmpty("message").orEmpty().ifBlank { body.take(500) }
     }.getOrDefault(body.take(500))
 
     private fun normalizeModel(model: String): String = model

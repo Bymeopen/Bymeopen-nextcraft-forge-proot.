@@ -52,11 +52,7 @@ object LocaleHelper {
                 @Suppress("DEPRECATION")
                 Resources.getSystem().configuration.locale
             }
-            if (systemLocale != null) {
-                Locale.setDefault(systemLocale)
-                context.resources.configuration.setLayoutDirection(systemLocale)
-            }
-            return context
+            systemLocale ?: return context
         }
 
         Locale.setDefault(targetLocale)
@@ -85,7 +81,7 @@ object AppStrings {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_LANGUAGE, code.trim().ifEmpty { "system" })
-            .apply()
+            .commit()
     }
 
     fun context(context: Context): Context =

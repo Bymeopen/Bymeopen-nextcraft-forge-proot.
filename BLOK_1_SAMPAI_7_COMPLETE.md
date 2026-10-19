@@ -33,14 +33,14 @@ Blok 1 adalah lapisan paling dasar (pondasi) dari **NextCraft Forge** yang menje
 - `app/src/main/java/com/nextcraft/forge/model/Models.kt` (391 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/BoundedFileReads.kt` (195 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeCompatibility.kt` (47 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
-- `app/src/main/cpp/forge_spawn.c` (297 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (194 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (245 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2677 baris)
+- `app/src/main/cpp/forge_spawn.c` (299 baris)
 - `app/src/main/cpp/CMakeLists.txt` (23 baris)
-- `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
+- `scripts/runtime-bundles/chroot-exec.sh` (170 baris)
 - `scripts/runtime-bundles/unmount-chroot.sh` (38 baris)
-- `scripts/runtime-bundles/build-core-on-rooted-android.sh` (65 baris)
+- `scripts/runtime-bundles/build-core-on-rooted-android.sh` (69 baris)
 - `scripts/runtime-bundles/build-claude-from-installed-android.sh` (45 baris)
 - `scripts/runtime-bundles/build-agy-from-official.sh` (42 baris)
 - `scripts/runtime-bundles/build-dsh-from-installed-android.sh` (48 baris)
@@ -696,7 +696,7 @@ internal fun disablePhantomProcessKillerViaRoot() {
 }
 ```
 
-## 4. `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (191 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/runtime/RootfsRepair.kt` (194 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -717,13 +717,16 @@ internal object RootfsRepair {
 
     private fun runRootCommand(vararg command: String, timeoutSeconds: Long = 15L): Int =
         runCatching {
-            val proc = ProcessBuilder(*command).redirectErrorStream(true).start()
+            // Output is never used; discarding it avoids a full pipe blocking the child until the timeout.
+            val proc = ProcessBuilder(*command)
+                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.to(java.io.File("/dev/null")))
+                .start()
             val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
                 proc.destroyForcibly()
                 -1
             } else {
-                runCatching { proc.inputStream.bufferedReader().use { it.readText() } }
                 proc.exitValue()
             }
         }.getOrDefault(-1)
@@ -892,7 +895,7 @@ internal object RootfsRepair {
 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (233 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/runtime/NativeSpawnProcess.kt` (245 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -922,17 +925,32 @@ internal class NativeSpawnProcess private constructor(
     override fun getInputStream(): InputStream = FileInputStream(outputFile)
     override fun getErrorStream(): InputStream = ByteArrayInputStream(ByteArray(0))
 
+    /**
+     * Non-blocking exit check. The lock is held only for a WNOHANG waitpid, so isAlive/destroy
+     * called from another thread are never stuck behind a thread that is waiting for exit.
+     */
+    private fun pollExit(): Int? {
+        result?.let { return it }
+        synchronized(waitLock) {
+            result?.let { return it }
+            val status = NativeSpawn.waitFor(pid, true)
+            if (status == NativeSpawn.STILL_RUNNING) return null
+            result = status
+            return status
+        }
+    }
+
     override fun waitFor(): Int {
         result?.let { return it }
-        val exitCode = synchronized(waitLock) {
-            result?.let { return@synchronized it }
-            val code = if (delegateProcess != null) {
-                delegateProcess.waitFor()
-            } else {
-                NativeSpawn.waitFor(pid, false)
+        val exitCode = if (delegateProcess != null) {
+            delegateProcess.waitFor().also { result = it }
+        } else {
+            var polled = pollExit()
+            while (polled == null) {
+                Thread.sleep(EXIT_POLL_INTERVAL_MS)
+                polled = pollExit()
             }
-            result = code
-            code
+            polled
         }
         runCatching { stdin.close() }
         outputPump?.join(1_000)
@@ -941,20 +959,15 @@ internal class NativeSpawnProcess private constructor(
 
     override fun exitValue(): Int {
         result?.let { return it }
-        synchronized(waitLock) {
-            result?.let { return it }
-            if (delegateProcess != null) {
-                val code = delegateProcess.exitValue()
-                result = code
-                runCatching { stdin.close() }
-                return code
-            }
-            val status = NativeSpawn.waitFor(pid, true)
-            if (status == NativeSpawn.STILL_RUNNING) throw IllegalThreadStateException("Process is still running")
-            result = status
+        if (delegateProcess != null) {
+            val code = delegateProcess.exitValue()
+            result = code
             runCatching { stdin.close() }
-            return status
+            return code
         }
+        val status = pollExit() ?: throw IllegalThreadStateException("Process is still running")
+        runCatching { stdin.close() }
+        return status
     }
 
     override fun destroy() {
@@ -1012,6 +1025,8 @@ internal class NativeSpawnProcess private constructor(
         delegateProcess?.isAlive ?: runCatching { exitValue(); false }.getOrDefault(true)
 
     companion object {
+        private const val EXIT_POLL_INTERVAL_MS = 20L
+
         private fun extractProcessPid(process: Process): Int = runCatching {
             val field = process.javaClass.getDeclaredField("pid")
             field.isAccessible = true
@@ -1130,7 +1145,7 @@ private object NativeSpawn {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2506 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt` (2677 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -1152,6 +1167,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
@@ -1262,15 +1278,27 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureChrootScripts(): File {
         runtimeBinDir.mkdirs()
         if (!chrootExecFile.isFile || chrootExecFile.readTextOrNull() != CHROOT_EXEC_SCRIPT.trim()) {
-            chrootExecFile.writeText(CHROOT_EXEC_SCRIPT)
+            writeScriptAtomically(chrootExecFile, CHROOT_EXEC_SCRIPT)
         }
         Os.chmod(chrootExecFile.absolutePath, 0b111101101)
 
         if (!unmountChrootFile.isFile || unmountChrootFile.readTextOrNull() != UNMOUNT_CHROOT_SCRIPT.trim()) {
-            unmountChrootFile.writeText(UNMOUNT_CHROOT_SCRIPT)
+            writeScriptAtomically(unmountChrootFile, UNMOUNT_CHROOT_SCRIPT)
         }
         Os.chmod(unmountChrootFile.absolutePath, 0b111101101)
         return chrootExecFile
+    }
+
+    /** Replaces the script via rename so a concurrent launch never executes a half-written file. */
+    private fun writeScriptAtomically(target: File, content: String) {
+        val staged = File(target.parentFile, "${target.name}.tmp")
+        try {
+            staged.writeText(content)
+            Os.rename(staged.absolutePath, target.absolutePath)
+        } catch (e: Throwable) {
+            staged.delete()
+            throw e
+        }
     }
 
     /** Unmounts all kernel mounts under [targetRootfs] before deleting or swapping rootfs directories. */
@@ -1313,7 +1341,8 @@ class RuntimeInstaller(private val context: Context) {
                 System.getProperty("os.arch"),
             ),
         ) { "NextCraft Forge requires an ARM64 (arm64-v8a / aarch64) Android device." }
-        require(isRootAccessAvailable()) {
+        // The first su call shows the Magisk/KernelSU/APatch grant dialog; the 8 s default kills su before the user can tap Allow.
+        require(isRootAccessAvailable(ROOT_GRANT_TIMEOUT_SECONDS)) {
             "Root access (su -mm) is required by NextCraft Forge's Ubuntu 24.04 LTS Chroot engine. Grant root permission in Magisk, KernelSU, or APatch and try again."
         }
         val chrootExec = ensureChrootScripts()
@@ -1364,7 +1393,9 @@ class RuntimeInstaller(private val context: Context) {
         ensureSettingsAndHooks()
 
         val coreNeeded = !File(rootfs, "usr/bin/git").exists() || !isSupportedCoreToolsVersion()
-        if (coreNeeded) {
+        // isInstalled() also requires Node; a missing/dangling node must be repaired even when git and the marker are fine.
+        val nodeMissing = !File(rootfs, "usr/local/bin/node").exists()
+        if (coreNeeded || nodeMissing) {
             installNodeIfNeeded(chrootExec, 0.58f, 0.66f, onProgress)
         }
         if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
@@ -1386,11 +1417,27 @@ class RuntimeInstaller(private val context: Context) {
         if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
         if (!nextcraftReadyMarker.exists()) nextcraftReadyMarker.writeText(CORE_TOOLS_VERSION)
 
+        val removedStacks = if (selectedStacks.isNotEmpty()) {
+            (installedStacks() - selectedStacks) - DevStack.WEB
+        } else {
+            emptySet()
+        }
         val missingStacks = selectedStacks.filterNot(::isStackInstalled)
-        missingStacks.forEachIndexed { index, stack ->
-            val slice = 0.26f / maxOf(1, missingStacks.size)
-            val from = 0.72f + index * slice
+        val totalStackOps = maxOf(1, removedStacks.size + missingStacks.size)
+        var opIndex = 0
+        removedStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
+            removeStack(stack) { p ->
+                onProgress(p.copy(fraction = from + p.fraction.coerceIn(0f, 1f) * slice))
+            }
+            opIndex++
+        }
+        missingStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
             applyStack(chrootExec, stack, from, from + slice, onProgress)
+            opIndex++
         }
 
         when (agent) {
@@ -1770,9 +1817,30 @@ class RuntimeInstaller(private val context: Context) {
             val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
             if (comparison != 0) return comparison > 0
         }
-        val candidatePre = '-' in candidate.substringBefore('+')
-        val currentPre = '-' in current.substringBefore('+')
-        return !candidatePre && currentPre
+        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+        }
+        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+        val candidateIds = candidatePreTag.split('.')
+        val currentIds = currentPreTag.split('.')
+        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+            val candidateId = candidateIds.getOrNull(index)
+            val currentId = currentIds.getOrNull(index)
+            if (candidateId == null) return false
+            if (currentId == null) return true
+            val candidateNum = candidateId.toIntOrNull()
+            val currentNum = currentId.toIntOrNull()
+            val comparison = if (candidateNum != null && currentNum != null) {
+                candidateNum.compareTo(currentNum)
+            } else {
+                candidateId.compareTo(currentId)
+            }
+            if (comparison != 0) return comparison > 0
+        }
+        return false
     }
 
     private fun migrateLegacyClaudeMarker() {
@@ -1812,6 +1880,7 @@ class RuntimeInstaller(private val context: Context) {
             onProgress = onProgress,
         )
         verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
+        migrateLegacyClaudeMarker()
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
@@ -2117,6 +2186,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installComposer(
         chrootExec: File,
         fraction: Float,
@@ -2233,6 +2303,18 @@ class RuntimeInstaller(private val context: Context) {
             true
         }.getOrDefault(false)
 
+    /** Fails early with an actionable message instead of an opaque IOException halfway through extraction. */
+    private fun requireFreeSpaceForBundle(bundle: RuntimeBundle, alreadyDownloaded: Boolean) {
+        val free = context.filesDir.usableSpace
+        if (free <= 0L) return // unknown (some filesystems report 0); let the real write decide
+        val factor = if (alreadyDownloaded) BUNDLE_EXTRACT_SPACE_FACTOR else BUNDLE_DOWNLOAD_SPACE_FACTOR
+        val needed = bundle.compressedBytes * factor
+        check(free >= needed) {
+            "Not enough free storage for the ${bundle.label} bundle: about ${needed / MEGABYTE} MB needed, " +
+                "${free / MEGABYTE} MB available. Free some space and retry."
+        }
+    }
+
     private suspend fun obtainRuntimeBundle(
         bundle: RuntimeBundle,
         preferEmbedded: Boolean,
@@ -2242,6 +2324,7 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
+        requireFreeSpaceForBundle(bundle, alreadyDownloaded = destination.isFile)
         if (preferEmbedded && isAssetAvailable("runtime/${bundle.fileName}")) {
             val loadingLabel = "Loading ${bundle.label} bundle…"
             onProgress(RuntimeInstallProgress(loadingLabel, from, 0, bundle.compressedBytes))
@@ -2369,15 +2452,26 @@ class RuntimeInstaller(private val context: Context) {
         .filter(::isStackInstalled)
         .toSet()
 
+    private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
+        val file = File(rootfs, relativePath.removePrefix("/"))
+        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+    }
+
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        return when (stack) {
+            DevStack.WEB -> true
+            DevStack.PYTHON -> guestExecutableOrSymlinkExists("usr/bin/python3") && guestExecutableOrSymlinkExists("usr/bin/pip3")
+            DevStack.CPP -> guestExecutableOrSymlinkExists("usr/bin/gcc") && guestExecutableOrSymlinkExists("usr/bin/g++")
+            DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
+            DevStack.ANDROID ->
+                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
+                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
+                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
+                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
+                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        }
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {
@@ -2399,6 +2493,7 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.writeText(obj.toString())
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installNodeIfNeeded(
         chrootExec: File,
         from: Float,
@@ -2521,13 +2616,16 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         require(packages.isNotEmpty()) { "No packages selected" }
         val packageNames = packages.joinToString(" ")
+        // The stack packages (php-cli, build-essential, gcc, ...) are metapackages: purging them alone leaves the real
+        // binaries (php8.3-cli, gcc-13, ...) installed, so autoremove the dependencies that were pulled in with them.
         val command = "export DEBIAN_FRONTEND=noninteractive; " +
             "apt-get -o DPkg::Lock::Timeout=120 purge -y $packageNames && " +
+            "apt-get -o DPkg::Lock::Timeout=120 autoremove --purge -y && " +
             "apt-get clean && rm -rf /var/lib/apt/lists/*"
         runGuestCommand(
             chrootExec = chrootExec,
             command = command,
-            displayCommand = "apt-get purge -y $packageNames",
+            displayCommand = "apt-get purge -y $packageNames && apt-get autoremove --purge -y",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
@@ -2619,6 +2717,10 @@ class RuntimeInstaller(private val context: Context) {
                     onProgress(RuntimeInstallProgress(line, fraction, terminalLine = line, indeterminate = true, event = RuntimeInstallEvent.OUTPUT))
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            // TimeoutCancellationException is a CancellationException: left as-is the setup service would
+            // report "paused" instead of a failure.
+            throw IllegalStateException("$failureMessage: timed out after ${timeoutMs / 60_000L} min", e)
         } finally {
             if (running.isAlive) {
                 running.destroy()
@@ -2669,6 +2771,8 @@ class RuntimeInstaller(private val context: Context) {
                 .orEmpty()
                 .trim()
             check(exit == 0) { actionableProcessError(output, failureMessage) }
+        } catch (e: TimeoutCancellationException) {
+            throw IllegalStateException("$failureMessage: timed out", e)
         } finally {
             if (verify.isAlive) {
                 verify.destroy()
@@ -2784,6 +2888,7 @@ class RuntimeInstaller(private val context: Context) {
      * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
      * No PRoot binary or ptrace translation is used.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
         rootfs: File,
@@ -2806,7 +2911,7 @@ class RuntimeInstaller(private val context: Context) {
             targetRootfs = rootfs,
         )
 
-        return try {
+        val spawned = try {
             NativeSpawnProcess.start(
                 argv = listOf("su", "-mm", "-c", suCommand),
                 environment = emptyMap(),
@@ -2820,6 +2925,13 @@ class RuntimeInstaller(private val context: Context) {
             envFile.delete()
             throw error
         }
+        // The `rm -f` inside suCommand never runs when su is denied or exec fails, which would leave API keys
+        // on disk until the next launch's 10-minute purge. Remove the file as soon as the process is gone.
+        Thread({
+            while (spawned.isAlive) Thread.sleep(ENV_CLEANUP_POLL_MS)
+            envFile.delete()
+        }, "forge-env-cleanup").apply { isDaemon = true; start() }
+        return spawned
     }
 
     /**
@@ -3090,7 +3202,8 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
     @Suppress("DEPRECATION")
     private fun extractZstdTar(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(openZstdInputStream(archive)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -3098,23 +3211,49 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val cleanName = currentEntry.name.removePrefix("./").trimEnd('/')
                 if (cleanName.isNotBlank()) {
-                    val target = safeChild(destination, cleanName)
+                    val target = safeChild(rootDir, cleanName)
                     when {
                         currentEntry.isDirectory -> {
-                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            target.mkdirs()
+                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                val resolvedDir = runCatching {
+                                    resolveSafeSymlinkTarget(
+                                        rootPath = rootPath,
+                                        parentDir = target.toPath().parent ?: rootPath,
+                                        linkName = java.nio.file.Files.readSymbolicLink(target.toPath()).toString(),
+                                        errorMessage = "Archive path escapes runtime via symlink",
+                                    ).toFile()
+                                }.getOrNull()
+                                if (resolvedDir != null) {
+                                    resolvedDir.mkdirs()
+                                } else {
+                                    target.delete()
+                                    target.mkdirs()
+                                }
+                            } else {
+                                target.mkdirs()
+                            }
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
-                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
+                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                if (target.isDirectory && !java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                    target.deleteRecursively()
+                                } else {
+                                    target.delete()
+                                }
+                            }
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             target.parentFile?.mkdirs()
-                            val linkTarget = safeChild(destination, currentEntry.linkName.removePrefix("./").trimEnd('/'))
-                            if (linkTarget.exists()) {
+                            val linkTarget = safeChild(rootDir, currentEntry.linkName.removePrefix("./").trimEnd('/'))
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -3132,18 +3271,21 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun extractNodeArchive(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(archive.inputStream()))).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -3151,7 +3293,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val relative = currentEntry.name.removePrefix("./").substringAfter('/', "").trimEnd('/')
                 if (relative.isNotBlank()) {
-                    val target = safeChild(destination, relative)
+                    val target = safeChild(rootDir, relative)
                     when {
                         currentEntry.isDirectory -> {
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
@@ -3159,16 +3301,20 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
                             if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             val relativeLink = currentEntry.linkName.removePrefix("./").substringAfter('/', "").trimEnd('/')
-                            val linkTarget = safeChild(destination, relativeLink)
+                            val linkTarget = safeChild(rootDir, relativeLink)
                             target.parentFile?.mkdirs()
-                            if (linkTarget.exists()) {
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -3186,24 +3332,50 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Node.js archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     private fun linkOrCopyFile(source: File, destination: File) {
         if (destination.exists() || java.nio.file.Files.isSymbolicLink(destination.toPath())) destination.delete()
+        if (java.nio.file.Files.isSymbolicLink(source.toPath())) {
+            val symTarget = java.nio.file.Files.readSymbolicLink(source.toPath()).toString()
+            Os.symlink(symTarget, destination.absolutePath)
+            return
+        }
         val linked = runCatching {
             Os.link(source.absolutePath, destination.absolutePath)
             true
         }.getOrDefault(false)
         if (!linked) {
             source.inputStream().use { input -> FileOutputStream(destination).use { input.copyTo(it) } }
+            runCatching { Os.chmod(destination.absolutePath, Os.stat(source.absolutePath).st_mode and 0b111111111) }
         }
+    }
+
+    private fun resolveSafeSymlinkTarget(
+        rootPath: java.nio.file.Path,
+        parentDir: java.nio.file.Path,
+        linkName: String,
+        errorMessage: String = "Archive symlink escapes runtime",
+    ): java.nio.file.Path {
+        require(linkName.isNotBlank() && !linkName.contains('\u0000')) { errorMessage }
+        val normalizedLink = linkName.replace('\\', '/')
+        val resolved = if (normalizedLink.startsWith('/')) {
+            val relFromRoot = normalizedLink.trimStart('/')
+            if (relFromRoot.isEmpty()) rootPath else rootPath.resolve(relFromRoot).normalize()
+        } else {
+            parentDir.resolve(normalizedLink).normalize()
+        }
+        require(resolved.startsWith(rootPath)) { errorMessage }
+        return resolved
     }
 
     private fun safeChild(root: File, relative: String): File {
@@ -3218,29 +3390,32 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         ) {
             "Unsafe archive path"
         }
-        val file = File(root, normalized)
         val rootCanonical = root.canonicalFile
         val rootPath = rootCanonical.toPath()
-        var cursor: File? = file.parentFile
-        while (cursor != null && cursor != root && cursor.canonicalFile != rootCanonical) {
-            val cursorPath = cursor.toPath()
-            if (java.nio.file.Files.isSymbolicLink(cursorPath)) {
-                val linkTarget = java.nio.file.Files.readSymbolicLink(cursorPath)
-                val resolved = cursorPath.parent.resolve(linkTarget).normalize()
-                require(resolved.startsWith(rootPath)) { "Archive path escapes runtime via symlink" }
+        var currentDir = rootPath
+        for (index in 0 until segments.lastIndex) {
+            val segment = segments[index]
+            var candidate = currentDir.resolve(segment).normalize()
+            require(candidate.startsWith(rootPath) && candidate != rootPath) { "Archive path escapes runtime" }
+            var hops = 0
+            while (java.nio.file.Files.isSymbolicLink(candidate)) {
+                check(++hops <= 16) { "Archive symlink loop detected" }
+                val linkTarget = java.nio.file.Files.readSymbolicLink(candidate).toString()
+                val parent = candidate.parent ?: rootPath
+                candidate = resolveSafeSymlinkTarget(
+                    rootPath = rootPath,
+                    parentDir = parent,
+                    linkName = linkTarget,
+                    errorMessage = "Archive path escapes runtime via symlink",
+                )
             }
-            require(cursor.canonicalFile.toPath().startsWith(rootPath)) { "Archive path escapes runtime" }
-            cursor = cursor.parentFile
+            currentDir = candidate
         }
-        val parentPath = (file.parentFile ?: root).canonicalFile.toPath()
-        require(parentPath.startsWith(rootPath)) { "Archive path escapes runtime" }
-        if (!java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            val canonicalFile = file.canonicalFile.toPath()
-            require(canonicalFile.startsWith(rootPath) && canonicalFile != rootPath) {
-                "Archive path escapes runtime"
-            }
+        val finalPath = currentDir.resolve(segments.last()).normalize()
+        require(finalPath.startsWith(rootPath) && finalPath != rootPath) {
+            "Archive path escapes runtime"
         }
-        return file
+        return finalPath.toFile()
     }
 
     private suspend fun downloadVerified(
@@ -3265,8 +3440,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
             val code = connection.responseCode
             if (code == 416 && existing > 0L) {
-                // Stale/complete .part cannot be resumed; discard so the next attempt starts clean.
+                // Stale/complete .part cannot be resumed; discard it and restart now (existing is 0 on the retry).
                 temporary.delete()
+                return downloadVerified(url, destination, expectedChecksum, algorithm, onBytes)
             }
             check(code in 200..299) { "Download failed with HTTP $code" }
             val resumed = code == HttpURLConnection.HTTP_PARTIAL && existing > 0L
@@ -3336,7 +3512,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09"
+        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
@@ -3419,6 +3595,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
             compressedBytes = 41_870_025L,
         )
+        private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
+        private const val ENV_CLEANUP_POLL_MS = 1_000L
+        /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
+        private const val BUNDLE_DOWNLOAD_SPACE_FACTOR = 4
+        private const val BUNDLE_EXTRACT_SPACE_FACTOR = 3
+        private const val MEGABYTE = 1024L * 1024L
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
         private const val MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
@@ -3447,7 +3629,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
 
             case "${'$'}GUEST_WORKSPACE" in
-                *..*|/workspace/.|/workspace/*/*)
+                *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
                     echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
                     exit 65
                     ;;
@@ -3557,7 +3739,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
                 chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
             }
-            trap fix_workspace_ownership EXIT INT TERM
+            # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
+            # resume execution (keep mounting) and run the ownership fix twice.
+            trap fix_workspace_ownership EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
 
             unset ANDROID_ROOT ANDROID_DATA ANDROID_ART_ROOT ANDROID_I18N_ROOT ANDROID_TZDATA_ROOT
             unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_RUNTIME_ROOT ANDROID_STORAGE
@@ -3641,7 +3827,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 }
 ```
 
-## 7. `app/src/main/cpp/forge_spawn.c` (297 baris)
+## 7. `app/src/main/cpp/forge_spawn.c` (299 baris)
 
 ```c
 #define _GNU_SOURCE
@@ -3863,7 +4049,9 @@ Java_com_nextcraft_forge_runtime_NativeSpawn_spawn(JNIEnv *env, jobject self, jo
             _exit(126);
         }
         prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
-        execve(argv[0], argv, envp);
+        // execvpe, not execve: callers pass bare names such as "su", which execve never resolves via PATH
+        // (it would always fail with ENOENT). The lookup uses this process's PATH; the child gets envp.
+        execvpe(argv[0], argv, envp);
         dprintf(STDERR_FILENO, "NextCraft native exec failed: %s\n", strerror(errno));
         _exit(127);
     }
@@ -3971,7 +4159,7 @@ target_link_options(forgespawn PRIVATE
 )
 ```
 
-## 9. `scripts/runtime-bundles/chroot-exec.sh` (166 baris)
+## 9. `scripts/runtime-bundles/chroot-exec.sh` (170 baris)
 
 ```bash
 #!/system/bin/sh
@@ -3995,7 +4183,7 @@ shift 5
 
 # Validasi keamanan path guest workspace (wajib /root, /workspace, atau /workspace/<slug> tanpa '..' atau nested '/')
 case "$GUEST_WORKSPACE" in
-    *..*|/workspace/.|/workspace/*/*)
+    *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
         echo "Invalid guest workspace path: $GUEST_WORKSPACE" >&2
         exit 65
         ;;
@@ -4032,7 +4220,11 @@ cleanup_ownership() {
     chown -R "$APP_UID:$APP_UID" "$BRIDGE_HOST" 2>/dev/null || true
     chmod -R u+rwX,g+rwX "$BRIDGE_HOST" 2>/dev/null || true
 }
-trap cleanup_ownership EXIT INT TERM
+# INT/TERM harus mengakhiri skrip (exit memicu EXIT trap sekali); trap handler biasa akan
+# melanjutkan eksekusi (mis. terus me-mount) dan menjalankan cleanup dua kali.
+trap cleanup_ownership EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Fungsi Idempotent Mount untuk direktori sistem statis
 mount_once() {
@@ -4185,7 +4377,7 @@ rm -rf "$ROOTFS_PATH/tmp/.nextcraft-mounts" 2>/dev/null || true
 exit 0
 ```
 
-## 11. `scripts/runtime-bundles/build-core-on-rooted-android.sh` (65 baris)
+## 11. `scripts/runtime-bundles/build-core-on-rooted-android.sh` (69 baris)
 
 ```bash
 #!/usr/bin/env bash
@@ -4222,9 +4414,13 @@ adb_cmd push "$temp_dir/$ROOTFS_FILE" /data/local/tmp/"$ROOTFS_FILE"
 adb_cmd shell "su -c 'rm -rf $REMOTE; mkdir -p $REMOTE/rootfs $REMOTE/output; toybox tar -xzf /data/local/tmp/$ROOTFS_FILE -C $REMOTE/rootfs; rm -f /data/local/tmp/$ROOTFS_FILE'"
 adb_cmd shell "su -c 'mount --bind /dev $REMOTE/rootfs/dev; mount --bind /dev/pts $REMOTE/rootfs/dev/pts; mount -t proc proc $REMOTE/rootfs/proc; mount -t sysfs sysfs $REMOTE/rootfs/sys'"
 
+# Run a command inside the rootfs. The command is base64-encoded so it reaches bash byte-for-byte:
+# passing it through adb shell -> su -c '...' -> bash -lc "..." re-parses it three times, which drops
+# newlines from printf format strings and breaks any command containing single quotes.
 guest() {
-  local command="$1"
-  adb_cmd shell "su -c 'chroot $REMOTE/rootfs /usr/bin/env -i HOME=/root USER=root LANG=C.UTF-8 GLIBC_TUNABLES=glibc.pthread.rseq=0 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -lc \"$command\"'"
+  local command="$1" encoded
+  encoded="$(printf '%s' "$command" | base64 | tr -d '\n')"
+  adb_cmd shell "su -c 'chroot $REMOTE/rootfs /usr/bin/env -i HOME=/root USER=root LANG=C.UTF-8 GLIBC_TUNABLES=glibc.pthread.rseq=0 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -lc \"\$(echo $encoded | base64 -d)\"'"
 }
 
 # 1. Konfigurasi Android Paranoid Network (AID_INET = 3003) & APT Non-Sandbox untuk Chroot Android
@@ -4236,13 +4432,13 @@ guest "printf 'nameserver $DNS_SERVER\\n' > /etc/resolv.conf; apt-get update && 
 guest "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates curl wget unzip zip xz-utils zstd jq ripgrep"
 
 # 3. Instal Node.js v24.19.0 ARM64 dengan verifikasi SHA256 resmi
-guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp; curl -fsSLO https://nodejs.org/dist/\${NODE_VERSION}/\${NODE_FILE}; curl -fsSL https://nodejs.org/dist/\${NODE_VERSION}/SHASUMS256.txt | grep \"  \${NODE_FILE}\" | sha256sum -c -; mkdir -p /usr/local/lib/nodejs; tar -xzf \${NODE_FILE} -C /usr/local/lib/nodejs; ln -sfn /usr/local/lib/nodejs/node-\${NODE_VERSION} /usr/local/lib/nodejs/current; ln -sfn /usr/local/lib/nodejs/current/bin/node /usr/local/bin/node; ln -sfn /usr/local/lib/nodejs/current/bin/npm /usr/local/bin/npm; ln -sfn /usr/local/lib/nodejs/current/bin/npx /usr/local/bin/npx; rm -f /tmp/\${NODE_FILE}"
+guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp; curl -fsSLO https://nodejs.org/dist/\${NODE_VERSION}/\${NODE_FILE}; curl -fsSL https://nodejs.org/dist/\${NODE_VERSION}/SHASUMS256.txt | grep \"  \${NODE_FILE}\" | sha256sum -c -; mkdir -p /usr/local/lib/nodejs; tar -xzf \${NODE_FILE} -C /usr/local/lib/nodejs; ln -sfn node-\${NODE_VERSION} /usr/local/lib/nodejs/current; for c in node npm npx corepack; do ln -sfn ../lib/nodejs/current/bin/\$c /usr/local/bin/\$c; done; rm -f /tmp/\${NODE_FILE}"
 guest "apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /var/tmp/*"
 
 # 4. Siapkan direktori mount (/workspace/nextcraft, /nextcraft-bridge) & version markers
 guest "mkdir -p /workspace /workspace/nextcraft /nextcraft-bridge /pocket-bridge /opt/nextcraft /opt/pocketdev /root/.gradle/init.d /system /apex /vendor /product"
 guest "printf 'ubuntu-24.04.5-arm64\\n' > /.nextcraft-rootfs-version && cp /.nextcraft-rootfs-version /.pocket-rootfs-version"
-guest "printf 'core-bundle-$VERSION\\n' > /.nextcraft-core-tools-version && cp /.nextcraft-core-tools-version /.pocket-core-tools-version"
+guest "printf 'nextcraft-core-$VERSION\\n' > /.nextcraft-core-tools-version && cp /.nextcraft-core-tools-version /.pocket-core-tools-version"
 guest "printf 'core-bundle-$VERSION\\n' > /.nextcraft-runtime-ready && cp /.nextcraft-runtime-ready /.pocket-runtime-ready"
 guest "printf 'ubuntu-maintenance-v1\\n' > /.nextcraft-system-upgrade-version && cp /.nextcraft-system-upgrade-version /.pocket-system-upgrade-version"
 guest "printf '{\"WEB\":true,\"PYTHON\":false,\"CPP\":false,\"PHP\":false,\"ANDROID\":false}\\n' > /.nextcraft-dev-stacks.json && cp /.nextcraft-dev-stacks.json /.pocket-dev-stacks.json"
@@ -4488,16 +4684,16 @@ Blok 2 menangani **keamanan penyimpanan kredensial**, **sistem snapshot/undo fil
    - `AppPreferences` menyimpan proyek (dengan validasi kanonik `rootPath`), riwayat percakapan, profil provider, dan pengaturan agen secara atomik (`AtomicFile` / temp-rename) dengan validasi ID penyimpanan (`safeStorageId`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (547 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (266 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (782 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/OpenRouterRoutingGateway.kt` (253 baris)
-- `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
-- `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (521 baris)
+- `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (274 baris)
+- `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (581 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (536 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/WorkspaceCheckpoints.kt` (547 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -4581,7 +4777,7 @@ class WorkspaceCheckpoints(
             val checkpoint = checkpointDir(safeId)
             val backup = File(checkpoint, "project")
             // Keep the original baseline only while unreviewed pending files exist.
-            if (backup.isDirectory && readChangedPathsUnlocked(safeId).isNotEmpty()) return
+            if (backup.isDirectory && (readChangedPathsUnlocked(safeId).isNotEmpty() || isManifestUnreadable(safeId))) return
             File(checkpoint, "changes.json").delete()
             File(checkpoint, ".changes.json.tmp").delete()
             backup.mkdirs()
@@ -4655,6 +4851,12 @@ class WorkspaceCheckpoints(
         return synchronized(lockFor(safeId)) {
             readChangedPathsUnlocked(safeId)
         }
+    }
+
+    /** A manifest that exists but cannot be parsed still guards an undo baseline; do not overwrite that baseline. */
+    private fun isManifestUnreadable(safeId: String): Boolean {
+        val manifest = File(checkpointDir(safeId), "changes.json")
+        return manifest.isFile && runCatching { JSONArray(manifest.readText()) }.isFailure
     }
 
     private fun readChangedPathsUnlocked(safeId: String): List<String> {
@@ -4986,9 +5188,16 @@ class WorkspaceCheckpoints(
 
     fun isInternalRuntimePath(path: String): Boolean {
         val normalized = path.replace('\\', '/')
-        return normalized == ".claude.json" || IGNORED_DIRECTORY_NAMES.any { directory ->
-            normalized == directory || normalized.startsWith("$directory/") || normalized.contains("/$directory/")
+        if (normalized == ".claude.json") return true
+        var insideSourceTree = false
+        for (segment in normalized.split('/')) {
+            if (segment in IGNORED_DIRECTORY_NAMES) return true
+            // build/dist/target are artifact folders, but a package or directory with that name under src/
+            // is real source and must stay tracked (and undoable).
+            if (segment in BUILD_OUTPUT_DIRECTORY_NAMES && !insideSourceTree) return true
+            if (segment == "src") insideSourceTree = true
         }
+        return false
     }
 
     private fun digest(file: File): String {
@@ -5028,17 +5237,15 @@ class WorkspaceCheckpoints(
             ".next",
             ".dart_tool",
             ".venv",
-            "build",
-            "dist",
             "node_modules",
-            "target",
             "venv",
         )
+        private val BUILD_OUTPUT_DIRECTORY_NAMES = setOf("build", "dist", "target")
     }
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (258 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeBridge.kt` (266 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5073,12 +5280,20 @@ object RuntimeTaskController {
 
     @Synchronized
     fun stopCurrentTask() {
-        stopAction?.invoke()
+        val action = stopAction
+        stopAction = null
+        action?.invoke()
+    }
+
+    /** Clears [action] only if it is still the registered one, so a finishing task cannot drop another task's stop hook. */
+    @Synchronized
+    fun release(action: (() -> Unit)?) {
+        if (action != null && stopAction === action) stopAction = null
     }
 
     @Synchronized
     fun requestStop() {
-        stopAction?.invoke()
+        stopCurrentTask()
     }
 }
 
@@ -5301,7 +5516,7 @@ object RuntimeLaunchConfigBuilder {
 }
 ```
 
-## 3. `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (773 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/runtime/LocalFormatGateway.kt` (782 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -5309,6 +5524,7 @@ package com.nextcraft.forge.runtime
 import android.util.Log
 import com.nextcraft.forge.model.ProviderProtocol
 import com.nextcraft.forge.model.ProviderProfile
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
@@ -5417,7 +5633,7 @@ internal class LocalFormatGateway(
         }
         runCatching {
             val anthropic = JSONObject(bodyText)
-            val requestedModel = anthropic.optString("model", profile.model)
+            val requestedModel = anthropic.stringOrEmpty("model", profile.model)
             val wantsStream = anthropic.optBoolean("stream", false)
             if (wantsStream && !isResponsesProtocol) {
                 streamFromProvider(anthropic, requestedModel, output)
@@ -5454,7 +5670,7 @@ internal class LocalFormatGateway(
         val sourceMessages = source.optJSONArray("messages") ?: JSONArray()
         for (index in 0 until sourceMessages.length()) {
             val message = sourceMessages.getJSONObject(index)
-            val role = message.optString("role")
+            val role = message.stringOrEmpty("role")
             val content = message.opt("content")
             if (content !is JSONArray) {
                 messages.put(JSONObject().put("role", role).put("content", content ?: ""))
@@ -5465,15 +5681,15 @@ internal class LocalFormatGateway(
             val toolResults = mutableListOf<JSONObject>()
             for (partIndex in 0 until content.length()) {
                 val part = content.optJSONObject(partIndex) ?: continue
-                when (part.optString("type")) {
+                when (part.stringOrEmpty("type")) {
                     "tool_use" -> toolCalls.put(
-                        JSONObject().put("id", part.optString("id"))
+                        JSONObject().put("id", part.stringOrEmpty("id"))
                             .put("type", "function")
-                            .put("function", JSONObject().put("name", part.optString("name")).put("arguments", part.optJSONObject("input")?.toString() ?: "{}")),
+                            .put("function", JSONObject().put("name", part.stringOrEmpty("name")).put("arguments", part.optJSONObject("input")?.toString() ?: "{}")),
                     )
                     "tool_result" -> toolResults += JSONObject()
                         .put("role", "tool")
-                        .put("tool_call_id", part.optString("tool_use_id"))
+                        .put("tool_call_id", part.stringOrEmpty("tool_use_id"))
                         .put("content", valueText(part.opt("content")))
                 }
             }
@@ -5498,8 +5714,8 @@ internal class LocalFormatGateway(
                     JSONObject().put("type", "function").put(
                         "function",
                         JSONObject()
-                            .put("name", tool.optString("name"))
-                            .put("description", tool.optString("description"))
+                            .put("name", tool.stringOrEmpty("name"))
+                            .put("description", tool.stringOrEmpty("description"))
                             .put("parameters", tool.optJSONObject("input_schema") ?: JSONObject().put("type", "object")),
                     ),
                 )
@@ -5526,7 +5742,7 @@ internal class LocalFormatGateway(
         val sourceMessages = source.optJSONArray("messages") ?: JSONArray()
         for (index in 0 until sourceMessages.length()) {
             val message = sourceMessages.getJSONObject(index)
-            val role = message.optString("role")
+            val role = message.stringOrEmpty("role")
             val content = message.opt("content")
             if (content !is JSONArray) {
                 input.put(JSONObject().put("role", role).put("content", content?.toString().orEmpty()))
@@ -5537,15 +5753,15 @@ internal class LocalFormatGateway(
             val toolResults = mutableListOf<JSONObject>()
             for (partIndex in 0 until content.length()) {
                 val part = content.optJSONObject(partIndex) ?: continue
-                when (part.optString("type")) {
+                when (part.stringOrEmpty("type")) {
                     "tool_use" -> toolCalls += JSONObject()
                         .put("type", "function_call")
-                        .put("call_id", part.optString("id"))
-                        .put("name", part.optString("name"))
+                        .put("call_id", part.stringOrEmpty("id"))
+                        .put("name", part.stringOrEmpty("name"))
                         .put("arguments", part.optJSONObject("input")?.toString() ?: "{}")
                     "tool_result" -> toolResults += JSONObject()
                         .put("type", "function_call_output")
-                        .put("call_id", part.optString("tool_use_id"))
+                        .put("call_id", part.stringOrEmpty("tool_use_id"))
                         .put("output", valueText(part.opt("content")))
                 }
             }
@@ -5568,8 +5784,8 @@ internal class LocalFormatGateway(
                 converted.put(
                     JSONObject()
                         .put("type", "function")
-                        .put("name", tool.optString("name"))
-                        .put("description", tool.optString("description"))
+                        .put("name", tool.stringOrEmpty("name"))
+                        .put("description", tool.stringOrEmpty("description"))
                         .put("parameters", tool.optJSONObject("input_schema") ?: JSONObject().put("type", "object")),
                 )
             }
@@ -5584,24 +5800,30 @@ internal class LocalFormatGateway(
         }
         val message = source.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: JSONObject()
         val content = JSONArray()
-        val text = message.optString("content")
+        val text = message.stringOrEmpty("content")
         if (text.isNotBlank()) content.put(JSONObject().put("type", "text").put("text", text))
         val calls = message.optJSONArray("tool_calls") ?: JSONArray()
         for (index in 0 until calls.length()) {
             val call = calls.getJSONObject(index)
             val function = call.optJSONObject("function") ?: JSONObject()
-            val arguments = runCatching { JSONObject(function.optString("arguments", "{}")) }.getOrDefault(JSONObject())
+            val arguments = runCatching { JSONObject(function.stringOrEmpty("arguments", "{}")) }.getOrDefault(JSONObject())
             content.put(
                 JSONObject().put("type", "tool_use")
-                    .put("id", call.optString("id").ifBlank { "tool_${UUID.randomUUID()}" })
-                    .put("name", function.optString("name"))
+                    .put("id", call.stringOrEmpty("id").ifBlank { "tool_${UUID.randomUUID()}" })
+                    .put("name", function.stringOrEmpty("name"))
                     .put("input", arguments),
             )
         }
         val usage = source.optJSONObject("usage") ?: JSONObject()
-        return JSONObject().put("id", source.optString("id").ifBlank { "msg_${UUID.randomUUID()}" })
+        val finishReason = source.optJSONArray("choices")?.optJSONObject(0)?.stringOrEmpty("finish_reason").orEmpty()
+        val stopReason = when {
+            calls.length() > 0 -> "tool_use"
+            finishReason == "length" -> "max_tokens"
+            else -> "end_turn"
+        }
+        return JSONObject().put("id", source.stringOrEmpty("id").ifBlank { "msg_${UUID.randomUUID()}" })
             .put("type", "message").put("role", "assistant").put("model", model)
-            .put("content", content).put("stop_reason", if (calls.length() > 0) "tool_use" else "end_turn")
+            .put("content", content).put("stop_reason", stopReason)
             .put("stop_sequence", JSONObject.NULL)
             .put("usage", JSONObject().put("input_tokens", usage.optInt("prompt_tokens")).put("output_tokens", usage.optInt("completion_tokens")))
     }
@@ -5612,27 +5834,27 @@ internal class LocalFormatGateway(
         var hasToolUse = false
         for (index in 0 until output.length()) {
             val item = output.optJSONObject(index) ?: continue
-            when (item.optString("type")) {
+            when (item.stringOrEmpty("type")) {
                 "message" -> {
                     val parts = item.optJSONArray("content")
-                    val text = if (parts != null) contentText(parts) else item.optString("content")
+                    val text = if (parts != null) contentText(parts) else item.stringOrEmpty("content")
                     if (text.isNotBlank()) content.put(JSONObject().put("type", "text").put("text", text))
                 }
                 "function_call" -> {
                     hasToolUse = true
-                    val arguments = runCatching { JSONObject(item.optString("arguments", "{}")) }.getOrDefault(JSONObject())
-                    val callId = item.optString("call_id").ifBlank { item.optString("id") }.ifBlank { "tool_${UUID.randomUUID()}" }
+                    val arguments = runCatching { JSONObject(item.stringOrEmpty("arguments", "{}")) }.getOrDefault(JSONObject())
+                    val callId = item.stringOrEmpty("call_id").ifBlank { item.stringOrEmpty("id") }.ifBlank { "tool_${UUID.randomUUID()}" }
                     content.put(
                         JSONObject().put("type", "tool_use")
                             .put("id", callId)
-                            .put("name", item.optString("name"))
+                            .put("name", item.stringOrEmpty("name"))
                             .put("input", arguments),
                     )
                 }
             }
         }
         if (content.length() == 0) {
-            val fallbackText = source.optString("output_text")
+            val fallbackText = source.stringOrEmpty("output_text")
             if (fallbackText.isNotBlank()) {
                 content.put(JSONObject().put("type", "text").put("text", fallbackText))
             }
@@ -5640,7 +5862,7 @@ internal class LocalFormatGateway(
         val usage = source.optJSONObject("usage") ?: JSONObject()
         val inputTokens = usage.optInt("input_tokens", usage.optInt("prompt_tokens"))
         val outputTokens = usage.optInt("output_tokens", usage.optInt("completion_tokens"))
-        return JSONObject().put("id", source.optString("id").ifBlank { "msg_${UUID.randomUUID()}" })
+        return JSONObject().put("id", source.stringOrEmpty("id").ifBlank { "msg_${UUID.randomUUID()}" })
             .put("type", "message").put("role", "assistant").put("model", model)
             .put("content", content).put("stop_reason", if (hasToolUse) "tool_use" else "end_turn")
             .put("stop_sequence", JSONObject.NULL)
@@ -5824,6 +6046,7 @@ internal class LocalFormatGateway(
         var openBlockIndex = -1
         val activeToolSlots = HashMap<Int, Int>()
         var sawToolCalls = false
+        var truncated = false
         var inputTokens = 0
         var outputTokens = 0
 
@@ -5847,9 +6070,10 @@ internal class LocalFormatGateway(
                 outputTokens = usage.optInt("completion_tokens", usage.optInt("output_tokens", outputTokens))
             }
             val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
+            if (choice.stringOrEmpty("finish_reason") == "length") truncated = true
             val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: continue
 
-            val reasoningDelta = delta.optString("reasoning_content").ifEmpty { delta.optString("reasoning") }
+            val reasoningDelta = delta.stringOrEmpty("reasoning_content").ifEmpty { delta.stringOrEmpty("reasoning") }
             if (reasoningDelta.isNotEmpty()) {
                 if (openBlockType != "thinking") {
                     closeOpenBlock()
@@ -5873,7 +6097,7 @@ internal class LocalFormatGateway(
                 )
             }
 
-            val textDelta = if (delta.isNull("content")) "" else delta.optString("content")
+            val textDelta = delta.stringOrEmpty("content")
             if (textDelta.isNotEmpty()) {
                 if (openBlockType != "text") {
                     closeOpenBlock()
@@ -5904,9 +6128,9 @@ internal class LocalFormatGateway(
                     sawToolCalls = true
                     val slot = tc.optInt("index", tcIdx)
                     val fn = tc.optJSONObject("function")
-                    val id = tc.optString("id")
-                    val name = fn?.optString("name").orEmpty()
-                    val argsDelta = fn?.optString("arguments").orEmpty()
+                    val id = tc.stringOrEmpty("id")
+                    val name = fn?.stringOrEmpty("name").orEmpty()
+                    val argsDelta = fn?.stringOrEmpty("arguments").orEmpty()
                     if (slot !in activeToolSlots) {
                         closeOpenBlock()
                         val idx = nextBlockIndex++
@@ -5950,7 +6174,7 @@ internal class LocalFormatGateway(
                 .put(
                     "delta",
                     JSONObject()
-                        .put("stop_reason", if (sawToolCalls) "tool_use" else "end_turn")
+                        .put("stop_reason", if (sawToolCalls) "tool_use" else if (truncated) "max_tokens" else "end_turn")
                         .put("stop_sequence", JSONObject.NULL),
                 )
                 .put("usage", JSONObject().put("input_tokens", inputTokens).put("output_tokens", outputTokens)),
@@ -6037,7 +6261,7 @@ internal class LocalFormatGateway(
     private fun contentText(array: JSONArray): String = buildString {
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
-            if (item.optString("type") in setOf("text", "output_text")) append(item.optString("text"))
+            if (item.stringOrEmpty("type") in setOf("text", "output_text")) append(item.stringOrEmpty("text"))
         }
     }
 
@@ -6049,7 +6273,7 @@ internal class LocalFormatGateway(
     }
 
     private fun providerError(body: String): String = runCatching {
-        JSONObject(body).optJSONObject("error")?.optString("message").orEmpty().ifBlank { body.take(500) }
+        JSONObject(body).optJSONObject("error")?.stringOrEmpty("message").orEmpty().ifBlank { body.take(500) }
     }.getOrDefault(body.take(500))
 
     private fun normalizeModel(model: String): String = model
@@ -6337,7 +6561,7 @@ internal class OpenRouterRoutingGateway(
 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (269 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/data/ApiKeyVault.kt` (274 baris)
 
 ```kotlin
 package com.nextcraft.forge.data
@@ -6459,9 +6683,14 @@ class ApiKeyVault(context: Context) {
         val entries = list(providerId)
         if (entries.size <= 1) return get(providerId)
         val currentIdx = entries.indexOfFirst { it.isActive }.coerceAtLeast(0)
-        val nextEntry = entries[(currentIdx + 1) % entries.size]
-        setActiveId(providerId, nextEntry.id)
-        return getEncrypted(secretKey(providerId, nextEntry.id))
+        // Skip entries whose secret is missing or unreadable instead of returning null for the whole rotation.
+        for (step in 1 until entries.size) {
+            val candidate = entries[(currentIdx + step) % entries.size]
+            val secret = getEncrypted(secretKey(providerId, candidate.id)) ?: continue
+            setActiveId(providerId, candidate.id)
+            return secret
+        }
+        return get(providerId)
     }
 
     @Synchronized
@@ -6568,11 +6797,11 @@ class ApiKeyVault(context: Context) {
     private fun savePool(providerId: String, entries: List<ApiKeyInfo>) {
         val array = JSONArray()
         entries.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name)) }
-        preferences.edit().putString(poolKey(providerId), array.toString()).apply()
+        preferences.edit().putString(poolKey(providerId), array.toString()).commit()
     }
 
     private fun activeId(providerId: String): String? = preferences.getString(activeKey(providerId), null)
-    private fun setActiveId(providerId: String, id: String) = preferences.edit().putString(activeKey(providerId), id).apply()
+    private fun setActiveId(providerId: String, id: String) = preferences.edit().putString(activeKey(providerId), id).commit()
     private fun poolKey(providerId: String) = "$providerId.pool"
     private fun activeKey(providerId: String) = "$providerId.active"
     private fun secretKey(providerId: String, id: String) = "$providerId.pool.$id"
@@ -6611,7 +6840,7 @@ data class ApiKeyInfo(val id: String, val name: String, val isActive: Boolean = 
 data class ApiKeyCredential(val id: String, val name: String, val secret: String, val isActive: Boolean)
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (521 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/data/AppPreferences.kt` (581 baris)
 
 ```kotlin
 package com.nextcraft.forge.data
@@ -6695,6 +6924,11 @@ class AppPreferences(private val context: Context) {
     var interactiveHighRiskApprovals: Boolean
         get() = preferences.getBoolean("interactive_high_risk_approvals", true)
         set(value) { preferences.edit().putBoolean("interactive_high_risk_approvals", value).apply() }
+
+    /** When true, every tool permission request is approved without classification or prompting. */
+    var autoApproveAllTools: Boolean
+        get() = preferences.getBoolean("auto_approve_all_tools", true)
+        set(value) { preferences.edit().putBoolean("auto_approve_all_tools", value).apply() }
 
     fun saveAgentConversation(agent: AgentKind, projectId: String, chatId: String, conversationId: String?) {
         val key = agentConversationKey(agent, projectId, chatId)
@@ -6879,13 +7113,18 @@ class AppPreferences(private val context: Context) {
     fun loadProjects(): List<Project> {
         val raw = preferences.getString("projects_json", null) ?: return emptyList()
         var needsSave = false
+        var dropped = 0
         val list = runCatching {
             val arr = JSONArray(raw)
             val usedSlugs = mutableSetOf<String>()
-            (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                val id = obj.getString("id")
-                val name = obj.getString("name")
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i)
+                val id = obj?.optString("id").orEmpty()
+                val name = obj?.optString("name").orEmpty()
+                if (obj == null || id.isBlank() || name.isBlank()) {
+                    dropped++
+                    return@mapNotNull null
+                }
                 val storedKind = obj.optString("kind", ProjectKind.PROJECT.name)
                 if (!obj.has("kind") || storedKind == "QUICK_CHAT") needsSave = true
                 val requestedSlug = obj.optString("slug").ifBlank { projectSlug(name) }
@@ -6941,15 +7180,46 @@ class AppPreferences(private val context: Context) {
                     },
                 )
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            backupCorruptProjects(raw)
+            return emptyList()
+        }
 
+        // Entries that could not be parsed are dropped on the next save, so keep the original around.
+        if (dropped > 0) backupCorruptProjects(raw)
         if (needsSave && list.isNotEmpty()) {
             saveProjects(list)
         }
         return list
     }
 
+    /** Keeps the unparseable projects JSON so a later save cannot silently destroy it. */
+    private fun backupCorruptProjects(raw: String) {
+        android.util.Log.w("AppPreferences", "projects_json had unreadable entries; keeping a backup")
+        preferences.edit().putString("projects_json_corrupt_backup", raw).apply()
+    }
+
     private val chatsDir = File(context.filesDir, "chats").also { it.mkdirs() }
+
+    /** Moves an unreadable file aside so the next save does not overwrite it. */
+    private fun quarantine(file: File) {
+        android.util.Log.w("AppPreferences", "Quarantining unreadable ${file.name}")
+        runCatching { file.renameTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")) }
+    }
+
+    /** Writes via a temp file that is fsynced before the rename, so a power loss cannot leave an empty file. */
+    private fun writeAtomically(destination: File, content: String) {
+        val temporary = File(destination.parentFile, ".${destination.name}.tmp")
+        java.io.FileOutputStream(temporary).use { out ->
+            out.write(content.toByteArray(Charsets.UTF_8))
+            out.fd.sync()
+        }
+        if (!temporary.renameTo(destination)) {
+            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
+            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
+            temporary.delete()
+        }
+    }
 
     private fun safeStorageId(id: String): String {
         val trimmed = id.trim()
@@ -6978,14 +7248,7 @@ class AppPreferences(private val context: Context) {
                 put("updatedAtMillis", chat.updatedAtMillis)
             })
         }
-        val destination = File(projectDir, "index.json")
-        val temporary = File(projectDir, ".index.json.tmp")
-        temporary.writeText(arr.toString())
-        if (!temporary.renameTo(destination)) {
-            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
-            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
-            temporary.delete()
-        }
+        writeAtomically(File(projectDir, "index.json"), arr.toString())
     }
 
     @Synchronized
@@ -6994,18 +7257,26 @@ class AppPreferences(private val context: Context) {
         val projectDir = File(chatsDir, safeProject).also { it.mkdirs() }
         val index = File(projectDir, "index.json")
         if (index.exists()) {
-            return runCatching {
+            val parsed = runCatching {
                 val arr = JSONArray(index.readText())
-                (0 until arr.length()).map { i ->
-                    val obj = arr.getJSONObject(i)
-                    ProjectChat(
-                        id = safeStorageId(obj.getString("id")),
-                        title = obj.optString("title", "Chat"),
-                        createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
-                        updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
-                    )
+                // One malformed entry must not hide every other chat in the project.
+                (0 until arr.length()).mapNotNull { i ->
+                    runCatching {
+                        val obj = arr.getJSONObject(i)
+                        ProjectChat(
+                            id = safeStorageId(obj.getString("id")),
+                            title = obj.optString("title", "Chat"),
+                            createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
+                            updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
+                        )
+                    }.getOrNull()
                 }.sortedByDescending { it.updatedAtMillis }
-            }.getOrDefault(emptyList())
+            }.getOrNull()
+            if (parsed != null) return parsed
+            // Unreadable index: keep it for inspection, then rebuild from the chat files that are still on disk.
+            quarantine(index)
+            val recovered = recoverChatIndex(safeProject, projectDir)
+            if (recovered.isNotEmpty()) return recovered
         }
 
         val legacy = File(chatsDir, "$safeProject.json")
@@ -7020,6 +7291,25 @@ class AppPreferences(private val context: Context) {
         saveProjectChats(safeProject, listOf(chat))
         if (legacyMessages.isNotEmpty()) saveMessages(safeProject, chat.id, legacyMessages)
         return listOf(chat)
+    }
+
+    /** Rebuilds the chat list from `<chatId>.json` files when `index.json` is lost or corrupt. */
+    private fun recoverChatIndex(projectId: String, projectDir: File): List<ProjectChat> {
+        val recovered = projectDir.listFiles { f ->
+            f.isFile && f.name.endsWith(".json") && f.name != "index.json" && !f.name.startsWith(".")
+        }.orEmpty().mapNotNull { file ->
+            val id = file.name.removeSuffix(".json")
+            if (runCatching { safeStorageId(id) }.isFailure) return@mapNotNull null
+            val modified = file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+            ProjectChat(
+                id = id,
+                title = loadLegacyMessages(file).firstOrNull { it.fromUser }?.text?.toChatTitle() ?: "Recovered chat",
+                createdAtMillis = modified,
+                updatedAtMillis = modified,
+            )
+        }.sortedByDescending { it.updatedAtMillis }
+        if (recovered.isNotEmpty()) saveProjectChats(projectId, recovered)
+        return recovered
     }
 
     @Synchronized
@@ -7058,14 +7348,7 @@ class AppPreferences(private val context: Context) {
             })
         }
         val projectDir = File(chatsDir, safeProject).also { it.mkdirs() }
-        val destination = File(projectDir, "$safeChat.json")
-        val temporary = File(projectDir, ".$safeChat.json.tmp")
-        temporary.writeText(arr.toString())
-        if (!temporary.renameTo(destination)) {
-            android.util.Log.w("AppPreferences", "Atomic rename failed for ${destination.name}; falling back to copy")
-            temporary.inputStream().use { src -> destination.outputStream().use { dst -> src.copyTo(dst) } }
-            temporary.delete()
-        }
+        writeAtomically(File(projectDir, "$safeChat.json"), arr.toString())
     }
 
     @Synchronized
@@ -7087,47 +7370,53 @@ class AppPreferences(private val context: Context) {
         if (!file.exists()) return emptyList()
         return runCatching {
             val arr = JSONArray(file.readText())
-            (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                ChatMessage(
-                    id = obj.getString("id"),
-                    fromUser = obj.getBoolean("fromUser"),
-                    text = obj.getString("text"),
-                    createdAt = runCatching { Instant.parse(obj.getString("createdAt")) }
-                        .getOrDefault(Instant.now()),
-                    attachments = obj.optJSONArray("attachments")?.let { attachments ->
-                        (0 until attachments.length()).mapNotNull { index ->
-                            runCatching {
-                                attachments.getJSONObject(index).let { attachment ->
-                                    ChatAttachment(
-                                        id = attachment.optString("id").ifBlank { UUID.randomUUID().toString() },
-                                        displayName = attachment.getString("displayName"),
-                                        relativePath = attachment.getString("relativePath"),
-                                        mimeType = attachment.optString("mimeType", "application/octet-stream"),
-                                        sizeBytes = attachment.optLong("sizeBytes", 0L),
-                                    )
-                                }
-                            }.getOrNull()
-                        }
-                    }.orEmpty(),
-                    workedMillis = obj.optLong("workedMillis", 0L),
-                    workItems = obj.optJSONArray("workItems")?.let { workItems ->
-                        (0 until workItems.length()).mapNotNull { index ->
-                            runCatching {
-                                workItems.getJSONObject(index).let { item ->
-                                    ActivityItem(
-                                        title = item.optString("title"),
-                                        detail = item.optString("detail"),
-                                        isComplete = item.optBoolean("isComplete", true),
-                                        isCommand = item.optBoolean("isCommand", false),
-                                    )
-                                }
-                            }.getOrNull()
-                        }
-                    }.orEmpty(),
-                )
+            (0 until arr.length()).mapNotNull { i ->
+                runCatching { parseMessage(arr.getJSONObject(i)) }.getOrNull()
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            quarantine(file)
+            emptyList()
+        }
+    }
+
+    private fun parseMessage(obj: JSONObject): ChatMessage {
+        return ChatMessage(
+            id = obj.getString("id"),
+            fromUser = obj.getBoolean("fromUser"),
+            text = obj.getString("text"),
+            createdAt = runCatching { Instant.parse(obj.getString("createdAt")) }
+                .getOrDefault(Instant.now()),
+            attachments = obj.optJSONArray("attachments")?.let { attachments ->
+                (0 until attachments.length()).mapNotNull { index ->
+                    runCatching {
+                        attachments.getJSONObject(index).let { attachment ->
+                            ChatAttachment(
+                                id = attachment.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                displayName = attachment.getString("displayName"),
+                                relativePath = attachment.getString("relativePath"),
+                                mimeType = attachment.optString("mimeType", "application/octet-stream"),
+                                sizeBytes = attachment.optLong("sizeBytes", 0L),
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }.orEmpty(),
+            workedMillis = obj.optLong("workedMillis", 0L),
+            workItems = obj.optJSONArray("workItems")?.let { workItems ->
+                (0 until workItems.length()).mapNotNull { index ->
+                    runCatching {
+                        workItems.getJSONObject(index).let { item ->
+                            ActivityItem(
+                                title = item.optString("title"),
+                                detail = item.optString("detail"),
+                                isComplete = item.optBoolean("isComplete", true),
+                                isCommand = item.optBoolean("isCommand", false),
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }.orEmpty(),
+        )
     }
 
     private fun String.toChatTitle(): String {
@@ -7157,20 +7446,21 @@ Blok 3 berisi implementasi **3 mesin agen coding otonom** yang berjalan di dalam
    - Menghasilkan `settings.yaml` dinamis sesuai rute provider (`DshRouteMapper`), mem-parsing stream reasoning dan eksekusi tool (`DshSdkProtocolParser`), serta menangani deduplikasi pesan akhir.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (1030 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (677 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (445 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (985 baris)
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (982 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/ClaudeRuntimeBridge.kt` (1030 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
 
 import android.content.Context
 import android.util.Log
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.DevStack
@@ -7212,20 +7502,20 @@ internal object ProviderRuntimeErrorDetector {
         val combined = if (json == null) {
             trimmed.lowercase()
         } else buildString {
-            append(json.optString("error"))
-            if (json.optString("type") == "error") {
+            append(json.stringOrEmpty("error"))
+            if (json.stringOrEmpty("type") == "error") {
                 append(' ')
-                append(json.optString("message"))
+                append(json.stringOrEmpty("message"))
                 json.optJSONObject("error")?.let { errObj ->
                     append(' ')
-                    append(errObj.optString("type"))
+                    append(errObj.stringOrEmpty("type"))
                     append(' ')
-                    append(errObj.optString("message"))
+                    append(errObj.stringOrEmpty("message"))
                 }
             }
-            if (json.optString("type") == "result" && json.optBoolean("is_error")) {
+            if (json.stringOrEmpty("type") == "result" && json.optBoolean("is_error")) {
                 append(' ')
-                append(json.optString("result"))
+                append(json.stringOrEmpty("result"))
             }
         }.lowercase()
         return when {
@@ -7247,7 +7537,7 @@ internal object ProviderRuntimeErrorDetector {
                 "http 401" in combined ||
                 "status 401" in combined ||
                 "401 unauthorized" in combined ||
-                (json?.optString("subtype") == "api_retry" && json.optInt("error_status") == 401) ->
+                (json?.stringOrEmpty("subtype") == "api_retry" && json.optInt("error_status") == 401) ->
                 "The provider rejected the saved API key."
             else -> null
         }
@@ -7260,8 +7550,11 @@ class ClaudeRuntimeBridge(
     private val rotateSecretFor: (ProviderProfile) -> String? = { profile ->
         com.nextcraft.forge.data.ApiKeyVault(context).rotateNext(profile.kind.name)
     },
+    private val autoApproveAllTools: () -> Boolean = {
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(false)
+    },
     private val interactiveHighRiskApprovals: () -> Boolean = {
-        com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals }.getOrDefault(true)
     },
 ) : RuntimeBridge {
     private val installer by lazy { RuntimeInstaller(context) }
@@ -7325,14 +7618,16 @@ class ClaudeRuntimeBridge(
                 "No API key is saved for ${provider.kind.title}."
             }
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, message))
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var formatGateway: LocalFormatGateway? = null
         var openRouterGateway: OpenRouterRoutingGateway? = null
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -7345,6 +7640,7 @@ class ClaudeRuntimeBridge(
                     }, "forge-claude-stop").apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
@@ -7461,6 +7757,13 @@ class ClaudeRuntimeBridge(
             }
         }.onFailure { error ->
             Log.e("ClaudeBridge", "Session failed: ${error::class.simpleName}")
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
+            pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
+                runCatching { permission.response.writeText("deny") }
+                pending.remove(permission.request.approvalId)
+                eventBus.emit(RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId))
+            }
             val message = friendlyError(error)
             emitFailureOnce(sessionId, message)
             if (userStopRequested) {
@@ -7478,7 +7781,7 @@ class ClaudeRuntimeBridge(
         runCatching { spawnedOutputFile?.delete() }
         activeProcess = null
         activeSessionId = null
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 
@@ -7521,11 +7824,11 @@ class ClaudeRuntimeBridge(
                 .map(String::trim)
                 .filter { it.startsWith("{") }
                 .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-                .lastOrNull { it.optString("type") == "result" }
+                .lastOrNull { it.stringOrEmpty("type") == "result" }
             when {
                 result == null -> error(output.trim().takeLast(300).ifBlank { "Claude Code did not answer." })
-                result.optBoolean("is_error") -> error(result.optString("result").ifBlank { result.optString("subtype") })
-                else -> result.optString("result").trim().ifBlank { "ok" }
+                result.optBoolean("is_error") -> error(result.stringOrEmpty("result").ifBlank { result.stringOrEmpty("subtype") })
+                else -> result.stringOrEmpty("result").trim().ifBlank { "ok" }
             }
         } catch (e: TimeoutCancellationException) {
             error("Claude Code did not answer in time. Check your connection and try again.")
@@ -7637,18 +7940,18 @@ class ClaudeRuntimeBridge(
         val approvalId = file.name.removeSuffix(".request")
         runCatching {
             val json = JSONObject(file.readText())
-            val toolName = json.optString("tool_name", "Tool")
+            val toolName = json.stringOrEmpty("tool_name", "Tool")
             val input = json.optJSONObject("tool_input") ?: JSONObject()
-            val command = input.optString("command").ifBlank { null }
+            val command = input.stringOrEmpty("command").ifBlank { null }
             val paths = listOf("file_path", "path", "notebook_path")
-                .mapNotNull { key -> input.optString(key).takeIf(String::isNotBlank) }
-            val explanation = input.optString("description")
+                .mapNotNull { key -> input.stringOrEmpty(key).takeIf(String::isNotBlank) }
+            val explanation = input.stringOrEmpty("description")
                 .ifBlank { command.orEmpty() }
                 .ifBlank { "$toolName running in project" }
 
             val risk = classifyRisk(toolName, command, paths)
             val response = responseFile(file, approvalId)
-            if (risk == RiskLevel.HIGH) {
+            if (risk == RiskLevel.HIGH && !autoApproveAllTools()) {
                 if (interactiveHighRiskApprovals()) {
                     val toolRequest = ToolRequest(
                         approvalId = approvalId,
@@ -7694,27 +7997,27 @@ class ClaudeRuntimeBridge(
     }
 
     private suspend fun consumeClaudeJsonEvent(sessionId: String, json: JSONObject) {
-        when (json.optString("type")) {
+        when (json.stringOrEmpty("type")) {
             "stream_event" -> json.optJSONObject("event")?.let { consumeClaudeJsonEvent(sessionId, it) }
-            "system" -> when (json.optString("subtype")) {
+            "system" -> when (json.stringOrEmpty("subtype")) {
                 "init" -> Unit
                 "thinking_tokens" -> emitReasoningProgress(sessionId, json.optInt("estimated_tokens"))
                 "permission_denied" -> eventBus.emit(
                     RuntimeEvent.RuntimeLog(
                         sessionId,
                         "Permission denied",
-                        sanitizeForDisplay(json.optString("decision_reason").ifBlank { json.optString("message") }),
+                        sanitizeForDisplay(json.stringOrEmpty("decision_reason").ifBlank { json.stringOrEmpty("message") }),
                     ),
                 )
             }
             "content_block_start" -> {
                 val block = json.optJSONObject("content_block")
-                when (block?.optString("type")) {
+                when (block?.stringOrEmpty("type")) {
                     "thinking" -> {
                         currentThinkingBlockId += 1
                         streamedThinking.clear()
                         emitReasoningSummary(sessionId, "", startsNewBlock = true)
-                        block.optString("thinking").takeIf(String::isNotBlank)?.let {
+                        block.stringOrEmpty("thinking").takeIf(String::isNotBlank)?.let {
                             streamedThinking.append(it)
                             emitReasoningSummary(sessionId, it, force = true)
                         }
@@ -7724,12 +8027,12 @@ class ClaudeRuntimeBridge(
             }
             "content_block_delta" -> {
                 val delta = json.optJSONObject("delta")
-                when (delta?.optString("type")) {
-                    "thinking_delta" -> delta.optString("thinking").takeIf(String::isNotEmpty)?.let {
+                when (delta?.stringOrEmpty("type")) {
+                    "thinking_delta" -> delta.stringOrEmpty("thinking").takeIf(String::isNotEmpty)?.let {
                         streamedThinking.append(it)
                         emitReasoningSummary(sessionId, streamedThinking.toString())
                     }
-                    "text_delta", "" -> delta.optString("text").takeIf(String::isNotEmpty)?.let {
+                    "text_delta", "" -> delta.stringOrEmpty("text").takeIf(String::isNotEmpty)?.let {
                         streamedText.append(it)
                         eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, it))
                     }
@@ -7745,13 +8048,13 @@ class ClaudeRuntimeBridge(
                 val content = message.optJSONArray("content") ?: return
                 for (index in 0 until content.length()) {
                     val block = content.optJSONObject(index) ?: continue
-                    when (block.optString("type")) {
+                    when (block.stringOrEmpty("type")) {
                         "text" -> if (streamedText.isEmpty()) {
-                            block.optString("text").takeIf(String::isNotBlank)?.let {
+                            block.stringOrEmpty("text").takeIf(String::isNotBlank)?.let {
                                 eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, it))
                             }
                         }
-                        "thinking" -> block.optString("thinking").takeIf(String::isNotBlank)?.let {
+                        "thinking" -> block.stringOrEmpty("thinking").takeIf(String::isNotBlank)?.let {
                             if (currentThinkingBlockId == 0L || streamedThinking.toString() != it) {
                                 currentThinkingBlockId += 1
                                 streamedThinking.clear()
@@ -7769,7 +8072,7 @@ class ClaudeRuntimeBridge(
                     }
                 }
                 streamedText.clear()
-                if (message.optString("stop_reason") == "end_turn") {
+                if (message.stringOrEmpty("stop_reason") == "end_turn") {
                     turnCompletedFromStream = true
                 }
             }
@@ -7777,15 +8080,15 @@ class ClaudeRuntimeBridge(
                 val content = json.optJSONObject("message")?.optJSONArray("content") ?: return
                 for (index in 0 until content.length()) {
                     val block = content.optJSONObject(index) ?: continue
-                    if (block.optString("type") == "tool_result") {
-                        val toolId = block.optString("tool_use_id")
+                    if (block.stringOrEmpty("type") == "tool_result") {
+                        val toolId = block.stringOrEmpty("tool_use_id")
                         val toolName = toolNames.remove(toolId) ?: "Tool"
                         val contentArray = block.optJSONArray("content")
                         val extractedContent = if (contentArray != null) {
                             buildString {
                                 for (itemIndex in 0 until contentArray.length()) {
                                     val item = contentArray.optJSONObject(itemIndex)
-                                    val text = item?.optString("text")?.takeIf(String::isNotBlank)
+                                    val text = item?.stringOrEmpty("text")?.takeIf(String::isNotBlank)
                                         ?: contentArray.optString(itemIndex).takeIf(String::isNotBlank)
                                     if (text != null) {
                                         if (isNotEmpty()) append('\n')
@@ -7794,7 +8097,7 @@ class ClaudeRuntimeBridge(
                                 }
                             }
                         } else {
-                            block.optString("content")
+                            block.stringOrEmpty("content")
                         }
                         val result = extractedContent
                             .ifBlank { if (block.optBoolean("is_error")) "Tool failed" else "Completed successfully" }
@@ -7804,7 +8107,7 @@ class ClaudeRuntimeBridge(
             }
             "result" -> {
                 if (json.optBoolean("is_error")) {
-                    val message = json.optString("result").ifBlank { "Claude Code reported an error" }
+                    val message = json.stringOrEmpty("result").ifBlank { "Claude Code reported an error" }
                     throw IllegalStateException(message)
                 }
                 turnCompletedFromStream = true
@@ -7850,25 +8153,26 @@ class ClaudeRuntimeBridge(
     }
 
     private suspend fun emitToolStarted(sessionId: String, block: JSONObject) {
-        val id = block.optString("id")
+        val id = block.stringOrEmpty("id")
         if (id.isNotBlank() && !seenToolCalls.add(id)) return
-        val name = block.optString("name", "Tool")
+        val name = block.stringOrEmpty("name", "Tool")
         if (id.isNotBlank()) toolNames[id] = name
         val input = block.optJSONObject("input") ?: JSONObject()
         val detail = when (name) {
-            "Bash" -> input.optString("command").ifBlank { input.optString("description") }
-            "Write", "Edit", "Read", "NotebookEdit" -> input.optString("file_path").ifBlank { input.optString("notebook_path") }
-            "Glob" -> input.optString("pattern")
-            "Grep" -> input.optString("pattern").let { pattern ->
-                input.optString("path").takeIf(String::isNotBlank)?.let { "$pattern in $it" } ?: pattern
+            "Bash" -> input.stringOrEmpty("command").ifBlank { input.stringOrEmpty("description") }
+            "Write", "Edit", "Read", "NotebookEdit" -> input.stringOrEmpty("file_path").ifBlank { input.stringOrEmpty("notebook_path") }
+            "Glob" -> input.stringOrEmpty("pattern")
+            "Grep" -> input.stringOrEmpty("pattern").let { pattern ->
+                input.stringOrEmpty("path").takeIf(String::isNotBlank)?.let { "$pattern in $it" } ?: pattern
             }
-            else -> input.optString("description").ifBlank { "Running $name" }
+            else -> input.stringOrEmpty("description").ifBlank { "Running $name" }
         }
         eventBus.emit(RuntimeEvent.ToolStarted(sessionId, name, sanitizeForDisplay(detail.ifBlank { "Running $name" })))
         val compactDetail = detail.replace(Regex("\\s+"), " ").trim().take(80).ifBlank { name }
         pushForegroundProgress("Running $name: $compactDetail")
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun terminalStatus(line: String): Pair<String, String>? = null
 
     private suspend fun emitCompletedOnce(sessionId: String) {
@@ -8068,6 +8372,30 @@ private val SAFE_BASH_COMMANDS = setOf(
     "basename", "dirname", "realpath", "readlink", "cut", "tr", "awk", "sed", "find", "xargs", "jq", "du", "df",
     "env", "md5sum", "sha256sum", "cp", "mv", "gradle", "javac", "kotlinc",
 )
+private val ENV_ASSIGNMENT_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")
+
+// awk and sed are safe for plain text processing, but their scripts can run commands or write files.
+private val AWK_WORD_REGEX = Regex("\\bawk\\b")
+private val AWK_EXEC_REGEX = Regex("""\|\s*\\?"|system\s*\(|getline|\|&|\bpopen\b""")
+private val SED_WORD_REGEX = Regex("\\bsed\\b")
+private val SED_EXEC_OR_WRITE_REGEX = Regex("""(?:^|[;{}'"\s/0-9$,!])(?:e(?:['";}\s]|$)|[wWrR]\s)""")
+
+private fun scriptCanEscapeSandbox(text: String): Boolean =
+    (AWK_WORD_REGEX.containsMatchIn(text) && AWK_EXEC_REGEX.containsMatchIn(text)) ||
+        (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
+
+/** Commands that create, overwrite or move files; their path arguments must stay inside the project. */
+private fun mutatesFiles(first: String, words: List<String>): Boolean =
+    first in setOf("cp", "mv", "mkdir", "touch") ||
+        (first == "sed" && words.any { it == "--in-place" || (it.startsWith("-i") && !it.startsWith("--")) })
+
+private fun isOutsideWorkspacePath(word: String): Boolean {
+    val arg = word.trim('\'', '"')
+    if (arg.startsWith("-") || arg.isEmpty()) return false
+    if (isSensitivePath(arg)) return true
+    return arg.startsWith("/") && !arg.startsWith("/workspace/") && !arg.startsWith("/tmp/")
+}
+
 private val SAFE_GIT_SUBCOMMANDS = setOf(
     "status", "diff", "log", "show", "add", "commit", "branch", "rev-parse", "ls-files", "ls-tree", "blame",
     "remote", "fetch", "pull", "stash", "restore", "switch", "tag",
@@ -8120,6 +8448,14 @@ private fun isSafeBashSegment(segment: String): Boolean {
     val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
         .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
     val first = words.firstOrNull()?.trim('\'', '"')?.substringAfterLast('/') ?: return false
+    if (first == "env" || first == "xargs") {
+        // Wrappers run another command, so judge that command. A bare `env` dumps every exported
+        // variable (including provider API keys) into the model context and is never auto-approved.
+        val wrapped = words.drop(1).dropWhile { it.startsWith("-") || it.matches(ENV_ASSIGNMENT_REGEX) }
+        if (wrapped.isEmpty()) return first == "xargs"
+        return isSafeBashSegment(wrapped.joinToString(" "))
+    }
+    if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
     return first in SAFE_BASH_COMMANDS
@@ -8136,7 +8472,8 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
     return when (tool) {
         "Bash" -> {
             val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
-            val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains)
+            val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains) ||
+                scriptCanEscapeSandbox(text)
             val masked = maskQuotedAndEscapedSeparators(text)
             val segments = masked.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)
             if (text.isBlank() || hasUnsafeSyntax || segments.isEmpty() || !segments.all(::isSafeBashSegment)) {
@@ -8151,12 +8488,13 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
 }
 ```
 
-## 3. `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (671 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/runtime/AntigravityRuntimeBridge.kt` (677 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
 
 import android.content.Context
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
@@ -8202,29 +8540,29 @@ internal sealed interface AntigravityParsedEvent {
 internal object AntigravityEventParser {
     fun parse(line: String): AntigravityParsedEvent? {
         val root = runCatching { JSONObject(line) }.getOrNull() ?: return null
-        return when (root.optString("event")) {
-            "init" -> root.optString("conversation_id")
+        return when (root.stringOrEmpty("event")) {
+            "init" -> root.stringOrEmpty("conversation_id")
                 .takeIf(String::isNotBlank)
                 ?.let(AntigravityParsedEvent::Initialized)
             "step_update" -> {
                 val step = root.optJSONObject("step_update") ?: return null
-                val delta = step.optString("text_delta")
+                val delta = step.stringOrEmpty("text_delta")
                 if (delta.isNotEmpty()) return AntigravityParsedEvent.Text(delta)
-                val type = step.optString("step_type")
+                val type = step.stringOrEmpty("step_type")
                 if (type.contains("tool", true) || type.contains("command", true)) {
-                    val rawName = step.optString("tool_name").ifBlank {
-                        step.optJSONObject("tool_info")?.optString("name").orEmpty()
+                    val rawName = step.stringOrEmpty("tool_name").ifBlank {
+                        step.optJSONObject("tool_info")?.stringOrEmpty("name").orEmpty()
                     }.ifBlank { type.ifBlank { "Tool" } }
                     val name = antigravityToolDisplayName(rawName)
                     val detail = antigravityToolDetail(step, rawName).ifBlank { name }
-                    if (step.optString("state") in setOf("DONE", "ERROR")) {
+                    if (step.stringOrEmpty("state") in setOf("DONE", "ERROR")) {
                         val output = step.optJSONObject("tool_info")
-                            ?.optString("output")
+                            ?.stringOrEmpty("output")
                             ?.takeIf(String::isNotBlank)
                             ?.let(::antigravityToolOutput)
                         val error = step.optJSONObject("tool_info")
                             ?.optJSONObject("error")
-                            ?.optString("message")
+                            ?.stringOrEmpty("message")
                             ?.takeIf(String::isNotBlank)
                             ?.let(::redactToolDetail)
                         AntigravityParsedEvent.ToolCompleted(name, output ?: error ?: detail)
@@ -8236,10 +8574,10 @@ internal object AntigravityEventParser {
             "result" -> {
                 val result = root.optJSONObject("result") ?: root
                 AntigravityParsedEvent.Result(
-                    result.optString("conversation_id").takeIf(String::isNotBlank),
-                    result.optString("status", "ERROR"),
-                    result.optString("response").takeIf(String::isNotBlank),
-                    result.optString("error").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("conversation_id").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("status", "ERROR"),
+                    result.stringOrEmpty("response").takeIf(String::isNotBlank),
+                    result.stringOrEmpty("error").takeIf(String::isNotBlank),
                 )
             }
             else -> null // Forward compatible with new agy event types.
@@ -8259,7 +8597,7 @@ private fun antigravityToolDisplayName(name: String): String = when (name.lowerc
 }
 
 private fun antigravityToolDetail(step: JSONObject, rawName: String): String {
-    step.optString("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
+    step.stringOrEmpty("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
     val info = step.optJSONObject("tool_info")
     val parameters = info?.optJSONObject("parameters")
     val preferredKeys = when (rawName.lowercase()) {
@@ -8479,12 +8817,14 @@ class AntigravityRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             emitFailure(sessionId, "Antigravity CLI is not installed. Open Settings → Coding agent to install it.")
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -8497,6 +8837,7 @@ class AntigravityRuntimeBridge(
                     }.apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             pushForegroundProgress("Starting Antigravity…")
             val installed = installer.installedRuntime()
@@ -8624,6 +8965,8 @@ class AntigravityRuntimeBridge(
             finishForegroundRuntime(true, projectSlug, "Antigravity finished in $projectSlug")
         }.onFailure {
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = if (userStopRequested) {
                 "Stopped by user"
             } else {
@@ -8638,7 +8981,7 @@ class AntigravityRuntimeBridge(
         activeSessionId = null
         activeProjectSlug = ""
         taskStartedAtElapsedRealtime = 0L
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 
@@ -8827,7 +9170,7 @@ internal fun antigravityGradleProgress(command: String, elapsedMillis: Long): St
 }
 ```
 
-## 4. `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (377 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/runtime/AntigravityAuthController.kt` (445 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -8863,6 +9206,9 @@ class AntigravityAuthController(
     private val logoutOutput = File(context.cacheDir, "antigravity-logout-output.log")
     @Volatile private var process: Process? = null
     @Volatile private var codeSubmitted = false
+    private val loginStarting = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** Signed-in state to return to when a re-login attempt is cancelled. */
+    @Volatile private var stateBeforeLogin: AntigravityAuthState? = null
 
     init {
         // Remove output left by an app/process crash before starting a new OAuth flow.
@@ -8894,43 +9240,68 @@ class AntigravityAuthController(
     }
 
     suspend fun beginLogin() = withContext(Dispatchers.IO) {
-        if (process?.isAlive == true) return@withContext
+        // process?.isAlive alone is check-then-act: two quick taps could each spawn an agy.
+        if (!loginStarting.compareAndSet(false, true)) return@withContext
+        try {
+            beginLoginLocked()
+        } finally {
+            loginStarting.set(false)
+        }
+    }
+
+    private suspend fun beginLoginLocked() {
+        if (process?.isAlive == true) return
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
                 message = "Install Antigravity CLI first in Settings.",
             )
-            return@withContext
+            return
         }
+        stateBeforeLogin = mutableState.value.takeIf { it.status == AntigravityAuthStatus.SIGNED_IN }
         mutableState.value = AntigravityAuthState(
             AntigravityAuthStatus.STARTING,
             message = "Starting Antigravity sign-in…",
         )
         codeSubmitted = false
         authOutput.delete()
-        val runtime = installer.installedRuntime()
-        val workspace = File(context.filesDir, "workspaces/antigravity-auth").apply { mkdirs() }
-        val running = installer.process(
-            runtime.chrootExec,
-            runtime.rootfs,
-            workspace,
-            // SSH_CONNECTION selects agy's official manual browser URL + one-time code flow.
-            // NativeSpawn supplies a real PTY bridged via /dev/pts inside Root Chroot.
-            mapOf(
-                "SSH_CONNECTION" to "127.0.0.1 1 127.0.0.1 1",
-                "TERM" to "xterm-256color",
-                "NO_COLOR" to "1",
-            ),
-            listOf(RuntimeInstaller.AGY_GUEST_PATH),
-            guestWorkspacePath = "/workspace/antigravity-auth",
-            emulateHardLinks = false,
-            outputFile = authOutput,
-            pseudoTerminal = true,
-            ptyRows = 40,
-            ptyColumns = 120,
-        )
+        // Spawning can throw (missing runtime, no root); callers launch this unguarded, so report it as state.
+        val running = try {
+            val runtime = installer.installedRuntime()
+            val workspace = File(context.filesDir, "workspaces/antigravity-auth").apply { mkdirs() }
+            val spawned = installer.process(
+                runtime.chrootExec,
+                runtime.rootfs,
+                workspace,
+                // SSH_CONNECTION selects agy's official manual browser URL + one-time code flow.
+                // NativeSpawn supplies a real PTY bridged via /dev/pts inside Root Chroot.
+                mapOf(
+                    "SSH_CONNECTION" to "127.0.0.1 1 127.0.0.1 1",
+                    "TERM" to "xterm-256color",
+                    "NO_COLOR" to "1",
+                ),
+                listOf(RuntimeInstaller.AGY_GUEST_PATH),
+                guestWorkspacePath = "/workspace/antigravity-auth",
+                emulateHardLinks = false,
+                outputFile = authOutput,
+                pseudoTerminal = true,
+                ptyRows = 40,
+                ptyColumns = 120,
+            )
+            if (spawned !is NativeSpawnProcess) {
+                runCatching { spawned.destroyForcibly() }
+                error("Unsupported Antigravity authentication process")
+            }
+            spawned
+        } catch (error: Throwable) {
+            mutableState.value = AntigravityAuthState(
+                AntigravityAuthStatus.ERROR,
+                message = error.message?.take(240) ?: "Could not start Antigravity sign-in.",
+            )
+            return
+        }
         process = running
-        val native = running as? NativeSpawnProcess ?: error("Unsupported Antigravity authentication process")
+        val native = running
         var offset = 0L
         val output = StringBuilder()
         var handshakeReplies = 0
@@ -8940,9 +9311,14 @@ class AntigravityAuthController(
         var renderingScreenCompleted = false
         var privacyScreenCompleted = false
         var workspaceTrustCompleted = false
+        val deadline = android.os.SystemClock.elapsedRealtime() + LOGIN_TIMEOUT_MS
         try {
             RandomAccessFile(native.outputFile, "r").use { file ->
                 while (running.isAlive || native.outputFile.length() > offset) {
+                    // An abandoned flow would otherwise keep agy alive in the chroot indefinitely.
+                    if (android.os.SystemClock.elapsedRealtime() > deadline) {
+                        error("Sign-in timed out. Start sign-in again.")
+                    }
                     val available = native.outputFile.length() - offset
                     if (available <= 0) {
                         delay(80)
@@ -8957,6 +9333,12 @@ class AntigravityAuthController(
                     }
                     offset += safeLength
                     output.append(bytes.decodeToString(0, safeLength))
+                    if (output.length > MAX_AUTH_OUTPUT_CHARS) {
+                        // The TUI repaints constantly; only the recent tail is ever inspected (and re-sanitized per chunk).
+                        val drop = output.length - KEEP_AUTH_OUTPUT_CHARS
+                        output.delete(0, drop)
+                        lastHandshakeReplyLength = (lastHandshakeReplyLength - drop).coerceAtLeast(0)
+                    }
                     val clean = sanitizeTerminalOutput(output.toString()).takeLast(40_000)
                     // Antigravity's renderer asks a real terminal for DEC mode and
                     // Kitty keyboard-protocol status before it paints its UI.
@@ -9055,9 +9437,24 @@ class AntigravityAuthController(
                     }
                 }
             }
-            if (!codeSubmitted && mutableState.value.status == AntigravityAuthStatus.STARTING) {
-                val exit = running.waitFor()
-                error("Antigravity sign-in exited early (code $exit).")
+            when (mutableState.value.status) {
+                AntigravityAuthStatus.STARTING -> if (!codeSubmitted) {
+                    val exit = running.waitFor()
+                    error("Antigravity sign-in exited early (code $exit).")
+                }
+                AntigravityAuthStatus.AWAITING_CODE ->
+                    error("Sign-in session ended before a code was submitted. Start sign-in again.")
+                // agy can finish and exit without ever painting the screen we match on.
+                AntigravityAuthStatus.COMPLETING -> if (hasOfficialCredential()) {
+                    onSignedInChanged(true, null)
+                    mutableState.value = AntigravityAuthState(
+                        AntigravityAuthStatus.SIGNED_IN,
+                        message = "Google account connected",
+                    )
+                } else {
+                    error("Antigravity sign-in ended before completing. Please try again.")
+                }
+                else -> Unit
             }
         } catch (error: Throwable) {
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
@@ -9085,10 +9482,19 @@ class AntigravityAuthController(
     fun submitCode(code: String) {
         val value = code.trim()
         require(value.isNotBlank()) { "Paste the verification code from Google first." }
-        val running = process ?: error("Sign-in session is not active. Start sign-in again.")
-        check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
-        running.outputStream.write((value + "\r\n").toByteArray())
-        running.outputStream.flush()
+        try {
+            val running = process ?: error("Sign-in session is not active. Start sign-in again.")
+            check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
+            running.outputStream.write((value + "\r\n").toByteArray())
+            running.outputStream.flush()
+        } catch (error: Throwable) {
+            // Callers swallow this exception, so surface it through state or the user sees nothing happen.
+            mutableState.value = AntigravityAuthState(
+                AntigravityAuthStatus.ERROR,
+                message = error.message?.take(240) ?: "Could not submit the verification code.",
+            )
+            throw error
+        }
         codeSubmitted = true
         mutableState.value = mutableState.value.copy(
             status = AntigravityAuthStatus.COMPLETING,
@@ -9153,7 +9559,8 @@ class AntigravityAuthController(
                 }
             }.apply { isDaemon = true }.start()
         }
-        mutableState.value = AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
+        // Cancelling a re-login must not make an already connected account look signed out.
+        mutableState.value = stateBeforeLogin ?: AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
     }
 
     fun invalidateSession(message: String) {
@@ -9161,6 +9568,10 @@ class AntigravityAuthController(
         mutableState.value = AntigravityAuthState(AntigravityAuthStatus.ERROR, message = message)
     }
 }
+
+private const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
+private const val MAX_AUTH_OUTPUT_CHARS = 200_000
+private const val KEEP_AUTH_OUTPUT_CHARS = 100_000
 
 internal fun extractGoogleOAuthUrl(output: String): String? {
     val compact = output.replace(Regex("[\\r\\n\\t ]+"), "")
@@ -9209,13 +9620,14 @@ private fun sanitizeTerminalOutput(text: String): String = text
     .filter { it == '\n' || it == '\r' || it == '\t' || it.code >= 0x20 }
 ```
 
-## 5. `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (973 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/runtime/DshRuntimeBridge.kt` (985 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
 
 import android.content.Context
 import android.util.Log
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatMessage
@@ -9287,6 +9699,7 @@ class DshRuntimeBridge(
         val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         if (secret.isBlank()) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
+            activeSessionId = null
             return@withContext sessionId
         }
         if (provider.kind == ProviderKind.CLAUDE) {
@@ -9296,13 +9709,15 @@ class DshRuntimeBridge(
                     "Claude subscription login is not supported by DeepSeek Harness. Pick a key-based provider in Settings.",
                 ),
             )
+            activeSessionId = null
             return@withContext sessionId
         }
 
         var openRouterGateway: OpenRouterRoutingGateway? = null
         var spawnedOutputFile: File? = null
+        var stopHandler: (() -> Unit)? = null
         runCatching {
-            RuntimeTaskController.stopAction = {
+            stopHandler = {
                 userStopRequested = true
                 val running = activeProcess
                 if (running != null) {
@@ -9315,6 +9730,7 @@ class DshRuntimeBridge(
                     }, "forge-dsh-stop").apply { isDaemon = true }.start()
                 }
             }
+            RuntimeTaskController.stopAction = stopHandler
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             check(installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
@@ -9389,6 +9805,8 @@ class DshRuntimeBridge(
             }
         }.onFailure { error ->
             Log.e("DshBridge", "Session failed: ${error::class.simpleName}")
+            // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
+            activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             val message = friendlyError(error)
             emitFailureOnce(sessionId, message)
             if (userStopRequested) {
@@ -9405,7 +9823,7 @@ class DshRuntimeBridge(
         runCatching { spawnedOutputFile?.delete() }
         activeProcess = null
         activeSessionId = null
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.release(stopHandler)
         sessionId
     }
 
@@ -9845,6 +10263,11 @@ internal data class DshRoute(
 
 internal data class DshCustomRoute(val api: String, val baseUrl: String)
 
+private val DSH_WIRE_APIS = setOf("anthropic-messages", "openai-completions", "openai-responses")
+
+/** dshApi is user-editable and written unquoted into settings.yaml, so only known wire protocols pass through. */
+internal fun safeDshApi(value: String): String = value.trim().takeIf { it in DSH_WIRE_APIS } ?: "anthropic-messages"
+
 internal object DshRouteMapper {
     fun forProfile(profile: ProviderProfile): DshRoute {
         val model = profile.model.ifBlank { profile.kind.defaultModel }
@@ -9873,7 +10296,7 @@ internal object DshRouteMapper {
                 name = "mh-kimi",
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
-                custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
+                custom = DshCustomRoute(safeDshApi(profile.dshApi), profile.resolvedBaseUrl),
             )
             ProviderKind.OPENCODE_ZEN -> DshRoute(
                 name = "opencode-zen",
@@ -9891,7 +10314,7 @@ internal object DshRouteMapper {
                 name = "mh-custom",
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
-                custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
+                custom = DshCustomRoute(safeDshApi(profile.dshApi), profile.resolvedBaseUrl),
             )
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
         }
@@ -9975,7 +10398,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             val id = frame.optInt("id", -1)
             frame.optJSONObject("error")?.let { error ->
                 return DshSdkProtocolEvent.Failed(
-                    error.optString("message").meaningfulDshText("DeepSeek Harness SDK request $id failed"),
+                    error.stringOrEmpty("message").meaningfulDshText("DeepSeek Harness SDK request $id failed"),
                 )
             }
             return when (id) {
@@ -9987,10 +10410,10 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         }
 
         val params = frame.optJSONObject("params") ?: return DshSdkProtocolEvent.Ignored
-        return when (frame.optString("method")) {
+        return when (frame.stringOrEmpty("method")) {
             "session.status" -> {
-                if (params.optString("sessionId") != expectedSessionId) DshSdkProtocolEvent.Ignored
-                else DshSdkProtocolEvent.Status(params.optString("status") == "running")
+                if (params.stringOrEmpty("sessionId") != expectedSessionId) DshSdkProtocolEvent.Ignored
+                else DshSdkProtocolEvent.Status(params.stringOrEmpty("status") == "running")
             }
             "session.event" -> parseSessionEvent(params)
             else -> DshSdkProtocolEvent.Ignored
@@ -9998,10 +10421,10 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
     }
 
     private fun parseSessionEvent(params: JSONObject): DshSdkProtocolEvent {
-        if (params.optString("sessionId") != expectedSessionId) return DshSdkProtocolEvent.Ignored
+        if (params.stringOrEmpty("sessionId") != expectedSessionId) return DshSdkProtocolEvent.Ignored
         val event = params.optJSONObject("event") ?: return DshSdkProtocolEvent.Ignored
         val data = event.optJSONObject("data") ?: return DshSdkProtocolEvent.Ignored
-        return when (event.optString("type")) {
+        return when (event.stringOrEmpty("type")) {
             "assistant/chunk" -> parseAssistantChunk(data)
             "assistant/message" -> {
                 val content = data.optJSONObject("message")?.optJSONArray("content")
@@ -10016,9 +10439,9 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
                 }
             }
             "tool/call" -> {
-                val callId = data.optString("callId")
-                val rawName = data.optString("name").ifBlank { "Tool" }
-                val arguments = data.optString("arguments")
+                val callId = data.stringOrEmpty("callId")
+                val rawName = data.stringOrEmpty("name").ifBlank { "Tool" }
+                val arguments = data.stringOrEmpty("arguments")
                 val displayName = displayToolName(rawName, arguments)
                 toolNames[callId] = displayName
                 DshSdkProtocolEvent.ToolStarted(callId, displayName, toolDetail(arguments))
@@ -10026,11 +10449,11 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             "tool/result" -> {
                 val message = data.optJSONObject("message")
                 val resultBlock = message?.optJSONArray("content")?.optJSONObject(0)
-                val callId = resultBlock?.optString("toolCallId").orEmpty()
+                val callId = resultBlock?.stringOrEmpty("toolCallId").orEmpty()
                 val name = toolNames.remove(callId) ?: "Tool"
                 val error = data.optJSONObject("error")
                 val text = contentText(resultBlock?.optJSONArray("content"))
-                val summary = error?.optString("message").orEmpty()
+                val summary = error?.stringOrEmpty("message").orEmpty()
                     .meaningfulDshText(text)
                     .let { compactDshText(it, MAX_DSH_TOOL_RAW_TEXT, 180) }
                     .ifBlank { "$name completed" }
@@ -10038,9 +10461,9 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             }
             "turn/end" -> {
                 val reason = data.optJSONObject("reason")
-                when (reason?.optString("kind")) {
+                when (reason?.stringOrEmpty("kind")) {
                     "error" -> DshSdkProtocolEvent.Failed(
-                        reason.optJSONObject("error")?.optString("message").orEmpty()
+                        reason.optJSONObject("error")?.stringOrEmpty("message").orEmpty()
                             .meaningfulDshText("DeepSeek Harness turn failed"),
                     )
                     "blocked" -> DshSdkProtocolEvent.Failed("DeepSeek Harness was blocked from completing the task")
@@ -10058,9 +10481,9 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val chunk = data.optJSONObject("chunk") ?: return DshSdkProtocolEvent.Ignored
         val index = chunk.optInt("index", 0)
         val blockId = data.optInt("turn", 0) * 1_000_000L + data.optInt("step", 0) * 1_000L + index
-        return when (chunk.optString("type")) {
+        return when (chunk.stringOrEmpty("type")) {
             "text-delta" -> {
-                val delta = chunk.optString("text")
+                val delta = chunk.stringOrEmpty("text")
                 if (delta.isEmpty()) return DshSdkProtocolEvent.Ignored
                 textByBlock.getOrPut(blockId) { StringBuilder() }
                     .appendBounded(delta, MAX_DSH_TEXT_BLOCK_BUFFER)
@@ -10070,21 +10493,21 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             "reasoning-delta" -> {
                 val buffer = reasoningByBlock.getOrPut(blockId) { StringBuilder() }
                 val starts = buffer.isEmpty()
-                buffer.appendBounded(chunk.optString("text"), MAX_DSH_REASONING_BUFFER)
+                buffer.appendBounded(chunk.stringOrEmpty("text"), MAX_DSH_REASONING_BUFFER)
                 DshSdkProtocolEvent.Reasoning(blockId, buffer.toString(), starts, isFinal = false)
             }
             "block-end" -> {
                 val block = chunk.optJSONObject("block")
-                if (block?.optString("type") == "text") {
+                if (block?.stringOrEmpty("type") == "text") {
                     val streamed = textByBlock.remove(blockId)?.toString().orEmpty()
-                    val complete = block.optString("text")
+                    val complete = block.stringOrEmpty("text")
                     val missingSuffix = if (streamed.isEmpty()) complete.takeLast(MAX_DSH_TEXT_BLOCK_BUFFER) else ""
                     if (missingSuffix.isBlank()) return DshSdkProtocolEvent.Ignored
                     streamedTextSinceMessage = true
                     return DshSdkProtocolEvent.AssistantText(missingSuffix)
                 }
-                if (block?.optString("type") != "reasoning") return DshSdkProtocolEvent.Ignored
-                val text = block.optString("text")
+                if (block?.stringOrEmpty("type") != "reasoning") return DshSdkProtocolEvent.Ignored
+                val text = block.stringOrEmpty("text")
                     .ifBlank { reasoningByBlock[blockId]?.toString().orEmpty() }
                     .takeLast(MAX_DSH_REASONING_BUFFER)
                 val starts = blockId !in reasoningByBlock
@@ -10097,7 +10520,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
     }
 
     private fun displayToolName(rawName: String, arguments: String): String {
-        val operation = runCatching { JSONObject(arguments).optString("command") }.getOrDefault("")
+        val operation = runCatching { JSONObject(arguments).stringOrEmpty("command") }.getOrDefault("")
         return when (rawName.lowercase()) {
             "bash", "shell" -> "Bash"
             "read", "view" -> "Read"
@@ -10117,7 +10540,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val parsed = runCatching { JSONObject(arguments) }.getOrNull()
         val detail = parsed?.let { json ->
             listOf("path", "file_path", "command", "pattern", "query")
-                .firstNotNullOfOrNull { key -> json.optString(key).takeIf(String::isNotBlank) }
+                .firstNotNullOfOrNull { key -> json.stringOrEmpty(key).takeIf(String::isNotBlank) }
         }.orEmpty()
         return compactDshText(detail.ifBlank { arguments }, MAX_DSH_TOOL_RAW_TEXT, 240)
             .ifBlank { "Working in the project" }
@@ -10128,8 +10551,8 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val result = StringBuilder()
         for (index in 0 until content.length()) {
             val block = content.optJSONObject(index) ?: continue
-            val text = when (block.optString("type")) {
-                "text" -> block.optString("text")
+            val text = when (block.stringOrEmpty("type")) {
+                "text" -> block.stringOrEmpty("text")
                 "tool-result" -> contentText(block.optJSONArray("content"))
                 else -> ""
             }
@@ -10209,20 +10632,20 @@ Blok 4 menyediakan fitur-fitur integrasi sistem Android dan jaringan yang membua
    - `AppUpdater`: Memeriksa `update-manifest.json`, mengunduh APK pembaruan NextCraft Forge, dan mewajibkan verifikasi integritas SHA-256 sebelum menginstal update.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (319 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (343 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstaller.kt` (273 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/AndroidAppInstallReceiver.kt` (51 baris)
 - `app/src/main/java/com/nextcraft/forge/runtime/RuntimeExecutionService.kt` (242 baris)
-- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
-- `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (407 baris)
+- `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (442 baris)
+- `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (408 baris)
 - `app/src/main/java/com/nextcraft/forge/network/LocalNetwork.kt` (114 baris)
-- `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
-- `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (218 baris)
+- `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (230 baris)
+- `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (219 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (308 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/runtime/AndroidProjectTemplateGenerator.kt` (319 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10364,7 +10787,7 @@ object AndroidProjectTemplateGenerator {
             root,
             "app/src/main/res/values/strings.xml",
             """
-            <resources><string name="app_name">${xmlEscape(appName)}</string></resources>
+            <resources><string name="app_name" formatted="false">${androidStringResource(appName)}</string></resources>
             """,
         )
     }
@@ -10526,16 +10949,27 @@ object AndroidProjectTemplateGenerator {
     private fun kotlinString(value: String): String =
         "\"${value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")}\""
 
-    private fun xmlEscape(value: String): String =
-        value.replace("&", "&amp;")
+    /**
+     * Escapes [value] for an Android string resource. XML escaping alone is not enough: aapt2 reads the decoded
+     * text, so an apostrophe (even as `&apos;`) or a double quote must be backslash-escaped, and a leading `@` or `?`
+     * would be parsed as a resource reference.
+     */
+    private fun androidStringResource(value: String): String {
+        val escaped = value.trim()
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\"", "\\\"")
+            .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&apos;")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+        return if (escaped.startsWith("@") || escaped.startsWith("?")) "\\$escaped" else escaped
+    }
 }
 ```
 
-## 2. `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (338 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/runtime/AndroidBuildSupport.kt` (343 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -10545,6 +10979,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -10707,7 +11142,7 @@ internal fun findDebugApk(projectRoot: File): File? {
             val json = JSONObject(metadata.readText())
             val elements = json.optJSONArray("elements") ?: return@runCatching null
             (0 until elements.length()).asSequence()
-                .mapNotNull { elements.optJSONObject(it)?.optString("outputFile") }
+                .mapNotNull { elements.optJSONObject(it)?.stringOrEmpty("outputFile") }
                 .filter { it.isNotBlank() && !it.contains('\u0000') }
                 .map { File(metadata.parentFile, it) }
                 .firstOrNull { candidate ->
@@ -10860,7 +11295,11 @@ internal fun startPackageLogcatProcess(
     packageName: String,
     sinceMillis: Long? = null,
 ): Process {
-    val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
+    val uid = try {
+        context.packageManager.getApplicationInfo(packageName, 0).uid
+    } catch (_: PackageManager.NameNotFoundException) {
+        throw IllegalStateException("App '$packageName' is not installed on this device yet. Build & Install the APK first.")
+    }
     require(uid > 0) { "Invalid application UID for $packageName" }
     val since = sinceMillis?.takeIf { it > 0L }?.let {
         SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date(it))
@@ -11459,7 +11898,7 @@ class RuntimeExecutionService : Service() {
 }
 ```
 
-## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (425 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/runtime/RuntimeSetupService.kt` (442 baris)
 
 ```kotlin
 package com.nextcraft.forge.runtime
@@ -11478,10 +11917,12 @@ import androidx.core.app.NotificationCompat
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.net.UnknownHostException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -11515,22 +11956,29 @@ object RuntimeSetupController {
     fun restore(context: Context) {
         val file = stateFile(context)
         if (!file.isFile) return
+        // A live run in this process is newer than the file; never overwrite it.
+        if (mutableSnapshot.value.status == RuntimeSetupStatus.RUNNING) return
         runCatching {
             val json = JSONObject(file.readText())
             val logsJson = json.optJSONArray("logs") ?: JSONArray()
             val logs = (0 until logsJson.length()).map { logsJson.optString(it) }
             val rawProgress = json.optDouble("progress", 0.0).toFloat()
             val safeProgress = if (rawProgress.isFinite()) rawProgress.coerceIn(0f, 1f) else 0f
+            val persisted = runCatching { RuntimeSetupStatus.valueOf(json.optString("status")) }
+                .getOrDefault(RuntimeSetupStatus.IDLE)
+            // RUNNING read from disk in a fresh process means the app was killed mid-setup: there is
+            // no service behind it, so show it as paused instead of spinning forever.
+            val interrupted = persisted == RuntimeSetupStatus.RUNNING
             mutableSnapshot.value = RuntimeSetupSnapshot(
-                status = runCatching { RuntimeSetupStatus.valueOf(json.optString("status")) }
-                    .getOrDefault(RuntimeSetupStatus.IDLE),
-                message = json.optString("message", DEFAULT_PREPARING_MESSAGE).ifBlank { DEFAULT_PREPARING_MESSAGE },
+                status = if (interrupted) RuntimeSetupStatus.CANCELLED else persisted,
+                message = if (interrupted) "Runtime setup was interrupted" else
+                    json.stringOrEmpty("message", DEFAULT_PREPARING_MESSAGE).ifBlank { DEFAULT_PREPARING_MESSAGE },
                 progress = safeProgress,
                 downloadedBytes = json.optLongOrNull("downloadedBytes"),
                 totalBytes = json.optLongOrNull("totalBytes"),
                 indeterminate = json.optBoolean("indeterminate"),
                 logs = logs.takeLast(MAX_LOG_LINES),
-                errorMessage = json.optString("errorMessage").takeIf(String::isNotBlank),
+                errorMessage = json.stringOrEmpty("errorMessage").takeIf(String::isNotBlank),
                 offline = json.optBoolean("offline"),
             )
         }
@@ -11735,14 +12183,17 @@ class RuntimeSetupService : Service() {
         }
         startForeground(NOTIFICATION_ID, setupNotification(RuntimeSetupController.snapshot.value))
         acquireWakeLock()
-        if (installJob?.isActive != true) {
+        val previousJob = installJob
+        // A cancelled job can still be winding down; start the new one after it instead of dropping the request.
+        if (previousJob?.isActive != true || previousJob.isCancelled) {
             val stacks = intent?.getStringExtra(EXTRA_STACKS).orEmpty().split(',')
                 .mapNotNull { name -> runCatching { DevStack.valueOf(name.trim()) }.getOrNull() }
                 .toSet()
             val agent = AgentKind.fromStored(intent?.getStringExtra(EXTRA_AGENT)?.trim())
             RuntimeSetupController.begin(this)
-            installJob = scope.launch {
+            val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
+                    previousJob?.join()
                     RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
                         RuntimeSetupController.update(this@RuntimeSetupService, progress)
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
@@ -11756,11 +12207,16 @@ class RuntimeSetupService : Service() {
                     RuntimeSetupController.fail(this@RuntimeSetupService, error)
                     showFinishedNotification(success = false)
                 } finally {
-                    releaseWakeLock()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    // Only the newest job may tear the service down, or a resumed setup would be killed by the old one.
+                    if (installJob === coroutineContext[Job]) {
+                        releaseWakeLock()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
                 }
             }
+            installJob = job
+            job.start()
         }
         return START_REDELIVER_INTENT
     }
@@ -11889,13 +12345,14 @@ class RuntimeSetupService : Service() {
 }
 ```
 
-## 7. `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (407 baris)
+## 7. `app/src/main/java/com/nextcraft/forge/network/ProviderApiClient.kt` (408 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
 
 import android.content.Context
 import com.nextcraft.forge.model.ProviderProtocol
+import com.nextcraft.forge.model.stringOrEmpty
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -12239,9 +12696,9 @@ class ProviderApiClient(@Suppress("UNUSED_PARAMETER") private val context: Conte
         val extracted = runCatching {
             val root = JSONObject(body)
             when (val error = root.opt("error")) {
-                is JSONObject -> error.optString("message").ifBlank { error.optString("detail") }
+                is JSONObject -> error.stringOrEmpty("message").ifBlank { error.stringOrEmpty("detail") }
                 is String -> error
-                else -> root.optString("message").ifBlank { root.optString("detail") }
+                else -> root.stringOrEmpty("message").ifBlank { root.stringOrEmpty("detail") }
             }
         }.getOrNull().orEmpty()
         if (extracted.isBlank()) return null
@@ -12276,17 +12733,17 @@ object ModelResponseParser {
                 when (val item = array.opt(index)) {
                     is String -> if (item.isNotBlank()) add(DiscoveredModel(item))
                     is JSONObject -> {
-                        val id = item.optString("id")
-                            .ifBlank { item.optString("name") }
-                            .ifBlank { item.optString("model") }
+                        val id = item.stringOrEmpty("id")
+                            .ifBlank { item.stringOrEmpty("name") }
+                            .ifBlank { item.stringOrEmpty("model") }
                         if (id.isNotBlank()) {
-                            val label = item.optString("display_name")
-                                .ifBlank { item.optString("displayName") }
+                            val label = item.stringOrEmpty("display_name")
+                                .ifBlank { item.stringOrEmpty("displayName") }
                                 .ifBlank { id }
                             val pricing = item.optJSONObject("pricing")
                             val free = id.endsWith(":free", ignoreCase = true) || pricing?.let {
                                 listOf("prompt", "completion", "request").all { field ->
-                                    it.optString(field, "0").toDoubleOrNull() == 0.0
+                                    it.stringOrEmpty(field, "0").toDoubleOrNull() == 0.0
                                 }
                             } == true
                             add(DiscoveredModel(id, label, free))
@@ -12420,12 +12877,13 @@ object LocalNetwork {
 }
 ```
 
-## 9. `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (229 baris)
+## 9. `app/src/main/java/com/nextcraft/forge/network/GitHubClient.kt` (230 baris)
 
 ```kotlin
 package com.nextcraft.forge.network
 
 import android.content.Context
+import com.nextcraft.forge.model.stringOrEmpty
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -12475,7 +12933,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return GitHubDeviceCode(
             deviceCode = json.getString("device_code"),
             userCode = json.getString("user_code"),
-            verificationUri = json.optString("verification_uri").ifBlank { "https://github.com/login/device" },
+            verificationUri = json.stringOrEmpty("verification_uri").ifBlank { "https://github.com/login/device" },
             expiresInSeconds = json.optLong("expires_in", 900L),
             intervalSeconds = json.optLong("interval", 5L).coerceAtLeast(5L),
         )
@@ -12491,14 +12949,14 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
                 "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
             ),
         )
-        json.optString("access_token").takeIf(String::isNotBlank)?.let { return GitHubTokenPoll.Success(it) }
-        return when (val error = json.optString("error")) {
+        json.stringOrEmpty("access_token").takeIf(String::isNotBlank)?.let { return GitHubTokenPoll.Success(it) }
+        return when (val error = json.stringOrEmpty("error")) {
             "authorization_pending" -> GitHubTokenPoll.Pending()
             "slow_down" -> GitHubTokenPoll.Pending(slowDown = true)
             "access_denied" -> GitHubTokenPoll.Failure("GitHub authorization was cancelled")
             "expired_token" -> GitHubTokenPoll.Failure("The GitHub sign-in code expired. Try again.")
             else -> GitHubTokenPoll.Failure(
-                json.optString("error_description").ifBlank {
+                json.stringOrEmpty("error_description").ifBlank {
                     error.ifBlank { "GitHub sign-in failed" }
                 },
             )
@@ -12508,7 +12966,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
     fun account(token: String): GitHubAccount {
         val json = getJson("https://api.github.com/user", token) as? JSONObject
             ?: error("Unexpected GitHub user profile response")
-        return GitHubAccount(json.getString("login"), json.optString("avatar_url"))
+        return GitHubAccount(json.getString("login"), json.stringOrEmpty("avatar_url"))
     }
 
     fun createRepository(
@@ -12531,9 +12989,9 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             fullName = item.getString("full_name"),
             cloneUrl = item.getString("clone_url"),
             private = item.optBoolean("private", private),
-            defaultBranch = item.optString("default_branch", "main").ifBlank { "main" },
-            description = item.optString("description"),
-            updatedAt = item.optString("updated_at"),
+            defaultBranch = item.stringOrEmpty("default_branch", "main").ifBlank { "main" },
+            description = item.stringOrEmpty("description"),
+            updatedAt = item.stringOrEmpty("updated_at"),
         )
     }
 
@@ -12547,16 +13005,16 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             ) as? JSONArray ?: error("Unexpected GitHub repository list response")
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
-                val fullName = item.optString("full_name")
-                val cloneUrl = item.optString("clone_url")
+                val fullName = item.stringOrEmpty("full_name")
+                val cloneUrl = item.stringOrEmpty("clone_url")
                 if (fullName.isBlank() || cloneUrl.isBlank()) continue
                 val repo = GitHubRepository(
                     fullName = fullName,
                     cloneUrl = cloneUrl,
                     private = item.optBoolean("private"),
-                    defaultBranch = item.optString("default_branch", "main").ifBlank { "main" },
-                    description = item.optString("description"),
-                    updatedAt = item.optString("updated_at"),
+                    defaultBranch = item.stringOrEmpty("default_branch", "main").ifBlank { "main" },
+                    description = item.stringOrEmpty("description"),
+                    updatedAt = item.stringOrEmpty("updated_at"),
                 )
                 result[repo.fullName] = repo
             }
@@ -12639,7 +13097,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             }
         }.orEmpty()
         if (status !in 200..299) {
-            val message = runCatching { JSONObject(text).optString("message") }.getOrNull()
+            val message = runCatching { JSONObject(text).stringOrEmpty("message") }.getOrNull()
             error(message?.takeIf(String::isNotBlank) ?: "GitHub returned HTTP $status")
         }
         return if (text.trimStart().startsWith("[")) JSONArray(text) else JSONObject(text)
@@ -12654,7 +13112,7 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
 }
 ```
 
-## 10. `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (218 baris)
+## 10. `app/src/main/java/com/nextcraft/forge/update/AppUpdater.kt` (219 baris)
 
 ```kotlin
 package com.nextcraft.forge.update
@@ -12662,6 +13120,7 @@ package com.nextcraft.forge.update
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -12713,15 +13172,15 @@ class AppUpdater(
             val artifact = root.optJSONObject("artifacts")?.optJSONObject(variant)
                 ?: root.optJSONObject(variant)
                 ?: root
-            val url = artifact.optString("url").ifBlank { artifact.optString("apkUrl") }.trim()
+            val url = artifact.stringOrEmpty("url").ifBlank { artifact.stringOrEmpty("apkUrl") }.trim()
             if (!url.startsWith("https://")) return null
             AppUpdateInfo(
                 versionCode = versionCode,
-                versionName = root.optString("versionName", versionCode.toString()),
+                versionName = root.stringOrEmpty("versionName", versionCode.toString()),
                 apkUrl = url,
-                sha256 = artifact.optString("sha256").trim().lowercase(),
+                sha256 = artifact.stringOrEmpty("sha256").trim().lowercase(),
                 sizeBytes = artifact.optLong("sizeBytes", -1L),
-                notes = root.optString("notes"),
+                notes = root.stringOrEmpty("notes"),
             )
         } finally {
             connection.disconnect()
@@ -12898,18 +13357,18 @@ Blok 5 menghubungkan seluruh mesin runtime inti pada **Blok 1–4** dengan lapis
    - `MarkdownText`: Merender respons agen yang berisi blok kode berformat ` ```bahasa `, tabel GFM, daftar berpoin/bernomor, kutipan, tautan yang dapat diklik, serta tombol **Salin Kode** (*Copy*) pada setiap blok kode.
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1899 baris)
+- `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (121 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2389 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AppLanguage.kt` (21 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (92 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (506 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/ModelLabels.kt` (74 baris)
 - `app/src/main/java/com/nextcraft/forge/ui/AndroidBuildText.kt` (62 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (478 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (112 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/MainActivity.kt` (121 baris)
 
 ```kotlin
 package com.nextcraft.forge
@@ -12961,7 +13420,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        applyPreComposeWindowTheme()
+        applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
@@ -12969,7 +13428,12 @@ class MainActivity : ComponentActivity() {
             val state by viewModel.state.collectAsState()
             // The locale is applied in attachBaseContext, so a changed language needs a new Activity.
             LaunchedEffect(state.languageCode) {
-                if (AppStrings.languageCode(this@MainActivity) != appliedLanguage) recreate()
+                if (state.languageCode != appliedLanguage || AppStrings.languageCode(this@MainActivity) != appliedLanguage) {
+                    recreate()
+                }
+            }
+            LaunchedEffect(state.themeMode) {
+                applyWindowTheme(state.themeMode)
             }
             NextCraftForgeTheme(themeMode = state.themeMode) {
                 val tokens = LocalForgeThemeTokens.current
@@ -12984,14 +13448,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun applyPreComposeWindowTheme() {
-        val savedTheme = AppPreferences(this).themeMode
+    @Suppress("DEPRECATION")
+    private fun applyWindowTheme(themeMode: String) {
         val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
-        val (_, tokens) = resolveThemeTokens(savedTheme, isNight)
+        val (_, tokens) = resolveThemeTokens(themeMode, isNight)
         window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
         window.statusBarColor = tokens.topBarContainerColor.toArgb()
-        window.navigationBarColor = tokens.bottomBarContainerColor.toArgb()
+        window.navigationBarColor = if (tokens.isGlass) {
+            android.graphics.Color.parseColor("#0B1324")
+        } else {
+            tokens.bottomBarContainerColor.toArgb()
+        }
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.isAppearanceLightStatusBars = !tokens.isDark
         controller.isAppearanceLightNavigationBars = !tokens.isDark
@@ -12999,7 +13467,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshRuntimeStatus()
+        viewModel.refreshRuntimeStatusOnResume()
     }
 
     override fun onTrimMemory(level: Int) {
@@ -13028,7 +13496,7 @@ class MainActivity : ComponentActivity() {
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (1899 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/MainViewModel.kt` (2389 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -13056,6 +13524,7 @@ import com.nextcraft.forge.model.ProviderProfile
 import com.nextcraft.forge.model.RuntimeEvent
 import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.model.WorkspaceEntry
+import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.projectSlug
 import com.nextcraft.forge.model.providerProtocolForAgent
 import com.nextcraft.forge.network.ConnectionValidation
@@ -13123,7 +13592,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ForgeTab(val title: String) {
+    PROJECTS("Projects"),
     AGENT("Agent"),
+    TOOLS("Tools"),
     FILES("Files"),
     TERMINAL("Terminal"),
     ANDROID("Android"),
@@ -13154,6 +13625,7 @@ data class ForgeUiState(
     val selectedFilePath: String? = null,
     val selectedFileContent: String = "",
     val selectedFileEditable: Boolean = true,
+    val selectedFileDirty: Boolean = false,
     val fileSavedBanner: String? = null,
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
@@ -13172,6 +13644,7 @@ data class ForgeUiState(
     val githubStatusMessage: String? = null,
     val languageCode: String = "system",
     val interactiveHighRiskApprovals: Boolean = true,
+    val autoApproveAllTools: Boolean = false,
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
@@ -13212,7 +13685,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val guestToken = runCatching {
                 JSONObject(credsFile.readText())
                     .optJSONObject("claudeAiOauth")
-                    ?.optString("accessToken")
+                    ?.stringOrEmpty("accessToken")
                     ?.trim()
                     ?.takeIf { it.isNotEmpty() }
             }.getOrNull()
@@ -13269,6 +13742,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
+    /** Bridge actually running the current session; approvals must go here, not to whatever agentKind is selected now. */
+    private var activeRuntimeBridge: RuntimeBridge? = null
     private val logLineIdCounter = AtomicLong(1L)
     /** Session whose events may touch the active chat; late events from older sessions are dropped. */
     private val activeRuntimeSessionId = AtomicReference<String?>(null)
@@ -13277,9 +13752,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         RuntimeSetupController.restore(application)
         viewModelScope.launch {
             RuntimeSetupController.snapshot.collect { snap ->
-                val justCompleted = snap.status == RuntimeSetupStatus.COMPLETE && !_state.value.runtimeInstalled
+                val completed = snap.status == RuntimeSetupStatus.COMPLETE
                 _state.update { it.copy(setupSnapshot = snap) }
-                if (justCompleted) {
+                if (completed) {
                     refreshRuntimeStatus()
                 }
             }
@@ -13338,6 +13813,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val loadedProfile = preferences.loadProvider(vault, savedAgent)
             val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
+            val initialBuildRecord = withContext(Dispatchers.IO) {
+                val ws = checkpoints.ensureWorkspace(firstProject.id)
+                val androidRoot = findAndroidProjectRoot(ws)
+                val existingApk = androidRoot?.let { findDebugApk(it) }
+                if (existingApk != null) {
+                    AndroidBuildRecord(
+                        phase = AndroidBuildPhase.SUCCEEDED,
+                        stage = AndroidBuildStage.COMPLETE,
+                        apkPath = existingApk.absolutePath,
+                        apkSizeBytes = existingApk.length(),
+                        message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                    )
+                } else {
+                    AndroidBuildRecord()
+                }
+            }
 
             _state.update {
                 it.copy(
@@ -13353,11 +13844,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     chats = chats,
                     activeChatId = activeChatId,
                     messages = messages,
+                    androidBuild = if (it.androidBuild.phase == AndroidBuildPhase.BUILDING) it.androidBuild else initialBuildRecord,
                     providerProfile = profile,
                     savedApiKeys = keys,
                     githubLogin = preferences.githubLogin,
                     languageCode = AppStrings.languageCode(getApplication()),
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+                    autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -13409,8 +13902,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun configureAllProjectRoots(projects: List<Project>) {
         projects.forEach { project ->
             checkpoints.configureProjectRoot(project.id, project.rootPath)
+            claudeRuntime.configureProjectRoot(project.id, project.rootPath)
+            dshRuntime.configureProjectRoot(project.id, project.rootPath)
             antigravityRuntime.configureProjectRoot(project.id, project.rootPath)
         }
+    }
+
+    private var lastResumeRefreshAt = 0L
+
+    /** onResume fires on every return to the app; each refresh spawns `su`, so don't repeat it within a few seconds. */
+    fun refreshRuntimeStatusOnResume() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastResumeRefreshAt != 0L && now - lastResumeRefreshAt < RESUME_REFRESH_MIN_INTERVAL_MS) return
+        lastResumeRefreshAt = now
+        refreshRuntimeStatus()
     }
 
     fun refreshRuntimeStatus() {
@@ -13495,6 +14000,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectAgent(agent: AgentKind) {
+        // Switching bridges mid-run would desync providerProfile/hasSecret from the session that is
+        // still streaming, and would misroute any pending tool approval to the newly selected bridge.
+        if (_state.value.sessionRunning) return
         preferences.agentKind = agent.stableId
         val loadedProfile = preferences.loadProvider(vault, agent)
         val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
@@ -13511,8 +14019,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
-        // Switching mid-run would append streamed output to, and save over, another project's chat.
-        if (_state.value.sessionRunning && projectId != _state.value.activeProjectId) return
+        val switchingProject = projectId != _state.value.activeProjectId
+        // Switching mid-run would append streamed output to, and save over, another project's chat or race with a build/terminal process.
+        if (switchingProject) {
+            if (_state.value.sessionRunning) {
+                _state.update { it.copy(bannerMessage = "Stop the running agent session before switching projects.") }
+                return
+            }
+            if (_state.value.androidBuild.phase == AndroidBuildPhase.BUILDING) {
+                _state.update { it.copy(bannerMessage = "Wait for the Android APK build to finish or stop it before switching projects.") }
+                return
+            }
+            if (_state.value.terminalRunning) {
+                _state.update { it.copy(bannerMessage = "Wait for the active terminal command to finish before switching projects.") }
+                return
+            }
+            activeLogcatProcess?.destroyForcibly()
+            activeLogcatProcess = null
+            activeLogcatJob?.cancel()
+        }
         val chats = preferences.loadProjectChats(project.id)
         val chatId = chats.firstOrNull()?.id ?: "main"
         val messages = preferences.loadMessages(project.id, chatId)
@@ -13524,7 +14049,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 messages = messages,
                 selectedFilePath = null,
                 selectedFileContent = "",
+                selectedFileDirty = false,
+                fileSavedBanner = null,
+                androidLogcat = if (switchingProject) AndroidLogcatState() else it.androidLogcat,
             )
+        }
+        if (_state.value.androidBuild.phase != AndroidBuildPhase.BUILDING) {
+            viewModelScope.launch {
+                val buildRecord = withContext(Dispatchers.IO) {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val androidRoot = findAndroidProjectRoot(ws)
+                    val existingApk = androidRoot?.let { findDebugApk(it) }
+                    if (existingApk != null) {
+                        AndroidBuildRecord(
+                            phase = AndroidBuildPhase.SUCCEEDED,
+                            stage = AndroidBuildStage.COMPLETE,
+                            apkPath = existingApk.absolutePath,
+                            apkSizeBytes = existingApk.length(),
+                            message = "Existing APK: ${existingApk.name} (${existingApk.length() / 1024} KB)",
+                        )
+                    } else {
+                        AndroidBuildRecord()
+                    }
+                }
+                if (_state.value.activeProjectId == project.id && _state.value.androidBuild.phase != AndroidBuildPhase.BUILDING) {
+                    _state.update { it.copy(androidBuild = buildRecord) }
+                }
+            }
         }
         refreshWorkspaceFilesAndChanges(project.id)
     }
@@ -13535,6 +14086,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isAndroid: Boolean,
         androidTemplate: AndroidTemplate = AndroidTemplate.COMPOSE,
     ) {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before creating and switching to a new project.") }
+            return
+        }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
             val newProject = withContext(Dispatchers.IO) {
@@ -13570,18 +14125,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val updated = listOf(newProject) + _state.value.projects
             preferences.saveProjects(updated)
             configureAllProjectRoots(updated)
-            _state.update { it.copy(projects = updated) }
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = if (it.activeTab == ForgeTab.PROJECTS) ForgeTab.AGENT else it.activeTab,
+                )
+            }
             selectProject(newProject.id)
         }
     }
 
+    fun createQuickProject() {
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Finish or stop the active task before starting a new Quick Chat.") }
+            return
+        }
+        viewModelScope.launch {
+            val quickProject = withContext(Dispatchers.IO) {
+                val quickCount = _state.value.projects.count { it.kind == ProjectKind.QUICK_PROJECT } + 1
+                val cleanName = if (quickCount == 1) "Quick Chat" else "Quick Chat $quickCount"
+                val usedSlugs = _state.value.projects.map { it.slug }.toSet()
+                val baseSlug = projectSlug(cleanName)
+                var slug = baseSlug
+                var suffix = 2
+                while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                val project = Project(
+                    name = cleanName,
+                    description = "Lightweight scratchpad & instant agent session",
+                    language = "Multi-language",
+                    slug = slug,
+                    type = ProjectType.GENERAL,
+                    kind = ProjectKind.QUICK_PROJECT,
+                )
+                val wsDir = checkpoints.ensureWorkspace(project.id)
+                val readme = File(wsDir, "README.md")
+                if (!readme.exists()) {
+                    readme.writeText("# $cleanName\n\nQuick scratchpad workspace.\n")
+                }
+                project
+            }
+            val updated = listOf(quickProject) + _state.value.projects
+            preferences.saveProjects(updated)
+            configureAllProjectRoots(updated)
+            _state.update {
+                it.copy(
+                    projects = updated,
+                    activeTab = ForgeTab.AGENT,
+                )
+            }
+            selectProject(quickProject.id)
+        }
+    }
+
     fun deleteProject(projectId: String) {
-        // The workspace would be wiped under a running agent, and the active-project switch is blocked mid-run.
-        if (_state.value.sessionRunning) return
+        // The workspace would be wiped under a running agent, build, or terminal process.
+        if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
+            _state.update { it.copy(bannerMessage = "Cannot delete a project while an agent session, build, or terminal command is running.") }
+            return
+        }
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
         if (updated.size == currentProjects.size) return
+        val oldChats = runCatching { preferences.loadProjectChats(projectId) }.getOrDefault(emptyList())
+        oldChats.forEach { chat ->
+            AgentKind.entries.forEach { agent ->
+                preferences.saveAgentConversation(agent, projectId, chat.id, null)
+            }
+        }
         preferences.saveProjects(updated)
         preferences.deleteProjectChats(projectId)
         viewModelScope.launch(Dispatchers.IO) {
@@ -13635,6 +14246,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
         preferences.saveProjectChats(project.id, updatedChats)
         runCatching {
             File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
@@ -13654,11 +14268,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearActiveChat() {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        AgentKind.entries.forEach { agent ->
+            preferences.saveAgentConversation(agent, project.id, chatId, null)
+        }
+        preferences.saveMessages(project.id, chatId, emptyList())
+        _state.update {
+            it.copy(
+                messages = emptyList(),
+                activeStatusLine = null,
+            )
+        }
+    }
+
     fun sendPrompt(promptText: String) {
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() || _state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        val now = System.currentTimeMillis()
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
@@ -13669,8 +14300,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updatedMessages = historyBefore + userMsg + assistantPlaceholder
         preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
 
+        val autoTitle = cleanPrompt.lineSequence().firstOrNull()?.trim().orEmpty().let { firstLine ->
+            if (firstLine.length > 34) firstLine.take(34).trimEnd() + "…" else firstLine
+        }
+        val updatedChats = _state.value.chats.map { chat ->
+            if (chat.id == chatId) {
+                val shouldRetitle = historyBefore.isEmpty() &&
+                    (chat.title == "Main chat" || chat.title.matches(Regex("""^Chat \d+$"""))) &&
+                    autoTitle.isNotEmpty()
+                chat.copy(
+                    title = if (shouldRetitle) autoTitle else chat.title,
+                    updatedAtMillis = now,
+                )
+            } else {
+                chat
+            }
+        }
+        val updatedProjects = _state.value.projects.map { proj ->
+            if (proj.id == project.id) proj.copy(updatedAtMillis = now) else proj
+        }
+        preferences.saveProjectChats(project.id, updatedChats)
+        preferences.saveProjects(updatedProjects)
+
         _state.update {
             it.copy(
+                projects = updatedProjects,
+                chats = updatedChats,
                 messages = updatedMessages,
                 sessionRunning = true,
                 activeStatusLine = "Starting ${_state.value.agentKind.title}…",
@@ -13683,6 +14338,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AgentKind.DEEPSEEK_HARNESS -> dshRuntime
             AgentKind.ANTIGRAVITY -> antigravityRuntime
         }
+        activeRuntimeBridge = bridge
 
         activeAgentJob = viewModelScope.launch {
             try {
@@ -13704,27 +14360,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopActiveTask() {
+        val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
+        val pendingApproval = _state.value.pendingToolRequest
+        val bridge = activeRuntimeBridge
         RuntimeTaskController.requestStop()
         val agentJob = activeAgentJob
         agentJob?.cancel()
         activeBuildProcess?.destroyForcibly()
         activeBuildJob?.cancel()
-        _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
-        // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
-        // otherwise a new prompt could race with it over shared bridge state.
-        viewModelScope.launch {
-            agentJob?.join()
-            _state.update {
-                it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+        if (wasSessionRunning) {
+            _state.update { it.copy(activeStatusLine = "Stopping…", pendingToolRequest = null) }
+            // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
+            // otherwise a new prompt could race with it over shared bridge state.
+            viewModelScope.launch {
+                if (pendingApproval != null) {
+                    runCatching { (bridge ?: claudeRuntime).respondToApproval(pendingApproval, false) }
+                }
+                agentJob?.join()
+                activeRuntimeBridge = null
+                _state.update {
+                    it.copy(sessionRunning = false, activeStatusLine = "Stopped by user", pendingToolRequest = null)
+                }
             }
         }
     }
 
     fun respondToToolRequest(approved: Boolean) {
         val req = _state.value.pendingToolRequest ?: return
+        val bridge = activeRuntimeBridge ?: claudeRuntime
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            claudeRuntime.respondToApproval(req, approved)
+            bridge.respondToApproval(req, approved)
         }
     }
 
@@ -13823,12 +14489,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishAgentTurn(projectId: String) {
+        // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
+        if (!_state.value.sessionRunning) return
+        activeRuntimeBridge = null
         val chatId = _state.value.activeChatId
+        val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->
             if (msg.id == "streaming-assistant") {
+                val elapsed = (now - msg.createdAt.toEpochMilli()).coerceAtLeast(0L)
                 msg.copy(
                     id = UUID.randomUUID().toString(),
                     text = msg.text.ifBlank { "Task finished." },
+                    workedMillis = elapsed,
                 )
             } else {
                 msg
@@ -13881,6 +14553,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         .toList()
+                        .sortedWith { a, b ->
+                            val aParts = a.path.split('/')
+                            val bParts = b.path.split('/')
+                            val minLen = minOf(aParts.size, bParts.size)
+                            var cmp = 0
+                            for (i in 0 until minLen) {
+                                if (aParts[i] != bParts[i]) {
+                                    val aDir = (i < aParts.lastIndex) || a.isDirectory
+                                    val bDir = (i < bParts.lastIndex) || b.isDirectory
+                                    cmp = if (aDir != bDir) {
+                                        if (aDir) -1 else 1
+                                    } else {
+                                        val ci = aParts[i].compareTo(bParts[i], ignoreCase = true)
+                                        if (ci != 0) ci else aParts[i].compareTo(bParts[i])
+                                    }
+                                    break
+                                }
+                            }
+                            if (cmp != 0) cmp else aParts.size.compareTo(bParts.size)
+                        }
                 }
                 val changedPaths = checkpoints.readChangedPaths(projectId)
                 val changeDetails = if (changedPaths.isNotEmpty()) {
@@ -13899,8 +14591,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var openFileRequest = 0
+
     fun openWorkspaceFile(relativePath: String) {
         val project = _state.value.activeProject ?: return
+        val requestId = ++openFileRequest
         viewModelScope.launch {
             // Saving a truncated, binary or unreadable file back as text would destroy it, so those open read-only.
             val (content, editable) = withContext(Dispatchers.IO) {
@@ -13921,11 +14616,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.getOrDefault("[Read-only: file could not be read]" to false)
             }
+            // A slower earlier read must not overwrite the file the user opened afterwards.
+            if (requestId != openFileRequest) return@launch
             _state.update {
                 it.copy(
                     selectedFilePath = relativePath,
                     selectedFileContent = content,
                     selectedFileEditable = editable,
+                    selectedFileDirty = false,
                     fileSavedBanner = null,
                 )
             }
@@ -13933,7 +14631,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateSelectedFileContent(newContent: String) {
-        _state.update { it.copy(selectedFileContent = newContent, fileSavedBanner = null) }
+        _state.update {
+            it.copy(
+                selectedFileContent = newContent,
+                selectedFileDirty = true,
+                fileSavedBanner = null,
+            )
+        }
     }
 
     fun saveSelectedFile() {
@@ -13955,7 +14659,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrDefault(false)
             }
             _state.update {
-                it.copy(fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path")
+                it.copy(
+                    selectedFileDirty = if (saved) false else it.selectedFileDirty,
+                    fileSavedBanner = if (saved) "Saved $path" else "Failed to save $path",
+                )
             }
             refreshWorkspaceFilesAndChanges(project.id)
             if (saved && preferences.autoSyncGitHub) {
@@ -13981,6 +14688,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (ok) {
                 refreshWorkspaceFilesAndChanges(project.id)
                 openWorkspaceFile(cleanPath)
+            }
+        }
+    }
+
+    fun deleteWorkspaceFile(relativePath: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/')
+        if (cleanPath.isEmpty()) return
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val target = checkpoints.safeWorkspaceFile(ws, cleanPath)
+                    target.exists() && target.deleteRecursively()
+                }.getOrDefault(false)
+            }
+            if (deleted) {
+                if (_state.value.selectedFilePath == cleanPath || _state.value.selectedFilePath?.startsWith("$cleanPath/") == true) {
+                    _state.update {
+                        it.copy(
+                            selectedFilePath = null,
+                            selectedFileContent = "",
+                            selectedFileDirty = false,
+                            fileSavedBanner = "Deleted $cleanPath",
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(fileSavedBanner = "Deleted $cleanPath") }
+                }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }
@@ -14044,20 +14782,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         activeTerminalJob = viewModelScope.launch {
+            var streamedAny = false
             var output = ""
             try {
                 output = withContext(Dispatchers.IO) {
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    runCommandInChrootOrHost(project.slug, ws, cleanCmd)
+                    runCommandInChrootOrHost(project.slug, ws, cleanCmd) { chunkText ->
+                        streamedAny = true
+                        _state.update { current ->
+                            current.copy(
+                                terminalOutput = (current.terminalOutput + chunkText).takeLast(MAX_TERMINAL_CHARS),
+                            )
+                        }
+                    }
                 }
             } finally {
                 activeTerminalProcess = null
                 _state.update {
+                    val tail = if (streamedAny) "\n" else (output + "\n")
                     it.copy(
                         terminalRunning = false,
-                        terminalOutput = (it.terminalOutput + output + "\n").takeLast(MAX_TERMINAL_CHARS),
+                        terminalOutput = (it.terminalOutput + tail).takeLast(MAX_TERMINAL_CHARS),
                     )
                 }
+                refreshWorkspaceFilesAndChanges(project.id)
             }
         }
     }
@@ -14099,7 +14847,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun runCommandInChrootOrHost(projectSlug: String, workspaceDir: File, command: String): String {
+    private fun runCommandInChrootOrHost(
+        projectSlug: String,
+        workspaceDir: File,
+        command: String,
+        onOutputChunk: ((String) -> Unit)? = null,
+    ): String {
         return runCatching {
             val process = if (installer.isInstalled() && isRootAccessAvailable()) {
                 val installed = installer.installedRuntime()
@@ -14129,12 +14882,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 while (buffer.length < MAX_TERMINAL_CHARS) {
                     val n = reader.read(chunk)
                     if (n <= 0) break
-                    buffer.append(chunk, 0, n)
+                    val text = String(chunk, 0, n)
+                    buffer.append(text)
+                    onOutputChunk?.invoke(text)
                 }
             }
             if (process.isAlive && !timedOut.get()) process.destroyForcibly()
             watchdog.interrupt()
-            if (timedOut.get()) buffer.append("\n[Command timed out after 60s]")
+            if (timedOut.get()) {
+                val timeoutNotice = "\n[Command timed out after 60s]"
+                buffer.append(timeoutNotice)
+                onOutputChunk?.invoke(timeoutNotice)
+            }
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
     }
@@ -14192,10 +14951,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "Running $task in ${project.name}")
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
-        RuntimeTaskController.stopAction = { stopActiveTask() }
+        val buildStopHook: () -> Unit = {
+            activeBuildProcess?.destroyForcibly()
+            activeBuildJob?.cancel()
+        }
+        RuntimeTaskController.stopAction = buildStopHook
 
         activeBuildJob = viewModelScope.launch {
             var succeeded = false
+            var cancelled = false
             var builtApk: File? = null
             var fullLog = ""
             var exitCode = -1
@@ -14229,28 +14993,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     builtApk = if (exitCode == 0) findDebugApk(androidRoot) else null
                     succeeded = exitCode == 0 && (task == "clean" || builtApk != null)
                 }
+            } catch (e: CancellationException) {
+                cancelled = true
             } catch (e: Throwable) {
-                fullLog += "\nBuild exception: ${e.message}"
+                if (!isActive) {
+                    cancelled = true
+                } else {
+                    fullLog += "\nBuild exception: ${e.message}"
+                }
             } finally {
+                if (!isActive) cancelled = true
                 activeBuildProcess = null
-                RuntimeTaskController.stopAction = null
+                RuntimeTaskController.release(buildStopHook)
             }
 
-            val issues = if (!succeeded && task != "clean") {
+            val issues = if (!succeeded && !cancelled && task != "clean") {
                 parseAndroidBuildIssues(fullLog, androidRoot, exitCode)
             } else {
                 emptyList()
             }
-            val finalApk = builtApk
+            val finalApk = builtApk ?: if (!cancelled && task != "clean") {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { findDebugApk(androidRoot) }
+            } else {
+                null
+            }
             _state.update {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
-                        phase = if (succeeded) AndroidBuildPhase.SUCCEEDED else AndroidBuildPhase.FAILED,
-                        stage = if (succeeded) AndroidBuildStage.COMPLETE else AndroidBuildStage.FAILED,
+                        phase = when {
+                            cancelled -> AndroidBuildPhase.CANCELLED
+                            succeeded -> AndroidBuildPhase.SUCCEEDED
+                            else -> AndroidBuildPhase.FAILED
+                        },
+                        stage = when {
+                            cancelled -> AndroidBuildStage.CANCELLED
+                            succeeded -> AndroidBuildStage.COMPLETE
+                            else -> AndroidBuildStage.FAILED
+                        },
                         finishedAtMillis = System.currentTimeMillis(),
                         apkPath = finalApk?.absolutePath,
                         apkSizeBytes = finalApk?.length(),
                         message = when {
+                            cancelled -> "Build cancelled by user."
                             succeeded && finalApk != null -> "APK ready: ${finalApk.name} (${finalApk.length() / 1024} KB)"
                             succeeded -> "Gradle $task completed."
                             else -> issues.firstOrNull()?.detail ?: "Build failed (exit $exitCode)"
@@ -14261,14 +15045,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             getApplication<Application>().startService(
                 Intent(getApplication(), RuntimeExecutionService::class.java)
-                    .setAction(if (succeeded) RuntimeExecutionService.ACTION_COMPLETE else RuntimeExecutionService.ACTION_FAILED)
+                    .setAction(
+                        when {
+                            cancelled -> RuntimeExecutionService.ACTION_CANCELLED
+                            succeeded -> RuntimeExecutionService.ACTION_COMPLETE
+                            else -> RuntimeExecutionService.ACTION_FAILED
+                        },
+                    )
                     .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
                     .putExtra(
                         RuntimeExecutionService.EXTRA_DETAIL,
-                        if (succeeded) "Android build succeeded" else "Android build failed",
+                        when {
+                            cancelled -> "Android build cancelled"
+                            succeeded -> "Android build succeeded"
+                            else -> "Android build failed"
+                        },
                     ),
             )
-            if (succeeded && installAfterBuild && finalApk != null) {
+            if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
         }
@@ -14311,12 +15105,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun resolveProjectAndroidPackageName(project: Project): String {
+        val builtApkPath = _state.value.androidBuild.apkPath
+        if (!builtApkPath.isNullOrBlank()) {
+            val apkFile = File(builtApkPath)
+            if (apkFile.isFile) {
+                val apkPkg = AndroidAppInstaller.packageName(getApplication(), apkFile)
+                if (!apkPkg.isNullOrBlank()) return apkPkg
+            }
+        }
+        val ws = runCatching { checkpoints.ensureWorkspace(project.id) }.getOrNull()
+        val androidRoot = ws?.let { findAndroidProjectRoot(it) ?: it }
+        if (androidRoot != null) {
+            val existingApk = findDebugApk(androidRoot)
+            if (existingApk != null) {
+                val apkPkg = AndroidAppInstaller.packageName(getApplication(), existingApk)
+                if (!apkPkg.isNullOrBlank()) return apkPkg
+            }
+            val candidates = listOf(
+                File(androidRoot, "app/build.gradle.kts"),
+                File(androidRoot, "app/build.gradle"),
+                File(androidRoot, "build.gradle.kts"),
+                File(androidRoot, "build.gradle"),
+                File(androidRoot, "app/src/main/AndroidManifest.xml"),
+            )
+            val appIdRegex = Regex("""(?:applicationId|namespace|package)\s*=?\s*["']([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)+)["']""")
+            for (file in candidates) {
+                if (file.isFile) {
+                    val text = runCatching { file.readBoundedText(64 * 1024) }.getOrNull().orEmpty()
+                    val match = appIdRegex.find(text)?.groupValues?.getOrNull(1)
+                    if (!match.isNullOrBlank()) return match
+                }
+            }
+        }
+        return AndroidProjectTemplateGenerator.packageName(project.name)
+    }
+
     fun startProjectLogcat() {
         val project = _state.value.activeProject ?: return
         activeLogcatProcess?.destroyForcibly()
         activeLogcatJob?.cancel()
-        val pkg = AndroidProjectTemplateGenerator.packageName(project.name)
         activeLogcatJob = viewModelScope.launch {
+            val pkg = withContext(Dispatchers.IO) { resolveProjectAndroidPackageName(project) }
             val canRead = withContext(Dispatchers.IO) { hasAndroidLogcatAccess(getApplication()) }
             if (!canRead) {
                 _state.update {
@@ -14370,6 +15200,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                     }
+                    if (isActive) {
+                        _state.update {
+                            it.copy(
+                                androidLogcat = it.androidLogcat.copy(
+                                    running = false,
+                                    message = "Logcat stream ended for $pkg.",
+                                ),
+                            )
+                        }
+                    }
                 }.onFailure { err ->
                     _state.update {
                         it.copy(
@@ -14390,6 +15230,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeLogcatJob?.cancel()
         _state.update {
             it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = "Logcat paused"))
+        }
+    }
+
+    fun clearProjectLogcat() {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(lines = emptyList()))
+        }
+    }
+
+    fun setLogcatMinimumLevel(level: AndroidLogLevel) {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(minimumLevel = level))
+        }
+    }
+
+    fun setLogcatQuery(query: String) {
+        _state.update {
+            it.copy(androidLogcat = it.androidLogcat.copy(query = query))
         }
     }
 
@@ -14429,16 +15287,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateProviderConfig(baseUrl: String, model: String, openRouterOrder: String = "") {
+    fun updateProviderConfig(
+        baseUrl: String,
+        model: String,
+        openRouterOrder: String = _state.value.providerProfile.openRouterProviderOrder,
+        openRouterAllowFallbacks: Boolean = _state.value.providerProfile.openRouterAllowFallbacks,
+        dshApi: String = _state.value.providerProfile.dshApi,
+    ) {
         val current = _state.value.providerProfile
         val updated = current.copy(
             baseUrl = baseUrl.trim(),
             model = model.trim(),
             openRouterProviderOrder = openRouterOrder.trim(),
+            openRouterAllowFallbacks = openRouterAllowFallbacks,
+            dshApi = dshApi.trim().ifBlank { current.dshApi },
             hasSecret = !resolveProviderSecret(current).isNullOrBlank(),
         )
         preferences.saveProvider(updated, _state.value.agentKind)
         _state.update { it.copy(providerProfile = updated) }
+    }
+
+    fun validateAntigravityConnection() {
+        _state.update { it.copy(apiBusy = true, apiStatusMessage = "Probing Antigravity CLI inside chroot…") }
+        viewModelScope.launch {
+            val msg = runCatching {
+                val reply = antigravityRuntime.hello(45_000L)
+                "✓ Antigravity CLI verified: ${reply.take(100)}"
+            }.getOrElse { err ->
+                "✕ Antigravity probe failed: ${err.message ?: "CLI error"}"
+            }
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = msg) }
+        }
     }
 
     fun addApiKey(label: String, secret: String) {
@@ -14606,6 +15485,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+            // Reached only when the code expired (success/failure return above); don't leave a dead code on screen.
+            if (isActive) {
+                _state.update {
+                    it.copy(
+                        githubDeviceCode = null,
+                        githubStatusMessage = "GitHub sign-in code expired. Start sign-in again.",
+                    )
+                }
+            }
         }
     }
 
@@ -14692,6 +15580,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         autoInit = false,
                     )
                     val project = _state.value.activeProject
+                    var pushError: Throwable? = null
                     if (pushActiveProject && project != null) {
                         val ws = checkpoints.ensureWorkspace(project.id)
                         val login = _state.value.githubLogin.ifBlank { "x-access-token" }
@@ -14705,19 +15594,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             append("(git diff --cached --quiet || git commit -m 'Initial commit from NextCraft Forge') && ")
                             append("git push -u origin main")
                         }
-                        withGitHubCredentials(token, login) {
-                            runCheckedCommand(project.slug, ws, pushCmd)
-                        }
+                        pushError = runCatching {
+                            withGitHubCredentials(token, login) {
+                                runCheckedCommand(project.slug, ws, pushCmd)
+                            }
+                        }.exceptionOrNull()
                     }
                     val updatedRepos = runCatching { githubClient.repositories(token) }.getOrDefault(listOf(repo))
-                    repo to updatedRepos
+                    Triple(repo, updatedRepos, pushError)
                 }
             }
-            result.onSuccess { (repo, updatedRepos) ->
+            result.onSuccess { (repo, updatedRepos, pushError) ->
                 _state.update {
                     it.copy(
                         githubRepos = updatedRepos,
-                        githubStatusMessage = "Created & pushed to ${repo.fullName}",
+                        githubStatusMessage = if (pushError == null) {
+                            "Created & pushed to ${repo.fullName}"
+                        } else {
+                            "Created ${repo.fullName}, but the initial push failed: ${pushError.message}"
+                        },
                     )
                 }
             }.onFailure { err ->
@@ -14814,14 +15709,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ws.listFiles()?.forEach { it.deleteRecursively() }
                     val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
-                    if (token.isNotBlank()) {
-                        withGitHubCredentials(token, login) {
+                    try {
+                        if (token.isNotBlank()) {
+                            withGitHubCredentials(token, login) {
+                                runCheckedCommand(project.slug, ws, cloneCmd)
+                            }
+                        } else {
                             runCheckedCommand(project.slug, ws, cloneCmd)
                         }
-                    } else {
-                        runCheckedCommand(project.slug, ws, cloneCmd)
+                    } catch (error: Throwable) {
+                        // The project is never saved on failure; don't leave its workspace behind on disk.
+                        ws.deleteRecursively()
+                        checkpoints.checkpointDir(project.id).deleteRecursively()
+                        throw error
                     }
-                    project
+                    val isAndroidRepo = findAndroidProjectRoot(ws) != null
+                    project.copy(
+                        type = if (isAndroidRepo) ProjectType.ANDROID else ProjectType.GENERAL,
+                        language = if (isAndroidRepo) "Kotlin / Android" else "Git Repository",
+                    )
                 }
             }
             clonedProject.onSuccess { newProject ->
@@ -14849,7 +15755,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setInteractiveHighRiskApprovals(enabled: Boolean) {
         preferences.interactiveHighRiskApprovals = enabled
-        _state.update { it.copy(interactiveHighRiskApprovals = enabled) }
+        if (enabled && preferences.autoApproveAllTools) {
+            preferences.autoApproveAllTools = false
+        }
+        _state.update {
+            it.copy(
+                interactiveHighRiskApprovals = enabled,
+                autoApproveAllTools = preferences.autoApproveAllTools,
+            )
+        }
+    }
+
+    fun setAutoApproveAllTools(enabled: Boolean) {
+        preferences.autoApproveAllTools = enabled
+        if (enabled && preferences.interactiveHighRiskApprovals) {
+            preferences.interactiveHighRiskApprovals = false
+        }
+        _state.update {
+            it.copy(
+                autoApproveAllTools = enabled,
+                interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
+            )
+        }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {
@@ -14858,7 +15785,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setAntigravityConfig(model: String, effort: String) {
-        val cleanModel = model.trim().ifEmpty { "gemini-2.5-pro" }
+        val cleanModel = model.trim()
         val cleanEffort = effort.trim().ifEmpty { "high" }
         preferences.antigravityModel = cleanModel
         preferences.antigravityEffort = cleanEffort
@@ -14901,6 +15828,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun downloadAndInstallAppUpdate() {
+        val info = _state.value.updateInfo ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(updateStatusMessage = "Downloading v${info.versionName}…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val apk = AppUpdater(getApplication()).download(info) { downloaded, total ->
+                        val pct = if (total > 0) ((downloaded * 100L) / total).coerceIn(0L, 100L) else -1L
+                        val msg = if (pct >= 0) {
+                            "Downloading v${info.versionName} ($pct%)…"
+                        } else {
+                            "Downloading v${info.versionName} (${downloaded / 1024} KB)…"
+                        }
+                        _state.update { it.copy(updateStatusMessage = msg) }
+                    }
+                    AndroidAppInstaller.install(
+                        context = getApplication(),
+                        apk = apk,
+                        launchAfterInstall = false,
+                    )
+                }
+            }
+            result.onSuccess {
+                _state.update { it.copy(updateStatusMessage = "Update v${info.versionName} verified & installing…") }
+            }.onFailure { err ->
+                _state.update { it.copy(updateStatusMessage = "Update install failed: ${err.message}") }
+            }
+        }
+    }
+
     fun setThemeMode(mode: String) {
         val resolved = ForgeThemeMode.fromStored(mode).id
         preferences.themeMode = resolved
@@ -14928,6 +15885,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MAX_TERMINAL_CHARS = 128 * 1024
+        const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
     }
 }
 ```
@@ -14962,7 +15920,7 @@ enum class AppLanguage(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (96 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/LocaleHelper.kt` (92 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15019,11 +15977,7 @@ object LocaleHelper {
                 @Suppress("DEPRECATION")
                 Resources.getSystem().configuration.locale
             }
-            if (systemLocale != null) {
-                Locale.setDefault(systemLocale)
-                context.resources.configuration.setLayoutDirection(systemLocale)
-            }
-            return context
+            systemLocale ?: return context
         }
 
         Locale.setDefault(targetLocale)
@@ -15052,7 +16006,7 @@ object AppStrings {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_LANGUAGE, code.trim().ifEmpty { "system" })
-            .apply()
+            .commit()
     }
 
     fun context(context: Context): Context =
@@ -15065,7 +16019,7 @@ object AppStrings {
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (505 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/Theme.kt` (506 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15139,8 +16093,8 @@ enum class ForgeThemeMode(
     ),
     DARK(
         id = "dark",
-        title = "Gelap (Dark)",
-        subtitle = "Obsidian kontras tinggi untuk pemrograman malam hari",
+        title = "Linear (Dark)",
+        subtitle = "Abu netral dengan satu aksen indigo, tenang untuk kerja lama",
         badge = "DARK",
     ),
     GLASS(
@@ -15196,38 +16150,39 @@ data class ForgeThemeTokens(
 )
 
 // 1. DARK (Zuan Tinted Obsidian Dark)
-private val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
-    primary = Color(0xFF38BDF8),
-    onPrimary = Color(0xFF06202E),
-    primaryContainer = Color(0xFF12354E),
-    onPrimaryContainer = Color(0xFFD8F3FF),
-    secondary = Color(0xFF34D399),
-    onSecondary = Color(0xFF052E1E),
-    secondaryContainer = Color(0xFF0A3F30),
-    onSecondaryContainer = Color(0xFFA7F3D0),
-    tertiary = Color(0xFFA78BFA),
-    onTertiary = Color(0xFF23134D),
-    background = Color(0xFF0B0F17),
-    onBackground = Color(0xFFEEEEEE),
-    surface = Color(0xFF111827),
-    onSurface = Color(0xFFEEEEEE),
-    surfaceVariant = Color(0xFF161F30),
-    onSurfaceVariant = Color(0xFF94A3B8),
-    outline = Color(0xFF263248),
-    outlineVariant = Color(0xFF1E293B),
-    error = Color(0xFFF87171),
-    onError = Color(0xFF450A0A),
-    errorContainer = Color(0xFF3B1219),
-    onErrorContainer = Color(0xFFFECACA),
+internal val ZuanDarkColorScheme: ColorScheme = darkColorScheme(
+    // Linear-style neutral dark: R=G=B greys, one indigo accent (values measured from Linear Android).
+    primary = Color(0xFF5E6AD2),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF1C1F3D),
+    onPrimaryContainer = Color(0xFFDDE0FF),
+    secondary = Color(0xFF4CB47F),
+    onSecondary = Color(0xFF06231A),
+    secondaryContainer = Color(0xFF12281E),
+    onSecondaryContainer = Color(0xFFB6F0D0),
+    tertiary = Color(0xFFF2C94C),
+    onTertiary = Color(0xFF2A2000),
+    background = Color(0xFF0B0B0B),
+    onBackground = Color(0xFFEDEDED),
+    surface = Color(0xFF131313),
+    onSurface = Color(0xFFEDEDED),
+    surfaceVariant = Color(0xFF181818),
+    onSurfaceVariant = Color(0xFF9C9C9C),
+    outline = Color(0xFF2A2A2A),
+    outlineVariant = Color(0xFF1E1E1E),
+    error = Color(0xFFE5484D),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFF3A1416),
+    onErrorContainer = Color(0xFFFFD5D6),
     surfaceTint = Color.Transparent,
 )
 
 // 2. GLASS (Zuan Liquid Glassmorphism)
-private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
-    primary = Color(0xFF60A5FA),
-    onPrimary = Color(0xFF061830),
-    primaryContainer = Color(0x731E3A8A),
-    onPrimaryContainer = Color(0xFFE0F2FE),
+internal val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
+    primary = Color(0xFF7C8CFF),
+    onPrimary = Color(0xFF0B1030),
+    primaryContainer = Color(0x66343F9E),
+    onPrimaryContainer = Color(0xFFE0E4FF),
     secondary = Color(0xFF2DD4BF),
     onSecondary = Color(0xFF042F2E),
     secondaryContainer = Color(0x73115E59),
@@ -15238,10 +16193,10 @@ private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
     onBackground = Color(0xFFF8FAFC),
     surface = Color(0xF0111827), // High opacity for DropdownMenu & AlertDialog popups (THEME-BUG-022)
     onSurface = Color(0xFFF8FAFC),
-    surfaceVariant = Color(0xA61E293B),
+    surfaceVariant = Color(0x661E293B),
     onSurfaceVariant = Color(0xFFCBD5E1),
-    outline = Color(0x47FFFFFF),
-    outlineVariant = Color(0x24FFFFFF),
+    outline = Color(0x55FFFFFF),
+    outlineVariant = Color(0x2EFFFFFF),
     error = Color(0xFFF87171),
     onError = Color(0xFF450A0A),
     errorContainer = Color(0x99450A0A),
@@ -15250,8 +16205,8 @@ private val ZuanGlassColorScheme: ColorScheme = darkColorScheme(
 )
 
 // 3. WHITE (Airbnb Daylight 100% Pure White)
-private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
-    primary = Color(0xFFFF385C),
+internal val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFFD70F47), // Airbnb coral darkened: white text on #FF385C is only 3.5:1
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFFFF0F3),
     onPrimaryContainer = Color(0xFF8A0F28),
@@ -15266,7 +16221,7 @@ private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
     surface = Color(0xFFFFFFFF),
     onSurface = Color(0xFF222222),
     surfaceVariant = Color(0xFFF7F7F7),
-    onSurfaceVariant = Color(0xFF717171),
+    onSurfaceVariant = Color(0xFF666666),
     outline = Color(0xFFDDDDDD),
     outlineVariant = Color(0xFFEBEBEB),
     error = Color(0xFFC13515),
@@ -15277,8 +16232,8 @@ private val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
 )
 
 // 4. SYSTEM LIGHT (Daylight Clean Blue-Slate when OS is in Light Mode)
-private val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
-    primary = Color(0xFF0284C7),
+internal val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
+    primary = Color(0xFF0369A1), // white on #0284C7 was 4.1:1
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFE0F2FE),
     onPrimaryContainer = Color(0xFF0C4A6E),
@@ -15292,107 +16247,104 @@ private val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
 // Pre-allocated Brushes & Tokens to prevent recomposition allocation thrashing (THEME-BUG-025)
 private val GlassSpecularBorderBrush = Brush.linearGradient(
     colors = listOf(
-        Color.White.copy(alpha = 0.28f),
-        Color.White.copy(alpha = 0.07f),
+        Color.White.copy(alpha = 0.38f),
+        Color.White.copy(alpha = 0.12f),
     ),
 )
 
 private val GlassInnerBorderBrush = Brush.linearGradient(
     colors = listOf(
-        Color.White.copy(alpha = 0.18f),
-        Color.White.copy(alpha = 0.04f),
+        Color.White.copy(alpha = 0.24f),
+        Color.White.copy(alpha = 0.08f),
     ),
 )
 
-private val GlassCosmicCanvasBrush = Brush.verticalGradient(
-    colors = listOf(
-        Color(0xFF090D16),
-        Color(0xFF122038),
-        Color(0xFF0B1324),
-    ),
-)
+// Diagonal indigo-violet-teal wash: gives the translucent surfaces something coloured to show through.
+internal val GlassCanvasColors = listOf(Color(0xFF0D1326), Color(0xFF1A1038), Color(0xFF0B1B2E))
+
+private val GlassCosmicCanvasBrush = Brush.linearGradient(colors = GlassCanvasColors)
 
 private val DarkThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.DARK,
     isDark = true,
     isGlass = false,
     isWhite = false,
-    canvasBrush = SolidColor(Color(0xFF0B0F17)),
-    windowBackgroundArgb = Color(0xFF0B0F17).toArgb(),
-    cardContainerColor = Color(0xFF151E2E),
-    cardElevatedColor = Color(0xFF1E293B),
-    cardBorderStroke = BorderStroke(1.dp, Color(0xFF263248)),
-    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFF334155)),
+    canvasBrush = SolidColor(Color(0xFF0B0B0B)),
+    windowBackgroundArgb = Color(0xFF0B0B0B).toArgb(),
+    cardContainerColor = Color(0xFF131313),
+    cardElevatedColor = Color(0xFF1B1B1B),
+    cardBorderStroke = null,
+    elevatedBorderStroke = null,
     cardCornerRadius = 18.dp,
-    topBarContainerColor = Color(0xFF111827),
-    bottomBarContainerColor = Color(0xFF111827),
-    accentText = Color(0xFF38BDF8),
-    successText = Color(0xFF34D399),
-    warningText = Color(0xFFFBBF24),
-    dangerText = Color(0xFFF87171),
-    terminalBackground = Color(0xFF080B11),
-    terminalHeaderBackground = Color(0xFF131B2E),
-    terminalText = Color(0xFFE2E8F0),
-    inlineCodeBackground = Color(0x3338BDF8),
-    diffAddedBackground = Color(0xFF063626),
+    topBarContainerColor = Color(0xFF0B0B0B),
+    bottomBarContainerColor = Color(0xFF131313),
+    accentText = Color(0xFFB9BFF5),
+    successText = Color(0xFF4CB47F),
+    warningText = Color(0xFFF2C94C),
+    dangerText = Color(0xFFE5484D),
+    terminalBackground = Color(0xFF070707),
+    terminalHeaderBackground = Color(0xFF131313),
+    terminalText = Color(0xFFE6E6E6),
+    inlineCodeBackground = Color(0x335E6AD2),
+    diffAddedBackground = Color(0xFF0F2A1F),
     diffAddedText = Color(0xFF6EE7B7),
-    diffRemovedBackground = Color(0xFF450A0A),
+    diffRemovedBackground = Color(0xFF2E1214),
     diffRemovedText = Color(0xFFFCA5A5),
     selectionColors = TextSelectionColors(
-        handleColor = Color(0xFF38BDF8),
-        backgroundColor = Color(0xFF38BDF8).copy(alpha = 0.32f),
+        handleColor = Color(0xFF5E6AD2),
+        backgroundColor = Color(0xFF5E6AD2).copy(alpha = 0.32f),
     ),
 )
 
-private val GlassThemeTokens = ForgeThemeTokens(
+internal val GlassThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.GLASS,
     isDark = true,
     isGlass = true,
     isWhite = false,
     canvasBrush = GlassCosmicCanvasBrush,
     windowBackgroundArgb = Color(0xFF090D16).toArgb(),
-    cardContainerColor = Color(0xFF1E293B).copy(alpha = 0.62f),
-    cardElevatedColor = Color(0xFF283750).copy(alpha = 0.72f),
+    cardContainerColor = Color(0xFF1E293B).copy(alpha = 0.30f),
+    cardElevatedColor = Color(0xFF283750).copy(alpha = 0.42f),
     cardBorderStroke = BorderStroke(0.8.dp, GlassSpecularBorderBrush),
     elevatedBorderStroke = BorderStroke(0.8.dp, GlassInnerBorderBrush),
-    cardCornerRadius = 22.dp,
-    topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.76f),
-    bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.82f),
-    accentText = Color(0xFF60A5FA),
+    cardCornerRadius = 18.dp,
+    topBarContainerColor = Color(0xFF0F172A).copy(alpha = 0.30f),
+    bottomBarContainerColor = Color(0xFF1E293B).copy(alpha = 0.38f),
+    accentText = Color(0xFFC5CCFF),
     successText = Color(0xFF2DD4BF),
     warningText = Color(0xFFFBBF24),
     dangerText = Color(0xFFF87171),
-    terminalBackground = Color(0xFF090D16).copy(alpha = 0.72f),
-    terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.78f),
+    terminalBackground = Color(0xFF090D16).copy(alpha = 0.58f),
+    terminalHeaderBackground = Color(0xFF1E293B).copy(alpha = 0.45f),
     terminalText = Color(0xFFF8FAFC),
-    inlineCodeBackground = Color(0x4060A5FA),
-    diffAddedBackground = Color(0x73064E3B),
+    inlineCodeBackground = Color(0x407C8CFF),
+    diffAddedBackground = Color(0x40064E3B),
     diffAddedText = Color(0xFFA7F3D0),
-    diffRemovedBackground = Color(0x737F1D1D),
+    diffRemovedBackground = Color(0x407F1D1D),
     diffRemovedText = Color(0xFFFECACA),
     selectionColors = TextSelectionColors(
-        handleColor = Color(0xFF60A5FA),
-        backgroundColor = Color(0xFF60A5FA).copy(alpha = 0.35f),
+        handleColor = Color(0xFF7C8CFF),
+        backgroundColor = Color(0xFF7C8CFF).copy(alpha = 0.35f),
     ),
 )
 
-private val WhiteThemeTokens = ForgeThemeTokens(
+internal val WhiteThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.WHITE,
     isDark = false,
     isGlass = false,
     isWhite = true,
     canvasBrush = SolidColor(Color(0xFFFFFFFF)),
     windowBackgroundArgb = Color(0xFFFFFFFF).toArgb(),
-    cardContainerColor = Color(0xFFFFFFFF),
-    cardElevatedColor = Color(0xFFF7F7F7),
-    cardBorderStroke = BorderStroke(1.dp, Color(0xFFDDDDDD)),
-    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFFE5E5E5)),
-    cardCornerRadius = 16.dp,
+    cardContainerColor = Color(0xFFF7F7F7),
+    cardElevatedColor = Color(0xFFEFEFEF),
+    cardBorderStroke = BorderStroke(0.5.dp, Color(0xFFE4E4E4)),
+    elevatedBorderStroke = BorderStroke(0.5.dp, Color(0xFFE4E4E4)),
+    cardCornerRadius = 18.dp,
     topBarContainerColor = Color(0xFFFFFFFF),
-    bottomBarContainerColor = Color(0xFFFFFFFF),
-    accentText = Color(0xFFD90B38),  // WCAG > 5.2:1 on White
-    successText = Color(0xFF008A05), // Airbnb Kazan Green (WCAG > 4.6:1)
-    warningText = Color(0xFFB45309), // Deep Amber (WCAG > 5.0:1)
+    bottomBarContainerColor = Color(0xFFF7F7F7),
+    accentText = Color(0xFFC70A32),  // >= 4.5:1 on every White surface
+    successText = Color(0xFF007505), // Kazan Green darkened (>= 4.5:1 on #F7F7F7)
+    warningText = Color(0xFFA04A07), // Deep Amber (>= 4.5:1 on #EFEFEF)
     dangerText = Color(0xFFC13515),  // Airbnb Arches Red
     terminalBackground = Color(0xFFF7F7F7),
     terminalHeaderBackground = Color(0xFFEBEBEB),
@@ -15403,8 +16355,8 @@ private val WhiteThemeTokens = ForgeThemeTokens(
     diffRemovedBackground = Color(0xFFFFF0F0),
     diffRemovedText = Color(0xFFC13515),
     selectionColors = TextSelectionColors(
-        handleColor = Color(0xFFFF385C),
-        backgroundColor = Color(0xFFFF385C).copy(alpha = 0.22f),
+        handleColor = Color(0xFFD70F47),
+        backgroundColor = Color(0xFFD70F47).copy(alpha = 0.22f),
     ),
 )
 
@@ -15470,11 +16422,14 @@ fun NextCraftForgeTheme(
             val activity = view.context.findActivity() ?: return@SideEffect
             val window = activity.window
             window.decorView.setBackgroundColor(tokens.windowBackgroundArgb)
-            window.statusBarColor = tokens.topBarContainerColor.toArgb()
-            window.navigationBarColor = if (tokens.isGlass) {
-                Color(0xFF0B1324).toArgb()
-            } else {
-                tokens.bottomBarContainerColor.toArgb()
+            @Suppress("DEPRECATION")
+            run {
+                window.statusBarColor = tokens.topBarContainerColor.toArgb()
+                window.navigationBarColor = if (tokens.isGlass) {
+                    Color(0xFF0B1324).toArgb()
+                } else {
+                    tokens.bottomBarContainerColor.toArgb()
+                }
             }
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !tokens.isDark
@@ -15727,7 +16682,7 @@ fun AndroidBuildIssue.formatForAgentPrompt(): String = buildString {
 
 ---
 
-## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (478 baris)
+## 8. `app/src/main/java/com/nextcraft/forge/ui/MarkdownText.kt` (578 baris)
 
 ```kotlin
 package com.nextcraft.forge.ui
@@ -15788,6 +16743,7 @@ private sealed interface MarkdownBlock {
     data class BulletItem(val depth: Int, val text: String) : MarkdownBlock
     data class NumberedItem(val number: String, val text: String) : MarkdownBlock
     data class BlockQuote(val text: String) : MarkdownBlock
+    data class Table(val rows: List<List<String>>) : MarkdownBlock
     object HorizontalRule : MarkdownBlock
     data class Paragraph(val text: String) : MarkdownBlock
 }
@@ -15812,6 +16768,7 @@ fun MarkdownText(
                     is MarkdownBlock.BulletItem -> BulletBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
+                    is MarkdownBlock.Table -> TableBlockView(block, resolvedColor, tokens)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
@@ -16031,7 +16988,71 @@ private fun CodeSnippetBlock(
     }
 }
 
+@Composable
+private fun TableBlockView(
+    block: MarkdownBlock.Table,
+    color: Color,
+    tokens: ForgeThemeTokens,
+) {
+    if (block.rows.isEmpty()) return
+    val shape = RoundedCornerShape(10.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
+        color = tokens.cardContainerColor,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            block.rows.forEachIndexed { rowIdx, cells ->
+                val isHeader = rowIdx == 0 && block.rows.size > 1
+                Row(
+                    modifier = Modifier
+                        .background(
+                            if (isHeader) {
+                                tokens.cardElevatedColor.copy(alpha = 0.78f)
+                            } else if (rowIdx % 2 == 1) {
+                                Color.Transparent
+                            } else {
+                                tokens.cardElevatedColor.copy(alpha = 0.25f)
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    cells.forEach { cellText ->
+                        Text(
+                            text = parseInlineMarkdown(
+                                text = cellText,
+                                accentColor = tokens.accentText,
+                                inlineCodeBg = tokens.inlineCodeBackground,
+                            ),
+                            color = color,
+                            style = if (isHeader) {
+                                MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            } else {
+                                MaterialTheme.typography.bodySmall
+                            },
+                            modifier = Modifier
+                                .width(136.dp)
+                                .padding(end = 10.dp),
+                        )
+                    }
+                }
+                if (rowIdx < block.rows.lastIndex) {
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                }
+            }
+        }
+    }
+}
+
 private val NUMBERED_ITEM_REGEX = Regex("""^(\d+)\.\s+(.*)$""")
+private val TABLE_DIVIDER_REGEX = Regex("""^\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$""")
 
 private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     if (raw.isBlank()) return emptyList()
@@ -16041,6 +17062,7 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
     var codeLang = ""
     val codeBuf = StringBuilder()
     val paraBuf = StringBuilder()
+    val tableRows = ArrayList<List<String>>()
 
     fun flushParagraph() {
         if (paraBuf.isNotEmpty()) {
@@ -16049,9 +17071,21 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
         }
     }
 
+    fun flushTable() {
+        if (tableRows.isNotEmpty()) {
+            blocks += MarkdownBlock.Table(tableRows.toList())
+            tableRows.clear()
+        }
+    }
+
     for (line in lines) {
         val trimmed = line.trimStart()
-        if (trimmed.startsWith("```")) {
+        val fencePrefix = when {
+            trimmed.startsWith("```") -> "```"
+            trimmed.startsWith("~~~") -> "~~~"
+            else -> null
+        }
+        if (fencePrefix != null) {
             if (inCodeBlock) {
                 blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
                 codeBuf.setLength(0)
@@ -16059,8 +17093,9 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 inCodeBlock = false
             } else {
                 flushParagraph()
+                flushTable()
                 inCodeBlock = true
-                codeLang = trimmed.removePrefix("```").trim()
+                codeLang = trimmed.removePrefix(fencePrefix).trim()
             }
             continue
         }
@@ -16068,6 +17103,25 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             codeBuf.append(line).append('\n')
             continue
         }
+        val trimmedBoth = trimmed.trimEnd()
+        val isTableRow = trimmedBoth.startsWith("|") && trimmedBoth.endsWith("|") && trimmedBoth.count { it == '|' } >= 2
+        if (isTableRow) {
+            flushParagraph()
+            if (!TABLE_DIVIDER_REGEX.matches(trimmedBoth)) {
+                val cells = trimmedBoth
+                    .removePrefix("|")
+                    .removeSuffix("|")
+                    .split("|")
+                    .map { it.trim() }
+                if (cells.isNotEmpty()) {
+                    tableRows += cells
+                }
+            }
+            continue
+        } else {
+            flushTable()
+        }
+
         when {
             line.isBlank() -> flushParagraph()
             trimmed == "---" || trimmed == "***" -> {
@@ -16089,9 +17143,9 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
                 val leadingSpaces = line.length - trimmed.length
                 blocks += MarkdownBlock.BulletItem(leadingSpaces / 2, trimmed.substring(2).trim())
             }
-            trimmed.startsWith("> ") -> {
+            trimmed.startsWith("> ") || trimmed == ">" -> {
                 flushParagraph()
-                blocks += MarkdownBlock.BlockQuote(trimmed.removePrefix("> ").trim())
+                blocks += MarkdownBlock.BlockQuote(trimmed.removePrefix(">").trim())
             }
             else -> {
                 val numMatch = NUMBERED_ITEM_REGEX.matchEntire(trimmed)
@@ -16105,9 +17159,10 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             }
         }
     }
-    if (inCodeBlock && codeBuf.isNotEmpty()) {
+    if (inCodeBlock) {
         blocks += MarkdownBlock.CodeBlock(codeLang, codeBuf.toString().trimEnd('\n'))
     }
+    flushTable()
     flushParagraph()
     return blocks
 }
@@ -16237,22 +17292,24 @@ Blok 6 berisi seluruh layar antarmuka pengguna (**Jetpack Compose Material 3**) 
    - Mengelola konfigurasi penyedia AI & kunci API terenkripsi (`ApiKeyVault`) beserta rotasi multi-kunci dan pengambilan katalog model langsung dari server, pengelolaan bundle runtime (impor `.tar.zst` lokal, unduh dari rilis resmi, *Verify & Repair Rootfs*, bersihkan *staging* atau *reset runtime*), integrasi penuh akun & repositori GitHub (`Connect Token`, `Create Repo`, `Clone`, `Push`, `Pull`, dan *Auto-Sync*), pemilih tema & bahasa antarmuka, kebijakan persetujuan perintah berisiko tinggi, serta pemeriksaan dan instalasi pembaruan aplikasi (`AppUpdater`).
 
 ## Daftar File dalam Blok Ini
-- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (199 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
-- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (872 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (791 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (596 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (241 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (947 baris)
+- `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (328 baris)
 
 ---
 
-## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (763 baris)
+## 1. `app/src/main/java/com/nextcraft/forge/ui/NextCraftForgeApp.kt` (872 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.nextcraft.forge.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -16263,6 +17320,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -16279,6 +17337,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -16297,8 +17356,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -16318,6 +17375,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -16326,6 +17385,9 @@ import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -16346,10 +17408,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         return
     }
 
+    val imeVisible by rememberImeVisible()
+    val backTarget = forgeBackTarget(state.activeTab)
+    BackHandler(enabled = backTarget != null) { backTarget?.let(viewModel::selectTab) }
+
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
-            ForgeTopBar(
+            // Every screen except Agent now draws its own large title; Agent keeps the project/agent switcher bar.
+            if (state.activeTab == ForgeTab.AGENT) ForgeTopBar(
                 state = state,
                 onSelectProject = viewModel::selectProject,
                 onDeleteProject = viewModel::deleteProject,
@@ -16359,11 +17426,14 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             )
         },
         bottomBar = {
-            ForgeBottomBar(
-                activeTab = state.activeTab,
-                changedCount = state.changedItems.size,
-                onSelectTab = viewModel::selectTab,
-            )
+            // adjustResize lifts the bar above the keyboard and eats the composer's space; hide it while typing.
+            if (!imeVisible) {
+                ForgeBottomBar(
+                    activeTab = state.activeTab,
+                    changedCount = state.changedItems.size,
+                    onSelectTab = viewModel::selectTab,
+                )
+            }
         },
     ) { innerPadding ->
         Column(
@@ -16403,7 +17473,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss",
+                                    contentDescription = stringResource(R.string.shell_dismiss),
                                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -16416,7 +17486,21 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.activeTab) {
+                    ForgeTab.PROJECTS -> ProjectsScreen(
+                        state = state,
+                        onOpenProject = { id ->
+                            viewModel.selectProject(id)
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onNewProject = { showNewProjectDialog = true },
+                        onDeleteProject = viewModel::deleteProject,
+                        onNewQuickProject = {
+                            viewModel.createQuickProject()
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                    )
                     ForgeTab.AGENT -> AgentScreen(state = state, viewModel = viewModel)
+                    ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
@@ -16450,9 +17534,42 @@ private fun ForgeTopBar(
     var projectMenuExpanded by remember { mutableStateOf(false) }
     var agentMenuExpanded by remember { mutableStateOf(false) }
     var themeMenuExpanded by remember { mutableStateOf(false) }
+    var pendingDeleteProjectId by remember { mutableStateOf<String?>(null) }
     val activeProject = state.activeProject
     val tokens = LocalForgeThemeTokens.current
     val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+    val canDeleteProject = state.projects.size > 1 &&
+        !state.sessionRunning &&
+        state.androidBuild.phase != com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING &&
+        !state.terminalRunning
+
+    pendingDeleteProjectId?.let { targetId ->
+        val target = state.projects.firstOrNull { it.id == targetId }
+        if (target != null) {
+            AlertDialog(
+                onDismissRequest = { pendingDeleteProjectId = null },
+                title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+                text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            onDeleteProject(target.id)
+                            pendingDeleteProjectId = null
+                        },
+                    ) {
+                        Text(stringResource(R.string.shell_confirm_delete))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteProjectId = null }) {
+                        Text(stringResource(R.string.agent_cancel))
+                    }
+                },
+            )
+        } else {
+            pendingDeleteProjectId = null
+        }
+    }
 
     Surface(
         color = tokens.topBarContainerColor,
@@ -16484,13 +17601,13 @@ private fun ForgeTopBar(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { projectMenuExpanded = true }
+                            .clickable(role = Role.Button) { projectMenuExpanded = true }
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column {
                             Text(
-                                text = activeProject?.name ?: "NextCraft Forge",
+                                text = activeProject?.name ?: stringResource(R.string.shell_nextcraft_forge),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -16505,7 +17622,7 @@ private fun ForgeTopBar(
                         }
                         Icon(
                             imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Switch project",
+                            contentDescription = stringResource(R.string.shell_switch_project),
                         )
                     }
 
@@ -16534,20 +17651,20 @@ private fun ForgeTopBar(
                                 },
                                 leadingIcon = {
                                     if (project.id == state.activeProjectId) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
+                                        Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected))
                                     }
                                 },
                                 trailingIcon = {
-                                    if (state.projects.size > 1) {
+                                    if (canDeleteProject) {
                                         IconButton(
                                             onClick = {
                                                 projectMenuExpanded = false
-                                                onDeleteProject(project.id)
+                                                pendingDeleteProjectId = project.id
                                             },
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Delete,
-                                                contentDescription = "Delete project",
+                                                contentDescription = stringResource(R.string.shell_delete_project),
                                                 modifier = Modifier.size(18.dp),
                                             )
                                         }
@@ -16561,7 +17678,7 @@ private fun ForgeTopBar(
                         }
                         Divider()
                         DropdownMenuItem(
-                            text = { Text("New Workspace Project…", fontWeight = FontWeight.SemiBold) },
+                            text = { Text(stringResource(R.string.shell_new_workspace_project), fontWeight = FontWeight.SemiBold) },
                             leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                             onClick = {
                                 projectMenuExpanded = false
@@ -16622,7 +17739,7 @@ private fun ForgeTopBar(
 
                 Spacer(modifier = Modifier.width(6.dp))
                 IconButton(onClick = onOpenNewProject) {
-                    Icon(Icons.Default.Add, contentDescription = "New Project")
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.shell_new_project))
                 }
 
                 // Perbaikan THEME-BUG-021: Lencana pemilih 4 mode tema langsung di Top Bar
@@ -16672,6 +17789,27 @@ private fun ForgeTopBar(
     }
 }
 
+private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, @StringRes val label: Int)
+
+private val navEntries = listOf(
+    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, R.string.nav_projects),
+    NavEntry(ForgeTab.AGENT, Icons.Default.Star, R.string.nav_agent),
+    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, R.string.nav_tools),
+    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, R.string.nav_settings),
+)
+
+// Screens reachable from the Tools launcher keep the Tools tab highlighted (Terminal has its own round button).
+private val toolsGroup = setOf(
+    ForgeTab.TOOLS,
+    ForgeTab.FILES,
+    ForgeTab.ANDROID,
+    ForgeTab.PREVIEW,
+)
+
+/**
+ * Linear-style floating capsule: four icon-only tabs (selected = soft pill) plus a detached
+ * round button for the terminal. Same shape in every theme; only colours/border come from tokens.
+ */
 @Composable
 private fun ForgeBottomBar(
     activeTab: ForgeTab,
@@ -16679,60 +17817,87 @@ private fun ForgeBottomBar(
     onSelectTab: (ForgeTab) -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
-    val shape = if (tokens.isGlass) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+    val scheme = MaterialTheme.colorScheme
+    val barBorder = if (tokens.isGlass || tokens.isWhite) tokens.cardBorderStroke else null
+    val barShadow = if (tokens.isGlass) 12.dp else 0.dp
 
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(
-                horizontal = if (tokens.isGlass) 16.dp else 0.dp,
-                vertical = if (tokens.isGlass) 10.dp else 0.dp,
-            ),
+            .padding(start = 25.dp, end = 25.dp, top = 8.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Surface(
-            shape = shape,
+            shape = RoundedCornerShape(100),
             color = tokens.bottomBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            border = if (tokens.isGlass) tokens.cardBorderStroke else null,
-            shadowElevation = if (tokens.isGlass) 12.dp else 0.dp,
-            modifier = Modifier.fillMaxWidth(),
+            contentColor = scheme.onSurface,
+            border = barBorder,
+            shadowElevation = barShadow,
+            modifier = Modifier
+                .weight(1f)
+                .height(53.dp),
         ) {
-            Column {
-                if (!tokens.isGlass) {
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                }
-                NavigationBar(
-                    containerColor = Color.Transparent,
-                    tonalElevation = 0.dp,
-                ) {
-                    ForgeTab.entries.forEach { tab ->
-                        val label = when (tab) {
-                            ForgeTab.FILES -> if (changedCount > 0) "${tab.title} ($changedCount)" else tab.title
-                            else -> tab.title
-                        }
-                        val icon = when (tab) {
-                            ForgeTab.AGENT -> Icons.Default.Star
-                            ForgeTab.FILES -> Icons.Default.Edit
-                            ForgeTab.TERMINAL -> Icons.Default.List
-                            ForgeTab.ANDROID -> Icons.Default.Build
-                            ForgeTab.PREVIEW -> Icons.Default.PlayArrow
-                            ForgeTab.SETTINGS -> Icons.Default.Settings
-                        }
-                        NavigationBarItem(
-                            selected = activeTab == tab,
-                            onClick = { onSelectTab(tab) },
-                            icon = { Icon(icon, contentDescription = label) },
-                            label = {
-                                Text(
-                                    text = label,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontSize = 11.sp,
-                                )
-                            },
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                navEntries.forEach { entry ->
+                    val label = stringResource(entry.label)
+                    val selected = if (entry.tab == ForgeTab.TOOLS) activeTab in toolsGroup else activeTab == entry.tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(100))
+                            .background(if (selected) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
+                            .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = label,
+                            tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp),
                         )
+                        // Pending file changes live under Tools; show a quiet accent dot when it is not open.
+                        if (entry.tab == ForgeTab.TOOLS && changedCount > 0 && !selected) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 9.dp, end = 18.dp)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(scheme.primary),
+                            )
+                        }
                     }
                 }
+            }
+        }
+        Surface(
+            shape = CircleShape,
+            color = tokens.bottomBarContainerColor,
+            contentColor = scheme.onSurface,
+            border = barBorder,
+            shadowElevation = barShadow,
+            modifier = Modifier.size(53.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(if (activeTab == ForgeTab.TERMINAL) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
+                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_terminal)) { onSelectTab(ForgeTab.TERMINAL) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.List,
+                    contentDescription = stringResource(R.string.shell_terminal),
+                    modifier = Modifier.size(22.dp),
+                )
             }
         }
     }
@@ -16760,7 +17925,7 @@ private fun RuntimeOnboardingScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = "NextCraft Forge",
+            text = stringResource(R.string.shell_nextcraft_forge),
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
@@ -16777,19 +17942,19 @@ private fun RuntimeOnboardingScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StatusCheckRow(
-                    label = "ARM64 Device Architecture (aarch64)",
+                    label = stringResource(R.string.shell_check_arm64),
                     ok = state.arm64Supported,
-                    detail = if (state.arm64Supported) "Supported" else "Requires 64-bit ARMv8 device",
+                    detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
                 )
                 StatusCheckRow(
-                    label = "Root Access (`su -mm` Mount Namespace)",
+                    label = stringResource(R.string.shell_check_root),
                     ok = state.rootAvailable,
-                    detail = if (state.rootAvailable) "Magisk / KernelSU / APatch granted" else "Root privileges required for chroot",
+                    detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
                 )
                 StatusCheckRow(
-                    label = "Ubuntu 24.04 Rootfs & Agent Toolchains",
+                    label = stringResource(R.string.shell_check_rootfs),
                     ok = state.runtimeInstalled,
-                    detail = if (state.runtimeInstalled) "Installed & ready" else snap.message,
+                    detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
                 )
             }
         }
@@ -16800,7 +17965,7 @@ private fun RuntimeOnboardingScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Select Development Stacks to Provision",
+                    text = stringResource(R.string.shell_select_development_stacks_to),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -16810,7 +17975,7 @@ private fun RuntimeOnboardingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isInstalling) { onToggleStack(stack) }
+                            .clickable(enabled = !isInstalling, role = Role.Button) { onToggleStack(stack) }
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -16875,11 +18040,11 @@ private fun RuntimeOnboardingScreen(
                 enabled = state.arm64Supported && !isInstalling,
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (snap.status == RuntimeSetupStatus.CANCELLED) "Resume Setup" else "Install Chroot Runtime")
+                Text(stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime))
             }
             if (isInstalling) {
                 OutlinedButton(onClick = onPauseSetup) {
-                    Text("Pause")
+                    Text(stringResource(R.string.launch_pause))
                 }
             }
         }
@@ -16892,13 +18057,13 @@ private fun RuntimeOnboardingScreen(
                 onClick = onRepairRootfs,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Repair Mounts / dpkg")
+                Text(stringResource(R.string.shell_repair_mounts_dpkg))
             }
             OutlinedButton(
                 onClick = onRefreshStatus,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Re-check Root")
+                Text(stringResource(R.string.shell_re_check_root))
             }
         }
 
@@ -16906,7 +18071,7 @@ private fun RuntimeOnboardingScreen(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) {
-            Text("Continue to IDE Workspace (Host Fallback Mode)")
+            Text(stringResource(R.string.shell_continue_to_ide_workspace))
         }
     }
 }
@@ -16952,22 +18117,22 @@ private fun NewProjectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create Workspace Project") },
+        title = { Text(stringResource(R.string.shell_create_workspace_project)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Project Name") },
-                    placeholder = { Text("My Awesome App") },
+                    label = { Text(stringResource(R.string.shell_project_name)) },
+                    placeholder = { Text(stringResource(R.string.shell_my_awesome_app)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
-                    placeholder = { Text("Optional project summary") },
+                    label = { Text(stringResource(R.string.shell_description)) },
+                    placeholder = { Text(stringResource(R.string.shell_optional_project_summary)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -16980,7 +18145,7 @@ private fun NewProjectDialog(
                         onCheckedChange = { isAndroid = it },
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Generate Android App Template (SDK 35)")
+                    Text(stringResource(R.string.shell_generate_android_app_template))
                 }
                 if (isAndroid) {
                     Row(
@@ -17002,12 +18167,12 @@ private fun NewProjectDialog(
             Button(
                 onClick = { onCreate(name, description, isAndroid, template) },
             ) {
-                Text("Create")
+                Text(stringResource(R.string.files_create))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.agent_cancel))
             }
         },
     )
@@ -17016,7 +18181,7 @@ private fun NewProjectDialog(
 
 ---
 
-## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (726 baris)
+## 2. `app/src/main/java/com/nextcraft/forge/ui/AgentScreen.kt` (791 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17102,6 +18267,13 @@ import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.runtime.AntigravityAuthState
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 
 @Composable
 fun AgentScreen(
@@ -17128,9 +18300,21 @@ fun AgentScreen(
         }
     }
 
+    var previousMessageCount by remember { mutableStateOf(state.messages.size) }
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+            val lastIdx = state.messages.lastIndex
+            if (state.messages.size != previousMessageCount) {
+                previousMessageCount = state.messages.size
+                listState.animateScrollToItem(lastIdx)
+            } else {
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                if (lastVisible >= lastIdx - 1) {
+                    listState.scrollToItem(lastIdx)
+                }
+            }
+        } else {
+            previousMessageCount = 0
         }
     }
 
@@ -17140,6 +18324,7 @@ fun AgentScreen(
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
+            onClearChat = viewModel::clearActiveChat,
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -17185,7 +18370,7 @@ fun AgentScreen(
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                 modifier = Modifier.height(28.dp),
                             ) {
-                                Text("Stop", fontSize = 11.sp)
+                                Text(stringResource(R.string.agent_stop), fontSize = 11.sp)
                             }
                         }
                     }
@@ -17232,54 +18417,95 @@ fun AgentScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        // Linear-style composer: one rounded surface with the input, a provider chip and a round send/stop button.
+        val running = state.sessionRunning
+        val canSend = promptInput.isNotBlank()
         Surface(
-            color = tokens.topBarContainerColor,
+            shape = RoundedCornerShape(20.dp),
+            color = tokens.cardContainerColor,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
+            Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                TextField(
                     value = promptInput,
                     onValueChange = { promptInput = it },
                     placeholder = {
                         Text(
-                            "Ask ${state.agentKind.displayTitle()} to build, refactor, or fix…",
+                            stringResource(R.string.agent_ask_to_build_refactor, state.agentKind.displayTitle()),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 5,
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                if (state.sessionRunning) {
-                    Button(
-                        onClick = viewModel::stopActiveTask,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
-                        ),
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Stop")
-                    }
-                } else {
-                    Button(
-                        onClick = {
-                            val text = promptInput.trim()
-                            if (text.isNotEmpty()) {
-                                promptInput = ""
-                                viewModel.sendPrompt(text)
-                            }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 10.dp, end = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // The provider and model are configured in Settings, so the chip is the shortcut there.
+                    AssistChip(
+                        onClick = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                        label = {
+                            Text(
+                                state.agentKind.displayTitle(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         },
-                        enabled = promptInput.isNotBlank(),
+                        shape = RoundedCornerShape(100),
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    running -> MaterialTheme.colorScheme.error
+                                    canSend -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                                },
+                            )
+                            .clickable(
+                                enabled = running || canSend,
+                                role = Role.Button,
+                                onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                            ) {
+                                if (running) {
+                                    viewModel.stopActiveTask()
+                                } else {
+                                    val text = promptInput.trim()
+                                    if (text.isNotEmpty()) {
+                                        promptInput = ""
+                                        viewModel.sendPrompt(text)
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "Send")
+                        Icon(
+                            imageVector = if (running) Icons.Default.Close else Icons.Default.Send,
+                            contentDescription = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                            tint = when {
+                                running -> MaterialTheme.colorScheme.onError
+                                canSend -> MaterialTheme.colorScheme.onPrimary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
             }
@@ -17293,6 +18519,7 @@ private fun ChatTabsRow(
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
+    onClearChat: () -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     Surface(
@@ -17325,10 +18552,12 @@ private fun ChatTabsRow(
                             {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Delete chat",
+                                    contentDescription = stringResource(R.string.agent_delete_chat),
                                     modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable { onDeleteChat(chat.id) },
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .clickable(role = Role.Button) { onDeleteChat(chat.id) }
+                                        .padding(9.dp),
                                 )
                             }
                         } else {
@@ -17338,7 +18567,7 @@ private fun ChatTabsRow(
                 }
                 AssistChip(
                     onClick = onCreateChat,
-                    label = { Text("New Chat") },
+                    label = { Text(stringResource(R.string.agent_new_chat)) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Add,
@@ -17347,6 +18576,12 @@ private fun ChatTabsRow(
                         )
                     },
                 )
+                if (state.messages.isNotEmpty() && !state.sessionRunning) {
+                    AssistChip(
+                        onClick = onClearChat,
+                        label = { Text(stringResource(R.string.agent_clear_chat)) },
+                    )
+                }
             }
             Divider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -17383,7 +18618,7 @@ private fun AntigravityOAuthBanner(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Antigravity CLI Google Account Sign-In",
+                    text = stringResource(R.string.agent_antigravity_cli_google_account),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                 )
@@ -17404,14 +18639,14 @@ private fun AntigravityOAuthBanner(
                             }
                         },
                     ) {
-                        Text("Open Google Sign-In")
+                        Text(stringResource(R.string.agent_open_google_sign_in))
                     }
                     OutlinedButton(
                         onClick = { clipboard.setText(AnnotatedString(url)) },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy Link")
+                        Text(stringResource(R.string.agent_copy_link))
                     }
                 }
                 Row(
@@ -17422,7 +18657,7 @@ private fun AntigravityOAuthBanner(
                     OutlinedTextField(
                         value = verificationCode,
                         onValueChange = { verificationCode = it },
-                        label = { Text("Paste Google Verification Code") },
+                        label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
@@ -17434,7 +18669,7 @@ private fun AntigravityOAuthBanner(
                             }
                         },
                     ) {
-                        Text("Verify")
+                        Text(stringResource(R.string.agent_verify))
                     }
                 }
             }
@@ -17442,14 +18677,14 @@ private fun AntigravityOAuthBanner(
                 authState.status == AntigravityAuthStatus.ERROR
             ) {
                 Button(onClick = onStartLogin) {
-                    Text("Sign In with Google (Official PTY OAuth)")
+                    Text(stringResource(R.string.agent_sign_in_with_google))
                 }
             } else if (authState.status == AntigravityAuthStatus.STARTING ||
                 authState.status == AntigravityAuthStatus.COMPLETING
             ) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 OutlinedButton(onClick = onCancel) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.agent_cancel))
                 }
             }
         }
@@ -17487,7 +18722,7 @@ private fun ToolApprovalCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "High-Risk Tool Approval: ${request.toolName} (${request.risk.name})",
+                    text = stringResource(R.string.agent_high_risk_tool_approval, request.toolName, request.risk.name),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     fontWeight = FontWeight.Bold,
@@ -17525,7 +18760,7 @@ private fun ToolApprovalCard(
                 ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Deny")
+                    Text(stringResource(R.string.agent_deny))
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
@@ -17537,7 +18772,7 @@ private fun ToolApprovalCard(
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Approve Execution")
+                    Text(stringResource(R.string.agent_approve_execution))
                 }
             }
         }
@@ -17607,28 +18842,9 @@ private fun ChatMessageCard(
     var expandTools by remember { mutableStateOf(false) }
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val bgColor = if (message.fromUser) {
-        scheme.primaryContainer
-    } else {
-        tokens.cardContainerColor
-    }
-    val textColor = if (message.fromUser) {
-        scheme.onPrimaryContainer
-    } else {
-        scheme.onSurface
-    }
-    val border = if (message.fromUser) {
-        BorderStroke(1.dp, scheme.primary.copy(alpha = 0.35f))
-    } else {
-        tokens.cardBorderStroke
-    }
+    val textColor = scheme.onSurface
 
-    ForgeThemedCard(
-        modifier = Modifier.fillMaxWidth(),
-        containerColor = bgColor,
-        contentColor = textColor,
-        border = border,
-    ) {
+    MessageContainer(fromUser = message.fromUser, contentColor = textColor) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -17642,22 +18858,21 @@ private fun ChatMessageCard(
                     text = if (message.fromUser) "You" else agentName,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (message.fromUser) {
-                        scheme.onPrimaryContainer
-                    } else {
-                        tokens.accentText
-                    },
+                    color = if (message.fromUser) scheme.onSurfaceVariant else tokens.accentText,
                 )
                 if (message.workItems.isNotEmpty()) {
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable { expandTools = !expandTools }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .clickable(
+                                role = Role.Button,
+                                onClickLabel = stringResource(if (expandTools) R.string.a11y_collapse else R.string.a11y_expand),
+                            ) { expandTools = !expandTools }
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "${message.workItems.size} tool steps",
+                            text = stringResource(R.string.agent_tool_steps, message.workItems.size),
                             style = MaterialTheme.typography.labelSmall,
                             color = textColor,
                         )
@@ -17687,7 +18902,7 @@ private fun ChatMessageCard(
                 )
             } else if (!message.fromUser) {
                 Text(
-                    text = "Thinking…",
+                    text = stringResource(R.string.agent_thinking),
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
                 )
@@ -17696,17 +18911,35 @@ private fun ChatMessageCard(
     }
 }
 
+/** User messages sit in a soft rounded surface; agent replies flow on the canvas without a card. */
+@Composable
+private fun MessageContainer(
+    fromUser: Boolean,
+    contentColor: Color,
+    content: @Composable () -> Unit,
+) {
+    if (fromUser) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = LocalForgeThemeTokens.current.cardElevatedColor,
+            contentColor = contentColor,
+            modifier = Modifier.fillMaxWidth(),
+        ) { content() }
+    } else {
+        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
+    }
+}
+
 @Composable
 private fun ToolActivityList(items: List<ActivityItem>) {
     val tokens = LocalForgeThemeTokens.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(12.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(tokens.cardElevatedColor)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-            .padding(8.dp),
+            .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items.forEach { item ->
@@ -17714,13 +18947,10 @@ private fun ToolActivityList(items: List<ActivityItem>) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,
             ) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = if (item.isComplete) tokens.successText else tokens.warningText,
-                    modifier = Modifier
-                        .size(15.dp)
-                        .padding(top = 2.dp),
+                ForgeStatusIcon(
+                    status = if (item.isComplete) ForgeStatus.DONE else ForgeStatus.RUNNING,
+                    iconSize = 15.dp,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -17749,7 +18979,7 @@ private fun ToolActivityList(items: List<ActivityItem>) {
 
 ---
 
-## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (535 baris)
+## 3. `app/src/main/java/com/nextcraft/forge/ui/FilesAndDiffScreen.kt` (596 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -17814,66 +19044,65 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.DiffLineType
 import com.nextcraft.forge.model.WorkspaceEntry
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun FilesAndDiffScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
 ) {
-    var mode by rememberSaveable { mutableStateOf("files") } // "files" | "editor" | "diff"
+    var mode by rememberSaveable { mutableStateOf(if (state.selectedFilePath != null) "editor" else "files") } // "files" | "editor" | "diff"
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
-    val tokens = LocalForgeThemeTokens.current
+    var pendingDeletePath by rememberSaveable { mutableStateOf<String?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(state.selectedFilePath) {
+        if (state.selectedFilePath != null) {
+            mode = "editor"
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = mode == "files",
-                    onClick = { mode = "files" },
-                    label = { Text("Explorer (${state.workspaceFiles.size})") },
-                    leadingIcon = { Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            ForgeLargeTitle(
+                title = stringResource(R.string.files_files),
+                subtitle = state.activeProject?.name,
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Add,
+                    description = stringResource(R.string.files_new_file),
+                    enabled = !state.sessionRunning,
+                    onClick = { showNewFileDialog = true },
                 )
-                FilterChip(
-                    selected = mode == "editor",
-                    onClick = { mode = "editor" },
-                    label = {
-                        Text(
-                            text = state.selectedFilePath?.substringAfterLast('/') ?: "Editor",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                )
-                FilterChip(
-                    selected = mode == "diff",
-                    onClick = { mode = "diff" },
-                    label = { Text("Changes (${state.changedItems.size})") },
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { showNewFileDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "New File")
-                }
-                IconButton(
+                ForgePillIcon(
+                    icon = Icons.Default.Refresh,
+                    description = stringResource(R.string.files_refresh),
                     onClick = {
                         state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) }
                     },
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                }
+                )
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        val modes = listOf("files", "editor", "diff")
+        ForgePillTabs(
+            items = listOf(
+                stringResource(R.string.files_tab_explorer, state.workspaceFiles.size),
+                state.selectedFilePath?.substringAfterLast('/') ?: stringResource(R.string.files_tab_editor),
+                stringResource(R.string.files_tab_changes, state.changedItems.size),
+            ),
+            selectedIndex = modes.indexOf(mode).coerceAtLeast(0),
+            onSelect = { mode = modes[it] },
+        )
 
         when (mode) {
             "files" -> WorkspaceTreeList(
@@ -17888,14 +19117,19 @@ fun FilesAndDiffScreen(
             "editor" -> WorkspaceFileEditor(
                 selectedPath = state.selectedFilePath,
                 content = state.selectedFileContent,
+                editable = state.selectedFileEditable,
+                dirty = state.selectedFileDirty,
+                sessionRunning = state.sessionRunning,
                 savedBanner = state.fileSavedBanner,
                 onContentChange = viewModel::updateSelectedFileContent,
                 onSave = viewModel::saveSelectedFile,
+                onRequestDelete = { path -> pendingDeletePath = path },
                 onBackToExplorer = { mode = "files" },
                 modifier = Modifier.weight(1f),
             )
             else -> WorkspaceDiffReviewList(
                 changes = state.changedItems,
+                sessionRunning = state.sessionRunning,
                 onOpenFile = { path ->
                     viewModel.openWorkspaceFile(path)
                     mode = "editor"
@@ -17919,6 +19153,30 @@ fun FilesAndDiffScreen(
             },
         )
     }
+
+    pendingDeletePath?.let { targetPath ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletePath = null },
+            title = { Text(stringResource(R.string.files_delete_file_confirm_title)) },
+            text = { Text(stringResource(R.string.files_delete_file_confirm_message, targetPath)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteWorkspaceFile(targetPath)
+                        pendingDeletePath = null
+                        mode = "files"
+                    },
+                ) {
+                    Text(stringResource(R.string.shell_confirm_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletePath = null }) {
+                    Text(stringResource(R.string.agent_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -17934,7 +19192,7 @@ private fun WorkspaceTreeList(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "Workspace is empty. Use + to create a file or ask the Agent to scaffold code.",
+                text = stringResource(R.string.files_workspace_is_empty_use),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
@@ -17946,29 +19204,25 @@ private fun WorkspaceTreeList(
     val scheme = MaterialTheme.colorScheme
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         items(entries, key = { it.path }) { entry ->
             val isSelected = entry.path == selectedPath
-            val primaryTextColor = if (isSelected) scheme.onPrimaryContainer else scheme.onSurface
-            val secondaryTextColor = if (isSelected) {
-                scheme.onPrimaryContainer.copy(alpha = 0.78f)
-            } else {
-                scheme.onSurfaceVariant
-            }
+            val primaryTextColor = scheme.onSurface
+            val secondaryTextColor = scheme.onSurfaceVariant
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         if (isSelected) {
-                            scheme.primaryContainer
+                            scheme.onSurface.copy(alpha = 0.08f)
                         } else {
                             Color.Transparent
                         },
                     )
-                    .clickable(enabled = !entry.isDirectory) { onSelectFile(entry.path) }
+                    .clickable(enabled = !entry.isDirectory, role = Role.Button) { onSelectFile(entry.path) }
                     .padding(
                         start = (12 + entry.depth * 14).dp,
                         end = 12.dp,
@@ -17977,10 +19231,17 @@ private fun WorkspaceTreeList(
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = if (entry.isDirectory) "📁" else "📄",
-                    fontSize = 14.sp,
-                )
+                // Folders get a chevron; files align under it with a blank slot (tree look, no emoji).
+                if (entry.isDirectory) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = secondaryTextColor,
+                        modifier = Modifier.size(18.dp),
+                    )
+                } else {
+                    Spacer(modifier = Modifier.width(18.dp))
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -18002,7 +19263,7 @@ private fun WorkspaceTreeList(
                 }
                 if (!entry.isDirectory) {
                     Text(
-                        text = "${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB",
+                        text = stringResource(R.string.files_kb, (entry.sizeBytes / 1024L).coerceAtLeast(1L)),
                         style = MaterialTheme.typography.labelSmall,
                         color = secondaryTextColor,
                     )
@@ -18016,9 +19277,13 @@ private fun WorkspaceTreeList(
 private fun WorkspaceFileEditor(
     selectedPath: String?,
     content: String,
+    editable: Boolean,
+    dirty: Boolean,
+    sessionRunning: Boolean,
     savedBanner: String?,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onRequestDelete: (String) -> Unit,
     onBackToExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -18030,13 +19295,13 @@ private fun WorkspaceFileEditor(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "Select a file from Explorer to view or edit.",
+                    text = stringResource(R.string.files_select_a_file_from),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(onClick = onBackToExplorer) {
-                    Text("Open File Explorer")
+                    Text(stringResource(R.string.files_open_file_explorer))
                 }
             }
         }
@@ -18054,7 +19319,7 @@ private fun WorkspaceFileEditor(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selectedPath,
+                text = if (dirty) "$selectedPath *" else selectedPath,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontFamily = FontFamily.Monospace,
@@ -18063,6 +19328,15 @@ private fun WorkspaceFileEditor(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (!editable) {
+                Text(
+                    text = stringResource(R.string.files_read_only_badge),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tokens.warningText,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             savedBanner?.let { msg ->
                 Text(
                     text = msg,
@@ -18072,16 +19346,31 @@ private fun WorkspaceFileEditor(
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }
-            Button(onClick = onSave) {
+            IconButton(
+                onClick = { onRequestDelete(selectedPath) },
+                enabled = !sessionRunning,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.files_delete_file),
+                    tint = tokens.dangerText,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Button(
+                onClick = onSave,
+                enabled = editable && dirty && !sessionRunning,
+            ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Save")
+                Text(stringResource(R.string.files_save))
             }
         }
 
         OutlinedTextField(
             value = content,
-            onValueChange = onContentChange,
+            onValueChange = { if (editable) onContentChange(it) },
+            readOnly = !editable,
             textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
@@ -18093,6 +19382,7 @@ private fun WorkspaceFileEditor(
 @Composable
 private fun WorkspaceDiffReviewList(
     changes: List<ChangeItem>,
+    sessionRunning: Boolean,
     onOpenFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
     onRevertAll: () -> Unit,
@@ -18107,7 +19397,7 @@ private fun WorkspaceDiffReviewList(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "No unreviewed checkpoint changes in this workspace.",
+                text = stringResource(R.string.files_no_unreviewed_checkpoint_changes),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -18124,30 +19414,30 @@ private fun WorkspaceDiffReviewList(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = "${changes.size} modified file(s) since last checkpoint",
+                text = stringResource(R.string.files_modified_file_s_since, changes.size),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onKeepAll) { Text("Keep All") }
-                OutlinedButton(onClick = onRevertAll) {
+                Button(onClick = onKeepAll, enabled = !sessionRunning) { Text(stringResource(R.string.files_keep_all)) }
+                OutlinedButton(onClick = onRevertAll, enabled = !sessionRunning) {
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Undo All")
+                    Text(stringResource(R.string.files_undo_all))
                 }
             }
         }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(changes, key = { it.path }) { item ->
-                ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier.padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Row(
@@ -18161,7 +19451,7 @@ private fun WorkspaceDiffReviewList(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable { onOpenFile(item.path) },
+                                    .clickable(role = Role.Button) { onOpenFile(item.path) },
                             )
                             Text(
                                 text = "+${item.additions}",
@@ -18181,35 +19471,36 @@ private fun WorkspaceDiffReviewList(
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
-                                modifier = Modifier.size(28.dp),
+                                enabled = !sessionRunning,
+                                modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
-                                    contentDescription = "Keep file",
+                                    contentDescription = stringResource(R.string.files_keep_file),
                                     tint = tokens.successText,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
-                                modifier = Modifier.size(28.dp),
+                                enabled = !sessionRunning,
+                                modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Revert file",
+                                    contentDescription = stringResource(R.string.files_revert_file),
                                     tint = tokens.dangerText,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
                         }
 
-                        val diffShape = RoundedCornerShape(8.dp)
+                        val diffShape = RoundedCornerShape(12.dp)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(diffShape)
                                 .background(tokens.terminalBackground)
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, diffShape)
                                 .horizontalScroll(rememberScrollState())
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -18261,12 +19552,12 @@ private fun NewWorkspaceFileDialog(
     var path by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create New File") },
+        title = { Text(stringResource(R.string.files_create_new_file)) },
         text = {
             OutlinedTextField(
                 value = path,
                 onValueChange = { path = it },
-                label = { Text("Relative File Path") },
+                label = { Text(stringResource(R.string.files_relative_file_path)) },
                 placeholder = { Text("src/main.py or index.html") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -18277,12 +19568,12 @@ private fun NewWorkspaceFileDialog(
                 onClick = { if (path.isNotBlank()) onCreate(path.trim()) },
                 enabled = path.isNotBlank(),
             ) {
-                Text("Create")
+                Text(stringResource(R.string.files_create))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.agent_cancel))
             }
         },
     )
@@ -18291,7 +19582,7 @@ private fun NewWorkspaceFileDialog(
 
 ---
 
-## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (199 baris)
+## 4. `app/src/main/java/com/nextcraft/forge/ui/TerminalScreen.kt` (241 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -18343,6 +19634,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
 
 @Composable
 fun TerminalScreen(
@@ -18353,6 +19655,7 @@ fun TerminalScreen(
     val scrollState = rememberScrollState()
     val clipboard = LocalClipboardManager.current
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
 
     val quickCommands = listOf(
         "uname -a",
@@ -18368,72 +19671,64 @@ fun TerminalScreen(
         scrollState.animateScrollTo(scrollState.maxValue)
     }
 
+    fun runCommand() {
+        val cmd = commandInput.trim()
+        if (cmd.isNotEmpty() && !state.terminalRunning) {
+            commandInput = ""
+            viewModel.runTerminalCommand(cmd)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Root Chroot Shell (`su -mm` • /workspace/${state.activeProject?.slug ?: "sandbox"})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(
-                        onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = "Copy terminal output", modifier = Modifier.size(18.dp))
-                    }
-                    if (state.terminalRunning) {
-                        IconButton(onClick = viewModel::stopTerminal) {
-                            Icon(Icons.Default.Close, contentDescription = "Stop command", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    IconButton(onClick = viewModel::clearTerminal) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear terminal", modifier = Modifier.size(18.dp))
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    quickCommands.forEach { cmd ->
-                        AssistChip(
-                            onClick = { viewModel.runTerminalCommand(cmd) },
-                            enabled = !state.terminalRunning,
-                            label = {
-                                Text(
-                                    text = cmd,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                )
-                            },
-                        )
-                    }
-                }
+            ForgeLargeTitle(
+                title = stringResource(R.string.shell_terminal),
+                subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"}",
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Share,
+                    description = stringResource(R.string.terminal_copy_terminal_output),
+                    onClick = { clipboard.setText(AnnotatedString(state.terminalOutput)) },
+                )
                 if (state.terminalRunning) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    ForgePillIcon(
+                        icon = Icons.Default.Close,
+                        description = stringResource(R.string.terminal_stop_command),
+                        onClick = viewModel::stopTerminal,
+                        tint = scheme.error,
+                    )
+                } else {
+                    ForgePillIcon(
+                        icon = Icons.Default.Delete,
+                        description = stringResource(R.string.terminal_clear_terminal),
+                        onClick = viewModel::clearTerminal,
+                    )
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (state.terminalRunning) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(3.dp),
+            )
+        }
 
+        // Output: the deepest surface of the theme, rounded like every other panel.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(14.dp))
                 .background(tokens.terminalBackground)
                 .verticalScroll(scrollState)
                 .padding(12.dp),
@@ -18449,45 +19744,83 @@ fun TerminalScreen(
             }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            quickCommands.forEach { cmd ->
+                AssistChip(
+                    onClick = { viewModel.runTerminalCommand(cmd) },
+                    enabled = !state.terminalRunning,
+                    shape = RoundedCornerShape(100),
+                    label = {
+                        Text(
+                            text = cmd,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                        )
+                    },
+                )
+            }
+        }
+
+        // Command line: one rounded surface, prompt glyph, round run button.
         Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = tokens.cardContainerColor,
+            contentColor = scheme.onSurface,
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                Text(
+                    text = "$",
+                    fontFamily = FontFamily.Monospace,
+                    color = scheme.onSurfaceVariant,
+                )
+                TextField(
                     value = commandInput,
                     onValueChange = { commandInput = it },
                     placeholder = {
                         Text(
-                            text = "Run command in Ubuntu Root Chroot…",
+                            text = stringResource(R.string.terminal_run_command_in_the),
                             fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
                         )
                     },
-                    textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+                    textStyle = ForgeCodeTextStyle.copy(color = scheme.onSurface),
                     singleLine = true,
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        val cmd = commandInput.trim()
-                        if (cmd.isNotEmpty()) {
-                            commandInput = ""
-                            viewModel.runTerminalCommand(cmd)
-                        }
-                    },
-                    enabled = commandInput.isNotBlank() && !state.terminalRunning,
+                val canRun = commandInput.isNotBlank() && !state.terminalRunning
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (canRun) scheme.primary else scheme.onSurface.copy(alpha = 0.10f))
+                        .clickable(enabled = canRun, role = Role.Button, onClickLabel = stringResource(R.string.terminal_run)) { runCommand() },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Execute")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Run")
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.terminal_run),
+                        tint = if (canRun) scheme.onPrimary else scheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
         }
@@ -18497,7 +19830,7 @@ fun TerminalScreen(
 
 ---
 
-## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (519 baris)
+## 5. `app/src/main/java/com/nextcraft/forge/ui/AndroidAndPreviewScreen.kt` (731 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -18564,164 +19897,264 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.nextcraft.forge.runtime.AndroidBuildIssue
 import com.nextcraft.forge.runtime.AndroidBuildPhase
 import com.nextcraft.forge.runtime.AndroidLogLevel
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.LaunchedEffect
+import com.nextcraft.forge.runtime.AndroidBuildStage
+import com.nextcraft.forge.runtime.AndroidIssueSeverity
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
 
+private data class StageRow(@StringRes val title: Int, val stages: List<AndroidBuildStage>)
+
+private val stageRows = listOf(
+    StageRow(R.string.launch_stage_prepare, listOf(AndroidBuildStage.PREPARING)),
+    StageRow(R.string.launch_stage_resolve, listOf(AndroidBuildStage.RESOLVING)),
+    StageRow(R.string.launch_stage_compile, listOf(AndroidBuildStage.COMPILING)),
+    StageRow(R.string.launch_stage_resources, listOf(AndroidBuildStage.RESOURCES)),
+    StageRow(R.string.launch_stage_package, listOf(AndroidBuildStage.PACKAGING, AndroidBuildStage.FINDING_APK)),
+    StageRow(R.string.launch_stage_install, listOf(AndroidBuildStage.INSTALLING, AndroidBuildStage.LAUNCHING)),
+)
+
+private fun stageRowIndex(stage: AndroidBuildStage): Int = stageRows.indexOfFirst { stage in it.stages }
+
+/** Status of stage row [row] given the last stage the build reached ([lastRow]) and the overall [phase]. */
+private fun stageRowStatus(row: Int, lastRow: Int, phase: AndroidBuildPhase): ForgeStatus {
+    if (phase == AndroidBuildPhase.IDLE || lastRow < 0) return ForgeStatus.TODO
+    return when {
+        row < lastRow -> ForgeStatus.DONE
+        row == lastRow -> when (phase) {
+            AndroidBuildPhase.SUCCEEDED -> ForgeStatus.DONE
+            AndroidBuildPhase.FAILED -> ForgeStatus.FAILED
+            AndroidBuildPhase.CANCELLED -> ForgeStatus.SKIPPED
+            else -> ForgeStatus.RUNNING
+        }
+        // Rows after the last reached one: skipped on success (e.g. no install), still waiting otherwise.
+        else -> if (phase == AndroidBuildPhase.SUCCEEDED) ForgeStatus.SKIPPED else ForgeStatus.TODO
+    }
+}
+
+@StringRes
+private fun AndroidBuildPhase.headline(): Int = when (this) {
+    AndroidBuildPhase.IDLE -> R.string.launch_state_idle
+    AndroidBuildPhase.PREPARING -> R.string.launch_state_preparing
+    AndroidBuildPhase.BUILDING -> R.string.launch_state_building
+    AndroidBuildPhase.CANCELLING -> R.string.launch_state_cancelling
+    AndroidBuildPhase.SUCCEEDED -> R.string.launch_state_succeeded
+    AndroidBuildPhase.FAILED -> R.string.launch_state_failed
+    AndroidBuildPhase.CANCELLED -> R.string.launch_state_cancelled
+}
+
+private fun AndroidBuildPhase.overallStatus(): ForgeStatus = when (this) {
+    AndroidBuildPhase.IDLE -> ForgeStatus.TODO
+    AndroidBuildPhase.PREPARING, AndroidBuildPhase.BUILDING, AndroidBuildPhase.CANCELLING -> ForgeStatus.RUNNING
+    AndroidBuildPhase.SUCCEEDED -> ForgeStatus.DONE
+    AndroidBuildPhase.FAILED -> ForgeStatus.FAILED
+    AndroidBuildPhase.CANCELLED -> ForgeStatus.SKIPPED
+}
+
+/**
+ * Launch screen, Linear style: title + action pill, one status block, then tabs
+ * (Stages / Issues / Log / Logcat). A failed build jumps to Issues so the fix is one tap away.
+ */
 @Composable
 fun AndroidBuildScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
 ) {
     val build = state.androidBuild
-    val isBuilding = build.phase == AndroidBuildPhase.BUILDING
-    var activeConsoleTab by rememberSaveable { mutableStateOf("gradle") } // "gradle" | "issues" | "logcat"
+    val busy = build.phase == AndroidBuildPhase.PREPARING ||
+        build.phase == AndroidBuildPhase.BUILDING ||
+        build.phase == AndroidBuildPhase.CANCELLING
+    val canStop = build.phase == AndroidBuildPhase.PREPARING || build.phase == AndroidBuildPhase.BUILDING
     val tokens = LocalForgeThemeTokens.current
+    var activeTab by rememberSaveable { mutableStateOf(0) } // 0 stages, 1 issues, 2 log, 3 logcat
+    var menuOpen by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Android APK Builder (SDK 35 • Bionic aapt2)",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = build.message ?: build.stage.displayLabel(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    val (badgeBg, badgeFg) = when (build.phase) {
-                        AndroidBuildPhase.SUCCEEDED -> tokens.diffAddedBackground to tokens.successText
-                        AndroidBuildPhase.FAILED -> tokens.diffRemovedBackground to tokens.dangerText
-                        AndroidBuildPhase.BUILDING -> tokens.inlineCodeBackground to tokens.accentText
-                        else -> tokens.cardElevatedColor to MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    Surface(
-                        color = badgeBg,
-                        contentColor = badgeFg,
-                        shape = RoundedCornerShape(6.dp),
-                    ) {
-                        Text(
-                            text = build.phase.displayBadge(),
-                            color = badgeFg,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                }
+    // Stage events carry only the active stage, so remember the last real one to place success/failure.
+    var lastRow by remember { mutableStateOf(-1) }
+    LaunchedEffect(build.stage, build.phase) {
+        val index = stageRowIndex(build.stage)
+        if (build.phase == AndroidBuildPhase.IDLE) lastRow = -1 else if (index >= 0) lastRow = index
+    }
+    LaunchedEffect(build.phase) {
+        if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) activeTab = 1
+    }
 
-                if (isBuilding) {
-                    LinearProgressIndicator(
-                        progress = build.stage.progressFraction(),
-                        modifier = Modifier.fillMaxWidth(),
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ForgeLargeTitle(
+                title = stringResource(R.string.launch_launch),
+                subtitle = state.activeProject?.name,
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                if (canStop) {
+                    ForgePillIcon(
+                        icon = Icons.Default.Close,
+                        description = stringResource(R.string.launch_cancel_build),
+                        onClick = viewModel::stopActiveTask,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    ForgePillIcon(
+                        icon = Icons.Default.PlayArrow,
+                        description = stringResource(R.string.launch_build_and_install_apk),
+                        enabled = !busy,
+                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
                     )
                 }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
-                        enabled = !isBuilding,
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Build & Install APK")
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = false) },
-                        enabled = !isBuilding,
-                    ) {
-                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Assemble Debug")
-                    }
-                    if (build.apkPath != null && !isBuilding) {
-                        OutlinedButton(onClick = { viewModel.installBuiltApk() }) {
-                            Text("Install Last APK")
+                Box {
+                    ForgePillIcon(
+                        icon = Icons.Default.MoreVert,
+                        description = stringResource(R.string.launch_more_build_actions),
+                        onClick = { menuOpen = true },
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.launch_assemble_debug_no_install)) },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.runAndroidBuild("assembleDebug", installAfterBuild = false)
+                            },
+                        )
+                        if (build.apkPath != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.launch_install_last_apk)) },
+                                enabled = !busy,
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.installBuiltApk()
+                                },
+                            )
                         }
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.runAndroidBuild("clean", installAfterBuild = false) },
-                        enabled = !isBuilding,
-                    ) {
-                        Text("Clean")
-                    }
-                    if (isBuilding) {
-                        OutlinedButton(onClick = viewModel::stopActiveTask) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Cancel")
-                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.launch_clean)) },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.runAndroidBuild("clean", installAfterBuild = false)
+                            },
+                        )
                     }
                 }
             }
         }
 
+        // Status block
+        val errorCount = build.issues.count { it.severity == AndroidIssueSeverity.ERROR }
+        val warningCount = build.issues.count { it.severity == AndroidIssueSeverity.WARNING }
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilterChip(
-                selected = activeConsoleTab == "gradle",
-                onClick = { activeConsoleTab = "gradle" },
-                label = { Text("Gradle Output") },
+            ForgeStatusIcon(build.phase.overallStatus(), iconSize = 22.dp)
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(build.phase.headline()), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+                        stringResource(R.string.launch_errors_warnings, errorCount, warningCount)
+                    } else {
+                        build.message ?: build.stage.displayLabel()
+                    },
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (build.phase == AndroidBuildPhase.BUILDING) {
+            LinearProgressIndicator(
+                progress = build.stage.progressFraction(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(3.dp),
             )
-            FilterChip(
-                selected = activeConsoleTab == "issues",
-                onClick = { activeConsoleTab = "issues" },
-                label = { Text("Diagnostics (${build.issues.size})") },
+        }
+        if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
+            ForgePrimaryButton(
+                text = stringResource(R.string.launch_fix_with_agent),
+                onClick = {
+                    viewModel.sendPrompt(build.issues.joinToString("\n\n") { it.formatForAgentPrompt() })
+                    viewModel.selectTab(ForgeTab.AGENT)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
             )
-            FilterChip(
-                selected = activeConsoleTab == "logcat",
-                onClick = { activeConsoleTab = "logcat" },
-                label = { Text("Live Logcat (${state.androidLogcat.lines.size})") },
+        } else if (build.phase == AndroidBuildPhase.SUCCEEDED && build.apkPath != null) {
+            ForgePrimaryButton(
+                text = stringResource(R.string.launch_install_apk),
+                onClick = viewModel::installBuiltApk,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
             )
         }
 
-        when (activeConsoleTab) {
-            "gradle" -> {
-                val consoleShape = RoundedCornerShape(10.dp)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .clip(consoleShape)
-                        .background(tokens.terminalBackground)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, consoleShape)
-                        .verticalScroll(rememberScrollState())
-                        .padding(12.dp),
-                ) {
-                    SelectionContainer {
+        ForgePillTabs(
+            items = listOf(
+                stringResource(R.string.launch_tab_stages),
+                if (build.issues.isEmpty()) {
+                    stringResource(R.string.launch_tab_issues)
+                } else {
+                    stringResource(R.string.launch_tab_issues_count, build.issues.size)
+                },
+                stringResource(R.string.launch_tab_log),
+                stringResource(R.string.launch_tab_logcat),
+            ),
+            selectedIndex = activeTab,
+            onSelect = { activeTab = it },
+        )
+
+        when (activeTab) {
+            0 -> Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                stageRows.forEachIndexed { index, row ->
+                    val status = stageRowStatus(index, lastRow, build.phase)
+                    val muted = status == ForgeStatus.TODO || status == ForgeStatus.SKIPPED
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ForgeStatusIcon(status, iconSize = 20.dp)
+                        Spacer(modifier = Modifier.width(14.dp))
                         Text(
-                            text = build.log.ifBlank { "No Gradle build output yet. Tap 'Build & Install APK' to compile." },
-                            color = tokens.terminalText,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 17.sp,
+                            text = stringResource(row.title),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
             }
 
-            "issues" -> BuildIssuesList(
+            1 -> BuildIssuesList(
                 issues = build.issues,
                 onAskAgentToFix = { issue ->
                     viewModel.sendPrompt(issue.formatForAgentPrompt())
@@ -18734,10 +20167,43 @@ fun AndroidBuildScreen(
                 modifier = Modifier.weight(1f),
             )
 
+            2 -> {
+                val consoleShape = RoundedCornerShape(12.dp)
+                val logScrollState = rememberScrollState()
+                LaunchedEffect(build.log.length) {
+                    if (busy) {
+                        logScrollState.scrollTo(logScrollState.maxValue)
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .clip(consoleShape)
+                        .background(tokens.terminalBackground)
+                        .verticalScroll(logScrollState)
+                        .padding(12.dp),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = build.log.ifBlank { stringResource(R.string.launch_no_build_output) },
+                            color = tokens.terminalText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                        )
+                    }
+                }
+            }
+
             else -> LogcatPanel(
                 state = state,
                 onStartLogcat = viewModel::startProjectLogcat,
                 onStopLogcat = viewModel::stopProjectLogcat,
+                onClearLogcat = viewModel::clearProjectLogcat,
+                onSetMinLevel = viewModel::setLogcatMinimumLevel,
+                onSetQuery = viewModel::setLogcatQuery,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -18758,7 +20224,7 @@ private fun BuildIssuesList(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "Zero compiler or AAPT2 resource issues detected.",
+                text = stringResource(R.string.launch_zero_compiler_or_aapt2),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -18817,11 +20283,11 @@ private fun BuildIssuesList(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onAskAgentToFix(issue) }) {
-                            Text("Ask Agent to Fix")
+                            Text(stringResource(R.string.launch_ask_agent_to_fix))
                         }
                         issue.filePath?.let { path ->
                             OutlinedButton(onClick = { onOpenFile(path) }) {
-                                Text("Open File")
+                                Text(stringResource(R.string.launch_open_file))
                             }
                         }
                     }
@@ -18836,18 +20302,30 @@ private fun LogcatPanel(
     state: ForgeUiState,
     onStartLogcat: () -> Unit,
     onStopLogcat: () -> Unit,
+    onClearLogcat: () -> Unit,
+    onSetMinLevel: (AndroidLogLevel) -> Unit,
+    onSetQuery: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val logcat = state.androidLogcat
     val tokens = LocalForgeThemeTokens.current
+    val filteredLines = remember(logcat.lines, logcat.minimumLevel, logcat.query) {
+        val q = logcat.query.trim()
+        logcat.lines.filter { line ->
+            line.level.ordinal >= logcat.minimumLevel.ordinal &&
+                (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+        }
+    }
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
@@ -18855,16 +20333,45 @@ private fun LogcatPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
+            if (logcat.lines.isNotEmpty()) {
+                OutlinedButton(onClick = onClearLogcat) {
+                    Text(stringResource(R.string.launch_clear_logcat))
+                }
+            }
             if (logcat.running) {
                 OutlinedButton(onClick = onStopLogcat) {
-                    Text("Pause")
+                    Text(stringResource(R.string.launch_pause))
                 }
             } else {
                 Button(onClick = onStartLogcat) {
-                    Text("Stream Logcat")
+                    Text(stringResource(R.string.launch_stream_logcat))
                 }
             }
         }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AndroidLogLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = logcat.minimumLevel == level,
+                    onClick = { onSetMinLevel(level) },
+                    label = { Text(level.name) },
+                )
+            }
+        }
+
+        OutlinedTextField(
+            value = logcat.query,
+            onValueChange = onSetQuery,
+            placeholder = { Text(stringResource(R.string.launch_filter_logcat)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         val logcatShape = RoundedCornerShape(10.dp)
         LazyColumn(
@@ -18877,7 +20384,7 @@ private fun LogcatPanel(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(logcat.lines, key = { it.id }) { line ->
+            items(filteredLines, key = { it.id }) { line ->
                 val color = when (line.level) {
                     AndroidLogLevel.FATAL, AndroidLogLevel.ERROR -> tokens.dangerText
                     AndroidLogLevel.WARNING -> tokens.warningText
@@ -18905,6 +20412,7 @@ fun WebPreviewScreen(
     var urlInput by rememberSaveable(state.previewUrl) { mutableStateOf(state.previewUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val tokens = LocalForgeThemeTokens.current
+    val colors = MaterialTheme.colorScheme
     val webViewBgArgb = tokens.terminalBackground.toArgb()
 
     androidx.compose.runtime.DisposableEffect(Unit) {
@@ -18914,87 +20422,124 @@ fun WebPreviewScreen(
         }
     }
 
+    LaunchedEffect(state.previewUrl) {
+        val target = state.previewUrl.trim()
+        if (target.isNotEmpty() && webViewRef?.url != target) {
+            webViewRef?.loadUrl(target)
+        }
+    }
+
+    fun openUrl(raw: String) {
+        val trimmed = raw.trim()
+        val normalized = when {
+            trimmed.startsWith(":") && trimmed.drop(1).all { it.isDigit() } ->
+                "http://127.0.0.1$trimmed"
+            trimmed.isNotEmpty() && trimmed.all { it.isDigit() } ->
+                "http://127.0.0.1:$trimmed"
+            trimmed.startsWith("localhost", ignoreCase = true) || trimmed.startsWith("127.0.0.1") ->
+                "http://$trimmed"
+            else -> trimmed
+        }
+        val uriScheme = android.net.Uri.parse(normalized).scheme?.lowercase()
+        if (normalized.isNotEmpty() && (uriScheme == "http" || uriScheme == "https")) {
+            urlInput = normalized
+            viewModel.updatePreviewUrl(normalized)
+            webViewRef?.loadUrl(normalized)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = tokens.topBarContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
+            ForgeLargeTitle(
+                title = stringResource(R.string.launch_preview),
+                subtitle = stringResource(R.string.launch_local_dev_server),
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Refresh,
+                    description = stringResource(R.string.launch_scan_ports_and_reload),
+                    onClick = {
+                        viewModel.scanLocalPreviewPorts()
+                        webViewRef?.reload()
+                    },
+                )
+            }
+        }
+
+        // Address bar: one rounded surface with a text-style "Open" action.
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = tokens.cardContainerColor,
+            contentColor = colors.onSurface,
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 6.dp, end = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    singleLine = true,
+                    placeholder = { Text("http://127.0.0.1:3000") },
+                    colors = TextFieldDefaults.textFieldColors(
+                        containerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = stringResource(R.string.launch_open),
+                    color = tokens.accentText,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100))
+                        .clickable(role = Role.Button) { openUrl(urlInput) }
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                )
+            }
+        }
+
+        if (state.activeLocalPorts.isNotEmpty()) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = urlInput,
-                        onValueChange = { urlInput = it },
-                        singleLine = true,
-                        label = { Text("Local Dev Server URL (Host NetNS)") },
-                        modifier = Modifier.weight(1f),
+                state.activeLocalPorts.forEach { port ->
+                    val portUrl = "http://127.0.0.1:$port"
+                    AssistChip(
+                        onClick = {
+                            urlInput = portUrl
+                            openUrl(portUrl)
+                        },
+                        shape = RoundedCornerShape(100),
+                        label = { Text(":$port", fontFamily = FontFamily.Monospace) },
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            val clean = urlInput.trim()
-                            val scheme = android.net.Uri.parse(clean).scheme?.lowercase()
-                            if (clean.isNotEmpty() && (scheme == "http" || scheme == "https")) {
-                                viewModel.updatePreviewUrl(clean)
-                                webViewRef?.loadUrl(clean)
-                            }
-                        },
-                    ) {
-                        Text("Go")
-                    }
-                    IconButton(
-                        onClick = {
-                            viewModel.scanLocalPreviewPorts()
-                            webViewRef?.reload()
-                        },
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Scan & Reload")
-                    }
-                }
-
-                if (state.activeLocalPorts.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Open Ports:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = tokens.successText,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        state.activeLocalPorts.forEach { port ->
-                            val portUrl = "http://127.0.0.1:$port"
-                            AssistChip(
-                                onClick = {
-                                    urlInput = portUrl
-                                    viewModel.updatePreviewUrl(portUrl)
-                                    webViewRef?.loadUrl(portUrl)
-                                },
-                                label = { Text(":$port", fontFamily = FontFamily.Monospace) },
-                            )
-                        }
-                    }
                 }
             }
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
         AndroidView(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(16.dp)),
             factory = { context ->
                 WebView(context).apply {
                     setBackgroundColor(webViewBgArgb)
@@ -19023,7 +20568,7 @@ fun WebPreviewScreen(
 
 ---
 
-## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (850 baris)
+## 6. `app/src/main/java/com/nextcraft/forge/ui/SettingsScreenModern.kt` (947 baris)
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
@@ -19065,7 +20610,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -19092,6 +20636,10 @@ import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun SettingsScreenModern(
@@ -19136,587 +20684,9 @@ fun SettingsScreenModern(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // 1. Coding Agent Engine
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Coding Agent Engine (Root Chroot)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                AgentKind.entries.forEach { kind ->
-                    val selected = state.agentKind == kind
-                    ForgeElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        selected = selected,
-                        onClick = { viewModel.selectAgent(kind) },
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(kind.displayTitle(), fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = kind.displaySubtitle(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (selected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                            if (selected) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = tokens.successText,
-                                )
-                            }
-                        }
-                    }
-                }
+        ForgeLargeTitle(title = stringResource(R.string.settings_settings), subtitle = stringResource(R.string.settings_preferences_configuration), horizontalPadding = 6.dp)
 
-                if (state.agentKind == AgentKind.ANTIGRAVITY) {
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(
-                        text = "Antigravity CLI Configuration",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    OutlinedTextField(
-                        value = agyModelInput,
-                        onValueChange = { agyModelInput = it },
-                        label = { Text("Antigravity Model") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        listOf("low", "medium", "high").forEach { effort ->
-                            FilterChip(
-                                selected = agyEffortInput == effort,
-                                onClick = {
-                                    agyEffortInput = effort
-                                    viewModel.setAntigravityConfig(agyModelInput, effort)
-                                },
-                                label = { Text("Effort: ${effort.uppercase()}") },
-                            )
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
-                        ) {
-                            Text("Save Antigravity Model")
-                        }
-                        val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
-                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                viewModel.antigravityAuth.hasOfficialCredential()
-                            }
-                        }
-                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
-                            OutlinedButton(
-                                onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
-                            ) {
-                                Text("Sign Out Google OAuth")
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
-                            ) {
-                                Text("Sign In with Google")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. AI Provider & Keystore Multi-Key Vault
-        val availableProviders = providersForAgent(state.agentKind)
-        if (availableProviders.isNotEmpty()) {
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        text = "Model Provider & Android Keystore Vault",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        availableProviders.forEach { kind ->
-                            FilterChip(
-                                selected = state.providerProfile.kind == kind,
-                                onClick = { viewModel.updateProviderKind(kind) },
-                                label = { Text(kind.displayTitle()) },
-                            )
-                        }
-                    }
-                    Text(
-                        text = state.providerProfile.kind.displaySubtitle(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    if (!state.providerProfile.kind.fixedBaseUrl &&
-                        state.providerProfile.kind != ProviderKind.CLAUDE
-                    ) {
-                        OutlinedTextField(
-                            value = baseUrlInput,
-                            onValueChange = { baseUrlInput = it },
-                            label = { Text("API Base URL") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = modelInput,
-                        onValueChange = { modelInput = it },
-                        label = { Text("Model Identifier") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    if (state.providerProfile.kind == ProviderKind.LLM_ROUTER) {
-                        OutlinedTextField(
-                            value = openRouterOrderInput,
-                            onValueChange = { openRouterOrderInput = it },
-                            label = { Text("OpenRouter Provider Order (comma-separated, optional)") },
-                            placeholder = { Text("anthropic,google-vertex,deepseek") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            onClick = {
-                                viewModel.updateProviderConfig(
-                                    baseUrl = baseUrlInput,
-                                    model = modelInput,
-                                    openRouterOrder = openRouterOrderInput,
-                                )
-                            },
-                        ) {
-                            Text("Save Config")
-                        }
-                        OutlinedButton(
-                            onClick = viewModel::discoverProviderModels,
-                            enabled = !state.apiBusy,
-                        ) {
-                            Text("Discover Models")
-                        }
-                        OutlinedButton(
-                            onClick = viewModel::validateProviderConnection,
-                            enabled = !state.apiBusy,
-                        ) {
-                            Text("Validate")
-                        }
-                    }
-
-                    if (state.apiBusy) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-                    state.apiStatusMessage?.let { msg ->
-                        Text(
-                            text = msg,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.accentText,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-
-                    if (state.discoveredModels.isNotEmpty()) {
-                        Text(
-                            text = "Discovered Models (tap to select):",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            state.discoveredModels.take(30).forEach { m ->
-                                AssistChip(
-                                    onClick = {
-                                        modelInput = m.id
-                                        viewModel.updateProviderConfig(
-                                            baseUrl = baseUrlInput,
-                                            model = m.id,
-                                            openRouterOrder = openRouterOrderInput,
-                                        )
-                                    },
-                                    label = { Text(m.displayName, fontFamily = FontFamily.Monospace) },
-                                )
-                            }
-                        }
-                    }
-
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(
-                        text = "API Keys for ${state.providerProfile.kind.displayTitle()} (Auto-Rotation Pool)",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    state.savedApiKeys.forEach { keyInfo ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.selectActiveApiKey(keyInfo.id) }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = if (keyInfo.isActive) Icons.Default.CheckCircle else Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = if (keyInfo.isActive) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (keyInfo.isActive) "${keyInfo.name} (Active)" else keyInfo.name,
-                                modifier = Modifier.weight(1f),
-                                fontWeight = if (keyInfo.isActive) FontWeight.Bold else FontWeight.Normal,
-                            )
-                            IconButton(onClick = { viewModel.removeApiKey(keyInfo.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete key", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OutlinedTextField(
-                            value = keyLabelInput,
-                            onValueChange = { keyLabelInput = it },
-                            label = { Text("Label") },
-                            placeholder = { Text("Primary") },
-                            singleLine = true,
-                            modifier = Modifier.weight(0.35f),
-                        )
-                        OutlinedTextField(
-                            value = keySecretInput,
-                            onValueChange = { keySecretInput = it },
-                            label = { Text("API Key / Token") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.weight(0.65f),
-                        )
-                    }
-                    Button(
-                        onClick = {
-                            if (keySecretInput.isNotBlank()) {
-                                viewModel.addApiKey(keyLabelInput, keySecretInput)
-                                keyLabelInput = ""
-                                keySecretInput = ""
-                            }
-                        },
-                        enabled = keySecretInput.isNotBlank(),
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Key to Android Keystore")
-                    }
-                }
-            }
-        }
-
-        // 3. GitHub Integration & Two-Way Repository Sync
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "GitHub Integration & Repository Sync",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                state.githubStatusMessage?.let { status ->
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = tokens.accentText,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-
-                state.githubDeviceCode?.let { dc ->
-                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                text = "One-Time Device Code: ${dc.userCode}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(
-                                    onClick = {
-                                        clipboard.setText(AnnotatedString(dc.userCode))
-                                        runCatching {
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dc.verificationUri)))
-                                        }
-                                    },
-                                ) {
-                                    Text("Copy Code & Open GitHub")
-                                }
-                                OutlinedButton(
-                                    onClick = { clipboard.setText(AnnotatedString(dc.userCode)) },
-                                ) {
-                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Copy Code")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (state.githubLogin.isBlank()) {
-                    Button(
-                        onClick = { viewModel.startGitHubDeviceSignIn() },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Sign In with GitHub (OAuth Device Flow)")
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedTextField(
-                            value = githubTokenInput,
-                            onValueChange = { githubTokenInput = it },
-                            label = { Text("Or Paste GitHub Personal Access Token") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedButton(
-                            onClick = {
-                                if (githubTokenInput.isNotBlank()) {
-                                    viewModel.connectGitHubWithToken(githubTokenInput)
-                                    githubTokenInput = ""
-                                }
-                            },
-                        ) {
-                            Text("Connect")
-                        }
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "Connected as @${state.githubLogin}",
-                            fontWeight = FontWeight.Bold,
-                            color = tokens.successText,
-                        )
-                        OutlinedButton(onClick = viewModel::disconnectGitHub) {
-                            Text("Disconnect")
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = state.autoSyncGitHub,
-                            onCheckedChange = viewModel::setAutoSyncGitHub,
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Auto-commit & push workspace after every Agent turn")
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            onClick = { viewModel.syncProjectWithGitHub() },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Push Workspace")
-                        }
-                        OutlinedButton(
-                            onClick = { viewModel.pullProjectFromGitHub() },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Pull Latest")
-                        }
-                    }
-
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(
-                        text = "Create & Push New GitHub Repository",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    OutlinedTextField(
-                        value = newRepoName,
-                        onValueChange = { newRepoName = it },
-                        label = { Text("Repository Name") },
-                        placeholder = { Text(state.activeProject?.slug ?: "my-forge-repo") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = newRepoDesc,
-                        onValueChange = { newRepoDesc = it },
-                        label = { Text("Description (optional)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(
-                            checked = newRepoPrivate,
-                            onCheckedChange = { newRepoPrivate = it },
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (newRepoPrivate) "Private Repository" else "Public Repository")
-                        Spacer(modifier = Modifier.weight(1f))
-                        Button(
-                            onClick = {
-                                val targetName = newRepoName.ifBlank { state.activeProject?.slug.orEmpty() }
-                                if (targetName.isNotBlank()) {
-                                    viewModel.createGitHubRepository(
-                                        name = targetName,
-                                        description = newRepoDesc,
-                                        isPrivate = newRepoPrivate,
-                                        pushActiveProject = true,
-                                    )
-                                    newRepoName = ""
-                                    newRepoDesc = ""
-                                }
-                            },
-                        ) {
-                            Text("Create & Push")
-                        }
-                    }
-
-                    if (state.githubRepos.isNotEmpty()) {
-                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
-                        Text(
-                            text = "Your Repositories (tap Clone to import into Workspace):",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        state.githubRepos.take(10).forEach { repo ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
-                                    if (repo.description.isNotBlank()) {
-                                        Text(
-                                            text = repo.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                                OutlinedButton(onClick = { viewModel.cloneGitHubRepository(repo) }) {
-                                    Text("Clone")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Ubuntu 24.04 Root Chroot & Dev Stacks",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                DevStack.entries.forEach { stack ->
-                    val selected = stack in state.selectedDevStacks
-                    val installed = stack in state.installedDevStacks
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = selected,
-                            onCheckedChange = { viewModel.toggleDevStack(stack) },
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                text = stack.displayDescription(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = viewModel::startRuntimeSetup,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Apply / Provision Stacks")
-                    }
-                    OutlinedButton(
-                        onClick = viewModel::repairRootfs,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Repair Chroot")
-                    }
-                }
-            }
-        }
-
+        ForgeSectionLabel(stringResource(R.string.settings_general), horizontalPadding = 6.dp)
         // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -19724,32 +20694,26 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Security, Language & Appearance",
+                    text = stringResource(R.string.settings_security_appearance),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Switch(
-                        checked = state.interactiveHighRiskApprovals,
-                        onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Interactive High-Risk Command Approvals", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = "Prompt before executing destructive shell or system commands",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                ForgeToggleRow(
+                    title = stringResource(R.string.settings_high_risk_command_approvals),
+                    subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
+                    checked = state.interactiveHighRiskApprovals,
+                    onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
+                )
+                ForgeToggleRow(
+                    title = stringResource(R.string.settings_auto_approve_all_tools),
+                    subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
+                    checked = state.autoApproveAllTools,
+                    onCheckedChange = viewModel::setAutoApproveAllTools,
+                )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
-                    text = "Interface Language",
+                    text = stringResource(R.string.settings_interface_language),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -19771,7 +20735,7 @@ fun SettingsScreenModern(
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                 val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
                 Text(
-                    text = "Theme Mode (${activeThemeMode.title})",
+                    text = stringResource(R.string.settings_theme_mode, activeThemeMode.title),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -19837,7 +20801,7 @@ fun SettingsScreenModern(
                                 if (selected) {
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
+                                        contentDescription = stringResource(R.string.a11y_selected),
                                         tint = tokens.successText,
                                     )
                                 }
@@ -19848,6 +20812,677 @@ fun SettingsScreenModern(
             }
         }
 
+        ForgeSectionLabel(stringResource(R.string.settings_ai), horizontalPadding = 6.dp)
+        // AI: coding agent engine
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_coding_agent_engine),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                AgentKind.entries.forEach { kind ->
+                    val selected = state.agentKind == kind
+                    ForgeElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        selected = selected,
+                        onClick = { viewModel.selectAgent(kind) },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(kind.displayTitle(), fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = kind.displaySubtitle(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = stringResource(R.string.a11y_selected),
+                                    tint = tokens.successText,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (state.agentKind == AgentKind.ANTIGRAVITY) {
+                    var agyVerificationCode by rememberSaveable { mutableStateOf("") }
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(
+                        text = stringResource(R.string.settings_antigravity_cli_configuration),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedTextField(
+                        value = agyModelInput,
+                        onValueChange = { agyModelInput = it },
+                        label = { Text(stringResource(R.string.settings_antigravity_model)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf("low", "medium", "high").forEach { effort ->
+                            FilterChip(
+                                selected = agyEffortInput == effort,
+                                onClick = {
+                                    agyEffortInput = effort
+                                    viewModel.setAntigravityConfig(agyModelInput, effort)
+                                },
+                                label = { Text(stringResource(R.string.settings_effort, effort.uppercase())) },
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
+                        ) {
+                            Text(stringResource(R.string.settings_save_antigravity_model))
+                        }
+                        val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
+                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                viewModel.antigravityAuth.hasOfficialCredential()
+                            }
+                        }
+                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
+                            OutlinedButton(
+                                onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
+                            ) {
+                                Text(stringResource(R.string.settings_sign_out_google_oauth))
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                                enabled = agyAuth.status != AntigravityAuthStatus.STARTING && agyAuth.status != AntigravityAuthStatus.COMPLETING,
+                            ) {
+                                Text(stringResource(R.string.settings_sign_in_with_google))
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateAntigravityConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text(stringResource(R.string.settings_validate))
+                        }
+                    }
+                    if (agyAuth.status == AntigravityAuthStatus.STARTING ||
+                        agyAuth.status == AntigravityAuthStatus.COMPLETING ||
+                        state.apiBusy
+                    ) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    agyAuth.message?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    agyAuth.authorizationUrl?.let { url ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.agent_open_google_sign_in))
+                            }
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(url)) },
+                            ) {
+                                Text(stringResource(R.string.agent_copy_link))
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.antigravityAuth.cancel() },
+                            ) {
+                                Text(stringResource(R.string.agent_cancel))
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = agyVerificationCode,
+                                onValueChange = { agyVerificationCode = it },
+                                label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = {
+                                    if (agyVerificationCode.isNotBlank()) {
+                                        runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }
+                                        agyVerificationCode = ""
+                                    }
+                                },
+                                enabled = agyVerificationCode.isNotBlank(),
+                            ) {
+                                Text(stringResource(R.string.agent_verify))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. AI Provider & Keystore Multi-Key Vault
+        val availableProviders = providersForAgent(state.agentKind)
+        if (availableProviders.isNotEmpty()) {
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_model_provider_key_vault),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        availableProviders.forEach { kind ->
+                            FilterChip(
+                                selected = state.providerProfile.kind == kind,
+                                onClick = { viewModel.updateProviderKind(kind) },
+                                label = { Text(kind.displayTitle()) },
+                            )
+                        }
+                    }
+                    Text(
+                        text = state.providerProfile.kind.displaySubtitle(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    if (!state.providerProfile.kind.fixedBaseUrl &&
+                        state.providerProfile.kind != ProviderKind.CLAUDE
+                    ) {
+                        OutlinedTextField(
+                            value = baseUrlInput,
+                            onValueChange = { baseUrlInput = it },
+                            label = { Text(stringResource(R.string.settings_api_base_url)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = modelInput,
+                        onValueChange = { modelInput = it },
+                        label = { Text(stringResource(R.string.settings_model_identifier)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    if (state.providerProfile.kind == ProviderKind.LLM_ROUTER) {
+                        OutlinedTextField(
+                            value = openRouterOrderInput,
+                            onValueChange = { openRouterOrderInput = it },
+                            label = { Text(stringResource(R.string.settings_openrouter_provider_order_comma)) },
+                            placeholder = { Text("anthropic,google-vertex,deepseek") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.updateProviderConfig(
+                                    baseUrl = baseUrlInput,
+                                    model = modelInput,
+                                    openRouterOrder = openRouterOrderInput,
+                                )
+                            },
+                        ) {
+                            Text(stringResource(R.string.settings_save_config))
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::discoverProviderModels,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text(stringResource(R.string.settings_discover_models))
+                        }
+                        OutlinedButton(
+                            onClick = viewModel::validateProviderConnection,
+                            enabled = !state.apiBusy,
+                        ) {
+                            Text(stringResource(R.string.settings_validate))
+                        }
+                    }
+
+                    if (state.apiBusy) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    state.apiStatusMessage?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.accentText,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+
+                    if (state.discoveredModels.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.settings_discovered_models_tap_to),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            state.discoveredModels.take(30).forEach { m ->
+                                AssistChip(
+                                    onClick = {
+                                        modelInput = m.id
+                                        viewModel.updateProviderConfig(
+                                            baseUrl = baseUrlInput,
+                                            model = m.id,
+                                            openRouterOrder = openRouterOrderInput,
+                                        )
+                                    },
+                                    label = { Text(m.displayName, fontFamily = FontFamily.Monospace) },
+                                )
+                            }
+                        }
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(
+                        text = stringResource(R.string.settings_api_keys_for_auto, state.providerProfile.kind.displayTitle()),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    state.savedApiKeys.forEach { keyInfo ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button) { viewModel.selectActiveApiKey(keyInfo.id) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = if (keyInfo.isActive) Icons.Default.CheckCircle else Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = if (keyInfo.isActive) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (keyInfo.isActive) "${keyInfo.name} (Active)" else keyInfo.name,
+                                modifier = Modifier.weight(1f),
+                                fontWeight = if (keyInfo.isActive) FontWeight.Bold else FontWeight.Normal,
+                            )
+                            IconButton(onClick = { viewModel.removeApiKey(keyInfo.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.settings_delete_key), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = keyLabelInput,
+                            onValueChange = { keyLabelInput = it },
+                            label = { Text(stringResource(R.string.settings_label)) },
+                            placeholder = { Text("Primary") },
+                            singleLine = true,
+                            modifier = Modifier.weight(0.35f),
+                        )
+                        OutlinedTextField(
+                            value = keySecretInput,
+                            onValueChange = { keySecretInput = it },
+                            label = { Text(stringResource(R.string.settings_api_key_token)) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.weight(0.65f),
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            if (keySecretInput.isNotBlank()) {
+                                viewModel.addApiKey(keyLabelInput, keySecretInput)
+                                keyLabelInput = ""
+                                keySecretInput = ""
+                            }
+                        },
+                        enabled = keySecretInput.isNotBlank(),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(stringResource(R.string.settings_add_key_to_android))
+                    }
+                }
+            }
+        }
+
+        ForgeSectionLabel(stringResource(R.string.settings_github), horizontalPadding = 6.dp)
+        // 3. GitHub Integration & Two-Way Repository Sync
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_repository_sync),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                state.githubStatusMessage?.let { status ->
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+
+                state.githubDeviceCode?.let { dc ->
+                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_one_time_device_code, dc.userCode),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(dc.userCode))
+                                        runCatching {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dc.verificationUri)))
+                                        }
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.settings_copy_code_open_github))
+                                }
+                                OutlinedButton(
+                                    onClick = { clipboard.setText(AnnotatedString(dc.userCode)) },
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(stringResource(R.string.settings_copy_code))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (state.githubLogin.isBlank()) {
+                    Button(
+                        onClick = { viewModel.startGitHubDeviceSignIn() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.settings_sign_in_with_github))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = githubTokenInput,
+                            onValueChange = { githubTokenInput = it },
+                            label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                if (githubTokenInput.isNotBlank()) {
+                                    viewModel.connectGitHubWithToken(githubTokenInput)
+                                    githubTokenInput = ""
+                                }
+                            },
+                        ) {
+                            Text(stringResource(R.string.settings_connect))
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_connected_as, state.githubLogin),
+                            fontWeight = FontWeight.Bold,
+                            color = tokens.successText,
+                        )
+                        OutlinedButton(onClick = viewModel::disconnectGitHub) {
+                            Text(stringResource(R.string.settings_disconnect))
+                        }
+                    }
+
+                    ForgeToggleRow(
+                        title = stringResource(R.string.settings_auto_commit_push),
+                        subtitle = stringResource(R.string.settings_commit_and_push_the),
+                        checked = state.autoSyncGitHub,
+                        onCheckedChange = viewModel::setAutoSyncGitHub,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { viewModel.syncProjectWithGitHub() },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.settings_push_workspace))
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.pullProjectFromGitHub() },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.settings_pull_latest))
+                        }
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(
+                        text = stringResource(R.string.settings_create_push_new_github),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedTextField(
+                        value = newRepoName,
+                        onValueChange = { newRepoName = it },
+                        label = { Text(stringResource(R.string.settings_repository_name)) },
+                        placeholder = { Text(state.activeProject?.slug ?: "my-forge-repo") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = newRepoDesc,
+                        onValueChange = { newRepoDesc = it },
+                        label = { Text(stringResource(R.string.settings_description_optional)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ForgeToggleRow(
+                        title = stringResource(if (newRepoPrivate) R.string.settings_private_repository else R.string.settings_public_repository),
+                        subtitle = stringResource(R.string.settings_visibility_of_the_new),
+                        checked = newRepoPrivate,
+                        onCheckedChange = { newRepoPrivate = it },
+                    )
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val targetName = newRepoName.ifBlank { state.activeProject?.slug.orEmpty() }
+                                if (targetName.isNotBlank()) {
+                                    viewModel.createGitHubRepository(
+                                        name = targetName,
+                                        description = newRepoDesc,
+                                        isPrivate = newRepoPrivate,
+                                        pushActiveProject = true,
+                                    )
+                                    newRepoName = ""
+                                    newRepoDesc = ""
+                                }
+                            },
+                        ) {
+                            Text(stringResource(R.string.settings_create_push))
+                        }
+                    }
+
+                    if (state.githubRepos.isNotEmpty()) {
+                        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(
+                            text = stringResource(R.string.settings_your_repositories_tap_clone),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        state.githubRepos.take(10).forEach { repo ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                                    if (repo.description.isNotBlank()) {
+                                        Text(
+                                            text = repo.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                OutlinedButton(onClick = { viewModel.cloneGitHubRepository(repo) }) {
+                                    Text(stringResource(R.string.settings_clone))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp)
+        // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            val isProvisioning = state.setupSnapshot.status == com.nextcraft.forge.runtime.RuntimeSetupStatus.RUNNING
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_dev_stacks),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                DevStack.entries.forEach { stack ->
+                    val selected = stack in state.selectedDevStacks
+                    val installed = stack in state.installedDevStacks
+                    ForgeToggleRow(
+                        title = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
+                        subtitle = stack.displayDescription(),
+                        checked = selected,
+                        onCheckedChange = { if (!isProvisioning) viewModel.toggleDevStack(stack) },
+                    )
+                }
+                if (state.setupSnapshot.status != com.nextcraft.forge.runtime.RuntimeSetupStatus.IDLE) {
+                    Text(
+                        text = state.setupSnapshot.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = tokens.accentText,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    state.setupSnapshot.errorMessage?.let { err ->
+                        Text(
+                            text = err,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.dangerText,
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = state.setupSnapshot.progress.coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = viewModel::startRuntimeSetup,
+                        enabled = !isProvisioning,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.settings_apply_provision_stacks))
+                    }
+                    if (isProvisioning) {
+                        OutlinedButton(onClick = viewModel::pauseRuntimeSetup) {
+                            Text(stringResource(R.string.launch_pause))
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = viewModel::repairRootfs,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.settings_repair_chroot))
+                        }
+                    }
+                }
+            }
+        }
+
+        ForgeSectionLabel(stringResource(R.string.settings_about), horizontalPadding = 6.dp)
         // 6. Application Self-Updater
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -19855,7 +21490,7 @@ fun SettingsScreenModern(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "NextCraft Forge Updates",
+                    text = stringResource(R.string.settings_app_updates),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -19867,14 +21502,356 @@ fun SettingsScreenModern(
                         fontWeight = FontWeight.Medium,
                     )
                 }
-                Button(onClick = { viewModel.checkForAppUpdates() }) {
-                    Text("Check for App Updates")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { viewModel.checkForAppUpdates() }) {
+                        Text(stringResource(R.string.settings_check_for_app_updates))
+                    }
+                    state.updateInfo?.let { info ->
+                        OutlinedButton(onClick = viewModel::downloadAndInstallAppUpdate) {
+                            Text(stringResource(R.string.settings_download_install_update, info.versionName))
+                        }
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
     }
+}
+```
+
+---
+
+## 7. `app/src/main/java/com/nextcraft/forge/ui/ProjectsScreen.kt` (328 baris)
+
+```kotlin
+package com.nextcraft.forge.ui
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nextcraft.forge.model.Project
+import com.nextcraft.forge.model.ProjectKind
+import com.nextcraft.forge.model.ProjectType
+import androidx.compose.ui.res.stringResource
+import com.nextcraft.forge.R
+import androidx.annotation.StringRes
+
+/**
+ * Linear-style projects home: a dense list of rows (no cards), hairline dividers,
+ * a single accent for the primary action and the active project, and one header action.
+ */
+@Composable
+fun ProjectsScreen(
+    state: ForgeUiState,
+    onOpenProject: (String) -> Unit,
+    onNewProject: () -> Unit,
+    onDeleteProject: (String) -> Unit,
+    onNewQuickProject: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val regular = state.projects
+        .filter { it.kind == ProjectKind.PROJECT }
+        .sortedByDescending { it.updatedAtMillis }
+    val quick = state.projects
+        .filter { it.kind == ProjectKind.QUICK_PROJECT }
+        .sortedByDescending { it.updatedAtMillis }
+    val busy = state.sessionRunning ||
+        state.androidBuild.phase == com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING ||
+        state.terminalRunning
+    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while tasks run.
+    val canDelete = state.projects.size > 1 && !busy
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        ProjectsHeader(
+            onNewProject = onNewProject,
+            onNewQuickProject = onNewQuickProject,
+        )
+        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+
+        if (state.projects.isEmpty()) {
+            ProjectsEmptyState(onNewProject = onNewProject)
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (regular.isNotEmpty()) {
+                    item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
+                    items(regular, key = { it.id }) { project ->
+                        ProjectRow(
+                            project = project,
+                            active = project.id == state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while active tasks run.
+                            locked = busy && project.id != state.activeProjectId,
+                            canDelete = canDelete,
+                            onOpen = { onOpenProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
+                        )
+                    }
+                }
+                if (quick.isNotEmpty()) {
+                    item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
+                    items(quick, key = { it.id }) { project ->
+                        ProjectRow(
+                            project = project,
+                            active = project.id == state.activeProjectId,
+                            // MainViewModel.selectProject ignores switches while active tasks run.
+                            locked = busy && project.id != state.activeProjectId,
+                            canDelete = canDelete,
+                            onOpen = { onOpenProject(project.id) },
+                            onDelete = { pendingDeleteProject = project },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    pendingDeleteProject?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+            text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteProject(target.id)
+                        pendingDeleteProject = null
+                    },
+                ) {
+                    Text(stringResource(R.string.shell_confirm_delete))
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text(stringResource(R.string.agent_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ProjectsHeader(
+    onNewProject: () -> Unit,
+    onNewQuickProject: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.projects_projects),
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        androidx.compose.material3.TextButton(onClick = onNewQuickProject) {
+            Text(stringResource(R.string.projects_new_quick_chat), fontSize = 12.sp)
+        }
+        // IconButton keeps the 48dp touch target while the glyph itself stays 20dp.
+        IconButton(onClick = onNewProject) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = stringResource(R.string.projects_new_project),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ProjectRow(
+    project: Project,
+    active: Boolean,
+    locked: Boolean,
+    canDelete: Boolean,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Box {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .alpha(if (locked) 0.5f else 1f)
+                    .combinedClickable(
+                        enabled = !locked,
+                        role = Role.Button,
+                        onClick = onOpen,
+                        onLongClickLabel = if (canDelete) stringResource(R.string.shell_delete_project) else null,
+                        onLongClick = if (canDelete) ({ menuOpen = true }) else null,
+                    )
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusDot(active = active)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = project.name,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (locked) stringResource(R.string.projects_agent_running) else project.subtitle(),
+                        fontSize = 12.5.sp,
+                        color = muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = project.formattedUpdatedAt,
+                    fontSize = 12.sp,
+                    color = muted,
+                    maxLines = 1,
+                )
+            }
+            Divider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(start = 16.dp),
+            )
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.shell_delete_project)) },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    onDelete()
+                },
+            )
+        }
+    }
+}
+
+/** Filled accent dot = active project, hollow ring = the rest. Shape (not only colour) carries the state. */
+@Composable
+private fun StatusDot(active: Boolean) {
+    val accent = MaterialTheme.colorScheme.primary
+    val ring = MaterialTheme.colorScheme.onSurfaceVariant
+    val description = stringResource(if (active) R.string.projects_active_project else R.string.projects_project)
+    Box(
+        modifier = Modifier
+            .size(16.dp)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (active) {
+            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(accent))
+        } else {
+            Box(modifier = Modifier.size(10.dp).border(1.5.dp, ring, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun ProjectsEmptyState(onNewProject: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.projects_no_projects_yet),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.projects_create_a_project_to),
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = onNewProject,
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.heightIn(min = 44.dp),
+        ) {
+            Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun Project.subtitle(): String = when {
+    kind == ProjectKind.QUICK_PROJECT -> stringResource(R.string.projects_quick_chat)
+    type == ProjectType.ANDROID -> stringResource(R.string.projects_android) + (androidTemplate?.let { " · ${it.label}" } ?: "")
+    else -> stringResource(R.string.projects_general)
 }
 ```
 
@@ -19899,10 +21876,10 @@ Blok 7 melengkapi proyek **NextCraft Forge** dengan seluruh file konfigurasi sis
 - `settings.gradle.kts` (18 baris)
 - `build.gradle.kts` (4 baris)
 - `gradle.properties` (5 baris)
-- `app/build.gradle.kts` (125 baris)
+- `app/build.gradle.kts` (126 baris)
 - `app/src/main/AndroidManifest.xml` (61 baris)
-- `app/src/main/res/values/strings.xml` (5 baris)
-- `app/src/main/res/values-in/strings.xml` (5 baris)
+- `app/src/main/res/values/strings.xml` (220 baris)
+- `app/src/main/res/values-in/strings.xml` (220 baris)
 - `app/src/main/res/values-es/strings.xml` (5 baris)
 - `app/src/main/res/values-zh-rCN/strings.xml` (5 baris)
 - `app/src/main/res/values-ar/strings.xml` (5 baris)
@@ -19968,7 +21945,7 @@ org.gradle.workers.max=2
 
 ---
 
-## 4. `app/build.gradle.kts` (125 baris)
+## 4. `app/build.gradle.kts` (126 baris)
 
 ```kotlin
 import java.io.File
@@ -20093,6 +22070,7 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.26.2")
     // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
     implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
+    testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
@@ -20168,25 +22146,455 @@ dependencies {
 
 ---
 
-## 6. `app/src/main/res/values/strings.xml` (5 baris)
+## 6. `app/src/main/res/values/strings.xml` (220 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <string name="app_name">NextCraft Forge</string>
     <string name="app_tagline">Root Chroot AI Coding Studio for Android</string>
+    <!-- UI strings extracted from Compose screens -->
+    <string name="agent_stop">Stop</string>
+    <string name="agent_ask_to_build_refactor">Ask %1$s to build, refactor, or fix…</string>
+    <string name="agent_delete_chat">Delete chat</string>
+    <string name="agent_new_chat">New Chat</string>
+    <string name="agent_antigravity_cli_google_account">Antigravity CLI Google Account Sign-In</string>
+    <string name="agent_open_google_sign_in">Open Google Sign-In</string>
+    <string name="agent_copy_link">Copy Link</string>
+    <string name="agent_paste_google_verification_code">Paste Google Verification Code</string>
+    <string name="agent_verify">Verify</string>
+    <string name="agent_sign_in_with_google">Sign In with Google (Official PTY OAuth)</string>
+    <string name="agent_cancel">Cancel</string>
+    <string name="agent_high_risk_tool_approval">High-Risk Tool Approval: %1$s (%2$s)</string>
+    <string name="agent_deny">Deny</string>
+    <string name="agent_approve_execution">Approve Execution</string>
+    <string name="agent_tool_steps">%1$s tool steps</string>
+    <string name="agent_thinking">Thinking…</string>
+    <string name="launch_launch">Launch</string>
+    <string name="launch_cancel_build">Cancel build</string>
+    <string name="launch_build_and_install_apk">Build and install APK</string>
+    <string name="launch_more_build_actions">More build actions</string>
+    <string name="launch_assemble_debug_no_install">Assemble debug (no install)</string>
+    <string name="launch_install_last_apk">Install last APK</string>
+    <string name="launch_clean">Clean</string>
+    <string name="launch_fix_with_agent">Fix with Agent</string>
+    <string name="launch_install_apk">Install APK</string>
+    <string name="launch_zero_compiler_or_aapt2">Zero compiler or AAPT2 resource issues detected.</string>
+    <string name="launch_ask_agent_to_fix">Ask Agent to Fix</string>
+    <string name="launch_open_file">Open File</string>
+    <string name="launch_pause">Pause</string>
+    <string name="launch_stream_logcat">Stream Logcat</string>
+    <string name="launch_preview">Preview</string>
+    <string name="launch_local_dev_server">Local dev server</string>
+    <string name="launch_scan_ports_and_reload">Scan ports and reload</string>
+    <string name="launch_open">Open</string>
+    <string name="files_files">Files</string>
+    <string name="files_new_file">New file</string>
+    <string name="files_refresh">Refresh</string>
+    <string name="files_workspace_is_empty_use">Workspace is empty. Use + to create a file or ask the Agent to scaffold code.</string>
+    <string name="files_kb">%1$s KB</string>
+    <string name="files_select_a_file_from">Select a file from Explorer to view or edit.</string>
+    <string name="files_open_file_explorer">Open File Explorer</string>
+    <string name="files_save">Save</string>
+    <string name="files_no_unreviewed_checkpoint_changes">No unreviewed checkpoint changes in this workspace.</string>
+    <string name="files_modified_file_s_since">%1$s modified file(s) since last checkpoint</string>
+    <string name="files_keep_all">Keep All</string>
+    <string name="files_undo_all">Undo All</string>
+    <string name="files_keep_file">Keep file</string>
+    <string name="files_revert_file">Revert file</string>
+    <string name="files_create_new_file">Create New File</string>
+    <string name="files_relative_file_path">Relative File Path</string>
+    <string name="files_create">Create</string>
+    <string name="shell_dismiss">Dismiss</string>
+    <string name="shell_switch_project">Switch project</string>
+    <string name="shell_delete_project">Delete project</string>
+    <string name="shell_new_workspace_project">New Workspace Project…</string>
+    <string name="shell_new_project">New Project</string>
+    <string name="shell_terminal">Terminal</string>
+    <string name="shell_nextcraft_forge">NextCraft Forge</string>
+    <string name="shell_select_development_stacks_to">Select Development Stacks to Provision</string>
+    <string name="shell_repair_mounts_dpkg">Repair Mounts / dpkg</string>
+    <string name="shell_re_check_root">Re-check Root</string>
+    <string name="shell_continue_to_ide_workspace">Continue to IDE Workspace (Host Fallback Mode)</string>
+    <string name="shell_create_workspace_project">Create Workspace Project</string>
+    <string name="shell_project_name">Project Name</string>
+    <string name="shell_my_awesome_app">My Awesome App</string>
+    <string name="shell_description">Description</string>
+    <string name="shell_optional_project_summary">Optional project summary</string>
+    <string name="shell_generate_android_app_template">Generate Android App Template (SDK 35)</string>
+    <string name="settings_settings">Settings</string>
+    <string name="settings_preferences_configuration">Preferences &amp; configuration</string>
+    <string name="settings_general">General</string>
+    <string name="settings_security_appearance">Security &amp; appearance</string>
+    <string name="settings_high_risk_command_approvals">High-risk command approvals</string>
+    <string name="settings_prompt_before_executing_destructive">Prompt before executing destructive shell or system commands</string>
+    <string name="settings_interface_language">Interface Language</string>
+    <string name="settings_theme_mode">Theme Mode (%1$s)</string>
+    <string name="settings_ai">AI</string>
+    <string name="settings_coding_agent_engine">Coding agent engine</string>
+    <string name="settings_antigravity_cli_configuration">Antigravity CLI Configuration</string>
+    <string name="settings_antigravity_model">Antigravity Model</string>
+    <string name="settings_effort">Effort: %1$s</string>
+    <string name="settings_save_antigravity_model">Save Antigravity Model</string>
+    <string name="settings_sign_out_google_oauth">Sign Out Google OAuth</string>
+    <string name="settings_sign_in_with_google">Sign In with Google</string>
+    <string name="settings_model_provider_key_vault">Model provider &amp; key vault</string>
+    <string name="settings_api_base_url">API Base URL</string>
+    <string name="settings_model_identifier">Model Identifier</string>
+    <string name="settings_openrouter_provider_order_comma">OpenRouter Provider Order (comma-separated, optional)</string>
+    <string name="settings_save_config">Save Config</string>
+    <string name="settings_discover_models">Discover Models</string>
+    <string name="settings_validate">Validate</string>
+    <string name="settings_discovered_models_tap_to">Discovered Models (tap to select):</string>
+    <string name="settings_api_keys_for_auto">API Keys for %1$s (Auto-Rotation Pool)</string>
+    <string name="settings_delete_key">Delete key</string>
+    <string name="settings_label">Label</string>
+    <string name="settings_api_key_token">API Key / Token</string>
+    <string name="settings_add_key_to_android">Add Key to Android Keystore</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_repository_sync">Repository sync</string>
+    <string name="settings_one_time_device_code">One-Time Device Code: %1$s</string>
+    <string name="settings_copy_code_open_github">Copy Code &amp; Open GitHub</string>
+    <string name="settings_copy_code">Copy Code</string>
+    <string name="settings_sign_in_with_github">Sign In with GitHub (OAuth Device Flow)</string>
+    <string name="settings_or_paste_github_personal">Or Paste GitHub Personal Access Token</string>
+    <string name="settings_connect">Connect</string>
+    <string name="settings_connected_as">Connected as @%1$s</string>
+    <string name="settings_disconnect">Disconnect</string>
+    <string name="settings_auto_commit_push">Auto-commit &amp; push</string>
+    <string name="settings_commit_and_push_the">Commit and push the workspace after every Agent turn</string>
+    <string name="settings_push_workspace">Push Workspace</string>
+    <string name="settings_pull_latest">Pull Latest</string>
+    <string name="settings_create_push_new_github">Create &amp; Push New GitHub Repository</string>
+    <string name="settings_repository_name">Repository Name</string>
+    <string name="settings_description_optional">Description (optional)</string>
+    <string name="settings_visibility_of_the_new">Visibility of the new GitHub repository</string>
+    <string name="settings_create_push">Create &amp; Push</string>
+    <string name="settings_your_repositories_tap_clone">Your Repositories (tap Clone to import into Workspace):</string>
+    <string name="settings_clone">Clone</string>
+    <string name="settings_runtime">Runtime</string>
+    <string name="settings_dev_stacks">Dev stacks</string>
+    <string name="settings_apply_provision_stacks">Apply / Provision Stacks</string>
+    <string name="settings_repair_chroot">Repair Chroot</string>
+    <string name="settings_about">About</string>
+    <string name="settings_app_updates">App updates</string>
+    <string name="settings_check_for_app_updates">Check for App Updates</string>
+    <string name="terminal_copy_terminal_output">Copy terminal output</string>
+    <string name="terminal_stop_command">Stop command</string>
+    <string name="terminal_clear_terminal">Clear terminal</string>
+    <string name="terminal_run_command_in_the">Run command in the workspace</string>
+    <string name="terminal_run">Run</string>
+    <string name="projects_projects">Projects</string>
+    <string name="projects_new_project">New project</string>
+    <string name="projects_no_projects_yet">No projects yet</string>
+    <string name="projects_create_a_project_to">Create a project to start building.</string>
+    <string name="tools_tools">Tools</string>
+    <string name="tools_files">Files</string>
+    <string name="tools_files_desc">Browse project files and review changes</string>
+    <string name="tools_terminal_desc">Linux terminal inside the private workspace</string>
+    <string name="tools_web_preview">Web Preview</string>
+    <string name="tools_web_preview_desc">Preview local dev servers</string>
+    <string name="tools_android_builder">Android Builder</string>
+    <string name="tools_android_builder_desc">Compile, sign, and install APKs directly</string>
+    <string name="tools_section_development">Development</string>
+    <string name="tools_section_build_deploy">Build &amp; Deploy</string>
+    <string name="projects_agent_running">Agent is running</string>
+    <string name="projects_active_project">Active project</string>
+    <string name="projects_project">Project</string>
+    <string name="projects_quick_chat">Quick chat</string>
+    <string name="projects_android">Android</string>
+    <string name="projects_general">General</string>
+    <string name="projects_recent">RECENT</string>
+    <string name="projects_quick">QUICK</string>
+    <string name="launch_stage_prepare">Prepare</string>
+    <string name="launch_stage_resolve">Resolve dependencies</string>
+    <string name="launch_stage_compile">Compile</string>
+    <string name="launch_stage_resources">Resources</string>
+    <string name="launch_stage_package">Package APK</string>
+    <string name="launch_stage_install">Install</string>
+    <string name="launch_state_idle">Ready to build</string>
+    <string name="launch_state_preparing">Preparing</string>
+    <string name="launch_state_building">Building</string>
+    <string name="launch_state_cancelling">Cancelling</string>
+    <string name="launch_state_succeeded">Build succeeded</string>
+    <string name="launch_state_failed">Build failed</string>
+    <string name="launch_state_cancelled">Build cancelled</string>
+    <string name="launch_tab_stages">Stages</string>
+    <string name="launch_tab_issues">Issues</string>
+    <string name="launch_tab_issues_count">Issues (%1$d)</string>
+    <string name="launch_tab_log">Log</string>
+    <string name="launch_tab_logcat">Logcat</string>
+    <string name="launch_errors_warnings">%1$d errors · %2$d warnings</string>
+    <string name="launch_no_build_output">No build output yet. Tap play to compile.</string>
+    <string name="nav_projects">Projects</string>
+    <string name="nav_agent">Agent</string>
+    <string name="nav_tools">Tools</string>
+    <string name="nav_settings">Settings</string>
+    <string name="status_done">Done</string>
+    <string name="status_running">Running</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_waiting">Waiting</string>
+    <string name="status_skipped">Skipped</string>
+    <string name="files_tab_explorer">Explorer (%1$d)</string>
+    <string name="files_tab_editor">Editor</string>
+    <string name="files_tab_changes">Changes (%1$d)</string>
+    <string name="agent_send">Send</string>
+    <string name="settings_private_repository">Private repository</string>
+    <string name="settings_public_repository">Public repository</string>
+    <string name="shell_check_arm64">ARM64 Device Architecture (aarch64)</string>
+    <string name="shell_supported">Supported</string>
+    <string name="shell_requires_arm64">Requires 64-bit ARMv8 device</string>
+    <string name="shell_check_root">Root Access (`su -mm` Mount Namespace)</string>
+    <string name="shell_root_granted">Magisk / KernelSU / APatch granted</string>
+    <string name="shell_root_required">Root privileges required for chroot</string>
+    <string name="shell_check_rootfs">Ubuntu 24.04 Rootfs &amp; Agent Toolchains</string>
+    <string name="shell_installed_ready">Installed &amp; ready</string>
+    <string name="shell_resume_setup">Resume Setup</string>
+    <string name="shell_install_runtime">Install Chroot Runtime</string>
+    <string name="a11y_selected">Selected</string>
+    <string name="a11y_expand">Expand tool steps</string>
+    <string name="a11y_collapse">Collapse tool steps</string>
+    <string name="settings_auto_approve_all_tools">Auto-approve all tools</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Skip confirmation prompts for all tool executions</string>
+    <string name="settings_download_install_update">Download &amp; Install v%1$s</string>
+    <string name="files_read_only_badge">Read-Only</string>
+    <string name="files_delete_file">Delete file</string>
+    <string name="files_delete_file_confirm_title">Delete File</string>
+    <string name="files_delete_file_confirm_message">Are you sure you want to delete %1$s from this workspace?</string>
+    <string name="shell_delete_project_confirm_title">Delete Project</string>
+    <string name="shell_delete_project_confirm_message">Permanently delete %1$s and all files inside /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Delete</string>
+    <string name="projects_new_quick_chat">New quick chat</string>
+    <string name="agent_clear_chat">Clear Chat</string>
+    <string name="launch_clear_logcat">Clear</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
 </resources>
 ```
 
 ---
 
-## 7. `app/src/main/res/values-in/strings.xml` (5 baris)
+## 7. `app/src/main/res/values-in/strings.xml` (220 baris)
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NextCraft Forge</string>
     <string name="app_tagline">Studio Coding AI Root Chroot untuk Android</string>
+    <!-- UI strings extracted from Compose screens -->
+    <string name="agent_stop">Berhenti</string>
+    <string name="agent_ask_to_build_refactor">Minta %1$s membangun, merombak, atau memperbaiki…</string>
+    <string name="agent_delete_chat">Hapus obrolan</string>
+    <string name="agent_new_chat">Obrolan baru</string>
+    <string name="agent_antigravity_cli_google_account">Masuk akun Google Antigravity CLI</string>
+    <string name="agent_open_google_sign_in">Buka halaman masuk Google</string>
+    <string name="agent_copy_link">Salin tautan</string>
+    <string name="agent_paste_google_verification_code">Tempel kode verifikasi Google</string>
+    <string name="agent_verify">Verifikasi</string>
+    <string name="agent_sign_in_with_google">Masuk dengan Google (OAuth PTY resmi)</string>
+    <string name="agent_cancel">Batal</string>
+    <string name="agent_high_risk_tool_approval">Persetujuan alat berisiko tinggi: %1$s (%2$s)</string>
+    <string name="agent_deny">Tolak</string>
+    <string name="agent_approve_execution">Setujui eksekusi</string>
+    <string name="agent_tool_steps">%1$s langkah alat</string>
+    <string name="agent_thinking">Berpikir…</string>
+    <string name="launch_launch">Luncurkan</string>
+    <string name="launch_cancel_build">Batalkan build</string>
+    <string name="launch_build_and_install_apk">Bangun dan instal APK</string>
+    <string name="launch_more_build_actions">Aksi build lainnya</string>
+    <string name="launch_assemble_debug_no_install">Rakit debug (tanpa instal)</string>
+    <string name="launch_install_last_apk">Instal APK terakhir</string>
+    <string name="launch_clean">Bersihkan</string>
+    <string name="launch_fix_with_agent">Perbaiki dengan Agent</string>
+    <string name="launch_install_apk">Instal APK</string>
+    <string name="launch_zero_compiler_or_aapt2">Tidak ada masalah compiler atau resource AAPT2.</string>
+    <string name="launch_ask_agent_to_fix">Minta Agent memperbaiki</string>
+    <string name="launch_open_file">Buka file</string>
+    <string name="launch_pause">Jeda</string>
+    <string name="launch_stream_logcat">Mulai Logcat</string>
+    <string name="launch_preview">Pratinjau</string>
+    <string name="launch_local_dev_server">Server dev lokal</string>
+    <string name="launch_scan_ports_and_reload">Pindai port dan muat ulang</string>
+    <string name="launch_open">Buka</string>
+    <string name="files_files">File</string>
+    <string name="files_new_file">File baru</string>
+    <string name="files_refresh">Muat ulang</string>
+    <string name="files_workspace_is_empty_use">Workspace kosong. Gunakan + untuk membuat file atau minta Agent membuat kode awal.</string>
+    <string name="files_kb">%1$s KB</string>
+    <string name="files_select_a_file_from">Pilih file dari Explorer untuk melihat atau mengedit.</string>
+    <string name="files_open_file_explorer">Buka File Explorer</string>
+    <string name="files_save">Simpan</string>
+    <string name="files_no_unreviewed_checkpoint_changes">Tidak ada perubahan checkpoint yang belum ditinjau di workspace ini.</string>
+    <string name="files_modified_file_s_since">%1$s file diubah sejak checkpoint terakhir</string>
+    <string name="files_keep_all">Terima semua</string>
+    <string name="files_undo_all">Batalkan semua</string>
+    <string name="files_keep_file">Terima file</string>
+    <string name="files_revert_file">Kembalikan file</string>
+    <string name="files_create_new_file">Buat file baru</string>
+    <string name="files_relative_file_path">Path file relatif</string>
+    <string name="files_create">Buat</string>
+    <string name="shell_dismiss">Tutup</string>
+    <string name="shell_switch_project">Ganti proyek</string>
+    <string name="shell_delete_project">Hapus proyek</string>
+    <string name="shell_new_workspace_project">Proyek workspace baru…</string>
+    <string name="shell_new_project">Proyek baru</string>
+    <string name="shell_terminal">Terminal</string>
+    <string name="shell_nextcraft_forge">NextCraft Forge</string>
+    <string name="shell_select_development_stacks_to">Pilih stack pengembangan yang akan dipasang</string>
+    <string name="shell_repair_mounts_dpkg">Perbaiki mount / dpkg</string>
+    <string name="shell_re_check_root">Periksa ulang root</string>
+    <string name="shell_continue_to_ide_workspace">Lanjut ke workspace IDE (mode cadangan host)</string>
+    <string name="shell_create_workspace_project">Buat proyek workspace</string>
+    <string name="shell_project_name">Nama proyek</string>
+    <string name="shell_my_awesome_app">Aplikasi saya</string>
+    <string name="shell_description">Deskripsi</string>
+    <string name="shell_optional_project_summary">Ringkasan proyek (opsional)</string>
+    <string name="shell_generate_android_app_template">Buat templat aplikasi Android (SDK 35)</string>
+    <string name="settings_settings">Pengaturan</string>
+    <string name="settings_preferences_configuration">Preferensi &amp; konfigurasi</string>
+    <string name="settings_general">Umum</string>
+    <string name="settings_security_appearance">Keamanan &amp; tampilan</string>
+    <string name="settings_high_risk_command_approvals">Persetujuan perintah berisiko</string>
+    <string name="settings_prompt_before_executing_destructive">Tanya sebelum menjalankan perintah shell atau sistem yang merusak</string>
+    <string name="settings_interface_language">Bahasa antarmuka</string>
+    <string name="settings_theme_mode">Mode tema (%1$s)</string>
+    <string name="settings_ai">AI</string>
+    <string name="settings_coding_agent_engine">Mesin agen koding</string>
+    <string name="settings_antigravity_cli_configuration">Konfigurasi Antigravity CLI</string>
+    <string name="settings_antigravity_model">Model Antigravity</string>
+    <string name="settings_effort">Upaya: %1$s</string>
+    <string name="settings_save_antigravity_model">Simpan model Antigravity</string>
+    <string name="settings_sign_out_google_oauth">Keluar dari Google OAuth</string>
+    <string name="settings_sign_in_with_google">Masuk dengan Google</string>
+    <string name="settings_model_provider_key_vault">Penyedia model &amp; brankas kunci</string>
+    <string name="settings_api_base_url">URL dasar API</string>
+    <string name="settings_model_identifier">Pengenal model</string>
+    <string name="settings_openrouter_provider_order_comma">Urutan penyedia OpenRouter (pisahkan dengan koma, opsional)</string>
+    <string name="settings_save_config">Simpan konfigurasi</string>
+    <string name="settings_discover_models">Temukan model</string>
+    <string name="settings_validate">Validasi</string>
+    <string name="settings_discovered_models_tap_to">Model yang ditemukan (ketuk untuk memilih):</string>
+    <string name="settings_api_keys_for_auto">Kunci API untuk %1$s (kumpulan rotasi otomatis)</string>
+    <string name="settings_delete_key">Hapus kunci</string>
+    <string name="settings_label">Label</string>
+    <string name="settings_api_key_token">Kunci API / token</string>
+    <string name="settings_add_key_to_android">Tambah kunci ke Android Keystore</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_repository_sync">Sinkronisasi repositori</string>
+    <string name="settings_one_time_device_code">Kode perangkat sekali pakai: %1$s</string>
+    <string name="settings_copy_code_open_github">Salin kode &amp; buka GitHub</string>
+    <string name="settings_copy_code">Salin kode</string>
+    <string name="settings_sign_in_with_github">Masuk dengan GitHub (OAuth Device Flow)</string>
+    <string name="settings_or_paste_github_personal">Atau tempel GitHub Personal Access Token</string>
+    <string name="settings_connect">Hubungkan</string>
+    <string name="settings_connected_as">Terhubung sebagai @%1$s</string>
+    <string name="settings_disconnect">Putuskan</string>
+    <string name="settings_auto_commit_push">Commit &amp; push otomatis</string>
+    <string name="settings_commit_and_push_the">Commit dan push workspace setelah setiap giliran Agent</string>
+    <string name="settings_push_workspace">Push workspace</string>
+    <string name="settings_pull_latest">Pull terbaru</string>
+    <string name="settings_create_push_new_github">Buat &amp; push repositori GitHub baru</string>
+    <string name="settings_repository_name">Nama repositori</string>
+    <string name="settings_description_optional">Deskripsi (opsional)</string>
+    <string name="settings_visibility_of_the_new">Visibilitas repositori GitHub baru</string>
+    <string name="settings_create_push">Buat &amp; push</string>
+    <string name="settings_your_repositories_tap_clone">Repositori Anda (ketuk Clone untuk mengimpor ke workspace):</string>
+    <string name="settings_clone">Clone</string>
+    <string name="settings_runtime">Runtime</string>
+    <string name="settings_dev_stacks">Stack pengembangan</string>
+    <string name="settings_apply_provision_stacks">Terapkan / pasang stack</string>
+    <string name="settings_repair_chroot">Perbaiki chroot</string>
+    <string name="settings_about">Tentang</string>
+    <string name="settings_app_updates">Pembaruan aplikasi</string>
+    <string name="settings_check_for_app_updates">Periksa pembaruan aplikasi</string>
+    <string name="terminal_copy_terminal_output">Salin output terminal</string>
+    <string name="terminal_stop_command">Hentikan perintah</string>
+    <string name="terminal_clear_terminal">Bersihkan terminal</string>
+    <string name="terminal_run_command_in_the">Jalankan perintah di workspace</string>
+    <string name="terminal_run">Jalankan</string>
+    <string name="projects_projects">Proyek</string>
+    <string name="projects_new_project">Proyek baru</string>
+    <string name="projects_no_projects_yet">Belum ada proyek</string>
+    <string name="projects_create_a_project_to">Buat proyek untuk mulai membangun.</string>
+    <string name="tools_tools">Alat</string>
+    <string name="tools_files">File</string>
+    <string name="tools_files_desc">Telusuri file proyek dan tinjau perubahan</string>
+    <string name="tools_terminal_desc">Terminal Linux di workspace privat</string>
+    <string name="tools_web_preview">Pratinjau web</string>
+    <string name="tools_web_preview_desc">Pratinjau server dev lokal</string>
+    <string name="tools_android_builder">Android Builder</string>
+    <string name="tools_android_builder_desc">Compile, tanda tangan, dan instal APK langsung</string>
+    <string name="tools_section_development">Pengembangan</string>
+    <string name="tools_section_build_deploy">Build &amp; Deploy</string>
+    <string name="projects_agent_running">Agent sedang berjalan</string>
+    <string name="projects_active_project">Proyek aktif</string>
+    <string name="projects_project">Proyek</string>
+    <string name="projects_quick_chat">Obrolan cepat</string>
+    <string name="projects_android">Android</string>
+    <string name="projects_general">Umum</string>
+    <string name="projects_recent">TERBARU</string>
+    <string name="projects_quick">CEPAT</string>
+    <string name="launch_stage_prepare">Persiapan</string>
+    <string name="launch_stage_resolve">Resolusi dependensi</string>
+    <string name="launch_stage_compile">Kompilasi</string>
+    <string name="launch_stage_resources">Resource</string>
+    <string name="launch_stage_package">Paket APK</string>
+    <string name="launch_stage_install">Instal</string>
+    <string name="launch_state_idle">Siap dibangun</string>
+    <string name="launch_state_preparing">Menyiapkan</string>
+    <string name="launch_state_building">Membangun</string>
+    <string name="launch_state_cancelling">Membatalkan</string>
+    <string name="launch_state_succeeded">Build berhasil</string>
+    <string name="launch_state_failed">Build gagal</string>
+    <string name="launch_state_cancelled">Build dibatalkan</string>
+    <string name="launch_tab_stages">Tahap</string>
+    <string name="launch_tab_issues">Masalah</string>
+    <string name="launch_tab_issues_count">Masalah (%1$d)</string>
+    <string name="launch_tab_log">Log</string>
+    <string name="launch_tab_logcat">Logcat</string>
+    <string name="launch_errors_warnings">%1$d error · %2$d peringatan</string>
+    <string name="launch_no_build_output">Belum ada output build. Ketuk putar untuk mengompilasi.</string>
+    <string name="nav_projects">Proyek</string>
+    <string name="nav_agent">Agent</string>
+    <string name="nav_tools">Alat</string>
+    <string name="nav_settings">Pengaturan</string>
+    <string name="status_done">Selesai</string>
+    <string name="status_running">Berjalan</string>
+    <string name="status_failed">Gagal</string>
+    <string name="status_waiting">Menunggu</string>
+    <string name="status_skipped">Dilewati</string>
+    <string name="files_tab_explorer">Explorer (%1$d)</string>
+    <string name="files_tab_editor">Editor</string>
+    <string name="files_tab_changes">Perubahan (%1$d)</string>
+    <string name="agent_send">Kirim</string>
+    <string name="settings_private_repository">Repositori privat</string>
+    <string name="settings_public_repository">Repositori publik</string>
+    <string name="shell_check_arm64">Arsitektur perangkat ARM64 (aarch64)</string>
+    <string name="shell_supported">Didukung</string>
+    <string name="shell_requires_arm64">Butuh perangkat ARMv8 64-bit</string>
+    <string name="shell_check_root">Akses root (mount namespace `su -mm`)</string>
+    <string name="shell_root_granted">Magisk / KernelSU / APatch diizinkan</string>
+    <string name="shell_root_required">Hak akses root diperlukan untuk chroot</string>
+    <string name="shell_check_rootfs">Rootfs Ubuntu 24.04 &amp; toolchain Agent</string>
+    <string name="shell_installed_ready">Terpasang &amp; siap</string>
+    <string name="shell_resume_setup">Lanjutkan pemasangan</string>
+    <string name="shell_install_runtime">Pasang runtime chroot</string>
+    <string name="a11y_selected">Dipilih</string>
+    <string name="a11y_expand">Buka langkah alat</string>
+    <string name="a11y_collapse">Tutup langkah alat</string>
+    <string name="settings_auto_approve_all_tools">Setujui semua alat otomatis</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Lewati konfirmasi untuk semua eksekusi alat</string>
+    <string name="settings_download_install_update">Unduh &amp; pasang v%1$s</string>
+    <string name="files_read_only_badge">Baca-Saja</string>
+    <string name="files_delete_file">Hapus file</string>
+    <string name="files_delete_file_confirm_title">Hapus File</string>
+    <string name="files_delete_file_confirm_message">Yakin ingin menghapus %1$s dari workspace ini?</string>
+    <string name="shell_delete_project_confirm_title">Hapus Proyek</string>
+    <string name="shell_delete_project_confirm_message">Hapus permanen %1$s beserta seluruh file di /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Hapus</string>
+    <string name="projects_new_quick_chat">Obrolan cepat baru</string>
+    <string name="agent_clear_chat">Bersihkan obrolan</string>
+    <string name="launch_clear_logcat">Bersihkan</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
 </resources>
 ```
 

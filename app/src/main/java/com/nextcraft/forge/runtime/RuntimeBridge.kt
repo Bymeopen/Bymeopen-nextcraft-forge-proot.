@@ -30,12 +30,20 @@ object RuntimeTaskController {
 
     @Synchronized
     fun stopCurrentTask() {
-        stopAction?.invoke()
+        val action = stopAction
+        stopAction = null
+        action?.invoke()
+    }
+
+    /** Clears [action] only if it is still the registered one, so a finishing task cannot drop another task's stop hook. */
+    @Synchronized
+    fun release(action: (() -> Unit)?) {
+        if (action != null && stopAction === action) stopAction = null
     }
 
     @Synchronized
     fun requestStop() {
-        stopAction?.invoke()
+        stopCurrentTask()
     }
 }
 

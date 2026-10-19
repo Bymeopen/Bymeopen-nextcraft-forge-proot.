@@ -94,6 +94,7 @@ fun ProjectsScreen(
     onCloneGitUrl: (String) -> Unit,
     onConnectGitHub: () -> Unit,
     onDeleteProject: (String) -> Unit,
+    onNewQuickProject: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val regular = state.projects
@@ -102,8 +103,12 @@ fun ProjectsScreen(
     val quick = state.projects
         .filter { it.kind == ProjectKind.QUICK_PROJECT }
         .sortedByDescending { it.updatedAtMillis }
-    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project.
-    val canDelete = state.projects.size > 1 && !state.sessionRunning
+    val busy = state.sessionRunning ||
+        state.androidBuild.phase == com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING ||
+        state.terminalRunning
+    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while tasks run.
+    val canDelete = state.projects.size > 1 && !busy
+    var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
     var showCloneDialog by rememberSaveable { mutableStateOf(false) }
     val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(onImportZip)
@@ -142,11 +147,11 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
-                        // MainViewModel.selectProject ignores switches while the agent streams.
-                        locked = state.sessionRunning && project.id != state.activeProjectId,
+                        // MainViewModel.selectProject ignores switches while active tasks run.
+                        locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
                         onOpen = { onOpenProject(project.id) },
-                        onDelete = { onDeleteProject(project.id) },
+                        onDelete = { pendingDeleteProject = project },
                     )
                 }
             }
@@ -156,10 +161,10 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
-                        locked = state.sessionRunning && project.id != state.activeProjectId,
+                        locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
                         onOpen = { onOpenProject(project.id) },
-                        onDelete = { onDeleteProject(project.id) },
+                        onDelete = { pendingDeleteProject = project },
                     )
                 }
             }
@@ -173,6 +178,25 @@ fun ProjectsScreen(
             onClone = { url ->
                 showCloneDialog = false
                 onCloneGitUrl(url)
+            },
+        )
+    }
+    pendingDeleteProject?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
+            text = { Text(stringResource(R.string.shell_delete_project_confirm_message, target.name, target.slug)) },
+            confirmButton = {
+                ForgePrimaryButton(
+                    text = stringResource(R.string.shell_confirm_delete),
+                    onClick = {
+                        onDeleteProject(target.id)
+                        pendingDeleteProject = null
+                    },
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -346,6 +370,7 @@ private fun BringExistingProjectCard(
             }
         }
     }
+
 }
 
 @Composable

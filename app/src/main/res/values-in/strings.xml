@@ -241,6 +241,7 @@
     <string name="msg_gh_repo_name_empty">Nama repositori tidak boleh kosong.</string>
     <string name="msg_gh_creating_repo">Membuat repositori GitHub \'%1$s\'…</string>
     <string name="msg_gh_created_pushed">Dibuat &amp; di-push ke %1$s</string>
+    <string name="msg_gh_created_push_failed">%1$s dibuat, tetapi push awal gagal: %2$s</string>
     <string name="msg_gh_create_failed">Gagal membuat repositori: %1$s</string>
     <string name="msg_gh_connect_first_pull">Hubungkan GitHub dulu sebelum pull.</string>
     <string name="msg_gh_pulling">Menarik perubahan terbaru dari GitHub untuk %1$s…</string>
@@ -274,7 +275,7 @@
     <string name="stack_php">Runtime PHP</string>
     <string name="stack_web_desc">Node.js 24, npm, TypeScript, Vite, Next.js</string>
     <string name="stack_python_desc">Python 3.12, pip, venv, FastAPI, perkakas data</string>
-    <string name="stack_android_desc">OpenJDK 17, Gradle, Android SDK 35/36, Bionic aapt2</string>
+    <string name="stack_android_desc">OpenJDK %1$s, Gradle %2$s, Android SDK %3$s, Bionic aapt2</string>
     <string name="stack_cpp_desc">Clang/GCC, CMake, Make, Ninja, gdb</string>
     <string name="stack_php_desc">PHP CLI, Composer, ekstensi SQLite/PDO</string>
     <string name="chat_main">Obrolan utama</string>
@@ -324,4 +325,28 @@
     <string name="np_title">Proyek baru</string>
     <string name="np_android_template">Templat aplikasi Android</string>
     <string name="np_android_template_sub">Buat proyek Kotlin (SDK 35)</string>
+    <string name="settings_auto_approve_all_tools">Setujui semua alat otomatis</string>
+    <string name="settings_auto_approve_all_tools_subtitle">Lewati konfirmasi untuk semua eksekusi alat</string>
+    <string name="settings_download_install_update">Unduh &amp; pasang v%1$s</string>
+    <string name="files_read_only_badge">Baca-Saja</string>
+    <string name="files_delete_file">Hapus file</string>
+    <string name="files_delete_file_confirm_title">Hapus File</string>
+    <string name="files_delete_file_confirm_message">Yakin ingin menghapus %1$s dari workspace ini?</string>
+    <string name="shell_delete_project_confirm_title">Hapus Proyek</string>
+    <string name="shell_delete_project_confirm_message">Hapus permanen %1$s beserta seluruh file di /workspace/%2$s?</string>
+    <string name="shell_confirm_delete">Hapus</string>
+    <string name="projects_new_quick_chat">Obrolan cepat baru</string>
+    <string name="agent_clear_chat">Bersihkan obrolan</string>
+    <string name="launch_clear_logcat">Bersihkan</string>
+    <string name="launch_filter_logcat">Filter logcat…</string>
+    <string name="msg_busy_before_quick_project">Selesaikan atau hentikan tugas aktif sebelum memulai Quick project.</string>
+    <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>
+    <string name="msg_agy_probing">Memeriksa Antigravity CLI di dalam chroot…</string>
+    <string name="msg_agy_verified">Antigravity CLI terverifikasi: %1$s</string>
+    <string name="msg_agy_probe_failed">Pemeriksaan Antigravity gagal: %1$s</string>
+    <string name="msg_switch_blocked_agent">Hentikan sesi agen yang berjalan sebelum berpindah proyek.</string>
+    <string name="msg_switch_blocked_build">Tunggu build APK Android selesai atau hentikan sebelum berpindah proyek.</string>
+    <string name="msg_switch_blocked_terminal">Tunggu perintah terminal aktif selesai sebelum berpindah proyek.</string>
+    <string name="msg_busy_before_new_project">Selesaikan atau hentikan tugas aktif sebelum membuat dan berpindah ke proyek baru.</string>
+    <string name="msg_gh_code_expired">Kode masuk GitHub kedaluwarsa. Mulai lagi proses masuk.</string>
 </resources>

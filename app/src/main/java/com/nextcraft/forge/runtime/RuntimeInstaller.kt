@@ -17,6 +17,8 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
@@ -61,7 +63,14 @@ private data class RuntimeBundle(
     val fileName: String,
     val sha256: String,
     val compressedBytes: Long,
+    val baseUrl: String = RUNTIME_RELEASE_BASE_URL,
 )
+
+/** Release hosting the Ubuntu 24.04 bundles built from scripts/runtime-bundles. */
+private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.1"
+
+/** Release hosting the Ubuntu 20.04 bundles; still serves the Android bundle and the Python 3.8 overlay. */
+private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
 
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
@@ -127,15 +136,27 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureChrootScripts(): File {
         runtimeBinDir.mkdirs()
         if (!chrootExecFile.isFile || chrootExecFile.readTextOrNull() != CHROOT_EXEC_SCRIPT.trim()) {
-            chrootExecFile.writeText(CHROOT_EXEC_SCRIPT)
+            writeScriptAtomically(chrootExecFile, CHROOT_EXEC_SCRIPT)
         }
         Os.chmod(chrootExecFile.absolutePath, 0b111101101)
 
         if (!unmountChrootFile.isFile || unmountChrootFile.readTextOrNull() != UNMOUNT_CHROOT_SCRIPT.trim()) {
-            unmountChrootFile.writeText(UNMOUNT_CHROOT_SCRIPT)
+            writeScriptAtomically(unmountChrootFile, UNMOUNT_CHROOT_SCRIPT)
         }
         Os.chmod(unmountChrootFile.absolutePath, 0b111101101)
         return chrootExecFile
+    }
+
+    /** Replaces the script via rename so a concurrent launch never executes a half-written file. */
+    private fun writeScriptAtomically(target: File, content: String) {
+        val staged = File(target.parentFile, "${target.name}.tmp")
+        try {
+            staged.writeText(content)
+            Os.rename(staged.absolutePath, target.absolutePath)
+        } catch (e: Throwable) {
+            staged.delete()
+            throw e
+        }
     }
 
     /** Unmounts all kernel mounts under [targetRootfs] before deleting or swapping rootfs directories. */
@@ -178,7 +199,8 @@ class RuntimeInstaller(private val context: Context) {
                 System.getProperty("os.arch"),
             ),
         ) { "NextCraft Forge requires an ARM64 (arm64-v8a / aarch64) Android device." }
-        require(isRootAccessAvailable()) {
+        // The first su call shows the Magisk/KernelSU/APatch grant dialog; the 8 s default kills su before the user can tap Allow.
+        require(isRootAccessAvailable(ROOT_GRANT_TIMEOUT_SECONDS)) {
             "Root access (su -mm) is required by NextCraft Forge's Ubuntu 24.04 LTS Chroot engine. Grant root permission in Magisk, KernelSU, or APatch and try again."
         }
         val chrootExec = ensureChrootScripts()
@@ -229,7 +251,9 @@ class RuntimeInstaller(private val context: Context) {
         ensureSettingsAndHooks()
 
         val coreNeeded = !File(rootfs, "usr/bin/git").exists() || !isSupportedCoreToolsVersion()
-        if (coreNeeded) {
+        // isInstalled() also requires Node; a missing/dangling node must be repaired even when git and the marker are fine.
+        val nodeMissing = !File(rootfs, "usr/local/bin/node").exists()
+        if (coreNeeded || nodeMissing) {
             installNodeIfNeeded(chrootExec, 0.58f, 0.66f, onProgress)
         }
         if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
@@ -251,17 +275,54 @@ class RuntimeInstaller(private val context: Context) {
         if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
         if (!nextcraftReadyMarker.exists()) nextcraftReadyMarker.writeText(CORE_TOOLS_VERSION)
 
+        val removedStacks = if (selectedStacks.isNotEmpty()) {
+            (installedStacks() - selectedStacks) - DevStack.WEB
+        } else {
+            emptySet()
+        }
         val missingStacks = selectedStacks.filterNot(::isStackInstalled)
-        missingStacks.forEachIndexed { index, stack ->
-            val slice = 0.26f / maxOf(1, missingStacks.size)
-            val from = 0.72f + index * slice
-            applyStack(chrootExec, stack, from, from + slice, onProgress)
+        val totalStackOps = maxOf(1, removedStacks.size + missingStacks.size)
+        var opIndex = 0
+        removedStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
+            removeStack(stack) { p ->
+                onProgress(p.copy(fraction = from + p.fraction.coerceIn(0f, 1f) * slice))
+            }
+            opIndex++
+        }
+        // One broken stack (e.g. Android tools that cannot run) must not keep the others from installing:
+        // install every selected stack, then report all failures together.
+        val failedStacks = mutableListOf<Pair<DevStack, Throwable>>()
+        missingStacks.forEach { stack ->
+            val slice = 0.26f / totalStackOps
+            val from = 0.72f + opIndex * slice
+            try {
+                applyStack(chrootExec, stack, from, from + slice, onProgress)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("RuntimeInstaller", "Installing ${stack.label} failed", e)
+                failedStacks += stack to e
+                onProgress(
+                    RuntimeInstallProgress(
+                        "${stack.label} failed: ${e.message?.take(160).orEmpty()}",
+                        from + slice,
+                    ),
+                )
+            }
+            opIndex++
         }
 
         when (agent) {
             AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(chrootExec, 0.985f, onProgress)
             AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(chrootExec, 0.985f, onProgress)
             AgentKind.ANTIGRAVITY -> ensureAgyInstalled(chrootExec, 0.985f, onProgress)
+        }
+        check(failedStacks.isEmpty()) {
+            failedStacks.joinToString(separator = "\n") { (stack, error) ->
+                "${stack.label}: ${error.message?.take(200).orEmpty()}"
+            }
         }
         onProgress(RuntimeInstallProgress("NextCraft Forge Root Chroot setup complete", 1f))
         return InstalledRuntime(chrootExec, rootfs)
@@ -635,9 +696,30 @@ class RuntimeInstaller(private val context: Context) {
             val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
             if (comparison != 0) return comparison > 0
         }
-        val candidatePre = '-' in candidate.substringBefore('+')
-        val currentPre = '-' in current.substringBefore('+')
-        return !candidatePre && currentPre
+        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+        }
+        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+        val candidateIds = candidatePreTag.split('.')
+        val currentIds = currentPreTag.split('.')
+        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+            val candidateId = candidateIds.getOrNull(index)
+            val currentId = currentIds.getOrNull(index)
+            if (candidateId == null) return false
+            if (currentId == null) return true
+            val candidateNum = candidateId.toIntOrNull()
+            val currentNum = currentId.toIntOrNull()
+            val comparison = if (candidateNum != null && currentNum != null) {
+                candidateNum.compareTo(currentNum)
+            } else {
+                candidateId.compareTo(currentId)
+            }
+            if (comparison != 0) return comparison > 0
+        }
+        return false
     }
 
     private fun migrateLegacyClaudeMarker() {
@@ -654,8 +736,12 @@ class RuntimeInstaller(private val context: Context) {
     private fun isSupportedCoreToolsVersion(): Boolean = coreToolsMarker.readTextOrNull() in setOf(
         CORE_TOOLS_VERSION,
         LEGACY_CORE_TOOLS_VERSION,
+        PREVIOUS_CORE_TOOLS_VERSION,
         NEXTCRAFT_CORE_TOOLS_VERSION,
     )
+
+    private fun pythonBundle(): RuntimeBundle =
+        if (rootfsMarker.readTextOrNull() == LEGACY_ROOTFS_VERSION) LEGACY_PYTHON_BUNDLE else PYTHON_BUNDLE
 
     private fun isSupportedRootfsVersion(version: String?): Boolean = version in setOf(
         ROOTFS_VERSION,
@@ -677,6 +763,7 @@ class RuntimeInstaller(private val context: Context) {
             onProgress = onProgress,
         )
         verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
+        migrateLegacyClaudeMarker()
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
@@ -862,43 +949,48 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePythonStack() {
+        // The overlay is unmanaged by dpkg, so it is removed by path. Covers the current Ubuntu 24.04 bundle
+        // (Python 3.12) and the legacy 20.04 bundle (Python 3.8). Shared libraries the overlay also ships
+        // (libsqlite3, libreadline, libhistory) and tzdata files are left in place: other tools may use them.
         listOf(
             ".pocket-python-tools-version",
+            ".nextcraft-python-tools-version",
             "usr/bin/python3",
+            "usr/bin/python3.12",
             "usr/bin/python3.8",
             "usr/bin/pip",
             "usr/bin/pip3",
+            "usr/bin/pip3.12",
+            "usr/bin/pdb3",
+            "usr/bin/pdb3.12",
+            "usr/bin/pydoc3",
+            "usr/bin/pydoc3.12",
+            "usr/bin/pygettext3",
+            "usr/bin/pygettext3.12",
+            "usr/bin/py3clean",
+            "usr/bin/py3compile",
+            "usr/bin/py3versions",
+            "usr/lib/aarch64-linux-gnu/libpython3.12.so.1",
+            "usr/lib/aarch64-linux-gnu/libpython3.12.so.1.0",
             "usr/lib/aarch64-linux-gnu/libpython3.8.so.1",
             "usr/lib/aarch64-linux-gnu/libpython3.8.so.1.0",
             "usr/lib/python3",
+            "usr/lib/python3.12",
             "usr/lib/python3.8",
+            "usr/lib/valgrind/python3.supp",
+            "usr/local/lib/python3.12",
             "usr/local/lib/python3.8",
+            "etc/python3",
+            "etc/python3.12",
             "usr/share/python3",
             "usr/share/python-wheels",
             "root/.cache/pip",
         ).forEach { removePath(File(rootfs, it)) }
     }
 
+    /** Removes the current overlay layout and every previous one, so an upgrade does not leave an old JDK behind. */
     private fun removeAndroidStack() {
-        listOf(
-            "root/android-sdk",
-            "root/maven",
-            "root/.pocket-android-tools-version",
-            "root/.gradle/caches",
-            "root/.gradle/daemon",
-            "root/.gradle/native",
-            "root/.gradle/notifications",
-            "root/.gradle/wrapper/dists",
-            "root/.gradle/init.d/pocketdev-android.gradle",
-            "opt/gradle",
-            "opt/jdk-17.0.20.1+1",
-            "usr/local/bin/jar",
-            "usr/local/bin/jarsigner",
-            "usr/local/bin/java",
-            "usr/local/bin/javac",
-            "usr/local/bin/javadoc",
-            "usr/local/bin/keytool",
-        ).forEach { removePath(File(rootfs, it)) }
+        AndroidToolchain.REMOVABLE_HOST_PATHS.forEach { removePath(File(rootfs, it)) }
         removeAndroidGradleProperty()
     }
 
@@ -935,7 +1027,7 @@ class RuntimeInstaller(private val context: Context) {
                 verifyGuest(chrootExec, "node --version && npm --version", "Failed to verify Node.js")
             }
             DevStack.PYTHON -> {
-                installRuntimeOverlay(PYTHON_BUNDLE, "Installing Python toolchain…", from, to, onProgress)
+                installRuntimeOverlay(pythonBundle(), "Installing Python toolchain…", from, to, onProgress)
                 runCatching {
                     verifyGuest(chrootExec, "python3 --version && pip3 --version", "Failed to verify Python")
                 }.onFailure { error ->
@@ -982,6 +1074,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${stack.label}", to))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installComposer(
         chrootExec: File,
         fraction: Float,
@@ -1020,35 +1113,37 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         val marker = File(rootfs, "root/.pocket-android-tools-version")
-        val androidHome = File(rootfs, "root/android-sdk")
-        val gradleHome = File(rootfs, "opt/gradle")
-        val localMaven = File(rootfs, "root/maven/localMvnRepository")
-        if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION ||
-            !File(androidHome, "platforms/android-36/android.jar").isFile ||
-            !File(androidHome, "build-tools/35.0.0/aapt2").isFile ||
-            !File(gradleHome, "gradle-8.14.3/bin/gradle").isFile ||
-            !localMaven.isDirectory
-        ) {
+        if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION || !hasAndroidToolchainFiles(rootfs)) {
+            // An older layout (different JDK/Gradle directories) would otherwise stay behind next to the new one.
+            if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION && marker.isFile) removeAndroidStack()
             installRuntimeOverlay(
                 ANDROID_BUNDLE,
-                "Installing Android SDK 36, Build Tools 35, Gradle 8.14.3, and Maven cache…",
+                "Installing Android SDK ${AndroidToolchain.COMPILE_SDK}, Build Tools ${AndroidToolchain.BUILD_TOOLS_VERSION}, " +
+                    "Gradle ${AndroidToolchain.GRADLE_VERSION}, and Maven cache…",
                 from,
                 to,
                 onProgress,
             )
-            makeAndroidToolsExecutable(androidHome, gradleHome)
+            makeAndroidToolsExecutable(rootfs)
             marker.parentFile?.mkdirs()
             marker.writeText(ANDROID_TOOLS_VERSION)
         }
         writeAndroidGradleConfiguration(rootfs)
 
+        val jdk = AndroidToolchain.JDK_MAJOR
         verifyGuest(
             chrootExec,
-            "java -version 2>&1 | grep -E '\"17\\.|version 17' && " +
-                "gradle --version && aapt2 version && test -f \"${'$'}ANDROID_HOME/platforms/android-36/android.jar\"",
-            "Failed to verify Android SDK, Gradle, and Java 17",
+            "java -version 2>&1 | grep -E '\"$jdk\\.|version $jdk' && " +
+                "gradle --version && aapt2 version && test -f ${AndroidToolchain.ANDROID_JAR_GUEST_PATH}",
+            "Failed to verify Android SDK, Gradle, and Java $jdk",
         )
     }
+
+    private fun hasAndroidToolchainFiles(runtimeRootfs: File): Boolean =
+        File(runtimeRootfs, AndroidToolchain.ANDROID_JAR_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.AAPT2_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.MAVEN_HOST_DIR).let { it.isDirectory && !it.list().isNullOrEmpty() }
 
     private suspend fun installRuntimeOverlay(
         bundle: RuntimeBundle,
@@ -1098,6 +1193,18 @@ class RuntimeInstaller(private val context: Context) {
             true
         }.getOrDefault(false)
 
+    /** Fails early with an actionable message instead of an opaque IOException halfway through extraction. */
+    private fun requireFreeSpaceForBundle(bundle: RuntimeBundle, alreadyDownloaded: Boolean) {
+        val free = context.filesDir.usableSpace
+        if (free <= 0L) return // unknown (some filesystems report 0); let the real write decide
+        val factor = if (alreadyDownloaded) BUNDLE_EXTRACT_SPACE_FACTOR else BUNDLE_DOWNLOAD_SPACE_FACTOR
+        val needed = bundle.compressedBytes * factor
+        check(free >= needed) {
+            "Not enough free storage for the ${bundle.label} bundle: about ${needed / MEGABYTE} MB needed, " +
+                "${free / MEGABYTE} MB available. Free some space and retry."
+        }
+    }
+
     private suspend fun obtainRuntimeBundle(
         bundle: RuntimeBundle,
         preferEmbedded: Boolean,
@@ -1107,6 +1214,7 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
+        requireFreeSpaceForBundle(bundle, alreadyDownloaded = destination.isFile)
         if (preferEmbedded && isAssetAvailable("runtime/${bundle.fileName}")) {
             val loadingLabel = "Loading ${bundle.label} bundle…"
             onProgress(RuntimeInstallProgress(loadingLabel, from, 0, bundle.compressedBytes))
@@ -1134,7 +1242,7 @@ class RuntimeInstaller(private val context: Context) {
             return destination
         }
 
-        val url = "$DEFAULT_RUNTIME_RELEASE_BASE_URL/${bundle.fileName}"
+        val url = "${bundle.baseUrl}/${bundle.fileName}"
         val downloadingLabel = "Downloading ${bundle.label} bundle…"
         downloadVerified(url, destination, bundle.sha256) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
@@ -1143,45 +1251,19 @@ class RuntimeInstaller(private val context: Context) {
         return destination
     }
 
-    private fun makeAndroidToolsExecutable(androidHome: File, gradleHome: File) {
-        val buildTools = File(androidHome, "build-tools/35.0.0")
+    private fun makeAndroidToolsExecutable(runtimeRootfs: File) {
+        val buildTools = File(runtimeRootfs, AndroidToolchain.BUILD_TOOLS_HOST_DIR)
         listOf("aapt", "aapt2", "aidl", "apksigner", "d8", "dexdump", "split-select", "zipalign")
             .map { File(buildTools, it) }
-            .plus(File(gradleHome, "gradle-8.14.3/bin/gradle"))
+            .plus(File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH))
             .filter(File::isFile)
             .forEach { Os.chmod(it.absolutePath, 0b111101101) }
     }
 
     private fun writeAndroidGradleInitScript(runtimeRootfs: File) {
-        val script = File(runtimeRootfs, "root/.gradle/init.d/pocketdev-android.gradle")
+        val script = File(runtimeRootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/"))
         script.parentFile?.mkdirs()
-        script.writeText(
-            """
-            def pocketMaven = uri('/root/maven/localMvnRepository')
-            beforeSettings { settings ->
-                settings.pluginManagement.repositories {
-                    maven { url = pocketMaven }
-                    google()
-                    mavenCentral()
-                    gradlePluginPortal()
-                }
-            }
-            settingsEvaluated { settings ->
-                settings.dependencyResolutionManagement.repositories {
-                    maven { url = pocketMaven }
-                }
-            }
-            gradle.beforeProject { project ->
-                project.extensions.extraProperties.set(
-                    'android.aapt2FromMavenOverride',
-                    '/root/android-sdk/build-tools/35.0.0/aapt2'
-                )
-                project.buildscript.repositories {
-                    maven { url = pocketMaven }
-                }
-            }
-            """.trimIndent() + "\n",
-        )
+        script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
     }
 
     @Synchronized
@@ -1234,15 +1316,23 @@ class RuntimeInstaller(private val context: Context) {
         .filter(::isStackInstalled)
         .toSet()
 
+    private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
+        val file = File(rootfs, relativePath.removePrefix("/"))
+        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+    }
+
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        return when (stack) {
+            DevStack.WEB -> true
+            DevStack.PYTHON -> guestExecutableOrSymlinkExists("usr/bin/python3") && guestExecutableOrSymlinkExists("usr/bin/pip3")
+            DevStack.CPP -> guestExecutableOrSymlinkExists("usr/bin/gcc") && guestExecutableOrSymlinkExists("usr/bin/g++")
+            DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
+            DevStack.ANDROID ->
+                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                    hasAndroidToolchainFiles(rootfs) &&
+                    File(rootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/")).isFile
+        }
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {
@@ -1264,6 +1354,7 @@ class RuntimeInstaller(private val context: Context) {
         devStacksFile.writeText(obj.toString())
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun installNodeIfNeeded(
         chrootExec: File,
         from: Float,
@@ -1386,13 +1477,16 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         require(packages.isNotEmpty()) { "No packages selected" }
         val packageNames = packages.joinToString(" ")
+        // The stack packages (php-cli, build-essential, gcc, ...) are metapackages: purging them alone leaves the real
+        // binaries (php8.3-cli, gcc-13, ...) installed, so autoremove the dependencies that were pulled in with them.
         val command = "export DEBIAN_FRONTEND=noninteractive; " +
             "apt-get -o DPkg::Lock::Timeout=120 purge -y $packageNames && " +
+            "apt-get -o DPkg::Lock::Timeout=120 autoremove --purge -y && " +
             "apt-get clean && rm -rf /var/lib/apt/lists/*"
         runGuestCommand(
             chrootExec = chrootExec,
             command = command,
-            displayCommand = "apt-get purge -y $packageNames",
+            displayCommand = "apt-get purge -y $packageNames && apt-get autoremove --purge -y",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
@@ -1484,6 +1578,10 @@ class RuntimeInstaller(private val context: Context) {
                     onProgress(RuntimeInstallProgress(line, fraction, terminalLine = line, indeterminate = true, event = RuntimeInstallEvent.OUTPUT))
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            // TimeoutCancellationException is a CancellationException: left as-is the setup service would
+            // report "paused" instead of a failure.
+            throw IllegalStateException("$failureMessage: timed out after ${timeoutMs / 60_000L} min", e)
         } finally {
             if (running.isAlive) {
                 running.destroy()
@@ -1534,6 +1632,8 @@ class RuntimeInstaller(private val context: Context) {
                 .orEmpty()
                 .trim()
             check(exit == 0) { actionableProcessError(output, failureMessage) }
+        } catch (e: TimeoutCancellationException) {
+            throw IllegalStateException("$failureMessage: timed out", e)
         } finally {
             if (verify.isAlive) {
                 verify.destroy()
@@ -1649,6 +1749,7 @@ class RuntimeInstaller(private val context: Context) {
      * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
      * No PRoot binary or ptrace translation is used.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
         rootfs: File,
@@ -1671,7 +1772,7 @@ class RuntimeInstaller(private val context: Context) {
             targetRootfs = rootfs,
         )
 
-        return try {
+        val spawned = try {
             NativeSpawnProcess.start(
                 argv = listOf("su", "-mm", "-c", suCommand),
                 environment = emptyMap(),
@@ -1685,6 +1786,13 @@ class RuntimeInstaller(private val context: Context) {
             envFile.delete()
             throw error
         }
+        // The `rm -f` inside suCommand never runs when su is denied or exec fails, which would leave API keys
+        // on disk until the next launch's 10-minute purge. Remove the file as soon as the process is gone.
+        Thread({
+            while (spawned.isAlive) Thread.sleep(ENV_CLEANUP_POLL_MS)
+            envFile.delete()
+        }, "forge-env-cleanup").apply { isDaemon = true; start() }
+        return spawned
     }
 
     /**
@@ -1725,12 +1833,12 @@ class RuntimeInstaller(private val context: Context) {
             val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
-                put("ANDROID_HOME", "/root/android-sdk")
-                put("ANDROID_SDK_ROOT", "/root/android-sdk")
-                put("GRADLE_HOME", "/opt/gradle/gradle-8.14.3")
+                put("ANDROID_HOME", AndroidToolchain.SDK_GUEST_DIR)
+                put("ANDROID_SDK_ROOT", AndroidToolchain.SDK_GUEST_DIR)
+                put("GRADLE_HOME", AndroidToolchain.GRADLE_HOME_GUEST_DIR)
                 put("GRADLE_USER_HOME", "/root/.gradle")
-                put("ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride", "/root/android-sdk/build-tools/35.0.0/aapt2")
-                put("PATH", "/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:$basePath")
+                put("ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride", AndroidToolchain.AAPT2_GUEST_PATH)
+                put("PATH", "${AndroidToolchain.GUEST_PATH_PREFIX}:$basePath")
             } else {
                 put("PATH", basePath)
             }
@@ -1955,7 +2063,8 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
     @Suppress("DEPRECATION")
     private fun extractZstdTar(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(openZstdInputStream(archive)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -1963,23 +2072,49 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val cleanName = currentEntry.name.removePrefix("./").trimEnd('/')
                 if (cleanName.isNotBlank()) {
-                    val target = safeChild(destination, cleanName)
+                    val target = safeChild(rootDir, cleanName)
                     when {
                         currentEntry.isDirectory -> {
-                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            target.mkdirs()
+                            if (java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                val resolvedDir = runCatching {
+                                    resolveSafeSymlinkTarget(
+                                        rootPath = rootPath,
+                                        parentDir = target.toPath().parent ?: rootPath,
+                                        linkName = java.nio.file.Files.readSymbolicLink(target.toPath()).toString(),
+                                        errorMessage = "Archive path escapes runtime via symlink",
+                                    ).toFile()
+                                }.getOrNull()
+                                if (resolvedDir != null) {
+                                    resolvedDir.mkdirs()
+                                } else {
+                                    target.delete()
+                                    target.mkdirs()
+                                }
+                            } else {
+                                target.mkdirs()
+                            }
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
-                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
+                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                if (target.isDirectory && !java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                                    target.deleteRecursively()
+                                } else {
+                                    target.delete()
+                                }
+                            }
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             target.parentFile?.mkdirs()
-                            val linkTarget = safeChild(destination, currentEntry.linkName.removePrefix("./").trimEnd('/'))
-                            if (linkTarget.exists()) {
+                            val linkTarget = safeChild(rootDir, currentEntry.linkName.removePrefix("./").trimEnd('/'))
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -1997,18 +2132,21 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun extractNodeArchive(archive: File, destination: File) {
-        val rootPath = destination.canonicalFile.toPath()
+        val rootDir = destination.canonicalFile
+        val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(archive.inputStream()))).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
@@ -2016,7 +2154,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 val currentEntry = entry
                 val relative = currentEntry.name.removePrefix("./").substringAfter('/', "").trimEnd('/')
                 if (relative.isNotBlank()) {
-                    val target = safeChild(destination, relative)
+                    val target = safeChild(rootDir, relative)
                     when {
                         currentEntry.isDirectory -> {
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
@@ -2024,16 +2162,20 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                         }
                         currentEntry.isSymbolicLink -> {
                             target.parentFile?.mkdirs()
-                            val resolvedLink = target.toPath().parent.resolve(currentEntry.linkName).normalize()
-                            require(resolvedLink.startsWith(rootPath)) { "Archive symlink escapes runtime" }
+                            resolveSafeSymlinkTarget(
+                                rootPath = rootPath,
+                                parentDir = target.toPath().parent ?: rootPath,
+                                linkName = currentEntry.linkName,
+                                errorMessage = "Archive symlink escapes runtime",
+                            )
                             if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
                             Os.symlink(currentEntry.linkName, target.absolutePath)
                         }
                         currentEntry.isLink -> {
                             val relativeLink = currentEntry.linkName.removePrefix("./").substringAfter('/', "").trimEnd('/')
-                            val linkTarget = safeChild(destination, relativeLink)
+                            val linkTarget = safeChild(rootDir, relativeLink)
                             target.parentFile?.mkdirs()
-                            if (linkTarget.exists()) {
+                            if (linkTarget.exists() || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                                 linkOrCopyFile(linkTarget, target)
                             } else {
                                 deferredLinks += target to linkTarget
@@ -2051,24 +2193,50 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             }
         }
         deferredLinks.forEach { (target, linkTarget) ->
-            require(linkTarget.isFile && !java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
+            require(linkTarget.isFile || java.nio.file.Files.isSymbolicLink(linkTarget.toPath())) {
                 "Node.js archive hard-link target is missing"
             }
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
-            runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
+            if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+            }
         }
     }
 
     private fun linkOrCopyFile(source: File, destination: File) {
         if (destination.exists() || java.nio.file.Files.isSymbolicLink(destination.toPath())) destination.delete()
+        if (java.nio.file.Files.isSymbolicLink(source.toPath())) {
+            val symTarget = java.nio.file.Files.readSymbolicLink(source.toPath()).toString()
+            Os.symlink(symTarget, destination.absolutePath)
+            return
+        }
         val linked = runCatching {
             Os.link(source.absolutePath, destination.absolutePath)
             true
         }.getOrDefault(false)
         if (!linked) {
             source.inputStream().use { input -> FileOutputStream(destination).use { input.copyTo(it) } }
+            runCatching { Os.chmod(destination.absolutePath, Os.stat(source.absolutePath).st_mode and 0b111111111) }
         }
+    }
+
+    private fun resolveSafeSymlinkTarget(
+        rootPath: java.nio.file.Path,
+        parentDir: java.nio.file.Path,
+        linkName: String,
+        errorMessage: String = "Archive symlink escapes runtime",
+    ): java.nio.file.Path {
+        require(linkName.isNotBlank() && !linkName.contains('\u0000')) { errorMessage }
+        val normalizedLink = linkName.replace('\\', '/')
+        val resolved = if (normalizedLink.startsWith('/')) {
+            val relFromRoot = normalizedLink.trimStart('/')
+            if (relFromRoot.isEmpty()) rootPath else rootPath.resolve(relFromRoot).normalize()
+        } else {
+            parentDir.resolve(normalizedLink).normalize()
+        }
+        require(resolved.startsWith(rootPath)) { errorMessage }
+        return resolved
     }
 
     private fun safeChild(root: File, relative: String): File {
@@ -2083,29 +2251,32 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         ) {
             "Unsafe archive path"
         }
-        val file = File(root, normalized)
         val rootCanonical = root.canonicalFile
         val rootPath = rootCanonical.toPath()
-        var cursor: File? = file.parentFile
-        while (cursor != null && cursor != root && cursor.canonicalFile != rootCanonical) {
-            val cursorPath = cursor.toPath()
-            if (java.nio.file.Files.isSymbolicLink(cursorPath)) {
-                val linkTarget = java.nio.file.Files.readSymbolicLink(cursorPath)
-                val resolved = cursorPath.parent.resolve(linkTarget).normalize()
-                require(resolved.startsWith(rootPath)) { "Archive path escapes runtime via symlink" }
+        var currentDir = rootPath
+        for (index in 0 until segments.lastIndex) {
+            val segment = segments[index]
+            var candidate = currentDir.resolve(segment).normalize()
+            require(candidate.startsWith(rootPath) && candidate != rootPath) { "Archive path escapes runtime" }
+            var hops = 0
+            while (java.nio.file.Files.isSymbolicLink(candidate)) {
+                check(++hops <= 16) { "Archive symlink loop detected" }
+                val linkTarget = java.nio.file.Files.readSymbolicLink(candidate).toString()
+                val parent = candidate.parent ?: rootPath
+                candidate = resolveSafeSymlinkTarget(
+                    rootPath = rootPath,
+                    parentDir = parent,
+                    linkName = linkTarget,
+                    errorMessage = "Archive path escapes runtime via symlink",
+                )
             }
-            require(cursor.canonicalFile.toPath().startsWith(rootPath)) { "Archive path escapes runtime" }
-            cursor = cursor.parentFile
+            currentDir = candidate
         }
-        val parentPath = (file.parentFile ?: root).canonicalFile.toPath()
-        require(parentPath.startsWith(rootPath)) { "Archive path escapes runtime" }
-        if (!java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            val canonicalFile = file.canonicalFile.toPath()
-            require(canonicalFile.startsWith(rootPath) && canonicalFile != rootPath) {
-                "Archive path escapes runtime"
-            }
+        val finalPath = currentDir.resolve(segments.last()).normalize()
+        require(finalPath.startsWith(rootPath) && finalPath != rootPath) {
+            "Archive path escapes runtime"
         }
-        return file
+        return finalPath.toFile()
     }
 
     private suspend fun downloadVerified(
@@ -2130,8 +2301,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
             val code = connection.responseCode
             if (code == 416 && existing > 0L) {
-                // Stale/complete .part cannot be resumed; discard so the next attempt starts clean.
+                // Stale/complete .part cannot be resumed; discard it and restart now (existing is 0 on the retry).
                 temporary.delete()
+                return downloadVerified(url, destination, expectedChecksum, algorithm, onBytes)
             }
             check(code in 200..299) { "Download failed with HTTP $code" }
             val resumed = code == HttpURLConnection.HTTP_PARTIAL && existing > 0L
@@ -2201,7 +2373,6 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val DEFAULT_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09"
         private const val AGY_VERSION = "1.1.27"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
@@ -2224,11 +2395,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val COMPOSER_VERSION = "2.10.3"
         private const val COMPOSER_SHA256 = "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
-        private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
+        private const val CORE_TOOLS_VERSION = "core-bundle-2026.10.1"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
+        private const val PREVIOUS_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val NEXTCRAFT_CORE_TOOLS_VERSION = "nextcraft-core-2026.10.1"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
-        private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
+        private const val ANDROID_TOOLS_VERSION = AndroidToolchain.TOOLS_VERSION
         private const val ANDROID_AAPT2_PROPERTY = "android.aapt2FromMavenOverride"
         private const val GRADLE_JVMARGS_PROPERTY = "org.gradle.jvmargs"
         private const val GRADLE_WORKERS_PROPERTY = "org.gradle.workers.max"
@@ -2241,49 +2413,94 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             GRADLE_PARALLEL_PROPERTY,
             KOTLIN_EXECUTION_PROPERTY,
         )
-        private const val ANDROID_AAPT2_GUEST_PATH = "/root/android-sdk/build-tools/35.0.0/aapt2"
-        private const val ANDROID_AAPT2_HOST_PATH = "root/android-sdk/build-tools/35.0.0/aapt2"
+        private const val ANDROID_AAPT2_GUEST_PATH = AndroidToolchain.AAPT2_GUEST_PATH
+        private const val ANDROID_AAPT2_HOST_PATH = AndroidToolchain.AAPT2_HOST_PATH
+
+        /**
+         * Gradle init script that makes the offline Maven repository and the ARM64 aapt2 visible to every build.
+         * `build-android-bundle.sh` ships a byte-identical copy; keep both in sync.
+         */
+        internal val ANDROID_GRADLE_INIT_SCRIPT = """
+            def pocketMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            beforeSettings { settings ->
+                settings.pluginManagement.repositories {
+                    maven { url = pocketMaven }
+                    google()
+                    mavenCentral()
+                    gradlePluginPortal()
+                }
+            }
+            settingsEvaluated { settings ->
+                settings.dependencyResolutionManagement.repositories {
+                    maven { url = pocketMaven }
+                }
+            }
+            gradle.beforeProject { project ->
+                project.extensions.extraProperties.set(
+                    '$ANDROID_AAPT2_PROPERTY',
+                    '$ANDROID_AAPT2_GUEST_PATH'
+                )
+                project.buildscript.repositories {
+                    maven { url = pocketMaven }
+                }
+            }
+        """.trimIndent() + "\n"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
         const val DSH_VERSION = "0.1.2-rc.1"
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "pocketdev-core-arm64-2026.09.5.tar.zst",
-            sha256 = "df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012",
-            compressedBytes = 72_185_773L,
+            fileName = "nextcraft-core-arm64-2026.10.1.tar.zst",
+            sha256 = "fe63d1dececdcd5e861debe0936835d39c2eb6eb787bb7bd71bcab5c3db4d4cf",
+            compressedBytes = 74_269_605L,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
-            fileName = "pocketdev-claude-arm64-2026.09.1.tar.zst",
-            sha256 = "0f68e15630e8c0fc941afe3f61ab5a3eb4407b334018de6dbdabfa5eca627724",
-            compressedBytes = 75_289_800L,
+            fileName = "nextcraft-claude-arm64-2026.10.1.tar.zst",
+            sha256 = "bb993c0a80ff2ea8d9c994e03cf587bf7ef996bdecdab3d95ce51e1e0f04f2bd",
+            compressedBytes = 75_422_659L,
         )
         private val PYTHON_BUNDLE = RuntimeBundle(
+            label = "Python",
+            fileName = "nextcraft-python-arm64-2026.10.1.tar.zst",
+            sha256 = "43a23a3e2d73e46f5c242ac4e3d8f7adef356b987559e1474e4cc9072118a7f3",
+            compressedBytes = 15_053_684L,
+        )
+        /** Python 3.8 overlay for runtimes still on the Ubuntu 20.04 rootfs: the 3.12 overlay needs glibc 2.39. */
+        private val LEGACY_PYTHON_BUNDLE = RuntimeBundle(
             label = "Python",
             fileName = "pocketdev-python-arm64-2026.09.2.tar.zst",
             sha256 = "6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85",
             compressedBytes = 55_419_626L,
+            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
         )
+        /** Built by scripts/runtime-bundles/build-android-bundle.sh; versions in [AndroidToolchain]. */
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
-            fileName = "pocketdev-android-arm64-2026.09.1.tar.zst",
-            sha256 = "01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6",
-            compressedBytes = 569_652_007L,
+            fileName = "nextcraft-android-arm64-2026.10.1.tar.zst",
+            sha256 = "8b4ecf057daa6fd54acd950712f8adb4eb7722c7bc557136f2ea31d7a2bbfd60",
+            compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek Harness",
-            fileName = "pocketdev-dsh-arm64-2026.09.1.tar.zst",
-            sha256 = "88e6a23ba74e1cd74a2c923b7e0d6bd78ba4b7e5f8a9b649f12bf4ffe158cce5",
-            compressedBytes = 27_752_194L,
+            fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
+            sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
+            compressedBytes = 28_066_921L,
         )
         private val AGY_BUNDLE = RuntimeBundle(
             label = "Antigravity CLI",
-            fileName = "pocketdev-agy-arm64-2026.09.1.tar.zst",
-            sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
-            compressedBytes = 41_870_025L,
+            fileName = "nextcraft-agy-arm64-2026.10.1.tar.zst",
+            sha256 = "001cbb373a1110ce32c939c2b27138b46b676b157c9329b50c34e790aa2b7eff",
+            compressedBytes = 42_003_928L,
         )
+        private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
+        private const val ENV_CLEANUP_POLL_MS = 1_000L
+        /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
+        private const val BUNDLE_DOWNLOAD_SPACE_FACTOR = 4
+        private const val BUNDLE_EXTRACT_SPACE_FACTOR = 3
+        private const val MEGABYTE = 1024L * 1024L
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
         private const val MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
@@ -2312,7 +2529,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
 
             case "${'$'}GUEST_WORKSPACE" in
-                *..*|/workspace/.|/workspace/*/*)
+                *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
                     echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
                     exit 65
                     ;;
@@ -2352,6 +2569,47 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             }
 
+            # Android's /apex is a tmpfs with every APEX module mounted below it, and /system/bin/linker64 (the interpreter
+            # of Bionic tools such as aapt2) points into /apex/com.android.runtime. A plain bind leaves those modules out.
+            # A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
+            # and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
+            # its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
+            has_submounts() {
+                awk -v prefix="${'$'}1/" 'index(${'$'}2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
+            }
+
+            make_slave() {
+                mount --make-rslave "${'$'}1" 2>/dev/null || mount -o rslave "${'$'}1" 2>/dev/null ||
+                    mount --make-slave "${'$'}1" 2>/dev/null || mount -o slave "${'$'}1" 2>/dev/null
+            }
+
+            mount_bionic() {
+                local src="${'$'}1"
+                local dst="${'$'}2"
+                mkdir -p "${'$'}dst"
+                # Earlier versions bound these directories without their submounts; replace such a mount.
+                if is_mounted "${'$'}dst" && has_submounts "${'$'}src" && ! has_submounts "${'$'}dst"; then
+                    umount "${'$'}dst" 2>/dev/null || umount -l "${'$'}dst" 2>/dev/null || true
+                fi
+                is_mounted "${'$'}dst" && return 0
+                mount -o bind "${'$'}src" "${'$'}dst" || return 1
+                if ! make_slave "${'$'}dst"; then
+                    echo "Warning: mount propagation cannot be changed; ${'$'}dst is bound without its submounts" >&2
+                    mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
+                    return 0
+                fi
+                # Parents first, so each module lands on a mount point that is already a slave copy.
+                awk -v prefix="${'$'}src/" 'index(${'$'}2, prefix) == 1 { print ${'$'}2 }' /proc/mounts | sort | while read -r sub; do
+                    target="${'$'}dst${'$'}{sub#"${'$'}src"}"
+                    [ -d "${'$'}sub" ] && [ -d "${'$'}target" ] || continue
+                    is_mounted "${'$'}target" && continue
+                    if mount -o bind "${'$'}sub" "${'$'}target" 2>/dev/null && ! make_slave "${'$'}target"; then
+                        umount "${'$'}target" 2>/dev/null || true
+                    fi
+                done
+                mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
+            }
+
             mount_dynamic_bind() {
                 local src="${'$'}1"
                 local dst="${'$'}2"
@@ -2388,7 +2646,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
             for bionic_dir in /system /apex /vendor /product; do
                 if [ -d "${'$'}bionic_dir" ]; then
-                    mount_once "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir" "bind" "ro"
+                    mount_bionic "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir"
                 fi
             done
 
@@ -2422,7 +2680,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
                 chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
             }
-            trap fix_workspace_ownership EXIT INT TERM
+            # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
+            # resume execution (keep mounting) and run the ownership fix twice.
+            trap fix_workspace_ownership EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
 
             unset ANDROID_ROOT ANDROID_DATA ANDROID_ART_ROOT ANDROID_I18N_ROOT ANDROID_TZDATA_ROOT
             unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_RUNTIME_ROOT ANDROID_STORAGE
@@ -2483,6 +2745,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
             ROOTFS_REAL=${'$'}(realpath "${'$'}ROOTFS" 2>/dev/null || printf '%s' "${'$'}ROOTFS")
             ROOTFS_CLEAN="${'$'}{ROOTFS_REAL%/}"
+            # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
+            # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
+            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
+                mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
+            done
+
             for pass in 1 2 3; do
                 MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
                 if [ -z "${'$'}MOUNTS" ]; then

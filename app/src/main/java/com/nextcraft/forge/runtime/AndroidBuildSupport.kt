@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
+import com.nextcraft.forge.model.stringOrEmpty
 import java.io.File
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -105,10 +106,7 @@ internal fun androidGradleCommand(root: File, task: String): String {
         .takeIf { it.isFile && !Files.isSymbolicLink(it.toPath()) }
         ?.let { "bash ./gradlew" }
         ?: "gradle"
-    return "$launcher -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 " +
-        "--init-script /root/.gradle/init.d/pocketdev-android.gradle " +
-        "-Pandroid.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2 " +
-        "$cleanTask --console=plain --stacktrace"
+    return "$launcher ${AndroidToolchain.GRADLE_BASE_FLAGS} $cleanTask --console=plain --stacktrace"
 }
 
 internal fun findAndroidProjectRoot(workspace: File): File? {
@@ -167,7 +165,7 @@ internal fun findDebugApk(projectRoot: File): File? {
             val json = JSONObject(metadata.readText())
             val elements = json.optJSONArray("elements") ?: return@runCatching null
             (0 until elements.length()).asSequence()
-                .mapNotNull { elements.optJSONObject(it)?.optString("outputFile") }
+                .mapNotNull { elements.optJSONObject(it)?.stringOrEmpty("outputFile") }
                 .filter { it.isNotBlank() && !it.contains('\u0000') }
                 .map { File(metadata.parentFile, it) }
                 .firstOrNull { candidate ->
@@ -320,7 +318,11 @@ internal fun startPackageLogcatProcess(
     packageName: String,
     sinceMillis: Long? = null,
 ): Process {
-    val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
+    val uid = try {
+        context.packageManager.getApplicationInfo(packageName, 0).uid
+    } catch (_: PackageManager.NameNotFoundException) {
+        throw IllegalStateException("App '$packageName' is not installed on this device yet. Build & Install the APK first.")
+    }
     require(uid > 0) { "Invalid application UID for $packageName" }
     val since = sinceMillis?.takeIf { it > 0L }?.let {
         SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date(it))
