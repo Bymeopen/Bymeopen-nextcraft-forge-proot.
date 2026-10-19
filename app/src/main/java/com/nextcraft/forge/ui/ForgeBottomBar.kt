@@ -307,7 +307,7 @@ internal fun ForgeBottomBar(
                             CompositionLocalProvider(LocalDensity provides Density(density.density, navFontScale)) {
                                 Text(
                                     text = label,
-                                    fontSize = ForgeType.caption,
+                                    fontSize = if (slot < 76.dp) ForgeType.navCompact else ForgeType.caption,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                     color = tint,
                                     maxLines = 1,
