@@ -489,10 +489,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun canRunRuntimeOperation(): Boolean {
         val current = _state.value
         val reason = when {
-            !current.runtimeInstalled -> "The base Ubuntu runtime (Core) is not installed. Run the runtime setup first."
+            !current.runtimeInstalled -> UiText.res(R.string.msg_core_not_installed)
             current.sessionRunning || current.terminalRunning || current.androidBuild.phase == AndroidBuildPhase.BUILDING ->
-                "Wait for the running agent, terminal or build to finish."
-            current.setupSnapshot.status == RuntimeSetupStatus.RUNNING -> "Another runtime operation is already running."
+                UiText.res(R.string.msg_wait_for_running_task)
+            current.setupSnapshot.status == RuntimeSetupStatus.RUNNING -> UiText.res(R.string.msg_runtime_op_running)
             else -> return true
         }
         _state.update { it.copy(bannerMessage = reason) }
@@ -544,8 +544,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     checkingAgentUpdates = false,
                     agentUpdates = result.getOrDefault(emptyMap()),
                     bannerMessage = when {
-                        result.isFailure -> "Could not check for agent updates: ${result.exceptionOrNull()?.message.orEmpty()}"
-                        result.getOrThrow().isEmpty() -> "All installed agents are up to date."
+                        result.isFailure -> UiText.res(R.string.msg_agent_update_check_failed, result.exceptionOrNull()?.message.orEmpty())
+                        result.getOrThrow().isEmpty() -> UiText.res(R.string.msg_agents_up_to_date)
                         else -> it.bannerMessage
                     },
                 )
@@ -1131,7 +1131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         throw e
     } catch (e: Exception) {
         Log.w("MainViewModel", failure, e)
-        _state.update { it.copy(bannerMessage = "$failure: ${e.message ?: e.javaClass.simpleName}") }
+        _state.update { it.copy(bannerMessage = UiText.Raw("$failure: ${e.message ?: e.javaClass.simpleName}")) }
         null
     }
 

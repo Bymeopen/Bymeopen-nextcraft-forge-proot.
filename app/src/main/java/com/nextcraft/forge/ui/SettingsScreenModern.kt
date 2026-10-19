@@ -4,15 +4,17 @@ package com.nextcraft.forge.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,24 +22,31 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,13 +59,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nextcraft.forge.BuildConfig
+import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.ProviderKind
@@ -64,11 +81,12 @@ import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import kotlinx.coroutines.launch
-import androidx.compose.ui.res.stringResource
-import com.nextcraft.forge.R
-import androidx.annotation.StringRes
-import androidx.compose.ui.semantics.Role
 
+/**
+ * Settings, grouped the way the reference layout does: General (appearance, language, safety),
+ * AI agent (agent tabs, access mode, endpoint, model & keys), GitHub, Developer tools, Linux
+ * runtime, Danger zone and About. Colours and type stay Linear; only the layout follows the reference.
+ */
 @Composable
 fun SettingsScreenModern(
     state: ForgeUiState,
@@ -79,433 +97,218 @@ fun SettingsScreenModern(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
 
-    var baseUrlInput by rememberSaveable(state.providerProfile.kind) {
-        mutableStateOf(state.providerProfile.baseUrl)
-    }
-    var modelInput by rememberSaveable(state.providerProfile.kind, state.providerProfile.model) {
-        mutableStateOf(state.providerProfile.model)
-    }
-    var openRouterOrderInput by rememberSaveable(state.providerProfile.kind) {
-        mutableStateOf(state.providerProfile.openRouterProviderOrder)
-    }
+    var baseUrlInput by rememberSaveable(state.providerProfile.kind) { mutableStateOf(state.providerProfile.baseUrl) }
+    var modelInput by rememberSaveable(state.providerProfile.kind, state.providerProfile.model) { mutableStateOf(state.providerProfile.model) }
+    var openRouterOrderInput by rememberSaveable(state.providerProfile.kind) { mutableStateOf(state.providerProfile.openRouterProviderOrder) }
     var keyLabelInput by rememberSaveable { mutableStateOf("") }
     // Secrets use plain remember: rememberSaveable would write them into the saved-instance Bundle.
     var keySecretInput by remember { mutableStateOf("") }
-
-    var agyModelInput by rememberSaveable(state.antigravityModel) {
-        mutableStateOf(state.antigravityModel)
-    }
-    var agyEffortInput by rememberSaveable(state.antigravityEffort) {
-        mutableStateOf(state.antigravityEffort)
-    }
-
+    var agyModelInput by rememberSaveable(state.antigravityModel) { mutableStateOf(state.antigravityModel) }
+    var agyEffortInput by rememberSaveable(state.antigravityEffort) { mutableStateOf(state.antigravityEffort) }
     var githubTokenInput by remember { mutableStateOf("") }
     var newRepoName by rememberSaveable { mutableStateOf("") }
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
     var newRepoPrivate by rememberSaveable { mutableStateOf(true) }
 
+    val isProvisioning = state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
+    val runtimeBusy = !state.runtimeInstalled || isProvisioning
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = 14.dp, end = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ForgeLargeTitle(title = stringResource(R.string.settings_settings), subtitle = stringResource(R.string.settings_preferences_configuration), horizontalPadding = 6.dp)
+        ForgeLargeTitle(
+            title = stringResource(R.string.settings_settings),
+            subtitle = stringResource(R.string.settings_preferences_configuration),
+            horizontalPadding = 6.dp,
+        )
 
+        // ───────────────────────── General ─────────────────────────
         ForgeSectionLabel(stringResource(R.string.settings_general), horizontalPadding = 6.dp)
-        // 5. Security, Language & Appearance (4-Mode Multi-Theme Engine)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_security_appearance),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                ForgeToggleRow(
-                    title = stringResource(R.string.settings_high_risk_command_approvals),
-                    subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
-                    checked = state.interactiveHighRiskApprovals,
-                    onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
-                )
-                ForgeToggleRow(
-                    title = stringResource(R.string.settings_auto_approve_all_tools),
-                    subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
-                    checked = state.autoApproveAllTools,
-                    onCheckedChange = viewModel::setAutoApproveAllTools,
-                )
-
-                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-                Text(
-                    text = stringResource(R.string.settings_interface_language),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    AppLanguage.entries.forEach { lang ->
-                        FilterChip(
-                            shape = RoundedCornerShape(100),
-                            selected = state.languageCode.equals(lang.code, ignoreCase = true),
-                            onClick = { viewModel.setLanguageCode(lang.code) },
-                            label = { Text("${lang.nativeName} (${lang.displayName})") },
-                        )
-                    }
-                }
-
-                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-                val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
-                Text(
-                    text = stringResource(R.string.settings_theme_mode, stringResource(activeThemeMode.title)),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
+            var appearanceOpen by rememberSaveable { mutableStateOf(false) }
+            SettingsRow(
+                icon = Icons.Default.Settings,
+                title = stringResource(R.string.settings_appearance),
+                subtitle = stringResource(activeThemeMode.title),
+                onClick = { appearanceOpen = !appearanceOpen },
+                trailing = { Chevron(appearanceOpen) },
+            )
+            AnimatedVisibility(visible = appearanceOpen) {
+                // 2 × 2 tiles: icon-less by design, the badge carries the name; selection by accent tint + ring.
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ForgeThemeMode.entries.forEach { mode ->
-                        val selected = mode == activeThemeMode
-                        ForgeElevatedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            selected = selected,
-                            onClick = { viewModel.setThemeMode(mode.id) },
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    ForgeThemeMode.entries.chunked(2).forEach { pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            pair.forEach { mode ->
+                                val selected = mode == activeThemeMode
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (selected) scheme.primary.copy(alpha = 0.12f) else tokens.cardElevatedColor,
+                                    border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, scheme.primary.copy(alpha = 0.6f)) else null,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 76.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable(role = Role.RadioButton) { viewModel.setThemeMode(mode.id) },
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                    ) {
                                         Text(
                                             text = stringResource(mode.title),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (selected) scheme.primary else scheme.onSurface,
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (selected) {
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                            } else {
-                                                tokens.cardContainerColor
-                                            },
-                                        ) {
-                                            Text(
-                                                text = mode.badge,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (selected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    tokens.accentText
-                                                },
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = stringResource(mode.subtitle),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (selected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                }
-                                if (selected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = stringResource(R.string.a11y_selected),
-                                        tint = tokens.successText,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        ForgeSectionLabel(stringResource(R.string.settings_ai), horizontalPadding = 6.dp)
-        // AI: coding agent engine
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_coding_agent_engine),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                AgentKind.entries.forEach { kind ->
-                    val selected = state.agentKind == kind
-                    ForgeElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        selected = selected,
-                        onClick = { viewModel.selectAgent(kind) },
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(kind.displayTitle(), fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = kind.displaySubtitle(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (selected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                                val busy = !state.runtimeInstalled ||
-                                    state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
-                                Row(
-                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (kind in state.installedAgents) {
                                         Text(
-                                            text = stringResource(R.string.settings_agent_installed),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = tokens.successText,
+                                            text = stringResource(mode.subtitle),
+                                            fontSize = 12.sp,
+                                            color = scheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
-                                        state.agentUpdates[kind]?.let { info ->
-                                            Button(onClick = { viewModel.updateAgent(kind) }, enabled = !busy) {
-                                                Text(stringResource(R.string.settings_agent_update, info.latestVersion))
-                                            }
-                                        }
-                                        OutlinedButton(onClick = { viewModel.removeAgent(kind) }, enabled = !busy) {
-                                            Text(stringResource(R.string.settings_agent_remove))
-                                        }
-                                    } else {
-                                        OutlinedButton(onClick = { viewModel.installAgent(kind) }, enabled = !busy) {
-                                            Text("${stringResource(R.string.settings_agent_install)} · ${kind.downloadNote}")
-                                        }
                                     }
                                 }
                             }
-                            if (selected) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = stringResource(R.string.a11y_selected),
-                                    tint = tokens.successText,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (state.installedAgents.isNotEmpty()) {
-                    OutlinedButton(
-                        onClick = viewModel::checkAgentUpdates,
-                        enabled = !state.checkingAgentUpdates,
-                    ) {
-                        Text(stringResource(R.string.settings_agent_check_updates))
-                    }
-                }
-
-                if (state.setupScope == SetupScope.AGENT) RuntimeProgressPanel(state.setupSnapshot)
-
-                if (state.agentKind == AgentKind.ANTIGRAVITY) {
-                    var agyVerificationCode by rememberSaveable { mutableStateOf("") }
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-                    Text(
-                        text = stringResource(R.string.settings_antigravity_cli_configuration),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
-                        value = agyModelInput,
-                        onValueChange = { agyModelInput = it },
-                        label = { Text(stringResource(R.string.settings_antigravity_model)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        listOf("low", "medium", "high").forEach { effort ->
-                            FilterChip(
-                                shape = RoundedCornerShape(100),
-                                selected = agyEffortInput == effort,
-                                onClick = {
-                                    agyEffortInput = effort
-                                    viewModel.setAntigravityConfig(agyModelInput, effort)
-                                },
-                                label = { Text(stringResource(R.string.settings_effort, effort.uppercase())) },
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            shape = RoundedCornerShape(100),
-                            onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
-                        ) {
-                            Text(stringResource(R.string.settings_save_antigravity_model))
-                        }
-                        val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
-                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                viewModel.antigravityAuth.hasOfficialCredential()
-                            }
-                        }
-                        if (agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential) {
-                            OutlinedButton(
-                                shape = RoundedCornerShape(100),
-                                onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
-                            ) {
-                                Text(stringResource(R.string.settings_sign_out_google_oauth))
-                            }
-                        } else {
-                            OutlinedButton(
-                                shape = RoundedCornerShape(100),
-                                onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
-                                enabled = agyAuth.status != AntigravityAuthStatus.STARTING && agyAuth.status != AntigravityAuthStatus.COMPLETING,
-                            ) {
-                                Text(stringResource(R.string.settings_sign_in_with_google))
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = viewModel::validateAntigravityConnection,
-                            enabled = !state.apiBusy,
-                        ) {
-                            Text(stringResource(R.string.settings_validate))
-                        }
-                    }
-                    if (agyAuth.status == AntigravityAuthStatus.STARTING ||
-                        agyAuth.status == AntigravityAuthStatus.COMPLETING ||
-                        state.apiBusy
-                    ) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-                    agyAuth.message?.let { msg ->
-                        Text(
-                            text = msg,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    state.apiStatusMessage?.let { msg ->
-                        Text(
-                            text = msg.asString(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.accentText,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                    agyAuth.authorizationUrl?.let { url ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    runCatching {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                    }
-                                },
-                            ) {
-                                Text(stringResource(R.string.agent_open_google_sign_in))
-                            }
-                            OutlinedButton(
-                                onClick = { clipboard.setText(AnnotatedString(url)) },
-                            ) {
-                                Text(stringResource(R.string.agent_copy_link))
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.antigravityAuth.cancel() },
-                            ) {
-                                Text(stringResource(R.string.agent_cancel))
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            OutlinedTextField(
-                                value = agyVerificationCode,
-                                onValueChange = { agyVerificationCode = it },
-                                label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Button(
-                                onClick = {
-                                    if (agyVerificationCode.isNotBlank()) {
-                                        runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }
-                                        agyVerificationCode = ""
-                                    }
-                                },
-                                enabled = agyVerificationCode.isNotBlank(),
-                            ) {
-                                Text(stringResource(R.string.agent_verify))
-                            }
+                            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
             }
+            ThinDivider()
+
+            val languages = AppLanguage.entries
+            val activeLanguage = languages.firstOrNull { it.code.equals(state.languageCode, ignoreCase = true) } ?: languages.first()
+            var languageOpen by rememberSaveable { mutableStateOf(false) }
+            SettingsRow(
+                icon = Icons.Default.List,
+                title = stringResource(R.string.settings_language),
+                subtitle = activeLanguage.nativeName,
+                onClick = { languageOpen = !languageOpen },
+                trailing = { Chevron(languageOpen) },
+            )
+            AnimatedVisibility(visible = languageOpen) {
+                Column(modifier = Modifier.padding(bottom = 6.dp)) {
+                    languages.forEach { lang ->
+                        RadioRow(
+                            title = lang.nativeName,
+                            subtitle = lang.displayName,
+                            selected = lang == activeLanguage,
+                            onClick = { viewModel.setLanguageCode(lang.code) },
+                        )
+                    }
+                }
+            }
+            ThinDivider()
+
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_high_risk_command_approvals),
+                subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
+                checked = state.interactiveHighRiskApprovals,
+                onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
+                modifier = Modifier.padding(horizontal = 6.dp),
+            )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_auto_approve_all_tools),
+                subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
+                checked = state.autoApproveAllTools,
+                onCheckedChange = viewModel::setAutoApproveAllTools,
+                modifier = Modifier.padding(horizontal = 6.dp),
+            )
         }
 
-        // 2. AI Provider & Keystore Multi-Key Vault
-        val availableProviders = providersForAgent(state.agentKind)
-        if (availableProviders.isNotEmpty()) {
+        // ───────────────────────── AI agent ─────────────────────────
+        ForgeSectionLabel(stringResource(R.string.settings_ai), horizontalPadding = 6.dp)
+        val agents = AgentKind.entries
+        ForgePillTabs(
+            items = agents.map { it.displayTitle() },
+            selectedIndex = agents.indexOf(state.agentKind).coerceAtLeast(0),
+            onSelect = { viewModel.selectAgent(agents[it]) },
+        )
+        val agent = state.agentKind
+        val agentInstalled = agent in state.installedAgents
+
+        if (!agentInstalled) {
+            // Not installed: one card, one call to action (the reference's "X is not installed" state).
             ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_model_provider_key_vault),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        availableProviders.forEach { kind ->
-                            FilterChip(
-                                shape = RoundedCornerShape(100),
-                                selected = state.providerProfile.kind == kind,
-                                onClick = { viewModel.updateProviderKind(kind) },
-                                label = { Text(kind.displayTitle()) },
-                            )
-                        }
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ForgeStatusIcon(ForgeStatus.TODO, iconSize = 18.dp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = stringResource(R.string.settings_agent_not_installed, agent.displayTitle()),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     }
                     Text(
-                        text = state.providerProfile.kind.displaySubtitle(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(R.string.settings_agent_install_hint, agent.downloadNote),
+                        fontSize = 14.sp,
+                        color = scheme.onSurfaceVariant,
                     )
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_agent_install_named, agent.displayTitle()),
+                        onClick = { viewModel.installAgent(agent) },
+                        enabled = !runtimeBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    SetupProgress(state)
+                }
+            }
+        } else if (agent == AgentKind.ANTIGRAVITY) {
+            AntigravityAccountCard(
+                state = state,
+                viewModel = viewModel,
+                agyAuth = agyAuth,
+                agyModelInput = agyModelInput,
+                onAgyModelChange = { agyModelInput = it },
+                agyEffortInput = agyEffortInput,
+                onAgyEffortChange = { agyEffortInput = it },
+            )
+        } else {
+            val availableProviders = providersForAgent(agent)
+            val provider = state.providerProfile.kind
 
-                    if (!state.providerProfile.kind.fixedBaseUrl &&
-                        state.providerProfile.kind != ProviderKind.CLAUDE
-                    ) {
+            // Access mode: radio list of the providers this agent can talk to.
+            var accessOpen by rememberSaveable(agent) { mutableStateOf(false) }
+            DisclosureCard(
+                icon = Icons.Default.Share,
+                title = stringResource(R.string.settings_access_mode),
+                subtitle = provider.displayTitle(),
+                expanded = accessOpen,
+                onToggle = { accessOpen = !accessOpen },
+            ) {
+                availableProviders.forEach { kind ->
+                    RadioRow(
+                        title = kind.displayTitle(),
+                        subtitle = kind.displaySubtitle(),
+                        selected = kind == provider,
+                        onClick = { viewModel.updateProviderKind(kind) },
+                    )
+                }
+            }
+
+            // Endpoint & protocol: base URL, model id, OpenRouter order.
+            var endpointOpen by rememberSaveable(agent) { mutableStateOf(false) }
+            DisclosureCard(
+                icon = Icons.Default.Info,
+                title = stringResource(R.string.settings_endpoint_protocol),
+                subtitle = if (provider.fixedBaseUrl || provider == ProviderKind.CLAUDE) state.providerProfile.model.ifBlank { "default" } else state.providerProfile.baseUrl,
+                expanded = endpointOpen,
+                onToggle = { endpointOpen = !endpointOpen },
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (!provider.fixedBaseUrl && provider != ProviderKind.CLAUDE) {
                         OutlinedTextField(
                             shape = RoundedCornerShape(14.dp),
                             value = baseUrlInput,
@@ -515,7 +318,6 @@ fun SettingsScreenModern(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-
                     OutlinedTextField(
                         shape = RoundedCornerShape(14.dp),
                         value = modelInput,
@@ -524,8 +326,7 @@ fun SettingsScreenModern(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-
-                    if (state.providerProfile.kind == ProviderKind.LLM_ROUTER) {
+                    if (provider == ProviderKind.LLM_ROUTER) {
                         OutlinedTextField(
                             shape = RoundedCornerShape(14.dp),
                             value = openRouterOrderInput,
@@ -536,139 +337,111 @@ fun SettingsScreenModern(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-
-                    Row(
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_save_config),
+                        onClick = { viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = modelInput, openRouterOrder = openRouterOrderInput) },
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            shape = RoundedCornerShape(100),
-                            onClick = {
-                                viewModel.updateProviderConfig(
-                                    baseUrl = baseUrlInput,
-                                    model = modelInput,
-                                    openRouterOrder = openRouterOrderInput,
-                                )
-                            },
-                        ) {
-                            Text(stringResource(R.string.settings_save_config))
-                        }
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::discoverProviderModels,
-                            enabled = !state.apiBusy,
-                        ) {
+                    )
+                }
+            }
+
+            // Model & access: discover / validate, discovered models as a radio list, keys.
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.settings_model_access),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
                             Text(stringResource(R.string.settings_discover_models))
                         }
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::validateProviderConnection,
-                            enabled = !state.apiBusy,
-                        ) {
-                            Text(stringResource(R.string.settings_validate))
-                        }
                     }
-
-                    if (state.apiBusy) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
+                    if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     state.apiStatusMessage?.asString()?.let { msg ->
-                        Text(
-                            text = msg,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.accentText,
-                            fontWeight = FontWeight.Medium,
-                        )
+                        Text(text = msg, fontSize = 13.sp, color = scheme.onSurfaceVariant)
                     }
-
                     if (state.discoveredModels.isNotEmpty()) {
                         Text(
-                            text = stringResource(R.string.settings_discovered_models_tap_to),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            text = stringResource(R.string.settings_models_found, state.discoveredModels.size),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = scheme.onSurfaceVariant,
                         )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            state.discoveredModels.take(30).forEach { m ->
-                                AssistChip(
-                                    shape = RoundedCornerShape(100),
-                                    onClick = {
-                                        modelInput = m.id
-                                        viewModel.updateProviderConfig(
-                                            baseUrl = baseUrlInput,
-                                            model = m.id,
-                                            openRouterOrder = openRouterOrderInput,
-                                        )
-                                    },
-                                    label = { Text(m.displayName, fontFamily = FontFamily.Monospace) },
-                                )
-                            }
+                        state.discoveredModels.take(30).forEach { m ->
+                            RadioRow(
+                                title = m.displayName,
+                                subtitle = m.id,
+                                mono = true,
+                                selected = m.id == state.providerProfile.model,
+                                onClick = {
+                                    modelInput = m.id
+                                    viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
+                                },
+                                horizontalPadding = 0.dp,
+                            )
                         }
                     }
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel::validateProviderConnection,
+                        enabled = !state.apiBusy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.settings_validate)) }
 
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                    ThinDivider()
                     Text(
-                        text = stringResource(R.string.settings_api_keys_for_auto, state.providerProfile.kind.displayTitle()),
-                        style = MaterialTheme.typography.titleSmall,
+                        text = stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     state.savedApiKeys.forEach { keyInfo ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable(role = Role.Button) { viewModel.selectActiveApiKey(keyInfo.id) }
-                                .padding(vertical = 4.dp),
+                                .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                imageVector = if (keyInfo.isActive) Icons.Default.CheckCircle else Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = if (keyInfo.isActive) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            if (keyInfo.isActive) {
+                                ForgeStatusIcon(ForgeStatus.DONE, iconSize = 18.dp)
+                            } else {
+                                Icon(Icons.Default.Lock, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = if (keyInfo.isActive) "${keyInfo.name} (Active)" else keyInfo.name,
+                                text = if (keyInfo.isActive) stringResource(R.string.settings_key_active, keyInfo.name) else keyInfo.name,
                                 modifier = Modifier.weight(1f),
-                                fontWeight = if (keyInfo.isActive) FontWeight.Bold else FontWeight.Normal,
+                                fontWeight = if (keyInfo.isActive) FontWeight.SemiBold else FontWeight.Normal,
                             )
                             IconButton(onClick = { viewModel.removeApiKey(keyInfo.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.settings_delete_key), modifier = Modifier.size(18.dp))
                             }
                         }
                     }
-
-                    Row(
+                    OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
+                        value = keyLabelInput,
+                        onValueChange = { keyLabelInput = it },
+                        label = { Text(stringResource(R.string.settings_label)) },
+                        placeholder = { Text("Primary") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
-                            value = keyLabelInput,
-                            onValueChange = { keyLabelInput = it },
-                            label = { Text(stringResource(R.string.settings_label)) },
-                            placeholder = { Text("Primary") },
-                            singleLine = true,
-                            modifier = Modifier.weight(0.35f),
-                        )
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
-                            value = keySecretInput,
-                            onValueChange = { keySecretInput = it },
-                            label = { Text(stringResource(R.string.settings_api_key_token)) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.weight(0.65f),
-                        )
-                    }
-                    Button(
-                        shape = RoundedCornerShape(100),
+                    )
+                    OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
+                        value = keySecretInput,
+                        onValueChange = { keySecretInput = it },
+                        label = { Text(stringResource(R.string.settings_api_key_token)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_add_key_to_android),
                         onClick = {
                             if (keySecretInput.isNotBlank()) {
                                 viewModel.addApiKey(keyLabelInput, keySecretInput)
@@ -677,228 +450,202 @@ fun SettingsScreenModern(
                             }
                         },
                         enabled = keySecretInput.isNotBlank(),
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.settings_add_key_to_android))
-                    }
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
 
-        ForgeSectionLabel(stringResource(R.string.settings_github), horizontalPadding = 6.dp)
-        // 3. GitHub Integration & Two-Way Repository Sync
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+        // Runtime updates: installed agents, update / remove, check.
+        if (state.installedAgents.isNotEmpty()) {
+            var updatesOpen by rememberSaveable { mutableStateOf(false) }
+            DisclosureCard(
+                icon = Icons.Default.Refresh,
+                title = stringResource(R.string.settings_runtime_updates),
+                subtitle = stringResource(R.string.settings_installed_agents_current),
+                expanded = updatesOpen,
+                onToggle = { updatesOpen = !updatesOpen },
             ) {
-                Text(
-                    text = stringResource(R.string.settings_repository_sync),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                state.githubStatusMessage?.asString()?.let { status ->
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = tokens.accentText,
-                        fontWeight = FontWeight.Medium,
-                    )
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.installedAgents.forEach { kind ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 44.dp)) {
+                            ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(kind.displayTitle(), fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            state.agentUpdates[kind]?.let { info ->
+                                TextButton(onClick = { viewModel.updateAgent(kind) }, enabled = !runtimeBusy) {
+                                    Text(stringResource(R.string.settings_agent_update, info.latestVersion))
+                                }
+                            }
+                            TextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
+                                Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel::checkAgentUpdates,
+                        enabled = !state.checkingAgentUpdates,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.settings_agent_check_updates)) }
+                    SetupProgress(state)
                 }
+            }
+        }
 
+        // ───────────────────────── GitHub ─────────────────────────
+        ForgeSectionLabel(stringResource(R.string.settings_github), horizontalPadding = 6.dp)
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.settings_repository_sync), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                state.githubStatusMessage?.asString()?.let { status ->
+                    Text(text = status, fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                }
                 state.githubDeviceCode?.let { dc ->
-                    ForgeElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = tokens.cardElevatedColor, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = stringResource(R.string.settings_one_time_device_code, dc.userCode),
-                                style = MaterialTheme.typography.titleMedium,
+                                fontSize = 18.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(
-                                    shape = RoundedCornerShape(100),
-                                    onClick = {
-                                        clipboard.setText(AnnotatedString(dc.userCode))
-                                        runCatching {
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dc.verificationUri)))
-                                        }
-                                    },
-                                ) {
-                                    Text(stringResource(R.string.settings_copy_code_open_github))
-                                }
-                                OutlinedButton(
-                                    shape = RoundedCornerShape(100),
-                                    onClick = { clipboard.setText(AnnotatedString(dc.userCode)) },
-                                ) {
-                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(stringResource(R.string.settings_copy_code))
-                                }
+                            ForgePrimaryButton(
+                                text = stringResource(R.string.settings_copy_code_open_github),
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(dc.userCode))
+                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dc.verificationUri))) }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            TextButton(onClick = { clipboard.setText(AnnotatedString(dc.userCode)) }) {
+                                Text(stringResource(R.string.settings_copy_code))
                             }
                         }
                     }
                 }
-
                 if (state.githubLogin.isBlank()) {
-                    Button(
-                        shape = RoundedCornerShape(100),
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_sign_in_with_github),
                         onClick = { viewModel.startGitHubDeviceSignIn() },
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.settings_sign_in_with_github))
-                    }
-                    Row(
+                    )
+                    OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
+                        value = githubTokenInput,
+                        onValueChange = { githubTokenInput = it },
+                        label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
-                            value = githubTokenInput,
-                            onValueChange = { githubTokenInput = it },
-                            label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = {
-                                if (githubTokenInput.isNotBlank()) {
-                                    viewModel.connectGitHubWithToken(githubTokenInput)
-                                    githubTokenInput = ""
-                                }
-                            },
-                        ) {
-                            Text(stringResource(R.string.settings_connect))
-                        }
-                    }
+                    )
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = {
+                            if (githubTokenInput.isNotBlank()) {
+                                viewModel.connectGitHubWithToken(githubTokenInput)
+                                githubTokenInput = ""
+                            }
+                        },
+                        enabled = githubTokenInput.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.settings_connect)) }
                 } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ForgeStatusIcon(ForgeStatus.DONE, iconSize = 18.dp)
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = stringResource(R.string.settings_connected_as, state.githubLogin),
-                            fontWeight = FontWeight.Bold,
-                            color = tokens.successText,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
                         )
-                        OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel::disconnectGitHub) {
-                            Text(stringResource(R.string.settings_disconnect))
-                        }
+                        TextButton(onClick = viewModel::disconnectGitHub) { Text(stringResource(R.string.settings_disconnect)) }
                     }
-
                     ForgeToggleRow(
                         title = stringResource(R.string.settings_auto_commit_push),
                         subtitle = stringResource(R.string.settings_commit_and_push_the),
                         checked = state.autoSyncGitHub,
                         onCheckedChange = viewModel::setAutoSyncGitHub,
                     )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            shape = RoundedCornerShape(100),
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ForgePrimaryButton(
+                            text = stringResource(R.string.settings_push_workspace),
                             onClick = { viewModel.syncProjectWithGitHub() },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.settings_push_workspace))
-                        }
+                        )
                         OutlinedButton(
                             shape = RoundedCornerShape(100),
                             onClick = { viewModel.pullProjectFromGitHub() },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.settings_pull_latest))
-                        }
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                        ) { Text(stringResource(R.string.settings_pull_latest)) }
                     }
 
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-                    Text(
-                        text = stringResource(R.string.settings_create_push_new_github),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                    var createOpen by rememberSaveable { mutableStateOf(false) }
+                    ThinDivider()
+                    SettingsRow(
+                        icon = Icons.Default.Add,
+                        title = stringResource(R.string.settings_create_push_new_github),
+                        onClick = { createOpen = !createOpen },
+                        trailing = { Chevron(createOpen) },
+                        horizontalPadding = 0.dp,
                     )
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
-                        value = newRepoName,
-                        onValueChange = { newRepoName = it },
-                        label = { Text(stringResource(R.string.settings_repository_name)) },
-                        placeholder = { Text(state.activeProject?.slug ?: "my-forge-repo") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
-                        value = newRepoDesc,
-                        onValueChange = { newRepoDesc = it },
-                        label = { Text(stringResource(R.string.settings_description_optional)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    ForgeToggleRow(
-                        title = stringResource(if (newRepoPrivate) R.string.settings_private_repository else R.string.settings_public_repository),
-                        subtitle = stringResource(R.string.settings_visibility_of_the_new),
-                        checked = newRepoPrivate,
-                        onCheckedChange = { newRepoPrivate = it },
-                    )
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        Button(
-                            shape = RoundedCornerShape(100),
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                val targetName = newRepoName.ifBlank { state.activeProject?.slug.orEmpty() }
-                                if (targetName.isNotBlank()) {
-                                    viewModel.createGitHubRepository(
-                                        name = targetName,
-                                        description = newRepoDesc,
-                                        isPrivate = newRepoPrivate,
-                                        pushActiveProject = true,
-                                    )
-                                    newRepoName = ""
-                                    newRepoDesc = ""
-                                }
-                            },
-                        ) {
-                            Text(stringResource(R.string.settings_create_push))
+                    AnimatedVisibility(visible = createOpen) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                shape = RoundedCornerShape(14.dp),
+                                value = newRepoName,
+                                onValueChange = { newRepoName = it },
+                                label = { Text(stringResource(R.string.settings_repository_name)) },
+                                placeholder = { Text(state.activeProject?.slug ?: "my-forge-repo") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                shape = RoundedCornerShape(14.dp),
+                                value = newRepoDesc,
+                                onValueChange = { newRepoDesc = it },
+                                label = { Text(stringResource(R.string.settings_description_optional)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            ForgeToggleRow(
+                                title = stringResource(if (newRepoPrivate) R.string.settings_private_repository else R.string.settings_public_repository),
+                                subtitle = stringResource(R.string.settings_visibility_of_the_new),
+                                checked = newRepoPrivate,
+                                onCheckedChange = { newRepoPrivate = it },
+                            )
+                            ForgePrimaryButton(
+                                text = stringResource(R.string.settings_create_push),
+                                onClick = {
+                                    val targetName = newRepoName.ifBlank { state.activeProject?.slug.orEmpty() }
+                                    if (targetName.isNotBlank()) {
+                                        viewModel.createGitHubRepository(name = targetName, description = newRepoDesc, isPrivate = newRepoPrivate, pushActiveProject = true)
+                                        newRepoName = ""
+                                        newRepoDesc = ""
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                     }
 
                     if (state.githubRepos.isNotEmpty()) {
-                        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                        ThinDivider()
                         Text(
                             text = stringResource(R.string.settings_your_repositories_tap_clone),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = scheme.onSurfaceVariant,
                         )
                         state.githubRepos.take(10).forEach { repo ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                     if (repo.description.isNotBlank()) {
-                                        Text(
-                                            text = repo.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
+                                        Text(repo.description, fontSize = 12.5.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
-                                OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.cloneGitHubRepository(repo) }) {
-                                    Text(stringResource(R.string.settings_clone))
-                                }
+                                TextButton(onClick = { viewModel.cloneGitHubRepository(repo) }) { Text(stringResource(R.string.settings_clone)) }
                             }
                         }
                     }
@@ -906,121 +653,446 @@ fun SettingsScreenModern(
             }
         }
 
+        // ───────────────────────── Developer tools ─────────────────────────
         ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp)
-        // 4. Ubuntu 24.04 Root Chroot & Development Toolchains
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            val isProvisioning = state.setupSnapshot.status == com.nextcraft.forge.runtime.RuntimeSetupStatus.RUNNING
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_dev_stacks),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
+        var toolsOpen by rememberSaveable { mutableStateOf(true) }
+        val optionalInstalled = state.installedDevStacks.count { it != DevStack.WEB }
+        DisclosureCard(
+            icon = Icons.Default.Build,
+            title = stringResource(R.string.settings_developer_tools),
+            subtitle = stringResource(R.string.settings_core_plus_optional, optionalInstalled),
+            expanded = toolsOpen,
+            onToggle = { toolsOpen = !toolsOpen },
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 DevStack.entries.forEach { stack ->
-                    val selected = stack in state.selectedDevStacks
                     val installed = stack in state.installedDevStacks
-                    ForgeToggleRow(
-                        title = if (installed) "${stack.displayLabel()} ✓" else stack.displayLabel(),
-                        subtitle = stack.displayDescription(),
-                        checked = selected,
-                        onCheckedChange = { if (!isProvisioning) viewModel.toggleDevStack(stack) },
-                    )
-                    if (stack != DevStack.WEB) {
-                        // Install or remove this one stack right away, without touching the other toggles.
-                        OutlinedButton(
-                            onClick = { if (installed) viewModel.removeStack(stack) else viewModel.installStack(stack) },
-                            enabled = !isProvisioning && state.runtimeInstalled,
-                        ) {
-                            Text(
-                                stringResource(
-                                    if (installed) R.string.settings_stack_remove else R.string.settings_stack_install,
-                                    stack.displayLabel(),
-                                ),
-                            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stack.displayLabel(), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Text(stack.displayDescription(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        when {
+                            stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = 14.sp, color = scheme.onSurfaceVariant)
+                            installed -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
+                                TextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
+                                    Text(stringResource(R.string.settings_remove), color = tokens.dangerText)
+                                }
+                            }
+                            else -> OutlinedButton(
+                                shape = RoundedCornerShape(100),
+                                onClick = { viewModel.installStack(stack) },
+                                enabled = !runtimeBusy,
+                                modifier = Modifier.heightIn(min = 40.dp),
+                            ) { Text(stringResource(R.string.settings_add)) }
                         }
                     }
                 }
-                if (state.setupScope == SetupScope.RUNTIME) RuntimeProgressPanel(state.setupSnapshot)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                SetupProgress(state)
+                if (isProvisioning) {
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel::pauseRuntimeSetup,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.launch_pause)) }
+                }
+            }
+        }
+
+        // ───────────────────────── Linux runtime ─────────────────────────
+        var runtimeOpen by rememberSaveable { mutableStateOf(false) }
+        DisclosureCard(
+            icon = Icons.Default.Lock,
+            title = stringResource(R.string.settings_linux_runtime),
+            subtitle = stringResource(R.string.onb_subtitle),
+            expanded = runtimeOpen,
+            onToggle = { runtimeOpen = !runtimeOpen },
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                KeyValueRow(stringResource(R.string.settings_architecture), if (state.arm64Supported) "ARM64 (aarch64)" else "—")
+                KeyValueRow(stringResource(R.string.settings_environment), "Ubuntu 24.04 · Root chroot")
+                KeyValueRow(stringResource(R.string.settings_active_agent), state.agentKind.displayTitle())
+                if (state.installedAgents.isNotEmpty()) {
+                    ThinDivider()
+                    Text(stringResource(R.string.settings_installed_agents), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant)
+                    state.installedAgents.forEach { kind ->
+                        KeyValueRow(kind.displayTitle(), state.agentUpdates[kind]?.latestVersion?.let { stringResource(R.string.settings_agent_update, it) } ?: stringResource(R.string.settings_agent_installed))
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = viewModel::clearTerminal,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                 ) {
-                    Button(
-                        shape = RoundedCornerShape(100),
-                        onClick = viewModel::startRuntimeSetup,
-                        enabled = !isProvisioning,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.settings_apply_provision_stacks))
-                    }
-                    if (isProvisioning) {
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::pauseRuntimeSetup,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.launch_pause))
-                        }
-                    } else {
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::repairRootfs,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.settings_repair_chroot))
-                        }
-                    }
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.settings_clear_terminal_history))
                 }
             }
         }
 
+        // ───────────────────────── Danger zone ─────────────────────────
+        ForgeSectionLabel(stringResource(R.string.settings_danger_zone), horizontalPadding = 6.dp)
+        ForgeThemedCard(
+            modifier = Modifier.fillMaxWidth(),
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.dangerText.copy(alpha = 0.45f)),
+        ) {
+            SettingsRow(
+                icon = Icons.Default.Warning,
+                iconTint = tokens.dangerText,
+                title = stringResource(R.string.settings_repair_rootfs),
+                subtitle = stringResource(R.string.settings_repair_rootfs_sub),
+                onClick = { if (!isProvisioning) viewModel.repairRootfs() },
+                trailing = { Text("›", color = scheme.onSurfaceVariant) },
+            )
+        }
+
+        // ───────────────────────── About ─────────────────────────
         ForgeSectionLabel(stringResource(R.string.settings_about), horizontalPadding = 6.dp)
-        // 6. Application Self-Updater
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_app_updates),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+            SettingsRow(
+                icon = Icons.Default.Info,
+                title = stringResource(R.string.settings_version),
+                trailing = { Text("v${BuildConfig.VERSION_NAME}", color = scheme.onSurfaceVariant, fontSize = 14.sp) },
+            )
+            ThinDivider()
+            SettingsRow(
+                icon = Icons.Default.Refresh,
+                title = stringResource(R.string.settings_check_for_app_updates),
+                subtitle = state.updateStatusMessage ?: stringResource(R.string.settings_check_updates_sub),
+                onClick = { viewModel.checkForAppUpdates() },
+                trailing = { Text("›", color = scheme.onSurfaceVariant) },
+            )
+            state.updateProgress?.let { fraction ->
+                LinearProgressIndicator(
+                    progress = fraction,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                 )
-                state.updateStatusMessage?.let { msg ->
-                    Text(
-                        text = msg,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = tokens.accentText,
-                        fontWeight = FontWeight.Medium,
+            }
+            state.updateInfo?.let { info ->
+                Box(modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_download_install_update, info.versionName),
+                        onClick = viewModel::downloadAndInstallAppUpdate,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                state.updateProgress?.let { fraction ->
-                    LinearProgressIndicator(progress = fraction, modifier = Modifier.fillMaxWidth())
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        shape = RoundedCornerShape(100),
-                        onClick = { viewModel.checkForAppUpdates() },
-                        enabled = !state.checkingAppUpdate && state.updateProgress == null,
-                    ) {
-                        Text(stringResource(R.string.settings_check_for_app_updates))
-                    }
-                    state.updateInfo?.let { info ->
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::downloadAndInstallAppUpdate,
-                            enabled = state.updateProgress == null,
-                        ) {
-                            Text(stringResource(R.string.settings_download_install_update, info.versionName))
-                        }
-                    }
-                }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.shell_nextcraft_forge), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.projects_tagline), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+            }
+            Text("v${BuildConfig.VERSION_NAME}", fontSize = 13.sp, color = scheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Google account card for Antigravity, plus its model and effort. */
+@Composable
+private fun AntigravityAccountCard(
+    state: ForgeUiState,
+    viewModel: MainViewModel,
+    agyAuth: com.nextcraft.forge.runtime.AntigravityAuthState,
+    agyModelInput: String,
+    onAgyModelChange: (String) -> Unit,
+    agyEffortInput: String,
+    onAgyEffortChange: (String) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var manualCode by rememberSaveable { mutableStateOf(false) }
+    var agyVerificationCode by rememberSaveable { mutableStateOf("") }
+    val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { viewModel.antigravityAuth.hasOfficialCredential() }
+    }
+    val signedIn = agyAuth.status == AntigravityAuthStatus.SIGNED_IN || hasAgyCredential
+    val inFlight = agyAuth.status == AntigravityAuthStatus.STARTING || agyAuth.status == AntigravityAuthStatus.COMPLETING
+
+    ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.settings_google_account), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = RoundedCornerShape(50), color = scheme.primary.copy(alpha = 0.16f), modifier = Modifier.size(44.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(26.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(
+                            when {
+                                signedIn -> R.string.settings_google_signed_in
+                                inFlight -> R.string.settings_google_waiting
+                                else -> R.string.settings_google_not_signed_in
+                            },
+                        ),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = agyAuth.message ?: stringResource(R.string.settings_google_required),
+                        fontSize = 13.sp,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (inFlight || state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+
+            if (signedIn) {
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                ) { Text(stringResource(R.string.settings_sign_out_google_oauth)) }
+            } else {
+                ForgePrimaryButton(
+                    text = stringResource(if (inFlight || agyAuth.authorizationUrl != null) R.string.settings_restart_google_sign_in else R.string.settings_sign_in_with_google),
+                    onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
+                    enabled = !inFlight,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                agyAuth.authorizationUrl?.let { url ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            shape = RoundedCornerShape(100),
+                            onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                        ) { Text(stringResource(R.string.agent_open_google_sign_in)) }
+                        OutlinedButton(
+                            shape = RoundedCornerShape(100),
+                            onClick = { clipboard.setText(AnnotatedString(url)) },
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                        ) { Text(stringResource(R.string.agent_copy_link)) }
+                    }
+                }
+                if (!manualCode) {
+                    TextButton(onClick = { manualCode = true }, modifier = Modifier.align(Alignment.End)) {
+                        Text(stringResource(R.string.settings_enter_code_manually))
+                    }
+                } else {
+                    OutlinedTextField(
+                        shape = RoundedCornerShape(14.dp),
+                        value = agyVerificationCode,
+                        onValueChange = { agyVerificationCode = it },
+                        label = { Text(stringResource(R.string.settings_one_time_code)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ForgePrimaryButton(
+                            text = stringResource(R.string.settings_complete_sign_in),
+                            onClick = {
+                                if (agyVerificationCode.isNotBlank()) {
+                                    runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }
+                                    agyVerificationCode = ""
+                                }
+                            },
+                            enabled = agyVerificationCode.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            manualCode = false
+                            agyVerificationCode = ""
+                            viewModel.antigravityAuth.cancel()
+                        }) { Text(stringResource(R.string.agent_cancel)) }
+                    }
+                }
+            }
+            state.apiStatusMessage?.let { msg ->
+                Text(text = msg.asString(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+            }
+            Text(
+                text = stringResource(R.string.settings_antigravity_footnote),
+                fontSize = 13.sp,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
+    var modelOpen by rememberSaveable { mutableStateOf(false) }
+    DisclosureCard(
+        icon = Icons.Default.Info,
+        title = stringResource(R.string.settings_model_access),
+        subtitle = "${state.antigravityModel} · ${state.antigravityEffort.uppercase()}",
+        expanded = modelOpen,
+        onToggle = { modelOpen = !modelOpen },
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(
+                shape = RoundedCornerShape(14.dp),
+                value = agyModelInput,
+                onValueChange = onAgyModelChange,
+                label = { Text(stringResource(R.string.settings_antigravity_model)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            val efforts = listOf("low", "medium", "high")
+            ForgePillTabs(
+                items = efforts.map { stringResource(R.string.settings_effort, it.uppercase()) },
+                selectedIndex = efforts.indexOf(agyEffortInput).coerceAtLeast(0),
+                onSelect = { onAgyEffortChange(efforts[it]) },
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ForgePrimaryButton(
+                    text = stringResource(R.string.settings_save_antigravity_model),
+                    onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = viewModel::validateAntigravityConnection,
+                    enabled = !state.apiBusy,
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                ) { Text(stringResource(R.string.settings_validate)) }
+            }
+        }
+    }
+}
+
+/* ───────────────────────── Building blocks ───────────────────────── */
+
+/** 56dp list row: leading icon in a tinted square, title/subtitle, custom trailing. */
+@Composable
+private fun SettingsRow(
+    icon: ImageVector,
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    iconTint: Color = MaterialTheme.colorScheme.primary,
+    onClick: (() -> Unit)? = null,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 14.dp,
+    trailing: @Composable () -> Unit = {},
+) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .heightIn(min = 60.dp)
+            .padding(horizontal = horizontalPadding, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(shape = RoundedCornerShape(10.dp), color = tokens.cardElevatedColor, modifier = Modifier.size(36.dp)) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+            }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            if (subtitle != null) {
+                Text(subtitle, fontSize = 13.sp, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        trailing()
+    }
+}
+
+/** Card with a SettingsRow header that reveals its body. */
+@Composable
+private fun DisclosureCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+        SettingsRow(icon = icon, title = title, subtitle = subtitle, onClick = onToggle, trailing = { Chevron(expanded) })
+        AnimatedVisibility(visible = expanded) {
+            Column {
+                ThinDivider()
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun Chevron(expanded: Boolean) {
+    Icon(
+        imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+        contentDescription = stringResource(if (expanded) R.string.projects_collapse else R.string.projects_expand),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ThinDivider() {
+    Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+}
+
+/** Radio row: title + subtitle left, Material radio right; whole row is the target. */
+@Composable
+private fun RadioRow(
+    title: String,
+    subtitle: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    mono: Boolean = false,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 14.dp,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .heightIn(min = 56.dp)
+            .padding(horizontal = horizontalPadding, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    fontSize = 13.sp,
+                    color = scheme.onSurfaceVariant,
+                    fontFamily = if (mono) FontFamily.Monospace else null,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        RadioButton(selected = selected, onClick = null)
+    }
+}
+
+@Composable
+private fun KeyValueRow(key: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(key, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Progress and message of the runtime setup service while it runs, errors in the danger colour. */
+@Composable
+private fun SetupProgress(state: ForgeUiState) {
+    val status = state.setupSnapshot.status
+    // Step, percent, MB transferred and the latest terminal lines while an install runs or after it failed.
+    if (status == RuntimeSetupStatus.RUNNING || status == RuntimeSetupStatus.ERROR) {
+        RuntimeProgressPanel(state.setupSnapshot)
     }
 }
