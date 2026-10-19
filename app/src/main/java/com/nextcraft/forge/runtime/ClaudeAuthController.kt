@@ -81,7 +81,18 @@ class ClaudeAuthController(
     }
 
     private suspend fun beginLoginLocked(mode: ClaudeLoginMode, email: String) {
-        if (process?.isAlive == true) return
+        // Tapping "Sign in with SSO" while the account flow is still waiting must restart with the new mode; silently
+        // keeping the old process made the SSO button look dead. cancel() ends the old reader loop, which nulls `process`.
+        if (process?.isAlive == true) {
+            cancel()
+            val giveUp = android.os.SystemClock.elapsedRealtime() + RESTART_WAIT_MS
+            while (process != null && android.os.SystemClock.elapsedRealtime() < giveUp) delay(50)
+            if (process?.isAlive == true) {
+                mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Previous sign-in is still closing. Try again.")
+                return
+            }
+            process = null
+        }
         if (!installer.isAgentInstalled(AgentKind.CLAUDE_CODE)) {
             mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Install Claude Code first.")
             return
@@ -345,6 +356,7 @@ class ClaudeAuthController(
         const val CLAUDE_BINARY = "/usr/local/bin/claude"
         val TRUSTED_SIGN_IN_HOSTS = listOf("claude.ai", "claude.com", "anthropic.com")
         const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
+        const val RESTART_WAIT_MS = 5_000L
         const val CREDENTIAL_POLL_MS = 2_000L
         const val MAX_OUTPUT_CHARS = 100_000
         val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
