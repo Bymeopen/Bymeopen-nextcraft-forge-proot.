@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -402,8 +403,15 @@ fun NextCraftForgeTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = ForgeTypography,
-            content = content,
-        )
+        ) {
+            // The app draws on a transparent Scaffold over its own canvas, so no Surface sets the
+            // content colour. Without this, LocalContentColor stays black and every Text that
+            // relies on the default is unreadable on the dark themes.
+            CompositionLocalProvider(
+                LocalContentColor provides colorScheme.onBackground,
+                content = content,
+            )
+        }
     }
 }
 
