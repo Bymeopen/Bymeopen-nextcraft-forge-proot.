@@ -238,7 +238,13 @@ internal fun parseAndroidBuildIssues(output: String, projectRoot: File, exitCode
     val issues = mutableListOf<AndroidBuildIssue>()
     val location = Regex("(?m)^(.+?\\.(?:kt|java|xml|gradle|kts)):(\\d+)(?::(\\d+))?[: ]+(?:error: )?(.+)$", RegexOption.IGNORE_CASE)
     val rootCanonical = runCatching { projectRoot.canonicalFile }.getOrDefault(projectRoot)
-    location.findAll(output).take(12).forEach { match ->
+    // Warnings are not the failure; counting them first pushed the real error past the 12-issue cap.
+    val isWarning = { line: String ->
+        val t = line.trimStart()
+        t.startsWith("w:", ignoreCase = true) || t.startsWith("warning:", ignoreCase = true) ||
+            line.contains(" warning:", ignoreCase = true)
+    }
+    location.findAll(output).filterNot { isWarning(it.value) }.take(12).forEach { match ->
         val rawPath = match.groupValues[1].trim()
             .replace(Regex("^(?:e:|w:|error:|warning:)\\s*", RegexOption.IGNORE_CASE), "")
             .removePrefix("file://")

@@ -493,6 +493,12 @@ fun SettingsScreenModern(
                 onClick = { viewModel.checkForAppUpdates() },
                 trailing = { Text("›", color = scheme.onSurfaceVariant) },
             )
+            state.updateProgress?.let { fraction ->
+                LinearProgressIndicator(
+                    progress = fraction,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
             state.updateInfo?.let { info ->
                 Box(modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
                     ForgePrimaryButton(
@@ -808,12 +814,9 @@ internal fun KeyValueRow(key: String, value: String) {
 /** Progress and message of the runtime setup service while it runs, errors in the danger colour. */
 @Composable
 internal fun SetupProgress(state: ForgeUiState) {
-    val scheme = MaterialTheme.colorScheme
-    val snap = state.setupSnapshot
-    if (snap.status == RuntimeSetupStatus.RUNNING) {
-        LinearProgressIndicator(progress = snap.progress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
-        Text(snap.message, fontSize = 13.sp, color = scheme.onSurfaceVariant)
-    } else if (snap.status == RuntimeSetupStatus.ERROR) {
-        Text(snap.errorMessage.orEmpty(), fontSize = 13.sp, color = scheme.error)
+    val status = state.setupSnapshot.status
+    // Step, percent, MB transferred and the latest terminal lines while an install runs or after it failed.
+    if (status == RuntimeSetupStatus.RUNNING || status == RuntimeSetupStatus.ERROR) {
+        RuntimeProgressPanel(state.setupSnapshot)
     }
 }

@@ -331,6 +331,8 @@ sealed interface RuntimeEvent {
     data class ToolRequested(override val sessionId: String, val request: ToolRequest) : RuntimeEvent
     data class ToolApproved(override val sessionId: String, val approvalId: String) : RuntimeEvent
     data class ToolRejected(override val sessionId: String, val approvalId: String) : RuntimeEvent
+    /** The system (not the user) refused a tool call. The session stays connected; the user is told what was refused. */
+    data class PermissionDenied(override val sessionId: String, val toolName: String, val reason: String) : RuntimeEvent
     data class ToolCompleted(override val sessionId: String, val toolName: String, val summary: String) : RuntimeEvent
     data class FilesChanged(override val sessionId: String, val changes: List<ChangeItem>) : RuntimeEvent {
         val paths: List<String> get() = changes.map { it.path }

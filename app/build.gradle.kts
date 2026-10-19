@@ -13,15 +13,19 @@ android {
         applicationId = "com.nextcraft.forge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100
-        versionName = "1.0.0-forge"
+        // The release workflow passes -PversionCode=... -PversionName=...; local builds keep the defaults.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 100
+        versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-forge"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
 
         buildConfigField("String", "APP_VARIANT", "\"debug\"")
-        buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"\"")
+        // Manifest asset of the latest GitHub release; build with -PappUpdateManifestUrl=... to point elsewhere.
+        val updateManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
+            ?: "https://github.com/bymeopen/nextcraft-forge/releases/latest/download/update-manifest.json"
+        buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 
     // Release signing comes from the environment so no key material lives in the repo.
