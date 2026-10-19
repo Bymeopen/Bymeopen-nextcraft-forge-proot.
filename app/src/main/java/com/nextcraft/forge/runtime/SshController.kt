@@ -33,7 +33,8 @@ data class SshState(
     val busy: Boolean = false,
 )
 
-internal val SSH_NAME = Regex("[A-Za-z0-9._-]{1,100}")
+// No leading "-": a user or host like "-oProxyCommand=..." would be parsed by ssh as an option (command injection).
+internal val SSH_NAME = Regex("[A-Za-z0-9_][A-Za-z0-9._-]{0,99}")
 internal val SSH_FORWARD = Regex("\\d{1,5}:[A-Za-z0-9._-]{1,100}:\\d{1,5}")
 
 /**
@@ -137,7 +138,16 @@ class SshController(context: Context) {
     }
 
     fun stopTunnel(id: String) {
-        tunnelProcesses.remove(id)?.destroyForcibly()
+        val process = tunnelProcesses.remove(id) ?: return
+        process.destroyForcibly()
+        // Killing the su wrapper does not always reach the ssh client inside the chroot; stop it there as well.
+        val forward = mutable.value.hosts.firstOrNull { it.id == id }?.forward.orEmpty()
+        if (forward.isNotEmpty()) {
+            scope.launch {
+                // "[s]sh" keeps pkill from matching this very shell command line.
+                runCatching { runner.run(workspace(), SLUG, "pkill -f ${ChrootRunner.quote("[s]sh .* -N .*-L $forward ")} || true", timeoutMillis = 15_000L) }
+            }
+        }
     }
 
     private fun sshBase(host: SshHost) =

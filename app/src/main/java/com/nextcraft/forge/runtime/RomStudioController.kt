@@ -25,7 +25,8 @@ data class RomState(
 
 internal val ROM_MANIFEST_URL = Regex("https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]{4,300}")
 internal val ROM_BRANCH = Regex("[A-Za-z0-9._/-]{1,100}")
-internal val ROM_DIRECTORY = Regex("[A-Za-z0-9._-]{1,60}")
+// No leading "-" or "."; "mkdir -p -x" / "cd .." would be taken as an option or escape the ROM workspace.
+internal val ROM_DIRECTORY = Regex("[A-Za-z0-9_][A-Za-z0-9._-]{0,59}")
 
 /**
  * ROM Studio: orchestrates Google's `repo` tool (install, init, sync) in the chroot so a custom ROM source tree can be
