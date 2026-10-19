@@ -65,7 +65,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
     val waiting = auth.status == ClaudeAuthStatus.AWAITING_BROWSER || auth.status == ClaudeAuthStatus.COMPLETING
 
     ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.settings_claude_account), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
             Text(
                 text = stringResource(
@@ -79,7 +79,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 fontWeight = FontWeight.SemiBold,
             )
             auth.message?.let {
-                Text(it, fontSize = 13.sp, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (inFlight) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
@@ -158,7 +158,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
             }
             Text(
                 text = stringResource(R.string.settings_claude_footnote),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )

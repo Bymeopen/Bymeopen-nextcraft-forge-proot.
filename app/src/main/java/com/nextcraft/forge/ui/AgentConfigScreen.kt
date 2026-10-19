@@ -239,8 +239,9 @@ fun AgentConfigScreen(
                 }
             }
 
-            // Claude subscription: sign in through Claude Code's own login (account, SSO or Console) instead of pasting a token.
-            if (agent == AgentKind.CLAUDE_CODE && provider == ProviderKind.CLAUDE) {
+            // Claude subscription: sign in through Claude Code's own login (account, SSO or Console) instead of pasting a
+            // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
+            if (agent == AgentKind.CLAUDE_CODE) {
                 ClaudeAccountCard(viewModel)
             }
 
