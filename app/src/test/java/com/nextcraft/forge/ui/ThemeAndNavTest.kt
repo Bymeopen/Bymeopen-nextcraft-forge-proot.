@@ -48,14 +48,14 @@ class ThemeAndNavTest {
 
     @Test
     fun backTarget_toolScreensReturnToTools() {
-        listOf(ForgeTab.FILES, ForgeTab.TERMINAL, ForgeTab.ANDROID, ForgeTab.PREVIEW).forEach {
+        listOf(ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW).forEach {
             assertEquals(ForgeTab.TOOLS, forgeBackTarget(it))
         }
     }
 
     @Test
     fun backTarget_topLevelTabsReturnToProjects_andProjectsExits() {
-        listOf(ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS).forEach {
+        listOf(ForgeTab.TERMINAL, ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS).forEach {
             assertEquals(ForgeTab.PROJECTS, forgeBackTarget(it))
         }
         assertNull(forgeBackTarget(ForgeTab.PROJECTS))

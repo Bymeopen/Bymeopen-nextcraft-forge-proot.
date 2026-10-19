@@ -55,6 +55,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.combinedClickable
 
 /**
  * Linear-style toggle cell: label and optional description on the left, switch on the right.
@@ -136,12 +138,12 @@ fun rememberImeVisible(): State<Boolean> {
 
 /**
  * Where the system Back button goes from [tab]; null = let the system leave the app.
- * Tool screens return to the Tools launcher, top-level tabs return to Projects.
+ * Tool screens return to the Tools launcher; the five bottom tabs return to Projects.
  */
 fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
     ForgeTab.PROJECTS -> null
-    ForgeTab.FILES, ForgeTab.TERMINAL, ForgeTab.ANDROID, ForgeTab.PREVIEW -> ForgeTab.TOOLS
-    ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
+    ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW -> ForgeTab.TOOLS
+    ForgeTab.TERMINAL, ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
 }
 
 /** Large left-aligned screen title (Linear style) with an optional quiet subtitle. */
@@ -288,11 +290,14 @@ fun ForgePillIcon(
 
 /** Text tabs; the selected one sits in a soft pill. */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun ForgePillTabs(
     items: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onLongPress: ((Int) -> Unit)? = null,
+    longPressLabel: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Row(
@@ -309,7 +314,13 @@ fun ForgePillTabs(
                     .heightIn(min = 34.dp)
                     .clip(RoundedCornerShape(100))
                     .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
-                    .clickable(role = Role.Tab, onClickLabel = label) { onSelect(index) }
+                    .combinedClickable(
+                        role = Role.Tab,
+                        onClickLabel = label,
+                        onLongClickLabel = longPressLabel,
+                        onLongClick = onLongPress?.let { cb -> { cb(index) } },
+                        onClick = { onSelect(index) },
+                    )
                     .padding(horizontal = 15.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -339,5 +350,18 @@ fun ForgePrimaryButton(
         modifier = modifier.heightIn(min = 44.dp),
     ) {
         Text(text = text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** True when the user disabled animations (Android "Remove animations" / animator scale 0). */
+@Composable
+fun rememberReduceMotion(): Boolean {
+    val context = LocalContext.current
+    return remember(context) {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
     }
 }

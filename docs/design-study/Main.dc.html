@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navigation study</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;font-family:Inter,system-ui,sans-serif}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.pill{transition:transform 420ms cubic-bezier(.34,1.15,.64,1)}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: {{bg}}; color: {{text}}; position: relative; overflow: hidden">
+  <div style="height: 44px; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 28px 6px; font-size: 14px; font-weight: 600">
+    <span>4:16</span><span>82</span>
+  </div>
+  <div style="padding: 10px 20px 0; display: flex; flex-direction: column; gap: 4px">
+    <div style="font-size: 27px; font-weight: 600; letter-spacing: -0.3px">Navigation</div>
+    <div style="font-size: 14px; color: {{muted}}">Tap a tab. One pill slides; icons morph; the bar changes material per theme.</div>
+  </div>
+  <div style="padding: 18px 20px 0; display: flex; flex-direction: column; gap: 10px">
+    <div style="font-size: 13px; font-weight: 500; color: {{muted}}">What each tab shows</div>
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+      <a href="{{r.href}}" style="display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 8px 0; border-bottom: 0.5px solid {{line}}">
+        <span style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid {{ring}}; box-sizing: border-box"></span>
+        <span style="flex: 1; display: flex; flex-direction: column">
+          <span style="font-size: 16px; font-weight: 500">{{r.title}}</span>
+          <span style="font-size: 13px; color: {{muted}}">{{r.sub}}</span>
+        </span>
+        <span style="font-size: 13px; color: {{muted}}">Open</span>
+      </a>
+    </sc-for>
+  </div>
+  <div style="flex: 1"></div>
+  <div style="font-size: 12px; color: {{muted}}; padding: 0 20px 10px">Selected: {{selectedLabel}} · theme {{themeName}}</div>
+  <div style="position: absolute; left: {{barLeft}}; right: {{barLeft}}; bottom: {{barBottom}}; height: 72px; background: {{barBg}}; border-radius: {{barRadius}}; border: {{barBorder}}; box-shadow: {{barShadow}}; backdrop-filter: blur(16px)">
+    <div style="position: absolute; left: 6px; right: 6px; top: 6px; bottom: 6px">
+      <div class="pill" style="position: absolute; left: 0; top: 0; width: 20%; height: 100%; transform: translateX({{pillX}})">
+        <div style="position: absolute; inset: -14px; background: radial-gradient(closest-side, {{glow}}, transparent); opacity: {{glowOpacity}}"></div>
+        <div style="position: absolute; inset: 6px; border-radius: {{pillRadius}}; background: {{pillFill}}; border: 1px solid {{pillEdge}}"></div>
+      </div>
+      <div style="position: absolute; inset: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr))">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+          <button type="button" onClick="{{t.pick}}" aria-label="{{t.label}}" style="appearance: none; background: transparent; border: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: {{t.color}}; font-family: inherit; padding: 0">
+            <span style="position: relative; width: 24px; height: 24px; display: block">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform: rotate({{t.rot}}); transition: transform 420ms cubic-bezier(.34,1.15,.64,1)"><path d="{{t.d}}"></path></svg>
+              <sc-if value="{{t.badge}}" hint-placeholder-val="{{false}}"><span style="position: absolute; top: -2px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: {{accent}}"></span></sc-if>
+            </span>
+            <span style="font-size: 11px; font-weight: {{t.weight}}">{{t.label}}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["linear","system","white","glass"],"default":"linear","section":"Theme"},"agentRunning":{"editor":"boolean","default":true,"section":"State"},"filesChanged":{"editor":"int","default":3,"min":0,"max":20,"section":"State"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sel: 0 }; }
+  palette() {
+    const t = this.props.theme ?? 'linear';
+    const P = {
+      linear: { bg: '#0B0B0B', text: '#EDEDED', muted: '#9C9C9C', line: '#1E1E1E', ring: '#4A4A4A', accent: '#5E6AD2', barBg: '#131313', barBorder: '0', float: false, glowOpacity: 1 },
+      system: { bg: '#141218', text: '#E6E0E9', muted: '#CAC4D0', line: '#2B2930', ring: '#6F6B76', accent: '#D0BCFF', barBg: '#211F26', barBorder: '0', float: false, glowOpacity: 0.6 },
+      white:  { bg: '#FFFFFF', text: '#111111', muted: '#666666', line: '#E4E4E4', ring: '#BDBDBD', accent: '#D70F47', barBg: '#F7F7F7', barBorder: '0', float: false, glowOpacity: 0 },
+      glass:  { bg: 'linear-gradient(160deg,#0D1326 0%,#1A1038 55%,#0B1B2E 100%)', text: '#FFFFFF', muted: '#C3C8DC', line: 'rgba(255,255,255,.12)', ring: '#7A81A0', accent: '#7C8CFF', barBg: 'rgba(255,255,255,.07)', barBorder: '1px solid rgba(255,255,255,.22)', float: true, glowOpacity: 1 },
+    };
+    return { name: t, ...P[t] };
+  }
+  renderVals() {
+    const p = this.palette();
+    const sel = this.state.sel;
+    const icons = [
+      'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+      'M4 5h16v14H4zM8 9l3 3-3 3M13 15h4',
+      'M12 3l2.5 6 6.5.5-5 4 1.5 6.5L12 17l-5.5 3 1.5-6.5-5-4 6.5-.5z',
+      'M14 6a4 4 0 005 5l-9 9-3-3 9-9',
+      'M4 7h10M18 7h2M4 12h2M10 12h10M4 17h6M14 17h6',
+    ];
+    const labels = ['Projects', 'Terminal', 'Agent', 'Tools', 'Settings'];
+    const hrefs = ['Projects.dc.html', 'Terminal.dc.html', 'Agent.dc.html', 'Tools.dc.html', 'Settings.dc.html'];
+    const subs = ['Hero, Quick/New project, import card, your projects', 'Rounded output, quick commands, prompt line', 'Header with agent switcher, chat tabs, composer', 'Launcher for Files, Preview, Android Builder', 'General, AI, GitHub, Runtime, About'];
+    const rot = ['0deg', '0deg', '90deg', '18deg', '0deg'];
+    const badge = [false, false, !!(this.props.agentRunning ?? true), (this.props.filesChanged ?? 3) > 0, false];
+    const tabs = labels.map((label, i) => ({
+      label, d: icons[i], href: hrefs[i],
+      color: i === sel ? p.accent : p.muted,
+      weight: i === sel ? 600 : 500,
+      rot: i === sel ? rot[i] : '0deg',
+      badge: badge[i] && i !== sel,
+      pick: () => this.setState({ sel: i }),
+    }));
+    const rows = labels.map((title, i) => ({ title, sub: subs[i], href: hrefs[i] }));
+    const pillFill = p.name === 'white' ? 'rgba(215,15,71,.10)' : (p.name === 'system' ? 'rgba(208,188,255,.18)' : 'rgba(94,106,210,.18)');
+    const pillEdge = p.name === 'white' ? 'rgba(215,15,71,.30)' : (p.name === 'system' ? 'rgba(208,188,255,.30)' : 'rgba(94,106,210,.30)');
+    return {
+      bg: p.bg, text: p.text, muted: p.muted, line: p.line, ring: p.ring, accent: p.accent,
+      themeName: p.name, selectedLabel: labels[sel],
+      barBg: p.barBg, barBorder: p.barBorder,
+      barLeft: p.float ? '16px' : '0px', barBottom: p.float ? '12px' : '0px',
+      barRadius: p.float ? '36px' : '0px', barShadow: p.float ? '0 12px 32px rgba(0,0,0,.35)' : 'none',
+      pillRadius: p.float ? '999px' : '22px', pillFill, pillEdge,
+      glow: p.name === 'white' ? 'transparent' : (p.name === 'system' ? 'rgba(208,188,255,.28)' : 'rgba(94,106,210,.28)'),
+      glowOpacity: p.glowOpacity,
+      pillX: (sel * 100) + '%',
+      tabs, rows,
+    };
+  }
+}
+</script>
+</body>
+</html>

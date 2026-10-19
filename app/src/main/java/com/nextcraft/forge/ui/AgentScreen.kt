@@ -88,6 +88,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 
 @Composable
 fun AgentScreen(
@@ -133,11 +141,12 @@ fun AgentScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ChatTabsRow(
+        AgentHeader(
             state = state,
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
+            onSelectAgent = viewModel::selectAgent,
             onClearChat = viewModel::clearActiveChat,
         )
 
@@ -327,77 +336,100 @@ fun AgentScreen(
     }
 }
 
+/** Large title + action pill (agent switcher, new chat) and pill tabs for the chats of the project. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatTabsRow(
+private fun AgentHeader(
     state: ForgeUiState,
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
+    onSelectAgent: (AgentKind) -> Unit,
     onClearChat: () -> Unit,
 ) {
-    val tokens = LocalForgeThemeTokens.current
-    Surface(
-        color = tokens.topBarContainerColor,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                state.chats.forEach { chat ->
-                    val selected = chat.id == state.activeChatId
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectChat(chat.id) },
-                        label = {
-                            Text(
-                                text = chat.displayTitle(),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingIcon = if (state.chats.size > 1 && selected) {
-                            {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = stringResource(R.string.agent_delete_chat),
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .clickable(role = Role.Button) { onDeleteChat(chat.id) }
-                                        .padding(9.dp),
-                                )
-                            }
-                        } else {
-                            null
-                        },
-                    )
-                }
-                AssistChip(
+    var menuOpen by remember { mutableStateOf(false) }
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ForgeLargeTitle(
+                title = stringResource(R.string.agent_title),
+                subtitle = listOfNotNull(state.activeProject?.name, state.agentKind.displayTitle()).joinToString(" · "),
+                modifier = Modifier.weight(1f),
+            )
+            ForgeActionPill {
+                ForgePillIcon(
+                    icon = Icons.Default.Add,
+                    description = stringResource(R.string.agent_new_chat),
                     onClick = onCreateChat,
-                    label = { Text(stringResource(R.string.agent_new_chat)) },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    },
                 )
-                if (state.messages.isNotEmpty() && !state.sessionRunning) {
-                    AssistChip(
-                        onClick = onClearChat,
-                        label = { Text(stringResource(R.string.agent_clear_chat)) },
+                Box {
+                    ForgePillIcon(
+                        icon = Icons.Default.MoreVert,
+                        description = stringResource(R.string.agent_more),
+                        onClick = { menuOpen = true },
                     )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        Text(
+                            text = stringResource(R.string.agent_switch_agent),
+                            fontSize = 12.sp,
+                            color = scheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
+                        AgentKind.entries.forEach { kind ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(kind.displayTitle(), fontWeight = FontWeight.SemiBold)
+                                        Text(kind.displaySubtitle(), fontSize = 12.sp, color = scheme.onSurfaceVariant)
+                                    }
+                                },
+                                leadingIcon = if (kind == state.agentKind) {
+                                    { Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected)) }
+                                } else {
+                                    null
+                                },
+                                enabled = !state.sessionRunning,
+                                onClick = {
+                                    menuOpen = false
+                                    onSelectAgent(kind)
+                                },
+                            )
+                        }
+                        if (state.messages.isNotEmpty()) {
+                            Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.agent_clear_chat)) },
+                                enabled = !state.sessionRunning,
+                                onClick = {
+                                    menuOpen = false
+                                    onClearChat()
+                                },
+                            )
+                        }
+                    }
                 }
             }
-            Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+        if (state.chats.isNotEmpty()) {
+            val titles = state.chats.map { it.displayTitle() }
+            val selectedIndex = state.chats.indexOfFirst { it.id == state.activeChatId }.coerceAtLeast(0)
+            // Long-press the active chat's tab to delete it (only when more than one chat exists).
+            ForgePillTabs(
+                items = titles,
+                selectedIndex = selectedIndex,
+                onSelect = { onSelectChat(state.chats[it].id) },
+                onLongPress = if (state.chats.size > 1) {
+                    { index -> if (index == selectedIndex) onDeleteChat(state.chats[index].id) }
+                } else {
+                    null
+                },
+                longPressLabel = stringResource(R.string.agent_delete_chat),
+            )
         }
     }
 }
@@ -412,94 +444,82 @@ private fun AntigravityOAuthBanner(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
     var verificationCode by rememberSaveable { mutableStateOf("") }
+    val busy = authState.status == AntigravityAuthStatus.STARTING || authState.status == AntigravityAuthStatus.COMPLETING
 
-    ForgeThemedCard(
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = tokens.cardContainerColor,
+        contentColor = scheme.onSurface,
+        border = tokens.cardBorderStroke,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.Lock,
                     contentDescription = null,
-                    tint = tokens.accentText,
-                    modifier = Modifier.size(18.dp),
+                    tint = scheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.agent_antigravity_cli_google_account),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.agent_google_account), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = authState.message ?: stringResource(R.string.agent_required_for_antigravity),
+                        fontSize = 13.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             }
-            authState.message?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(3.dp))
             authState.authorizationUrl?.let { url ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            }
-                        },
-                    ) {
-                        Text(stringResource(R.string.agent_open_google_sign_in))
-                    }
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.agent_open_google_sign_in),
+                        onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                        modifier = Modifier.weight(1f),
+                    )
                     OutlinedButton(
                         onClick = { clipboard.setText(AnnotatedString(url)) },
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.agent_copy_link))
-                    }
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier.heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.agent_copy_link)) }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = verificationCode,
                         onValueChange = { verificationCode = it },
-                        label = { Text(stringResource(R.string.agent_paste_google_verification_code)) },
+                        placeholder = { Text(stringResource(R.string.agent_paste_google_verification_code), fontSize = 13.sp) },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f),
                     )
-                    Button(
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.agent_verify),
+                        enabled = verificationCode.isNotBlank(),
                         onClick = {
-                            if (verificationCode.isNotBlank()) {
-                                onSubmitCode(verificationCode)
-                                verificationCode = ""
-                            }
+                            onSubmitCode(verificationCode)
+                            verificationCode = ""
                         },
-                    ) {
-                        Text(stringResource(R.string.agent_verify))
-                    }
+                    )
                 }
             }
-            if (authState.status == AntigravityAuthStatus.SIGNED_OUT ||
-                authState.status == AntigravityAuthStatus.ERROR
-            ) {
-                Button(onClick = onStartLogin) {
-                    Text(stringResource(R.string.agent_sign_in_with_google))
-                }
-            } else if (authState.status == AntigravityAuthStatus.STARTING ||
-                authState.status == AntigravityAuthStatus.COMPLETING
-            ) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel) {
-                    Text(stringResource(R.string.agent_cancel))
-                }
+            when {
+                authState.status == AntigravityAuthStatus.SIGNED_OUT || authState.status == AntigravityAuthStatus.ERROR ->
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.agent_sign_in_with_google),
+                        onClick = onStartLogin,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                busy -> OutlinedButton(
+                    onClick = onCancel,
+                    shape = RoundedCornerShape(100),
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) { Text(stringResource(R.string.agent_cancel)) }
             }
         }
     }
@@ -512,81 +532,66 @@ private fun ToolApprovalCard(
     onReject: () -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
-    val shape = RoundedCornerShape(tokens.cardCornerRadius)
-    Card(
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = tokens.cardContainerColor,
+        contentColor = scheme.onSurface,
+        border = tokens.cardBorderStroke,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        shape = shape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.agent_high_risk_tool_approval, request.toolName, request.risk.name),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Text(
-                text = request.explanation,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+        Row {
+            // Thin red rule carries the warning so the card itself stays calm.
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(scheme.error),
             )
-            request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
-                val cmdShape = RoundedCornerShape(8.dp)
-                Text(
-                    text = cmd,
-                    style = ForgeCodeTextStyle,
-                    color = tokens.terminalText,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(cmdShape)
-                        .background(tokens.terminalBackground)
-                        .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), cmdShape)
-                        .padding(8.dp),
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                OutlinedButton(
-                    onClick = onReject,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.5f)),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(stringResource(R.string.agent_deny))
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ForgeStatusIcon(ForgeStatus.FAILED, iconSize = 20.dp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.agent_approval_title), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            text = stringResource(R.string.agent_approval_sub, request.toolName, request.risk.name.lowercase()),
+                            fontSize = 13.sp,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = onApprove,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(stringResource(R.string.agent_approve_execution))
+                Text(text = request.explanation, fontSize = 14.sp, color = scheme.onSurfaceVariant)
+                request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
+                    Text(
+                        text = cmd,
+                        style = ForgeCodeTextStyle,
+                        color = tokens.terminalText,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(tokens.terminalBackground)
+                            .padding(10.dp),
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onReject,
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.agent_deny)) }
+                    Button(
+                        onClick = onApprove,
+                        shape = RoundedCornerShape(100),
+                        colors = ButtonDefaults.buttonColors(containerColor = scheme.error, contentColor = scheme.onError),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold) }
                 }
             }
         }
@@ -599,49 +604,42 @@ private fun EmptyAgentWelcome(
     onQuickPrompt: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
     val suggestions = listOf(
-        "Inspect this workspace and summarize its architecture.",
-        "Create a responsive Jetpack Compose screen with clean state management.",
-        "Run the test suite or verify scripts inside the Ubuntu Root Chroot.",
-        "Audit the codebase for concurrency, security, and edge-case bugs.",
+        stringResource(R.string.agent_sugg_inspect),
+        stringResource(R.string.agent_sugg_compose),
+        stringResource(R.string.agent_sugg_tests),
+        stringResource(R.string.agent_sugg_audit),
     )
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 8.dp),
     ) {
         Text(
-            text = state.agentKind.displayTitle(),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
+            text = stringResource(R.string.agent_welcome_hint),
+            fontSize = 14.sp,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "Active Workspace: /workspace/${state.activeProject?.slug ?: "sandbox"} • Model: ${
-                if (state.agentKind == AgentKind.ANTIGRAVITY) state.antigravityModel else state.providerProfile.model
-            }",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            suggestions.forEach { prompt ->
-                ForgeThemedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onQuickPrompt(prompt) },
-                ) {
-                    Text(
-                        text = prompt,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(12.dp),
-                    )
-                }
+        suggestions.forEach { prompt ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(role = Role.Button) { onQuickPrompt(prompt) }
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = scheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Text(text = prompt, fontSize = 15.sp, modifier = Modifier.weight(1f))
             }
         }
     }
