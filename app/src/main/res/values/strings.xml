@@ -690,5 +690,6 @@
     <string name="settings_auto_approve_warning">Every tool runs without confirmation. Turn this off to review commands first.</string>
     <string name="msg_subscription_models">Subscription login: models come from Claude Code, no catalog request needed.</string>
     <string name="msg_claude_cli_verified">✓ Claude Code verified: %1$s</string>
-    <string name="msg_claude_cli_unverified">✕ Claude Code did not answer. Check the runtime is installed and you are signed in.</string>
+    <string name="msg_claude_cli_unverified">✕ Claude Code check failed: %1$s</string>
+    <string name="msg_runtime_not_installed">The Linux runtime is not installed yet.</string>
 </resources>
