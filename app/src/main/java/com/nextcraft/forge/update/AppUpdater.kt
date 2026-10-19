@@ -19,11 +19,15 @@ data class AppUpdateInfo(
     val notes: String,
 )
 
+/** The manifest URL answered 404: the project has not published an app release (or manifest) yet. */
+class NoPublishedReleaseException : java.io.IOException("No app release has been published yet.")
+
 class AppUpdater(
     private val context: Context,
     /**
      * Optional manifest URL override. When non-empty, used in place of
-     * `BuildConfig.APP_UPDATE_MANIFEST_URL`.
+     * `BuildConfig.APP_UPDATE_MANIFEST_URL`, which defaults to the `update-manifest.json` asset of the latest
+     * GitHub release (see scripts/make-update-manifest.sh).
      */
     private val manifestUrlOverride: String = "",
 ) {
@@ -37,6 +41,7 @@ class AppUpdater(
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/json")
             val code = connection.responseCode
+            if (code == 404) throw NoPublishedReleaseException()
             if (code !in 200..299) throw java.io.IOException("Update manifest request failed (HTTP $code)")
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 buildString {

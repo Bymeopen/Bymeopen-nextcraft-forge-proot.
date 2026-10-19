@@ -124,6 +124,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     var bypassSetupGate by rememberSaveable { mutableStateOf(false) }
     var showNewProjectDialog by rememberSaveable { mutableStateOf(false) }
+    var showGitHubDialog by rememberSaveable { mutableStateOf(false) }
 
     if (!state.runtimeInstalled && !bypassSetupGate) {
         RuntimeOnboardingScreen(
@@ -264,8 +265,9 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onQuickProject = viewModel::createQuickProject,
                             onImportZip = viewModel::importZipProject,
                             onCloneGitUrl = viewModel::cloneGitUrl,
-                            onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                            onConnectGitHub = { showGitHubDialog = true },
                             onDeleteProject = viewModel::deleteProject,
+                            onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
                         )
                         ProjectView.CHATS, ProjectView.CONVERSATION -> when (pane) {
@@ -286,9 +288,25 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
                     ForgeTab.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                     ForgeTab.SETTINGS -> SettingsScreenModern(state = state, viewModel = viewModel)
+                    ForgeTab.TOOLCHAINS -> ToolchainsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
+                    ForgeTab.BUILD_MATRIX -> BuildMatrixScreen(state = state, viewModel = viewModel)
+                    ForgeTab.SSH -> SshScreen(viewModel = viewModel)
+                    ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
+                    ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
+                    ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
                 }
             }
         }
+    }
+
+    if (showGitHubDialog) {
+        AlertDialog(
+            onDismissRequest = { showGitHubDialog = false },
+            title = { Text(stringResource(R.string.settings_github)) },
+            text = { GitHubSection(state, viewModel) },
+            confirmButton = { TextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.agent_close)) } },
+        )
     }
 
     if (showNewProjectDialog) {
@@ -589,7 +607,10 @@ private val projectEntries = listOf(
 )
 
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
-private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
+private val toolsGroup = setOf(
+    ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+)
 
 private fun ForgeTab.navIndex(): Int {
     val tab = if (this in toolsGroup) ForgeTab.TOOLS else this

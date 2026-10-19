@@ -67,12 +67,15 @@ fun MarkdownText(
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
     onRunCode: ((String) -> Unit)? = null,
+    // SelectionContainer inside a LazyColumn item whose content changes (streaming chat) is a suspected cause of the
+    // Compose Stack.pop crash; chat messages use the Copy button instead.
+    selectable: Boolean = true,
 ) {
     val blocks = remember(markdown) { parseMarkdown(markdown) }
     val resolvedColor = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface else color
     val tokens = LocalForgeThemeTokens.current
 
-    SelectionContainer {
+    OptionalSelection(selectable) {
         Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             blocks.forEach { block ->
                 when (block) {
@@ -99,6 +102,11 @@ fun MarkdownText(
             }
         }
     }
+}
+
+@Composable
+private fun OptionalSelection(enabled: Boolean, content: @Composable () -> Unit) {
+    if (enabled) SelectionContainer(content = content) else content()
 }
 
 @Composable

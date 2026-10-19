@@ -101,7 +101,7 @@ object RuntimeSetupController {
         val current = mutableSnapshot.value
         val line = event.terminalLine ?: when {
             event.downloadedBytes != null && event.totalBytes != null ->
-                "Downloading: %.1f / %.1f MB".format(event.downloadedBytes / MB, event.totalBytes / MB)
+                "${if (event.unpacking) UNPACK_PREFIX else DOWNLOAD_PREFIX} %.1f / %.1f MB".format(event.downloadedBytes / MB, event.totalBytes / MB)
             event.event == RuntimeInstallEvent.STAGE -> "• ${event.message}"
             else -> null
         }
@@ -109,11 +109,11 @@ object RuntimeSetupController {
         val isDownloadUpdate = event.downloadedBytes != null && event.totalBytes != null
         val logs = when {
             sanitizedLine == null -> current.logs
-            isDownloadUpdate && current.logs.lastOrNull()?.startsWith(DOWNLOAD_PREFIX) == true ->
+            isDownloadUpdate && current.logs.lastOrNull().isProgressLine() ->
                 (current.logs.dropLast(1) + sanitizedLine).takeLast(MAX_LOG_LINES)
             else -> (current.logs + sanitizedLine).takeLast(MAX_LOG_LINES)
         }
-        if (!isDownloadUpdate || current.logs.lastOrNull()?.startsWith(DOWNLOAD_PREFIX) != true) {
+        if (!isDownloadUpdate || !current.logs.lastOrNull().isProgressLine()) {
             appendLog(context, sanitizedLine)
         }
         val safeFraction = if (event.fraction.isFinite()) event.fraction.coerceIn(0f, 1f) else current.progress
@@ -254,6 +254,9 @@ object RuntimeSetupController {
     private const val MAX_LOG_BYTES = 1_000_000L
     private const val MB = 1_048_576.0
     private const val DOWNLOAD_PREFIX = "Downloading:"
+    private const val UNPACK_PREFIX = "Unpacking:"
+
+    private fun String?.isProgressLine() = this != null && (startsWith(DOWNLOAD_PREFIX) || startsWith(UNPACK_PREFIX))
 }
 
 class RuntimeSetupService : Service() {

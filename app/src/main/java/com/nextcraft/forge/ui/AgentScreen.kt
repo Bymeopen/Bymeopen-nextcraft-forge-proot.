@@ -708,7 +708,10 @@ private fun ChatMessageCard(
     if (message.fromUser) {
         MessageContainer(fromUser = true, contentColor = textColor) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (message.text.isNotBlank()) MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+                if (message.text.isNotBlank()) {
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
+                    CopyMessageButton(message.text)
+                }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         message.attachments.forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
@@ -734,7 +737,7 @@ private fun ChatMessageCard(
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
                 Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
                     if (streaming) {
                         // Blinking caret says "still arriving" without a spinner.
                         val blink = rememberBlink()
@@ -745,6 +748,8 @@ private fun ChatMessageCard(
                                 .graphicsLayer { alpha = blink }
                                 .background(scheme.primary, RoundedCornerShape(2.dp)),
                         )
+                    } else {
+                        CopyMessageButton(message.text)
                     }
                 }
             }
@@ -765,6 +770,35 @@ private fun ChatMessageCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * Explicit copy action for a whole message. Long-press selection (MarkdownText) still works for parts of a message,
+ * but it is easy to miss and can be lost while the list updates, so copying must not depend on it.
+ */
+@Composable
+private fun CopyMessageButton(text: String) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    var copied by remember { mutableStateOf(false) }
+    androidx.compose.material3.TextButton(
+        onClick = {
+            clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+            copied = true
+            scope.launch {
+                kotlinx.coroutines.delay(1_500)
+                copied = false
+            }
+        },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        modifier = Modifier.heightIn(min = 32.dp),
+    ) {
+        Text(
+            text = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

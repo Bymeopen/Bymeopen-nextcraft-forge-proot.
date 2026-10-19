@@ -93,7 +93,7 @@ class ClaudeRuntimeBridge(
         com.nextcraft.forge.data.ApiKeyVault(context).rotateNext(profile.kind.name)
     },
     private val autoApproveAllTools: () -> Boolean = {
-        runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(false)
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(true)
     },
     private val interactiveHighRiskApprovals: () -> Boolean = {
         runCatching { com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals }.getOrDefault(true)
@@ -152,10 +152,11 @@ class ClaudeRuntimeBridge(
         streamedThinking.clear()
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting Claude Code…")
-        val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
-        if (secret.isBlank()) {
+        val storedLogin = usesStoredClaudeLogin(provider)
+        val secret = if (storedLogin) "" else secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
+        if (secret.isBlank() && !storedLogin) {
             val message = if (provider.kind == ProviderKind.CLAUDE) {
-                "No Claude subscription token is saved. Add one from Agent → AI provider."
+                "Not signed in to Claude. Open Agent → AI provider and sign in, or add a subscription token."
             } else {
                 "No API key is saved for ${provider.kind.title}."
             }
@@ -201,6 +202,7 @@ class ClaudeRuntimeBridge(
                 provider,
                 authToken = secret,
                 localGatewayUrl = formatGateway?.url ?: openRouterGateway?.url,
+                useStoredLogin = storedLogin,
             )
             Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}")
             Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
@@ -273,8 +275,10 @@ class ClaudeRuntimeBridge(
                 Log.d("ClaudeBridge", "Process exited with code $exit")
                 permissionWatcher.cancelAndJoin()
                 pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
-                    permission.response.writeText("deny")
+                    // A failed write here must not turn a finished run into a failure.
+                    runCatching { permission.response.writeText("deny") }
                     pending.remove(permission.request.approvalId)
+                    eventBus.emit(RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId))
                 }
                 val changed = checkpoints.changedFiles(workspace, before)
                 if (changed.isNotEmpty()) {
@@ -331,14 +335,26 @@ class ClaudeRuntimeBridge(
      * Runs a one-turn "reply ok" prompt with the saved credentials to prove Claude Code can
      * authenticate inside Root Chroot.
      */
+    /**
+     * True for the Claude subscription provider when no token was entered by hand but `claude auth login` left a login
+     * in the guest: the CLI then authenticates (and refreshes) with its own credentials file.
+     */
+    private fun usesStoredClaudeLogin(provider: ProviderProfile): Boolean {
+        if (provider.kind != ProviderKind.CLAUDE) return false
+        val vault = com.nextcraft.forge.data.ApiKeyVault(context)
+        val manualToken = listOf(ProviderKind.CLAUDE, ProviderKind.ANTHROPIC).any { !vault.get(it.name).isNullOrBlank() }
+        return !manualToken && installer.hasClaudeLoginCredential()
+    }
+
     suspend fun hello(provider: ProviderProfile, timeoutMillis: Long = 90_000L): String = withContext(Dispatchers.IO) {
         val startedAt = android.os.SystemClock.elapsedRealtime()
-        val secret = secretFor(provider).orEmpty()
-        check(secret.isNotBlank()) { "No Claude subscription token is saved." }
+        val storedLogin = usesStoredClaudeLogin(provider)
+        val secret = if (storedLogin) "" else secretFor(provider).orEmpty()
+        check(secret.isNotBlank() || storedLogin) { "Not signed in to Claude." }
         val installed = installer.installedRuntime()
         val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
         val outputFile = File(context.cacheDir, "claude-hello-${System.nanoTime()}.log")
-        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret)
+        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, useStoredLogin = storedLogin)
         val command = listOf(
             launch.executable,
             "-p", "Reply with exactly: ok",
@@ -474,6 +490,7 @@ class ClaudeRuntimeBridge(
                 if (pending.remove(expired.request.approvalId, expired)) {
                     runCatching { expired.response.writeText("deny") }
                     eventBus.emit(RuntimeEvent.ToolRejected(sessionId, expired.request.approvalId))
+                    eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, expired.request.toolName, "no answer was given in time"))
                 }
             }
     }
@@ -513,10 +530,10 @@ class ClaudeRuntimeBridge(
                     response.writeText("deny")
                     runCatching { file.delete() }
                     eventBus.emit(
-                        RuntimeEvent.RuntimeLog(
+                        RuntimeEvent.PermissionDenied(
                             sessionId,
-                            "Permission denied",
-                            sanitizeForDisplay("Blocked high-risk $toolName request: $explanation"),
+                            toolName,
+                            sanitizeForDisplay("high-risk request blocked: $explanation"),
                         ),
                     )
                 }
@@ -524,10 +541,13 @@ class ClaudeRuntimeBridge(
                 Log.d("ClaudeBridge", "Approving permission request $approvalId for $toolName ($paths, risk=$risk)")
                 response.writeText("allow")
                 runCatching { file.delete() }
-                eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, explanation))
+                // Completion is reported by the stream's tool_result; emitting it at approval time marked long
+                // commands as finished before they had run and produced a duplicate row later.
             }
         }.onFailure {
-            runCatching { responseFile(file, approvalId).writeText("deny") }
+            // With auto-approve on, a request this app failed to parse must not become a refusal for the agent.
+            val decision = if (autoApproveAllTools()) "allow" else "deny"
+            runCatching { responseFile(file, approvalId).writeText(decision) }
             runCatching { file.delete() }
         }
     }
@@ -644,13 +664,21 @@ class ClaudeRuntimeBridge(
                         val result = extractedContent
                             .ifBlank { if (block.optBoolean("is_error")) "Tool failed" else "Completed successfully" }
                         eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, sanitizeForDisplay(result)))
+                        if (block.optBoolean("is_error") && isPermissionDenialText(result)) {
+                            eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, toolName, sanitizeForDisplay(result)))
+                        }
                     }
                 }
             }
             "result" -> {
                 if (json.optBoolean("is_error")) {
                     val message = json.stringOrEmpty("result").ifBlank { "Claude Code reported an error" }
-                    throw IllegalStateException(message)
+                    if (isPermissionDenialText(message)) {
+                        // A refusal is not a failed connection: tell the user and let the session carry on.
+                        eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, "Tool", sanitizeForDisplay(message)))
+                    } else {
+                        throw IllegalStateException(message)
+                    }
                 }
                 turnCompletedFromStream = true
                 terminateActiveProcessGracefully()
@@ -893,6 +921,14 @@ class ClaudeRuntimeBridge(
     }
 }
 
+private val PERMISSION_DENIAL_REGEX = Regex(
+    "permission.{0,60}denied|denied.{0,40}permission|not allowed|doesn't want to proceed|user rejected|blocked by|requires approval",
+    RegexOption.IGNORE_CASE,
+)
+
+/** True for Claude Code's text when a tool call was refused by permissions rather than failing for a technical reason. */
+internal fun isPermissionDenialText(text: String): Boolean = PERMISSION_DENIAL_REGEX.containsMatchIn(text)
+
 private val DANGEROUS_PATTERNS = listOf(
     "git push", "git reset", "git clean", "git checkout --", "sudo", "curl ", "wget ", "chmod ", "chown ", "mkfs",
     "dd if=", "/dev/block", "/dev/loop", "/dev/sd", "/dev/zero", "/dev/mem", "/dev/kmem", "/proc/", "umount",
@@ -914,11 +950,19 @@ private val ENV_ASSIGNMENT_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")
 
 // awk and sed are safe for plain text processing, but their scripts can run commands or write files.
 private val AWK_WORD_REGEX = Regex("\\bawk\\b")
-private val AWK_EXEC_REGEX = Regex("""\|\s*\\?"|system\s*\(|getline|\|&|\bpopen\b""")
+private val AWK_EXEC_REGEX = Regex("""\|\s*\\?"|system\s*\(|getline|\|&|\bpopen\b|\bENVIRON\b""")
 private val SED_WORD_REGEX = Regex("\\bsed\\b")
 private val SED_EXEC_OR_WRITE_REGEX = Regex("""(?:^|[;{}'"\s/0-9$,!])(?:e(?:['";}\s]|$)|[wWrR]\s)""")
 
+// jq can print the process environment (`jq -n env`, `$ENV`), which holds provider keys.
+private val JQ_WORD_REGEX = Regex("\\bjq\\b")
+private val JQ_ENV_REGEX = Regex("""\benv\b|[$]ENV|\binput_filename\b""")
+
+// A shell variable expansion can print an exported secret (`echo "$ANTHROPIC_API_KEY"`); those commands need the user.
+private val VARIABLE_EXPANSION_REGEX = Regex("""\$[A-Za-z_{@*#?0-9!-]""")
+
 private fun scriptCanEscapeSandbox(text: String): Boolean =
+    (JQ_WORD_REGEX.containsMatchIn(text) && JQ_ENV_REGEX.containsMatchIn(text)) ||
     (AWK_WORD_REGEX.containsMatchIn(text) && AWK_EXEC_REGEX.containsMatchIn(text)) ||
         (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
 
@@ -946,6 +990,13 @@ private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-crede
 
 private fun isSensitivePath(path: String): Boolean =
     SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
+
+private val CREDENTIAL_PATH_PARTS = listOf(
+    "/proc/", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook",
+    "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge", "/.gradle/gradle.properties",
+)
+
+private fun isCredentialPath(path: String): Boolean = CREDENTIAL_PATH_PARTS.any(path::contains)
 
 private fun maskQuotedAndEscapedSeparators(input: String): String {
     val out = StringBuilder(input.length)
@@ -1007,10 +1058,13 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
     if (DANGEROUS_PATTERNS.any(preview::contains)) return RiskLevel.HIGH
     if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
+    // Reads and searches must not reach credentials or the process environment either (/proc/self/environ, ~/.claude).
+    if (tool != "Bash" && paths.any(::isCredentialPath)) return RiskLevel.HIGH
     return when (tool) {
         "Bash" -> {
             val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
             val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains) ||
+                VARIABLE_EXPANSION_REGEX.containsMatchIn(text) ||
                 scriptCanEscapeSandbox(text)
             val masked = maskQuotedAndEscapedSeparators(text)
             val segments = masked.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)

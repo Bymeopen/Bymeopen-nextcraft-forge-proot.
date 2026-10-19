@@ -55,7 +55,8 @@ fun NavGlyph(
             ForgeTab.PROJECTS -> drawTiles(tint, stroke, progress)
             ForgeTab.TERMINAL -> drawPrompt(tint, stroke, progress, blink = animate && t < 0.5f)
             ForgeTab.AGENT -> drawSpark(tint, stroke, progress, orbit = if (animate) t else null)
-            ForgeTab.TOOLS, ForgeTab.ANDROID -> drawWrench(tint, stroke, progress)
+            ForgeTab.TOOLS, ForgeTab.ANDROID, ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX,
+            ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS -> drawWrench(tint, stroke, progress)
             ForgeTab.FILES -> drawFile(tint, stroke, progress)
             ForgeTab.PREVIEW -> drawPreview(tint, stroke, progress)
             ForgeTab.SETTINGS -> drawSliders(tint, stroke, progress)
@@ -204,5 +205,5 @@ private fun DrawScope.drawPreview(tint: Color, stroke: Stroke, p: Float) {
         lineTo(w * 0.42f, h * 0.72f)
         close()
     }
-    drawPath(tri, tint.copy(alpha = 0.25f + 0.75f * p), style = if (p > 0.5f) androidx.compose.ui.graphics.drawscope.Fill else stroke)
+    drawPath(tri, tint.copy(alpha = (0.25f + 0.75f * p).coerceIn(0f, 1f)), style = if (p > 0.5f) androidx.compose.ui.graphics.drawscope.Fill else stroke)
 }

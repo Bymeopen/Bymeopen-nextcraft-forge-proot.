@@ -76,6 +76,7 @@ fun AgentConfigScreen(
     var agyModelInput by rememberSaveable(state.antigravityModel) { mutableStateOf(state.antigravityModel) }
     var agyEffortInput by rememberSaveable(state.antigravityEffort) { mutableStateOf(state.antigravityEffort) }
 
+    var showModelPicker by rememberSaveable { mutableStateOf(false) }
     val isProvisioning = state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
     val runtimeBusy = !state.runtimeInstalled || isProvisioning
 
@@ -122,7 +123,7 @@ fun AgentConfigScreen(
                     ForgePrimaryButton(
                         text = stringResource(R.string.settings_agent_install_named, agent.displayTitle()),
                         onClick = { viewModel.installAgent(agent) },
-                        enabled = !runtimeBusy,
+                        enabled = !isProvisioning,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     SetupProgress(state)
@@ -159,6 +160,11 @@ fun AgentConfigScreen(
                         onClick = { viewModel.updateProviderKind(kind) },
                     )
                 }
+            }
+
+            // Claude subscription: sign in through Claude Code's own login (account or SSO) instead of pasting a token.
+            if (agent == AgentKind.CLAUDE_CODE && provider == ProviderKind.CLAUDE) {
+                ClaudeAccountCard(viewModel)
             }
 
             // Endpoint & protocol: base URL, model id, OpenRouter order.
@@ -225,6 +231,35 @@ fun AgentConfigScreen(
                     if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     state.apiStatusMessage?.asString()?.let { msg ->
                         Text(text = msg, fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                    }
+                    // Model choice for every provider: discovered models when available, otherwise sensible presets.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.settings_current_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                            Text(
+                                text = state.providerProfile.model.ifBlank { "default" },
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
+                            Text(stringResource(R.string.settings_choose_model))
+                        }
+                    }
+                    if (showModelPicker) {
+                        ModelPickerDialog(
+                            title = provider.displayTitle(),
+                            options = providerModelOptions(provider, state.discoveredModels, state.providerProfile.model),
+                            selectedId = state.providerProfile.model,
+                            loading = state.apiBusy,
+                            onRefresh = if (provider == ProviderKind.CLAUDE) null else viewModel::discoverProviderModels,
+                            onSelect = { id ->
+                                modelInput = id
+                                viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = id, openRouterOrder = openRouterOrderInput)
+                                showModelPicker = false
+                            },
+                            onDismiss = { showModelPicker = false },
+                        )
                     }
                     if (state.discoveredModels.isNotEmpty()) {
                         Text(
