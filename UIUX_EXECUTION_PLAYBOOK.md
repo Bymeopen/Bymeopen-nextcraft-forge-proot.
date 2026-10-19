@@ -348,3 +348,5 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 **Selesai**: tema, nav (study 5 tab + pil meluncur + glyph kustom + glow), Projects (hero + Quick/New + kartu import ZIP/Git/GitHub, Quick = QUICK_PROJECT), Tools, Launch, Agent (header + tab chat pil + kartu persetujuan + banner OAuth + composer; top bar lama dihapus), Files (header, pohon, perubahan, editor, dialog New file), Terminal, Preview, Settings (seksi + kulit kapsul/bulat), onboarding runtime, dialog New Project, toggle, i18n (layar + ViewModel via UiText + label enum), a11y pass. **Semua layar sudah di gaya baru di kode.**
 
 **Belum**: locale es/ar/hi/ru/zh; blur Glass + fallback; isi form Settings masih form (bukan baris datar) meski kulitnya baru; durasi per tahap di Launch; **uji di perangkat** (bentuk glyph nav & glow, keyboard vs bar, Back, TalkBack, font 200%, reduce-motion, ZIP picker, transparansi Glass).
+
+- Design study (semua layar, 4 tema, interaktif): `docs/design-study/` + artifact https://claude.ai/artifact/Mgq8C7tfQtXSS17fnjhy9Y
