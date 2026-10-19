@@ -122,7 +122,7 @@ fun ToolsScreen(
             ) { Icon(Icons.Default.Build, contentDescription = null, tint = scheme.primary) }
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.tools_header_title), fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(stringResource(R.string.tools_header_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(
                     stringResource(R.string.tools_header_subtitle),
                     fontSize = 14.sp,
@@ -182,7 +182,7 @@ private fun ToolCardRow(entry: ToolEntry, onClick: () -> Unit) {
             ) { Icon(entry.icon, contentDescription = null, tint = entry.tint, modifier = Modifier.size(24.dp)) }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(entry.title), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(entry.title), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(stringResource(entry.subtitle), fontSize = 14.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = muted.copy(alpha = 0.7f))

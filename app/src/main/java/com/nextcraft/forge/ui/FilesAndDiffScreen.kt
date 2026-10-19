@@ -297,7 +297,7 @@ private fun FilesHeaderCard(
         ) {
             Text(
                 text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else stringResource(R.string.files_files),
-                fontSize = 17.sp,
+                fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
@@ -783,7 +783,7 @@ private fun WorkspaceDiffReviewList(
                                     text = prefix + line.text,
                                     color = lineColor,
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
+                                    fontSize = ForgeType.caption,
                                     lineHeight = 16.sp,
                                     modifier = Modifier
                                         .fillMaxWidth()

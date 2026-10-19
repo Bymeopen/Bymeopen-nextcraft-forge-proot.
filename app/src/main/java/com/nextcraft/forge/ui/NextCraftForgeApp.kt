@@ -762,7 +762,7 @@ private fun ForgeBottomBar(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = label,
-                                fontSize = 11.sp,
+                                fontSize = ForgeType.caption,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                 color = tint,
                                 maxLines = 1,

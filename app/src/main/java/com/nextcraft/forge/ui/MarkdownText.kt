@@ -254,7 +254,7 @@ private fun CodeSnippetBlock(
                 Text(
                     text = block.language.ifBlank { "code" }.uppercase(),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
+                    fontSize = ForgeType.caption,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
                 )

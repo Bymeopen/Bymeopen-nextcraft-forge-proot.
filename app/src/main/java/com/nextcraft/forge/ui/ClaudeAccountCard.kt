@@ -66,7 +66,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
 
     ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.settings_claude_account), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.settings_claude_account), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
             Text(
                 text = stringResource(
                     when {
@@ -75,7 +75,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                         else -> R.string.settings_claude_not_signed_in
                     },
                 ),
-                fontSize = 17.sp,
+                fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
             )
             auth.message?.let {
