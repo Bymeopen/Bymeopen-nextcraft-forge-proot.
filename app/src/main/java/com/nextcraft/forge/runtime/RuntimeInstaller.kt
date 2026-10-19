@@ -46,6 +46,8 @@ data class RuntimeInstallProgress(
     val terminalLine: String? = null,
     val indeterminate: Boolean = false,
     val event: RuntimeInstallEvent = RuntimeInstallEvent.STAGE,
+    /** True when [downloadedBytes] counts archive bytes unpacked rather than downloaded. */
+    val unpacking: Boolean = false,
 )
 
 data class AgentUpdateInfo(
@@ -232,7 +234,9 @@ class RuntimeInstaller(private val context: Context) {
             check(RootfsRepair.ensureUnmounted(staging)) { "Staging rootfs still has active mounts" }
             staging.deleteRecursively()
             staging.mkdirs()
-            extractZstdTar(archive, staging)
+            extractZstdTar(archive, staging) { done, total ->
+                onProgress(unpackProgress("Unpacking Core Linux rootfs…", 0.28f, 0.34f, done, total))
+            }
             stripMacosMetadataArtifacts(staging)
             ensureAndroidSocketGroupConfiguration(staging)
             RootfsRepair.activate(
@@ -523,6 +527,24 @@ class RuntimeInstaller(private val context: Context) {
             RootfsRepair.reclaimOwnership(file, AndroidProcess.myUid())
             if (!file.delete() && file.exists()) Log.w("RuntimeInstaller", "Could not remove ${file.name}")
         }
+    }
+
+    /**
+     * True when `claude auth login` left a usable login (access + refresh token) in the guest. The file is written by
+     * root inside the chroot, so the app UID usually cannot read it; ask root.
+     */
+    fun hasClaudeLoginCredential(): Boolean {
+        val file = File(rootfs, "root/.claude/.credentials.json")
+        val quoted = "'${file.absolutePath.replace("'", "'\\''")}'"
+        return runCatching {
+            val process = ProcessBuilder("su", "-c", "grep -q '\"refreshToken\"' $quoted").start()
+            if (!process.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                false
+            } else {
+                process.exitValue() == 0
+            }
+        }.getOrDefault(false)
     }
 
     /** Versions recorded after each real agent binary has been installed and verified. */
@@ -1239,6 +1261,17 @@ class RuntimeInstaller(private val context: Context) {
             File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH).isFile &&
             File(runtimeRootfs, AndroidToolchain.MAVEN_HOST_DIR).let { it.isDirectory && !it.list().isNullOrEmpty() }
 
+    /** Unpack progress: bytes are the compressed archive consumed, so the UI can show MB/s like a download. */
+    private fun unpackProgress(message: String, from: Float, to: Float, done: Long, total: Long) =
+        RuntimeInstallProgress(
+            message = message,
+            fraction = from + (to - from) * (if (total > 0L) done.toFloat() / total else 0f),
+            downloadedBytes = done,
+            totalBytes = total.takeIf { it > 0L },
+            event = RuntimeInstallEvent.DOWNLOAD,
+            unpacking = true,
+        )
+
     private suspend fun installRuntimeOverlay(
         bundle: RuntimeBundle,
         message: String,
@@ -1251,7 +1284,9 @@ class RuntimeInstaller(private val context: Context) {
         val archive = obtainRuntimeBundle(bundle, preferEmbedded = preferEmbedded, from = from, to = to * 0.8f + from * 0.2f, onProgress = onProgress)
         onProgress(RuntimeInstallProgress(message, to * 0.8f + from * 0.2f, indeterminate = true))
         try {
-            extractZstdTar(archive, rootfs)
+            extractZstdTar(archive, rootfs) { done, total ->
+                onProgress(unpackProgress(message, to * 0.8f + from * 0.2f, to, done, total))
+            }
             stripMacosMetadataArtifacts(rootfs)
         } finally {
             if (archive.parentFile == downloads) archive.delete()
@@ -2025,6 +2060,19 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         )
         Os.chmod(hook.absolutePath, 0b111101101)
 
+        // BROWSER handler for `claude auth login`: there is no browser in the chroot, so the sign-in URL is handed to
+        // the app through the bridge directory and opened in the Android browser. The browser then redirects to
+        // http://localhost:<port>/callback, which the CLI (same network namespace) is listening on.
+        val openUrl = File(rootfs, "opt/pocket/open-url.sh")
+        openUrl.writeText(
+            """#!/bin/sh
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+[ -n "${'$'}1" ] && [ -d "${'$'}BRIDGE" ] || exit 0
+printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDGE/claude-login-url.tmp" "${'$'}BRIDGE/claude-login-url"
+""",
+        )
+        Os.chmod(openUrl.absolutePath, 0b111101101)
+
         val settingsContent = JSONObject()
             .put("disableAllHooks", false)
             .put(
@@ -2162,10 +2210,39 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             resolvFile.delete()
         }
         resolvFile.writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        ensureLocalhostInHosts()
     }
 
-    private fun openZstdInputStream(archive: File): java.io.InputStream {
-        val rawStream = BufferedInputStream(archive.inputStream())
+    /**
+     * The Core rootfs ships an empty /etc/hosts, so `localhost` was resolved through DNS and failed. Anything that binds
+     * or connects to localhost then breaks: the OAuth callback listener of Antigravity ("listen tcp: lookup localhost ...
+     * no such host") and Claude Code logins, dev servers, Gradle and preview. Keeps whatever else the file holds.
+     */
+    private fun ensureLocalhostInHosts() {
+        val hosts = File(rootfs, "etc/hosts")
+        val current = runCatching { hosts.takeIf { it.isFile }?.readText().orEmpty() }.getOrDefault("")
+        val hasLocalhost = current.lineSequence().any { line ->
+            val fields = line.substringBefore('#').trim().split(Regex("\\s+"))
+            fields.size >= 2 && fields[0] == "127.0.0.1" && "localhost" in fields.drop(1)
+        }
+        if (hasLocalhost) return
+        val entries = "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n"
+        runCatching { writeRootfsFileAtomically(hosts, entries + current.trimStart('\n')) }
+            .onFailure { Log.w("RuntimeInstaller", "Could not write /etc/hosts", it) }
+    }
+
+    private fun openZstdInputStream(
+        archive: File,
+        consumed: java.util.concurrent.atomic.AtomicLong? = null,
+    ): java.io.InputStream {
+        val fileStream = archive.inputStream()
+        // Counts compressed bytes read so unpacking can report MB/s; the external-zstd fallback is not counted.
+        val counted = if (consumed == null) fileStream else object : java.io.FilterInputStream(fileStream) {
+            override fun read(): Int = super.read().also { if (it >= 0) consumed.incrementAndGet() }
+            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                super.read(b, off, len).also { if (it > 0) consumed.addAndGet(it.toLong()) }
+        }
+        val rawStream = BufferedInputStream(counted)
         return try {
             ZstdCompressorInputStream(rawStream)
         } catch (_: Throwable) {
@@ -2206,13 +2283,28 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
     }
 
     @Suppress("DEPRECATION")
-    private fun extractZstdTar(archive: File, destination: File) {
+    private suspend fun extractZstdTar(
+        archive: File,
+        destination: File,
+        /** Receives (compressed bytes consumed, archive size) at most every ~400 ms. */
+        report: (suspend (Long, Long) -> Unit)? = null,
+    ) {
+        val consumed = if (report != null) java.util.concurrent.atomic.AtomicLong() else null
+        val archiveSize = archive.length()
+        var lastReport = 0L
         val rootDir = destination.canonicalFile
         val rootPath = rootDir.toPath()
         val deferredLinks = mutableListOf<Pair<File, File>>()
-        TarArchiveInputStream(openZstdInputStream(archive)).use { tar ->
+        TarArchiveInputStream(openZstdInputStream(archive, consumed)).use { tar ->
             var entry: TarArchiveEntry? = tar.nextTarEntry
             while (entry != null) {
+                if (report != null && consumed != null) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastReport >= 400L) {
+                        lastReport = now
+                        report(consumed.get().coerceAtMost(archiveSize), archiveSize)
+                    }
+                }
                 val currentEntry = entry
                 val cleanName = currentEntry.name.removePrefix("./").trimEnd('/')
                 if (cleanName.isNotBlank()) {

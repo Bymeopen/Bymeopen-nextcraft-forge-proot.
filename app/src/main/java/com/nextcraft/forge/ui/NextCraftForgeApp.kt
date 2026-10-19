@@ -97,6 +97,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -121,6 +123,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     var bypassSetupGate by rememberSaveable { mutableStateOf(false) }
     var showNewProjectDialog by rememberSaveable { mutableStateOf(false) }
+    var showGitHubDialog by rememberSaveable { mutableStateOf(false) }
 
     if (!state.runtimeInstalled && !bypassSetupGate) {
         RuntimeOnboardingScreen(
@@ -143,7 +146,10 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         if (!viewModel.projectBack()) backTarget?.let(viewModel::selectTab)
     }
 
+    // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
+    // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
         topBar = {},
         bottomBar = {
@@ -190,7 +196,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .statusBarsPadding(),
         ) {
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(
@@ -245,8 +252,9 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onQuickProject = viewModel::createQuickProject,
                             onImportZip = viewModel::importZipProject,
                             onCloneGitUrl = viewModel::cloneGitUrl,
-                            onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
+                            onConnectGitHub = { showGitHubDialog = true },
                             onDeleteProject = viewModel::deleteProject,
+                            onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
                         )
                         ProjectView.CHATS, ProjectView.CONVERSATION -> when (state.projectPane) {
@@ -267,9 +275,25 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
                     ForgeTab.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                     ForgeTab.SETTINGS -> SettingsScreenModern(state = state, viewModel = viewModel)
+                    ForgeTab.TOOLCHAINS -> ToolchainsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
+                    ForgeTab.BUILD_MATRIX -> BuildMatrixScreen(state = state, viewModel = viewModel)
+                    ForgeTab.SSH -> SshScreen(viewModel = viewModel)
+                    ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
+                    ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
+                    ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
                 }
             }
         }
+    }
+
+    if (showGitHubDialog) {
+        AlertDialog(
+            onDismissRequest = { showGitHubDialog = false },
+            title = { Text(stringResource(R.string.settings_github)) },
+            text = { GitHubSection(state, viewModel) },
+            confirmButton = { TextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.agent_close)) } },
+        )
     }
 
     if (showNewProjectDialog) {
@@ -570,7 +594,10 @@ private val projectEntries = listOf(
 )
 
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
-private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
+private val toolsGroup = setOf(
+    ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+)
 
 private fun ForgeTab.navIndex(): Int {
     val tab = if (this in toolsGroup) ForgeTab.TOOLS else this
@@ -619,7 +646,7 @@ private fun ForgeBottomBar(
             .fillMaxWidth()
             .padding(outerPadding),
     ) {
-        Column {
+        Column(modifier = Modifier.navigationBarsPadding()) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
             BoxWithConstraints(
                 modifier = Modifier

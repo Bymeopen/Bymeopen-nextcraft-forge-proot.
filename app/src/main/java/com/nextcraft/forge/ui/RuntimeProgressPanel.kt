@@ -10,6 +10,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -38,6 +43,36 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
     val failed = snapshot.status == RuntimeSetupStatus.ERROR
     val percent = (snapshot.progress.coerceIn(0f, 1f) * 100).toInt()
     val transfer = formatTransfer(snapshot.downloadedBytes, snapshot.totalBytes)
+    // Smoothed download speed from the byte counter between updates.
+    var lastSample by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var bytesPerSecond by remember { mutableStateOf(0.0) }
+    LaunchedEffect(snapshot.downloadedBytes) {
+        val bytes = snapshot.downloadedBytes
+        if (bytes == null) {
+            lastSample = null
+            bytesPerSecond = 0.0
+            return@LaunchedEffect
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        val previous = lastSample
+        if (previous == null || bytes < previous.first) {
+            lastSample = bytes to now
+        } else if (now - previous.second >= 500L) {
+            val instant = (bytes - previous.first) / ((now - previous.second) / 1000.0)
+            bytesPerSecond = if (bytesPerSecond == 0.0) instant else bytesPerSecond * 0.7 + instant * 0.3
+            lastSample = bytes to now
+        }
+    }
+
+    // Steps without a byte counter (apt/SDK installs inside the chroot) show elapsed time instead of a speed.
+    var elapsedSeconds by remember(snapshot.message) { mutableStateOf(0L) }
+    LaunchedEffect(snapshot.message, running) {
+        val started = android.os.SystemClock.elapsedRealtime()
+        while (running) {
+            elapsedSeconds = (android.os.SystemClock.elapsedRealtime() - started) / 1000
+            kotlinx.coroutines.delay(1000)
+        }
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -61,22 +96,22 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (!snapshot.indeterminate || !running) {
-                    Text(
-                        text = "%d%%".format(percent),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
             }
             if (running && snapshot.indeterminate) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             } else {
                 LinearProgressIndicator(progress = snapshot.progress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
             }
-            transfer?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(transfer ?: if (running) "%d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60) else "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!snapshot.indeterminate || !running) {
+                    val speed = if (bytesPerSecond > 0.0 && transfer != null) " · %.1f MB/s".format(bytesPerSecond / MIB) else ""
+                    Text(
+                        text = "%d%%".format(percent) + speed,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
             if (failed) {
                 Text(

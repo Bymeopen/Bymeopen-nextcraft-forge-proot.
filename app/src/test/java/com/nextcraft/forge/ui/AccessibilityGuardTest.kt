@@ -35,7 +35,8 @@ class AccessibilityGuardTest {
     }
 
     private companion object {
-        // 29 = 23 + 6 on the Projects hero/import card (icons beside their own label text).
-        const val BASELINE = 29
+        // 35 = 23 + 6 on the Projects hero/import card (icons beside their own label text).
+        // 37 = 35 + 1 (Rename item in the project menu) + 1 (Developer Tools header tile); both sit beside visible text.
+        const val BASELINE = 37
     }
 }

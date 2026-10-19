@@ -13,6 +13,7 @@ import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.ChangeItem
+import com.nextcraft.forge.model.ChatAttachment
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
@@ -46,6 +47,14 @@ import com.nextcraft.forge.runtime.AndroidLogLine
 import com.nextcraft.forge.runtime.AndroidLogcatState
 import com.nextcraft.forge.runtime.AndroidProjectTemplateGenerator
 import com.nextcraft.forge.runtime.AntigravityAuthController
+import com.nextcraft.forge.runtime.ClaudeAuthController
+import com.nextcraft.forge.runtime.SshController
+import com.nextcraft.forge.runtime.SnapshotsController
+import com.nextcraft.forge.runtime.RomStudioController
+import com.nextcraft.forge.runtime.DiagnosticsController
+import com.nextcraft.forge.runtime.CiCdController
+import com.nextcraft.forge.runtime.BuildMatrixController
+import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
 import com.nextcraft.forge.runtime.DshRuntimeBridge
@@ -111,6 +120,13 @@ enum class ForgeTab(val title: String) {
     ANDROID("Android"),
     PREVIEW("Preview"),
     SETTINGS("Settings"),
+    TOOLCHAINS("Toolchains"),
+    DIAGNOSTICS("Diagnostics"),
+    BUILD_MATRIX("Build Matrix"),
+    SSH("SSH"),
+    CICD("CI/CD"),
+    ROM("ROM Studio"),
+    CHECKPOINTS("Checkpoints"),
 }
 
 enum class SetupScope { RUNTIME, AGENT }
@@ -149,6 +165,8 @@ data class ForgeUiState(
     /** Set while the user is asked whether to save or discard unsaved editor changes before leaving the file. */
     val unsavedChangesPrompt: String? = null,
     val fileSavedBanner: String? = null,
+    /** Files picked for the next prompt; copied into the workspace's attachments/ folder. */
+    val pendingAttachments: List<ChatAttachment> = emptyList(),
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
     val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
@@ -170,6 +188,9 @@ data class ForgeUiState(
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
+    /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
+    val antigravityModels: List<String> = emptyList(),
+    val antigravityModelsLoading: Boolean = false,
     val updateInfo: AppUpdateInfo? = null,
     val updateStatusMessage: String? = null,
     /** 0..1 while an app update APK is downloading, null otherwise. */
@@ -228,6 +249,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return resolveProviderSecret(profile)
     }
+
+    val claudeAuth = ClaudeAuthController(application)
+
+    // Developer tools (Tools tab). Each owns its state flow and runs its commands in the chroot.
+    val diagnostics = DiagnosticsController(application)
+    val buildMatrix = BuildMatrixController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
+    val cicd = CiCdController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
+    val ssh = SshController(application)
+    val rom = RomStudioController(application)
+    val snapshots = SnapshotsController(
+        application,
+        { _state.value.activeProject },
+        { checkpoints.ensureWorkspace(it) },
+        { _state.value.sessionRunning || _state.value.terminalRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING },
+    )
 
     private val claudeRuntime = ClaudeRuntimeBridge(
         context = application,
@@ -517,6 +553,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
     fun installAgent(agent: AgentKind) {
+        if (!_state.value.runtimeInstalled) return installCoreWith(emptySet(), agent)
         if (!canRunRuntimeOperation()) return
         startRuntimeOperation(SetupScope.AGENT) {
             action = RuntimeSetupService.ACTION_INSTALL_AGENT
@@ -566,7 +603,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeStack(stack: DevStack) = runStackOperation(RuntimeSetupService.ACTION_REMOVE_STACK, stack)
 
+    /**
+     * Core is missing (onboarding skipped): run the full setup, which installs Core first and then the requested
+     * stack/agent, instead of refusing the click.
+     */
+    private fun installCoreWith(stacks: Set<DevStack>, agent: AgentKind) {
+        if (_state.value.setupSnapshot.status == RuntimeSetupStatus.RUNNING) return
+        _state.update { it.copy(setupScope = SetupScope.RUNTIME) }
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), RuntimeSetupService::class.java)
+                .setAction(RuntimeSetupService.ACTION_START)
+                .putExtra(RuntimeSetupService.EXTRA_STACKS, stacks.joinToString(",") { it.name })
+                .putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name),
+        )
+    }
+
     private fun runStackOperation(serviceAction: String, stack: DevStack) {
+        if (serviceAction == RuntimeSetupService.ACTION_INSTALL_STACK && !_state.value.runtimeInstalled) {
+            return installCoreWith(setOf(stack), _state.value.agentKind)
+        }
         if (!canRunRuntimeOperation()) return
         startRuntimeOperation(SetupScope.RUNTIME) {
             action = serviceAction
@@ -798,6 +854,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Renames the display name only; the slug (the /workspace/<slug> path agents and chats are bound to) stays. */
+    fun renameProject(projectId: String, newName: String) {
+        val cleanName = newName.trim().take(80)
+        if (cleanName.isEmpty()) return
+        val current = _state.value.projects
+        val target = current.firstOrNull { it.id == projectId } ?: return
+        if (target.name == cleanName) return
+        val updated = current.map { if (it.id == projectId) it.copy(name = cleanName) else it }
+        preferences.saveProjects(updated)
+        _state.update { it.copy(projects = updated) }
+    }
+
     fun selectChat(chatId: String) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
@@ -880,12 +948,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendPrompt(promptText: String) {
+        val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
-        if (cleanPrompt.isEmpty() || _state.value.sessionRunning) return
+        if ((cleanPrompt.isEmpty() && attachments.isEmpty()) || _state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
-        val userMsg = ChatMessage(fromUser = true, text = cleanPrompt)
+        val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
+        // The agent sees the attachments as workspace paths it can open with its own tools.
+        val agentPrompt = if (attachments.isEmpty()) {
+            cleanPrompt
+        } else {
+            buildString {
+                append(cleanPrompt.ifEmpty { "See the attached files." })
+                append("\n\nAttached files (inside the workspace):\n")
+                attachments.forEach { append("- ").append(it.relativePath).append(" (").append(it.mimeType).append(")\n") }
+            }
+        }
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
@@ -925,6 +1004,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sessionRunning = true,
                 activeStatusLine = "Starting ${_state.value.agentKind.title}…",
                 pendingToolRequest = null,
+                pendingAttachments = emptyList(),
             )
         }
 
@@ -941,7 +1021,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     projectId = project.id,
                     projectSlug = project.slug,
                     projectKind = project.kind,
-                    prompt = cleanPrompt,
+                    prompt = agentPrompt,
                     conversationHistory = historyBefore + userMsg,
                     provider = _state.value.providerProfile,
                 )
@@ -1430,6 +1510,151 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Creates an empty folder inside the workspace. */
+    fun createWorkspaceFolder(relativePath: String) {
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/').trimEnd('/')
+        if (cleanPath.isEmpty()) return
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(project.id), cleanPath).mkdirs() }.getOrDefault(false)
+            }
+            if (ok) refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
+    /** Renames a file or folder in place (same parent); the open editor follows the file. */
+    fun renameWorkspaceEntry(relativePath: String, newName: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/')
+        val name = newName.trim()
+        if (cleanPath.isEmpty() || name.isEmpty() || name.contains('/') || name == "." || name == "..") return
+        val parent = cleanPath.substringBeforeLast('/', "")
+        val newPath = if (parent.isEmpty()) name else "$parent/$name"
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val from = checkpoints.safeWorkspaceFile(ws, cleanPath)
+                    val to = checkpoints.safeWorkspaceFile(ws, newPath)
+                    from.exists() && !to.exists() && from.renameTo(to)
+                }.getOrDefault(false)
+            }
+            if (ok) {
+                if (_state.value.selectedFilePath == cleanPath) {
+                    _state.update { it.copy(selectedFilePath = newPath) }
+                }
+                refreshWorkspaceFilesAndChanges(project.id)
+            }
+        }
+    }
+
+    /** Copies picked documents (any type) into [targetDir] of the workspace; names are de-duplicated. */
+    fun importFilesToWorkspace(uris: List<android.net.Uri>, targetDir: String = "") {
+        val project = _state.value.activeProject ?: return
+        if (uris.isEmpty()) return
+        val dir = targetDir.trim().trimStart('/').trimEnd('/')
+        viewModelScope.launch {
+            val copied = withContext(Dispatchers.IO) { copyUrisIntoWorkspace(project.id, uris, dir) }
+            if (copied.isNotEmpty()) {
+                _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_files_uploaded, copied.size)) }
+                refreshWorkspaceFilesAndChanges(project.id)
+            }
+        }
+    }
+
+    /** Picks files for the next prompt: stored under attachments/ so the agent can read them. */
+    fun attachFilesToPrompt(uris: List<android.net.Uri>) {
+        val project = _state.value.activeProject ?: return
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val copied = withContext(Dispatchers.IO) { copyUrisIntoWorkspace(project.id, uris, "attachments") }
+            if (copied.isNotEmpty()) {
+                _state.update { it.copy(pendingAttachments = it.pendingAttachments + copied) }
+            }
+        }
+    }
+
+    fun removePendingAttachment(id: String) {
+        _state.update { st -> st.copy(pendingAttachments = st.pendingAttachments.filterNot { it.id == id }) }
+    }
+
+    private fun copyUrisIntoWorkspace(projectId: String, uris: List<android.net.Uri>, dir: String): List<ChatAttachment> {
+        val resolver = getApplication<Application>().contentResolver
+        val ws = checkpoints.ensureWorkspace(projectId)
+        val out = mutableListOf<ChatAttachment>()
+        uris.forEach { uri ->
+            runCatching {
+                val display = queryDisplayName(uri) ?: "file-${System.currentTimeMillis()}"
+                val safeName = display.replace(Regex("[^A-Za-z0-9._ -]"), "_").ifBlank { "file" }
+                var rel = if (dir.isEmpty()) safeName else "$dir/$safeName"
+                var target = checkpoints.safeWorkspaceFile(ws, rel)
+                var n = 2
+                while (target.exists()) {
+                    val base = safeName.substringBeforeLast('.', safeName)
+                    val ext = safeName.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+                    rel = (if (dir.isEmpty()) "" else "$dir/") + "$base-$n$ext"
+                    target = checkpoints.safeWorkspaceFile(ws, rel)
+                    n++
+                }
+                target.parentFile?.mkdirs()
+                resolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                    ?: error("No stream for $uri")
+                out += ChatAttachment(
+                    displayName = display,
+                    relativePath = rel,
+                    mimeType = resolver.getType(uri) ?: "application/octet-stream",
+                    sizeBytes = target.length(),
+                )
+            }.onFailure { Log.w("MainViewModel", "Import failed for $uri", it) }
+        }
+        return out
+    }
+
+    private fun queryDisplayName(uri: android.net.Uri): String? =
+        runCatching {
+            getApplication<Application>().contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/')
+
+    /** Writes a ZIP of [paths] (or the whole workspace when empty) to a document the user chose. */
+    fun exportWorkspaceZip(target: android.net.Uri, paths: List<String>) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val ignored = setOf(".git", ".gradle", "build", "node_modules", "__pycache__")
+                    val roots = if (paths.isEmpty()) listOf(ws) else paths.map { checkpoints.safeWorkspaceFile(ws, it) }
+                    var written = 0
+                    getApplication<Application>().contentResolver.openOutputStream(target)?.use { os ->
+                        java.util.zip.ZipOutputStream(os.buffered()).use { zip ->
+                            roots.forEach { root ->
+                                root.walkTopDown()
+                                    .onEnter { d -> d == root || (d.name !in ignored && !Files.isSymbolicLink(d.toPath())) }
+                                    .filter { it.isFile && !Files.isSymbolicLink(it.toPath()) }
+                                    .forEach { file ->
+                                        zip.putNextEntry(java.util.zip.ZipEntry(file.relativeTo(ws).invariantSeparatorsPath))
+                                        file.inputStream().use { it.copyTo(zip) }
+                                        zip.closeEntry()
+                                        written++
+                                    }
+                            }
+                        }
+                    } ?: error("Cannot open $target")
+                    written
+                }.getOrElse { Log.w("MainViewModel", "ZIP export failed", it); -1 }
+            }
+            _state.update {
+                it.copy(
+                    fileSavedBanner = if (count >= 0) getApplication<Application>().getString(R.string.msg_zip_saved, count) else getApplication<Application>().getString(R.string.msg_zip_failed),
+                )
+            }
+        }
+    }
+
     fun deleteWorkspaceFile(relativePath: String) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
@@ -1561,9 +1786,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun activeChrootEnvironment(): Map<String, String> {
         val profile = _state.value.providerProfile
-        val secret = resolveProviderSecret(profile)
+        // A Claude login made with `claude auth login` must stay in charge in the terminal too: an access token copied
+        // into CLAUDE_CODE_OAUTH_TOKEN is never refreshed and would shadow it once it expires.
+        val storedLogin = profile.kind == ProviderKind.CLAUDE &&
+            listOf(ProviderKind.CLAUDE, ProviderKind.ANTHROPIC).none { !vault.get(it.name).isNullOrBlank() } &&
+            installer.hasClaudeLoginCredential()
+        val secret = if (storedLogin) null else resolveProviderSecret(profile)
         return runCatching {
-            RuntimeLaunchConfigBuilder.build(profile, secret).environment
+            RuntimeLaunchConfigBuilder.build(profile, secret, useStoredLogin = storedLogin).environment
         }.getOrDefault(emptyMap())
     }
 
@@ -2685,6 +2915,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 antigravityModel = cleanModel,
                 antigravityEffort = cleanEffort,
             )
+        }
+    }
+
+    /** Picks an Antigravity model; an id ending in -low/-medium/-high also sets the matching effort. */
+    fun selectAntigravityModel(model: String) {
+        val effort = Regex("-(low|medium|high)$").find(model)?.groupValues?.get(1) ?: _state.value.antigravityEffort
+        setAntigravityConfig(model, effort)
+    }
+
+    /** Lists the models the signed-in Google account can use by running `agy models` in the chroot. */
+    fun refreshAntigravityModels() {
+        if (_state.value.antigravityModelsLoading) return
+        if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
+            _state.update { it.copy(apiStatusMessage = UiText.Raw("Install Antigravity CLI first.")) }
+            return
+        }
+        _state.update { it.copy(antigravityModelsLoading = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val runtime = installer.installedRuntime()
+                val workspace = File(getApplication<Application>().filesDir, "workspaces/antigravity-models").apply { mkdirs() }
+                val output = File(getApplication<Application>().cacheDir, "antigravity-models-${System.nanoTime()}.log")
+                val process = installer.process(
+                    runtime.chrootExec,
+                    runtime.rootfs,
+                    workspace,
+                    mapOf("NO_COLOR" to "1", "TERM" to "xterm-256color"),
+                    listOf(RuntimeInstaller.AGY_GUEST_PATH, "models"),
+                    guestWorkspacePath = "/workspace/antigravity-models",
+                    emulateHardLinks = false,
+                    outputFile = output,
+                )
+                runCatching { process.outputStream.close() }
+                try {
+                    if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                        error("Listing Antigravity models timed out.")
+                    }
+                    val text = sanitizeClaudeAuthOutput(output.takeIf(File::exists)?.readText().orEmpty())
+                    check(!text.contains("sign in", ignoreCase = true)) { "Sign in to Antigravity first." }
+                    text.lineSequence()
+                        .mapNotNull { line -> line.trim().split(Regex("\\s+"), limit = 2).firstOrNull() }
+                        .filter { it.matches(Regex("[a-z0-9][a-z0-9._-]+")) }
+                        .distinct()
+                        .toList()
+                        .also { check(it.isNotEmpty()) { "Antigravity returned no models." } }
+                } finally {
+                    output.delete()
+                }
+            }
+            _state.update { current ->
+                result.fold(
+                    onSuccess = { models -> current.copy(antigravityModelsLoading = false, antigravityModels = models) },
+                    onFailure = { error ->
+                        current.copy(
+                            antigravityModelsLoading = false,
+                            apiStatusMessage = UiText.Raw(error.message ?: "Could not load Antigravity models."),
+                        )
+                    },
+                )
+            }
         }
     }
 

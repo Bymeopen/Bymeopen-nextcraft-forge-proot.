@@ -33,6 +33,19 @@ sealed interface GitHubTokenPoll {
     data class Failure(val message: String) : GitHubTokenPoll
 }
 
+data class GitHubWorkflow(val id: Long, val name: String, val path: String, val state: String)
+
+data class GitHubWorkflowRun(
+    val id: Long,
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+    val branch: String,
+    val event: String,
+    val createdAt: String,
+    val url: String,
+)
+
 class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? = null) {
 
     fun requestDeviceCode(
@@ -218,7 +231,57 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
             val message = runCatching { JSONObject(text).stringOrEmpty("message") }.getOrNull()
             error(message?.takeIf(String::isNotBlank) ?: "GitHub returned HTTP $status")
         }
+        // 204 No Content (workflow dispatch) has no body.
+        if (text.isBlank()) return JSONObject()
         return if (text.trimStart().startsWith("[")) JSONArray(text) else JSONObject(text)
+    }
+
+    fun workflows(token: String, owner: String, repo: String): List<GitHubWorkflow> {
+        val json = getJson("https://api.github.com/repos/${segment(owner)}/${segment(repo)}/actions/workflows?per_page=50", token) as? JSONObject
+        val array = json?.optJSONArray("workflows") ?: return emptyList()
+        return (0 until array.length()).mapNotNull { i ->
+            array.optJSONObject(i)?.let {
+                GitHubWorkflow(it.optLong("id"), it.optString("name"), it.optString("path"), it.optString("state"))
+            }
+        }.filter { it.id != 0L }
+    }
+
+    fun workflowRuns(token: String, owner: String, repo: String, perPage: Int = 15): List<GitHubWorkflowRun> {
+        val json = getJson(
+            "https://api.github.com/repos/${segment(owner)}/${segment(repo)}/actions/runs?per_page=${perPage.coerceIn(1, 50)}",
+            token,
+        ) as? JSONObject
+        val array = json?.optJSONArray("workflow_runs") ?: return emptyList()
+        return (0 until array.length()).mapNotNull { i ->
+            array.optJSONObject(i)?.let {
+                GitHubWorkflowRun(
+                    id = it.optLong("id"),
+                    name = it.optString("name").ifBlank { it.optString("display_title") },
+                    status = it.optString("status"),
+                    conclusion = it.optString("conclusion").takeIf { c -> c.isNotBlank() && c != "null" },
+                    branch = it.optString("head_branch"),
+                    event = it.optString("event"),
+                    createdAt = it.optString("created_at"),
+                    url = it.optString("html_url"),
+                )
+            }
+        }
+    }
+
+    /** Starts a workflow that declares `workflow_dispatch`; GitHub answers 204 and the run appears a moment later. */
+    fun dispatchWorkflow(token: String, owner: String, repo: String, workflowId: Long, ref: String) {
+        require(workflowId > 0) { "Invalid workflow" }
+        require(Regex("[A-Za-z0-9._/-]{1,200}").matches(ref)) { "Invalid branch name" }
+        postJson(
+            "https://api.github.com/repos/${segment(owner)}/${segment(repo)}/actions/workflows/$workflowId/dispatches",
+            token,
+            JSONObject().put("ref", ref),
+        )
+    }
+
+    private fun segment(value: String): String {
+        require(Regex("[A-Za-z0-9._-]{1,100}").matches(value)) { "Invalid repository name" }
+        return value
     }
 
     companion object {

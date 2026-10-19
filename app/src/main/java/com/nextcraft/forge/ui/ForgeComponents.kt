@@ -142,7 +142,9 @@ fun rememberImeVisible(): State<Boolean> {
  */
 fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
     ForgeTab.PROJECTS -> null
-    ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW -> ForgeTab.TOOLS
+    ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+    -> ForgeTab.TOOLS
     ForgeTab.TERMINAL, ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
 }
 
