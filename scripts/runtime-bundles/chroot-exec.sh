@@ -75,7 +75,14 @@ make_slave() {
     e2=$(mount -o rslave "$1" 2>&1) && return 0
     e3=$(mount --make-slave "$1" 2>&1) && return 0
     e4=$(mount -o slave "$1" 2>&1) && return 0
-    MAKE_SLAVE_ERR="--make-rslave: $e1 | -o rslave: $e2 | --make-slave: $e3 | -o slave: $e4"
+    # Android's toybox mount reads "--make-rslave DIR" as "mount DIR" (fstab lookup), so also try a busybox mount.
+    local bb eb
+    for bb in busybox /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
+        command -v "$bb" >/dev/null 2>&1 || continue
+        "$bb" mount --make-rslave "$1" >/dev/null 2>&1 && return 0
+        eb="$eb | $bb: $("$bb" mount --make-rslave "$1" 2>&1)"
+    done
+    MAKE_SLAVE_ERR="--make-rslave: $e1 | -o rslave: $e2 | --make-slave: $e3 | -o slave: $e4$eb"
     return 1
 }
 
