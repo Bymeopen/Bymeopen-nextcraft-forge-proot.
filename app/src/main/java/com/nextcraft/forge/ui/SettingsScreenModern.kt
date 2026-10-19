@@ -411,7 +411,7 @@ fun SettingsScreenModern(
                             else -> OutlinedButton(
                                 shape = RoundedCornerShape(100),
                                 onClick = { viewModel.installStack(stack) },
-                                enabled = !runtimeBusy,
+                                enabled = !isProvisioning,
                                 modifier = Modifier.heightIn(min = 40.dp),
                             ) { Text(stringResource(R.string.settings_add)) }
                         }

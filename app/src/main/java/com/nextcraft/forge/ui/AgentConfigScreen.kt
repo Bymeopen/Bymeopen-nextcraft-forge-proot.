@@ -123,7 +123,7 @@ fun AgentConfigScreen(
                     ForgePrimaryButton(
                         text = stringResource(R.string.settings_agent_install_named, agent.displayTitle()),
                         onClick = { viewModel.installAgent(agent) },
-                        enabled = !runtimeBusy,
+                        enabled = !isProvisioning,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     SetupProgress(state)

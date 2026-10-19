@@ -47,7 +47,8 @@ import java.util.Date
 @Composable
 fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
     val scheme = MaterialTheme.colorScheme
-    val busy = !state.runtimeInstalled || state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
+    val running = state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
+    val busy = !state.runtimeInstalled || running
     ToolScaffold(
         title = stringResource(R.string.tools_toolchains),
         subtitle = stringResource(R.string.tools_toolchains_desc),
@@ -71,7 +72,7 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                         installed -> OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.removeStack(stack) }, enabled = !busy) {
                             Text(stringResource(R.string.tool_remove))
                         }
-                        else -> OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.installStack(stack) }, enabled = !busy) {
+                        else -> OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.installStack(stack) }, enabled = !running) {
                             Text(stringResource(R.string.tool_install))
                         }
                     }
@@ -100,7 +101,7 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                         )
                     }
                     if (!installed) {
-                        OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.installAgent(agent) }, enabled = !busy) {
+                        OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.installAgent(agent) }, enabled = !running) {
                             Text(stringResource(R.string.tool_install))
                         }
                     } else {

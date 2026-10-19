@@ -270,7 +270,7 @@
     <string name="tool_run_selected">Jalankan terpilih</string>
     <string name="tool_runs">Run terbaru</string>
     <string name="tool_runtime">Runtime</string>
-    <string name="tool_runtime_missing">Pasang runtime dasar dulu (Pengaturan).</string>
+    <string name="tool_runtime_missing">Runtime inti belum terpasang: memasang stack atau agen akan memasang runtime inti terlebih dahulu.</string>
     <string name="tool_snapshot_name">Nama snapshot</string>
     <string name="tool_snapshots">Snapshot</string>
     <string name="tool_ssh_add_host">Tambah host</string>

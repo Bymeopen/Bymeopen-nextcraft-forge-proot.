@@ -553,6 +553,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
     fun installAgent(agent: AgentKind) {
+        if (!_state.value.runtimeInstalled) return installCoreWith(emptySet(), agent)
         if (!canRunRuntimeOperation()) return
         startRuntimeOperation(SetupScope.AGENT) {
             action = RuntimeSetupService.ACTION_INSTALL_AGENT
@@ -602,7 +603,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeStack(stack: DevStack) = runStackOperation(RuntimeSetupService.ACTION_REMOVE_STACK, stack)
 
+    /**
+     * Core is missing (onboarding skipped): run the full setup, which installs Core first and then the requested
+     * stack/agent, instead of refusing the click.
+     */
+    private fun installCoreWith(stacks: Set<DevStack>, agent: AgentKind) {
+        if (_state.value.setupSnapshot.status == RuntimeSetupStatus.RUNNING) return
+        _state.update { it.copy(setupScope = SetupScope.RUNTIME) }
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), RuntimeSetupService::class.java)
+                .setAction(RuntimeSetupService.ACTION_START)
+                .putExtra(RuntimeSetupService.EXTRA_STACKS, stacks.joinToString(",") { it.name })
+                .putExtra(RuntimeSetupService.EXTRA_AGENT, agent.name),
+        )
+    }
+
     private fun runStackOperation(serviceAction: String, stack: DevStack) {
+        if (serviceAction == RuntimeSetupService.ACTION_INSTALL_STACK && !_state.value.runtimeInstalled) {
+            return installCoreWith(setOf(stack), _state.value.agentKind)
+        }
         if (!canRunRuntimeOperation()) return
         startRuntimeOperation(SetupScope.RUNTIME) {
             action = serviceAction
