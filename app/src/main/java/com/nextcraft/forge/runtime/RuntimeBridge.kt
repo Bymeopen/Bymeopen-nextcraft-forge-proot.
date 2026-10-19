@@ -171,6 +171,11 @@ object RuntimeLaunchConfigBuilder {
         profile: ProviderProfile,
         authToken: String? = null,
         localGatewayUrl: String? = null,
+        /**
+         * Claude subscription signed in with `claude auth login`: the CLI reads and refreshes its own credentials file,
+         * so no token is passed. (A token in CLAUDE_CODE_OAUTH_TOKEN is never refreshed and expires within hours.)
+         */
+        useStoredLogin: Boolean = false,
     ): RuntimeLaunchConfig {
         val cleanToken = authToken?.trim().orEmpty()
         val isClaudeOAuthToken = cleanToken.startsWith("sk-ant-oat")
@@ -187,8 +192,13 @@ object RuntimeLaunchConfigBuilder {
         )
         when (profile.kind.protocol) {
             ProviderProtocol.CLAUDE_LOGIN -> {
-                require(cleanToken.isNotBlank()) { "Enter a Claude subscription token first" }
-                if (isAnthropicApiKey) {
+                require(cleanToken.isNotBlank() || useStoredLogin) { "Sign in to Claude or enter a subscription token first" }
+                if (useStoredLogin && cleanToken.isBlank()) {
+                    // Claude Code gives API-key variables precedence over the stored login; make sure none leaks in.
+                    environment["ANTHROPIC_API_KEY"] = ""
+                    environment["ANTHROPIC_AUTH_TOKEN"] = ""
+                    environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
+                } else if (isAnthropicApiKey) {
                     environment["ANTHROPIC_BASE_URL"] = ProviderKind.ANTHROPIC.defaultBaseUrl
                     environment["ANTHROPIC_MODEL"] = profile.model
                         .takeUnless { it.isBlank() || it == "default" }

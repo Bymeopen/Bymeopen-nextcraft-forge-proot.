@@ -46,6 +46,7 @@ import com.nextcraft.forge.runtime.AndroidLogLine
 import com.nextcraft.forge.runtime.AndroidLogcatState
 import com.nextcraft.forge.runtime.AndroidProjectTemplateGenerator
 import com.nextcraft.forge.runtime.AntigravityAuthController
+import com.nextcraft.forge.runtime.ClaudeAuthController
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
 import com.nextcraft.forge.runtime.DshRuntimeBridge
@@ -228,6 +229,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return resolveProviderSecret(profile)
     }
+
+    val claudeAuth = ClaudeAuthController(application)
 
     private val claudeRuntime = ClaudeRuntimeBridge(
         context = application,
@@ -1561,9 +1564,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun activeChrootEnvironment(): Map<String, String> {
         val profile = _state.value.providerProfile
-        val secret = resolveProviderSecret(profile)
+        // A Claude login made with `claude auth login` must stay in charge in the terminal too: an access token copied
+        // into CLAUDE_CODE_OAUTH_TOKEN is never refreshed and would shadow it once it expires.
+        val storedLogin = profile.kind == ProviderKind.CLAUDE &&
+            listOf(ProviderKind.CLAUDE, ProviderKind.ANTHROPIC).none { !vault.get(it.name).isNullOrBlank() } &&
+            installer.hasClaudeLoginCredential()
+        val secret = if (storedLogin) null else resolveProviderSecret(profile)
         return runCatching {
-            RuntimeLaunchConfigBuilder.build(profile, secret).environment
+            RuntimeLaunchConfigBuilder.build(profile, secret, useStoredLogin = storedLogin).environment
         }.getOrDefault(emptyMap())
     }
 

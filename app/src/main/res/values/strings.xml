@@ -208,6 +208,16 @@
     <string name="settings_stack_install">Install %1$s</string>
     <string name="settings_stack_remove">Remove %1$s</string>
     <string name="msg_permission_denied">⚠️ Refused by the system: %1$s — %2$s. The session stays connected and the agent continues.</string>
+    <string name="settings_claude_account">Claude account</string>
+    <string name="settings_claude_signed_in">Signed in to Claude</string>
+    <string name="settings_claude_not_signed_in">Not signed in to Claude</string>
+    <string name="settings_claude_waiting">Waiting for sign-in…</string>
+    <string name="settings_claude_sign_in">Sign in with Claude</string>
+    <string name="settings_claude_sign_in_sso">Sign in with SSO</string>
+    <string name="settings_claude_email_optional">Email (optional, for SSO)</string>
+    <string name="settings_claude_open_page">Open sign-in page</string>
+    <string name="settings_claude_sign_out">Sign out of Claude</string>
+    <string name="settings_claude_footnote">Sign-in runs Claude Code's official login. After you approve in the browser it returns to the app by itself; if the page shows a code instead, paste it above. Pro, Max, Team and Enterprise (including SSO) are supported.</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>

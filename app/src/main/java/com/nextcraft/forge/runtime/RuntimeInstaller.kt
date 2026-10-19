@@ -525,6 +525,24 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
+    /**
+     * True when `claude auth login` left a usable login (access + refresh token) in the guest. The file is written by
+     * root inside the chroot, so the app UID usually cannot read it; ask root.
+     */
+    fun hasClaudeLoginCredential(): Boolean {
+        val file = File(rootfs, "root/.claude/.credentials.json")
+        val quoted = "'${file.absolutePath.replace("'", "'\\''")}'"
+        return runCatching {
+            val process = ProcessBuilder("su", "-c", "grep -q '\"refreshToken\"' $quoted").start()
+            if (!process.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                false
+            } else {
+                process.exitValue() == 0
+            }
+        }.getOrDefault(false)
+    }
+
     /** Versions recorded after each real agent binary has been installed and verified. */
     fun installedAgentVersions(): Map<AgentKind, String> = buildMap {
         migrateLegacyClaudeMarker()
@@ -2024,6 +2042,19 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 """,
         )
         Os.chmod(hook.absolutePath, 0b111101101)
+
+        // BROWSER handler for `claude auth login`: there is no browser in the chroot, so the sign-in URL is handed to
+        // the app through the bridge directory and opened in the Android browser. The browser then redirects to
+        // http://localhost:<port>/callback, which the CLI (same network namespace) is listening on.
+        val openUrl = File(rootfs, "opt/pocket/open-url.sh")
+        openUrl.writeText(
+            """#!/bin/sh
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+[ -n "${'$'}1" ] && [ -d "${'$'}BRIDGE" ] || exit 0
+printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDGE/claude-login-url.tmp" "${'$'}BRIDGE/claude-login-url"
+""",
+        )
+        Os.chmod(openUrl.absolutePath, 0b111101101)
 
         val settingsContent = JSONObject()
             .put("disableAllHooks", false)

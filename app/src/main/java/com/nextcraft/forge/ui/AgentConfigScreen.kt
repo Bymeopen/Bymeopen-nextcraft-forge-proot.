@@ -161,6 +161,11 @@ fun AgentConfigScreen(
                 }
             }
 
+            // Claude subscription: sign in through Claude Code's own login (account or SSO) instead of pasting a token.
+            if (agent == AgentKind.CLAUDE_CODE && provider == ProviderKind.CLAUDE) {
+                ClaudeAccountCard(viewModel)
+            }
+
             // Endpoint & protocol: base URL, model id, OpenRouter order.
             var endpointOpen by rememberSaveable(agent) { mutableStateOf(false) }
             DisclosureCard(
