@@ -92,7 +92,8 @@ sumber yang sama) lewat `android.aapt2FromMavenOverride`; `aapt2` ARM64 itu send
 ### Mesin PRoot (tanpa root, ADR-007)
 
 Bila `su` tidak tersedia, aplikasi memakai `libproot.so` dari APK (`proot` 5.5.0 + `talloc` 2.4.3 statis, dibangun oleh
-`scripts/runtime-bundles/build-proot-static.sh`; SHA-256 tercatat di bawah). Bundle Core/Python/Claude/DSH/Agy/Android
+`scripts/runtime-bundles/build-proot-static.sh` dari `proot-me/proot` commit `25dc6a31…` dan `talloc-2.4.3.tar.gz`
+SHA-256 `dc46c40b…`; `libproot.so` 938.856 byte, SHA-256 `21cf22142a1ae636e2e8a501684c3589e7b495663c7e4f6aae73ea9a33ed9bb3`). Bundle Core/Python/Claude/DSH/Agy/Android
 tidak berubah; `aapt2` statis membuat build Android tidak lagi bergantung pada `/apex`. Yang tidak tersedia di mode ini:
 `pm install` senyap (jatuh ke `PackageInstaller`), penonaktifan phantom-process killer (`adb shell device_config put
 activity_manager max_phantom_processes 2147483647` bisa dilakukan manual), `chroot-health.sh` bagian *Mount* (ERR wajar).

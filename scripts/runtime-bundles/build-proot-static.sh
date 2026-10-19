@@ -20,7 +20,7 @@ set -euo pipefail
 # NEXTCRAFT_DNS, NEXTCRAFT_EXTRA_CA_FILE (TLS-intercepting proxy CA, used for git/curl inside the chroot only).
 CORE_ROOTFS="${NEXTCRAFT_CORE_ROOTFS:?Set NEXTCRAFT_CORE_ROOTFS to an extracted Core bundle rootfs}"
 PROOT_TAG="v5.5.0"
-PROOT_COMMIT="${NEXTCRAFT_PROOT_COMMIT:-}"   # filled in below from the tag unless pinned
+PROOT_COMMIT="${NEXTCRAFT_PROOT_COMMIT:-25dc6a3134891f98a79f57ce1c2c1b23ff15cad1}"   # commit behind the tag
 TALLOC_VERSION="2.4.3"
 TALLOC_URL="https://www.samba.org/ftp/talloc/talloc-${TALLOC_VERSION}.tar.gz"
 TALLOC_SHA256="dc46c40b9f46bb34dd97fe41f548b0e8b247b77a918576733c528e83abd854dd"
@@ -95,9 +95,11 @@ guest "cd /build && tar -xzf talloc.tar.gz && cd talloc-$TALLOC_VERSION && \
 # talloc's waf install only ships the shared library; the archive above is built from its single object file.
 
 echo "Building proot (static)"
+# LDFLAGS/CFLAGS go through the environment, not make arguments: the GNUmakefile appends `pkg-config --libs talloc`
+# with `+=`, and a command-line LDFLAGS would override that and drop -ltalloc.
 guest "cd /build/proot/src && \
-  PKG_CONFIG_PATH=/build/talloc-prefix/lib/pkgconfig \
-  make -j\$(nproc) V=1 LDFLAGS='-static -L/build/talloc-prefix/lib' CFLAGS='-O2 -I/build/talloc-prefix/include' >/dev/null && \
+  PKG_CONFIG_PATH=/build/talloc-prefix/lib/pkgconfig LDFLAGS='-static -L/build/talloc-prefix/lib' \
+  CFLAGS='-O2 -I/build/talloc-prefix/include' make -j\$(nproc) >/dev/null && \
   strip proot && ./proot --version | head -1"
 
 mkdir -p "$OUT_DIR"
