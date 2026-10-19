@@ -253,7 +253,7 @@ fun SettingsScreenModern(
                         }
                     }
                 }
-                SetupProgress(state)
+                SetupProgress(state, SetupScope.RUNTIME)
                 if (isProvisioning) {
                     OutlinedButton(
                         shape = RoundedCornerShape(100),
@@ -675,7 +675,9 @@ internal fun KeyValueRow(key: String, value: String) {
 
 /** Progress and message of the runtime setup service while it runs, errors in the danger colour. */
 @Composable
-internal fun SetupProgress(state: ForgeUiState) {
+internal fun SetupProgress(state: ForgeUiState, scope: SetupScope? = null) {
+    // Agent installs show under their agent tab, tool/stack installs under Settings: a screen passes its scope.
+    if (scope != null && state.setupScope != scope) return
     val status = state.setupSnapshot.status
     // Step, percent, MB transferred and the latest terminal lines while an install runs or after it failed.
     if (status == RuntimeSetupStatus.RUNNING || status == RuntimeSetupStatus.ERROR) {

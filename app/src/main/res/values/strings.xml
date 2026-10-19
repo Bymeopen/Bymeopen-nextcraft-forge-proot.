@@ -561,4 +561,5 @@
     <string name="files_row_menu">More actions</string>
     <string name="agent_attach">Attach photo or file</string>
     <string name="agent_remove_attachment">Remove attachment</string>
+    <string name="settings_agent_wait_runtime">A runtime or tool install is running (see Settings). The agent can be installed after it finishes.</string>
 </resources>
