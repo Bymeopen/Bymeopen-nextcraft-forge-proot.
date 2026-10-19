@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -145,21 +146,12 @@ fun SettingsScreenModern(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    AppLanguage.entries.forEach { lang ->
-                        FilterChip(
-                            shape = RoundedCornerShape(100),
-                            selected = state.languageCode.equals(lang.code, ignoreCase = true),
-                            onClick = { viewModel.setLanguageCode(lang.code) },
-                            label = { Text("${lang.nativeName} (${lang.displayName})") },
-                        )
-                    }
-                }
+                val languages = AppLanguage.entries
+                ForgePillTabs(
+                    items = languages.map { "${it.nativeName} (${it.displayName})" },
+                    selectedIndex = languages.indexOfFirst { it.code.equals(state.languageCode, ignoreCase = true) }.coerceAtLeast(0),
+                    onSelect = { viewModel.setLanguageCode(languages[it].code) },
+                )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                 val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
@@ -231,7 +223,7 @@ fun SettingsScreenModern(
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = stringResource(R.string.a11y_selected),
-                                        tint = tokens.successText,
+                                        tint = MaterialTheme.colorScheme.primary,
                                     )
                                 }
                             }
@@ -285,21 +277,22 @@ fun SettingsScreenModern(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     if (kind in state.installedAgents) {
+                                        ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
                                         Text(
                                             text = stringResource(R.string.settings_agent_installed),
                                             style = MaterialTheme.typography.labelMedium,
-                                            color = tokens.successText,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         state.agentUpdates[kind]?.let { info ->
-                                            Button(onClick = { viewModel.updateAgent(kind) }, enabled = !busy) {
+                                            Button(shape = RoundedCornerShape(100), onClick = { viewModel.updateAgent(kind) }, enabled = !busy) {
                                                 Text(stringResource(R.string.settings_agent_update, info.latestVersion))
                                             }
                                         }
-                                        OutlinedButton(onClick = { viewModel.removeAgent(kind) }, enabled = !busy) {
+                                        OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.removeAgent(kind) }, enabled = !busy) {
                                             Text(stringResource(R.string.settings_agent_remove))
                                         }
                                     } else {
-                                        OutlinedButton(onClick = { viewModel.installAgent(kind) }, enabled = !busy) {
+                                        OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.installAgent(kind) }, enabled = !busy) {
                                             Text("${stringResource(R.string.settings_agent_install)} · ${kind.downloadNote}")
                                         }
                                     }
@@ -309,7 +302,7 @@ fun SettingsScreenModern(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = stringResource(R.string.a11y_selected),
-                                    tint = tokens.successText,
+                                    tint = MaterialTheme.colorScheme.primary,
                                 )
                             }
                         }
@@ -318,6 +311,7 @@ fun SettingsScreenModern(
 
                 if (state.installedAgents.isNotEmpty()) {
                     OutlinedButton(
+                        shape = RoundedCornerShape(100),
                         onClick = viewModel::checkAgentUpdates,
                         enabled = !state.checkingAgentUpdates,
                     ) {
@@ -359,32 +353,24 @@ fun SettingsScreenModern(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    val efforts = listOf("low", "medium", "high")
+                    ForgePillTabs(
+                        items = efforts.map { stringResource(R.string.settings_effort, it.uppercase()) },
+                        selectedIndex = efforts.indexOf(agyEffortInput).coerceAtLeast(0),
+                        onSelect = {
+                            agyEffortInput = efforts[it]
+                            viewModel.setAntigravityConfig(agyModelInput, efforts[it])
+                        },
+                    )
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_save_antigravity_model),
+                        onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        listOf("low", "medium", "high").forEach { effort ->
-                            FilterChip(
-                                shape = RoundedCornerShape(100),
-                                selected = agyEffortInput == effort,
-                                onClick = {
-                                    agyEffortInput = effort
-                                    viewModel.setAntigravityConfig(agyModelInput, effort)
-                                },
-                                label = { Text(stringResource(R.string.settings_effort, effort.uppercase())) },
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            shape = RoundedCornerShape(100),
-                            onClick = { viewModel.setAntigravityConfig(agyModelInput, agyEffortInput) },
-                        ) {
-                            Text(stringResource(R.string.settings_save_antigravity_model))
-                        }
                         val hasAgyCredential by produceState(initialValue = false, agyAuth.status) {
                             value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 viewModel.antigravityAuth.hasOfficialCredential()
@@ -394,6 +380,7 @@ fun SettingsScreenModern(
                             OutlinedButton(
                                 shape = RoundedCornerShape(100),
                                 onClick = { scope.launch { runCatching { viewModel.antigravityAuth.logout() } } },
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                             ) {
                                 Text(stringResource(R.string.settings_sign_out_google_oauth))
                             }
@@ -402,13 +389,16 @@ fun SettingsScreenModern(
                                 shape = RoundedCornerShape(100),
                                 onClick = { scope.launch { viewModel.antigravityAuth.beginLogin() } },
                                 enabled = agyAuth.status != AntigravityAuthStatus.STARTING && agyAuth.status != AntigravityAuthStatus.COMPLETING,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                             ) {
                                 Text(stringResource(R.string.settings_sign_in_with_google))
                             }
                         }
                         OutlinedButton(
+                            shape = RoundedCornerShape(100),
                             onClick = viewModel::validateAntigravityConnection,
                             enabled = !state.apiBusy,
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                         ) {
                             Text(stringResource(R.string.settings_validate))
                         }
@@ -498,21 +488,11 @@ fun SettingsScreenModern(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                     )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        availableProviders.forEach { kind ->
-                            FilterChip(
-                                shape = RoundedCornerShape(100),
-                                selected = state.providerProfile.kind == kind,
-                                onClick = { viewModel.updateProviderKind(kind) },
-                                label = { Text(kind.displayTitle()) },
-                            )
-                        }
-                    }
+                    ForgePillTabs(
+                        items = availableProviders.map { it.displayTitle() },
+                        selectedIndex = availableProviders.indexOf(state.providerProfile.kind).coerceAtLeast(0),
+                        onSelect = { viewModel.updateProviderKind(availableProviders[it]) },
+                    )
                     Text(
                         text = state.providerProfile.kind.displaySubtitle(),
                         style = MaterialTheme.typography.bodySmall,
@@ -553,26 +533,28 @@ fun SettingsScreenModern(
                         )
                     }
 
+                    // Three buttons never fit one row at phone width; the third collapsed into a
+                    // letter-per-line capsule. Primary on its own line, the two secondary ones share one.
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.settings_save_config),
+                        onClick = {
+                            viewModel.updateProviderConfig(
+                                baseUrl = baseUrlInput,
+                                model = modelInput,
+                                openRouterOrder = openRouterOrderInput,
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
-                            shape = RoundedCornerShape(100),
-                            onClick = {
-                                viewModel.updateProviderConfig(
-                                    baseUrl = baseUrlInput,
-                                    model = modelInput,
-                                    openRouterOrder = openRouterOrderInput,
-                                )
-                            },
-                        ) {
-                            Text(stringResource(R.string.settings_save_config))
-                        }
                         OutlinedButton(
                             shape = RoundedCornerShape(100),
                             onClick = viewModel::discoverProviderModels,
                             enabled = !state.apiBusy,
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                         ) {
                             Text(stringResource(R.string.settings_discover_models))
                         }
@@ -580,6 +562,7 @@ fun SettingsScreenModern(
                             shape = RoundedCornerShape(100),
                             onClick = viewModel::validateProviderConnection,
                             enabled = !state.apiBusy,
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                         ) {
                             Text(stringResource(R.string.settings_validate))
                         }
@@ -644,12 +627,12 @@ fun SettingsScreenModern(
                             Icon(
                                 imageVector = if (keyInfo.isActive) Icons.Default.CheckCircle else Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = if (keyInfo.isActive) tokens.successText else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (keyInfo.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (keyInfo.isActive) "${keyInfo.name} (Active)" else keyInfo.name,
+                                text = if (keyInfo.isActive) stringResource(R.string.settings_key_active, keyInfo.name) else keyInfo.name,
                                 modifier = Modifier.weight(1f),
                                 fontWeight = if (keyInfo.isActive) FontWeight.Bold else FontWeight.Normal,
                             )
@@ -803,7 +786,6 @@ fun SettingsScreenModern(
                         Text(
                             text = stringResource(R.string.settings_connected_as, state.githubLogin),
                             fontWeight = FontWeight.Bold,
-                            color = tokens.successText,
                         )
                         OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel::disconnectGitHub) {
                             Text(stringResource(R.string.settings_disconnect))

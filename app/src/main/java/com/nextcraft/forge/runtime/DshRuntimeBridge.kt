@@ -105,7 +105,7 @@ class DshRuntimeBridge(
                     }, "forge-dsh-stop").apply { isDaemon = true }.start()
                 }
             }
-            RuntimeTaskController.register(RuntimeTaskController.AGENT, stopHandler)
+            stopHandler?.let { RuntimeTaskController.register(RuntimeTaskController.AGENT, it) }
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             check(installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {

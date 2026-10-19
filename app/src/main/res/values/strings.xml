@@ -363,4 +363,10 @@
     <string name="msg_switch_blocked_terminal">Wait for the active terminal command to finish before switching projects.</string>
     <string name="msg_busy_before_new_project">Finish or stop the active task before creating and switching to a new project.</string>
     <string name="msg_gh_code_expired">GitHub sign-in code expired. Start sign-in again.</string>
+    <string name="settings_key_active">%1$s (active)</string>
+    <string name="msg_core_not_installed">The base Ubuntu runtime (Core) is not installed. Run the runtime setup first.</string>
+    <string name="msg_wait_for_running_task">Wait for the running agent, terminal or build to finish.</string>
+    <string name="msg_runtime_op_running">Another runtime operation is already running.</string>
+    <string name="msg_agent_update_check_failed">Could not check for agent updates: %1$s</string>
+    <string name="msg_agents_up_to_date">All installed agents are up to date.</string>
 </resources>

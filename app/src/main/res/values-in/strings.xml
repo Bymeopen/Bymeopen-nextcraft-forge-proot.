@@ -360,4 +360,10 @@
     <string name="msg_switch_blocked_terminal">Tunggu perintah terminal aktif selesai sebelum berpindah proyek.</string>
     <string name="msg_busy_before_new_project">Selesaikan atau hentikan tugas aktif sebelum membuat dan berpindah ke proyek baru.</string>
     <string name="msg_gh_code_expired">Kode masuk GitHub kedaluwarsa. Mulai lagi proses masuk.</string>
+    <string name="settings_key_active">%1$s (aktif)</string>
+    <string name="msg_core_not_installed">Runtime dasar Ubuntu (Core) belum terpasang. Jalankan penyiapan runtime dulu.</string>
+    <string name="msg_wait_for_running_task">Tunggu agen, terminal, atau build yang berjalan selesai.</string>
+    <string name="msg_runtime_op_running">Operasi runtime lain sedang berjalan.</string>
+    <string name="msg_agent_update_check_failed">Tidak bisa memeriksa pembaruan agen: %1$s</string>
+    <string name="msg_agents_up_to_date">Semua agen yang terpasang sudah terbaru.</string>
 </resources>
