@@ -55,6 +55,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -634,6 +636,7 @@ private fun ForgeBottomBar(
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     val reduceMotion = rememberReduceMotion()
+    val haptics = LocalHapticFeedback.current
     // Global entries collapse the Tools group onto Tools; the project bar matches its keys directly.
     val selectedIndex = entries.indexOfFirst { it.tab == selectedTab }.takeIf { it >= 0 } ?: selectedTab.navIndex()
     val pillOffset by animateFloatAsState(
@@ -733,7 +736,10 @@ private fun ForgeBottomBar(
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .clip(pillShape)
-                                .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
+                                .clickable(role = Role.Tab, onClickLabel = label) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSelectTab(entry.tab)
+                                },
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {

@@ -2028,9 +2028,6 @@ class RuntimeInstaller(private val context: Context) {
         return envFile to suCommand
     }
 
-    private fun shellSingleQuote(value: String): String =
-        "'" + value.replace("'", "'\"'\"'") + "'"
-
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()

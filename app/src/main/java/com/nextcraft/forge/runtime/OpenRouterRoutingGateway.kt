@@ -139,7 +139,7 @@ internal class OpenRouterRoutingGateway(
                 .removeSuffix("/messages")
                 .removeSuffix("/v1")
             val endpoint = if (isChatCompletions) "$normalizedBase/v1/chat/completions" else "$normalizedBase/v1/messages"
-            if (!isPlainHttpAllowedEndpoint(endpoint)) {
+            if (!com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(endpoint)) {
                 writeJson(output, 400, errorJson("Plain http:// is only allowed for localhost"))
                 return
             }
@@ -223,9 +223,6 @@ internal class OpenRouterRoutingGateway(
         val presentedBytes = presented.toByteArray()
         return MessageDigest.isEqual(presentedBytes, apiKey.toByteArray())
     }
-
-    private fun isPlainHttpAllowedEndpoint(url: String): Boolean =
-        com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(url)
 
     /**
      * Reports a failure on a response that may already be under way: once the status line is out, a second HTTP

@@ -46,10 +46,9 @@ class DshRuntimeBridge(
     @Volatile private var activeProcess: Process? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
+    private val foreground = ForegroundSession(context, "DshBridge")
+
     @Volatile private var activeProjectSlug: String? = null
-    @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
-    @Volatile private var lastForegroundProgressAt: Long = 0L
-    @Volatile private var foregroundResultPosted: Boolean = false
     @Volatile private var lastThinkingUpdateAt: Long = 0L
 
     override suspend fun startSession(
@@ -65,9 +64,7 @@ class DshRuntimeBridge(
         activeSessionId = sessionId
         userStopRequested = false
         activeProjectSlug = projectSlug
-        taskStartedAtElapsedRealtime = android.os.SystemClock.elapsedRealtime()
-        lastForegroundProgressAt = 0L
-        foregroundResultPosted = false
+        foreground.begin()
         lastThinkingUpdateAt = 0L
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting DeepSeek Harness…")
@@ -579,45 +576,21 @@ class DshRuntimeBridge(
 
     private fun pushForegroundProgress(detailRaw: String) {
         if (activeSessionId == null) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastForegroundProgressAt < FOREGROUND_PROGRESS_MIN_INTERVAL_MS) return
-        lastForegroundProgressAt = now
-        val detail = detailRaw.replace(Regex("\\s+"), " ").trim().take(110)
-        val elapsedMs = taskStartedAtElapsedRealtime.takeIf { it > 0 }?.let { now - it } ?: 0L
-        val text = if (elapsedMs > 0L) "$detail · ${formatElapsedShort(elapsedMs)}" else detail
-        RuntimeExecutionServiceContract.pushProgress(context, activeProjectSlug, text)
+        foreground.progress(activeProjectSlug, detailRaw)
     }
 
-    private fun formatElapsedShort(milliseconds: Long): String {
-        val totalSeconds = milliseconds / 1_000L
-        val hours = totalSeconds / 3_600L
-        val minutes = (totalSeconds % 3_600L) / 60L
-        val seconds = totalSeconds % 60L
-        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
-    }
+    private fun startForegroundRuntime(projectName: String) = foreground.start(projectName)
 
-    private fun startForegroundRuntime(projectName: String) {
-        RuntimeExecutionServiceContract.startForeground(context, projectName)
-    }
+    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
+        foreground.finish(completed, projectName, detail)
 
-    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, "DshBridge")
-    }
-
-    private fun cancelForegroundRuntime() {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.cancelForeground(context)
-    }
+    private fun cancelForegroundRuntime() = foreground.cancel()
 
     private class DshSessionException(message: String) : IllegalStateException(message)
 
     companion object {
         const val DSH_HOME_GUEST_PATH = "/root/.dsh"
         const val FALLBACK_KEY_ENV = "MH_DSH_API_KEY"
-        private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
         private const val SDK_INITIALIZE_ID = 1
         private const val SDK_PROMPT_ID = 2

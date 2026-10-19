@@ -53,6 +53,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.snap
@@ -308,6 +310,44 @@ fun AgentScreen(
         val attachPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNotEmpty()) viewModel.attachFilesToPrompt(uris)
         }
+        // Camera: the photo is written to a FileProvider URI in the app cache, then imported like any picked file.
+        val cameraContext = LocalContext.current
+        var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
+        var attachMenuOpen by remember { mutableStateOf(false) }
+        val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+            val uri = cameraUri?.let(android.net.Uri::parse)
+            if (saved && uri != null) viewModel.attachFilesToPrompt(listOf(uri))
+            cameraUri = null
+        }
+        fun launchCamera() {
+            runCatching {
+                val dir = java.io.File(cameraContext.cacheDir, "camera").apply { mkdirs() }
+                val photo = java.io.File.createTempFile("IMG_${System.currentTimeMillis()}_", ".jpg", dir)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    cameraContext,
+                    "${cameraContext.packageName}.fileprovider",
+                    photo,
+                )
+                cameraUri = uri.toString()
+                cameraLauncher.launch(uri)
+            }.onFailure { cameraUri = null }
+        }
+        if (state.queuedPrompts.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    stringResource(R.string.agent_queued_title, state.queuedPrompts.size),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.queuedPrompts.forEach { queued ->
+                    val label = queued.text.ifBlank { queued.attachments.joinToString { it.displayName } }
+                    AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                }
+            }
+        }
         if (state.pendingAttachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -335,8 +375,20 @@ fun AgentScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Attach: photos or any file; it lands in attachments/ inside the workspace.
-                IconButton(onClick = { attachPicker.launch(arrayOf("*/*")) }, enabled = !running) {
-                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box {
+                    IconButton(onClick = { attachMenuOpen = true }) {
+                        ForgeIcon(glyph = ForgeGlyph.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 22.dp, description = stringResource(R.string.agent_attach))
+                    }
+                    DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.agent_attach_camera)) },
+                            onClick = { attachMenuOpen = false; launchCamera() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.agent_attach_file)) },
+                            onClick = { attachMenuOpen = false; attachPicker.launch(arrayOf("*/*")) },
+                        )
+                    }
                 }
                 TextField(
                     value = promptInput,
@@ -344,6 +396,7 @@ fun AgentScreen(
                     placeholder = {
                         Text(
                             stringResource(R.string.agent_message_placeholder, state.agentKind.displayTitle()),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -357,6 +410,7 @@ fun AgentScreen(
                         disabledIndicatorColor = Color.Transparent,
                     ),
                 )
+                val haptics = LocalHapticFeedback.current
                 val reduceMotion = rememberReduceMotion()
                 val sendScale by animateFloatAsState(
                     targetValue = if (running || canSend) 1f else 0.86f,
@@ -365,8 +419,8 @@ fun AgentScreen(
                 )
                 val sendBg by animateColorAsState(
                     targetValue = when {
-                        running -> MaterialTheme.colorScheme.error
                         canSend -> MaterialTheme.colorScheme.primary
+                        running -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
                     },
                     animationSpec = if (reduceMotion) snap() else tween(ForgeMotion.FADE_MS),
@@ -381,26 +435,26 @@ fun AgentScreen(
                         .clickable(
                             enabled = running || canSend,
                             role = Role.Button,
-                            onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                            onClickLabel = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
                         ) {
-                            if (running) {
-                                viewModel.stopActiveTask()
-                            } else {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            // While the agent works, sending queues the message; stop is available when nothing is typed.
+                            if (canSend) {
                                 val text = promptInput.trim()
-                                if (text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) {
-                                    promptInput = ""
-                                    viewModel.sendPrompt(text)
-                                }
+                                promptInput = ""
+                                viewModel.sendPrompt(text)
+                            } else if (running) {
+                                viewModel.stopActiveTask()
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (running) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
-                        contentDescription = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                        imageVector = if (running && !canSend) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
+                        contentDescription = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
                         tint = when {
-                            running -> MaterialTheme.colorScheme.onError
                             canSend -> MaterialTheme.colorScheme.onPrimary
+                            running -> MaterialTheme.colorScheme.onError
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier.size(22.dp),
@@ -454,7 +508,7 @@ private fun AgentHeader(
             )
         }
         IconButton(onClick = { chatsOpen = true }) {
-            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.agent_project_chats), tint = scheme.onSurface)
+            ForgeIcon(glyph = ForgeGlyph.HISTORY, tint = scheme.onSurface, size = 22.dp, description = stringResource(R.string.agent_project_chats))
         }
     }
 
@@ -842,12 +896,7 @@ private fun ToolCallRow(item: ActivityItem) {
         val kind = toolKind(item)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box {
-                Icon(
-                    imageVector = kind.icon,
-                    contentDescription = null,
-                    tint = kind.tint(scheme, tokens),
-                    modifier = Modifier.size(18.dp),
-                )
+                ForgeIcon(glyph = kind.glyph, tint = kind.tint(scheme, tokens), size = 18.dp)
                 if (!item.isComplete) {
                     Box(
                         modifier = Modifier
@@ -923,8 +972,8 @@ private fun MessageContainer(
 }
 
 /** Tool-call kinds, derived from the activity title, each with its own glyph and tint. */
-private enum class ToolKind(val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    THINK(Icons.Default.Star), BASH(Icons.Default.List), READ(Icons.Default.Info), WRITE(Icons.Default.Edit), OTHER(Icons.Default.Build);
+private enum class ToolKind(val glyph: ForgeGlyph) {
+    THINK(ForgeGlyph.SPARK), BASH(ForgeGlyph.TERMINAL), READ(ForgeGlyph.FILE), WRITE(ForgeGlyph.EDIT), OTHER(ForgeGlyph.BUILD);
 
     fun tint(scheme: androidx.compose.material3.ColorScheme, tokens: ForgeThemeTokens): Color = when (this) {
         THINK -> scheme.primary
@@ -946,7 +995,7 @@ private fun toolKind(item: ActivityItem): ToolKind {
 
 /** Small capsule naming an attached file; [onRemove] null makes it read-only (sent messages). */
 @Composable
-private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?) {
+private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, showSize: Boolean = true) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
     Row(
@@ -957,8 +1006,8 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
+        if (showSize) Spacer(modifier = Modifier.width(6.dp))
+        if (showSize) Text(
             text = if (size < 1024 * 1024) "${(size / 1024).coerceAtLeast(1)} KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", size / (1024.0 * 1024.0)),
             fontSize = 12.sp,
             color = scheme.onSurfaceVariant,

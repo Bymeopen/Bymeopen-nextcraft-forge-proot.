@@ -154,7 +154,7 @@ fun AgentConfigScreen(
             // Access mode: radio list of the providers this agent can talk to.
             var accessOpen by rememberSaveable(agent) { mutableStateOf(false) }
             DisclosureCard(
-                icon = Icons.Default.Share,
+                icon = ForgeGlyph.LINK,
                 title = stringResource(R.string.settings_access_mode),
                 subtitle = provider.displayTitle(),
                 expanded = accessOpen,
@@ -178,7 +178,7 @@ fun AgentConfigScreen(
             // Endpoint & protocol: base URL, model id, OpenRouter order.
             var endpointOpen by rememberSaveable(agent) { mutableStateOf(false) }
             DisclosureCard(
-                icon = Icons.Default.Info,
+                icon = ForgeGlyph.GLOBE,
                 title = stringResource(R.string.settings_endpoint_protocol),
                 subtitle = if (provider.fixedBaseUrl || provider == ProviderKind.CLAUDE) state.providerProfile.model.ifBlank { "default" } else state.providerProfile.baseUrl,
                 expanded = endpointOpen,
@@ -315,7 +315,7 @@ fun AgentConfigScreen(
                             if (keyInfo.isActive) {
                                 ForgeStatusIcon(ForgeStatus.DONE, iconSize = 18.dp)
                             } else {
-                                Icon(Icons.Default.Lock, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                                ForgeIcon(glyph = ForgeGlyph.LOCK, tint = scheme.onSurfaceVariant, size = 18.dp)
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
@@ -324,7 +324,7 @@ fun AgentConfigScreen(
                                 fontWeight = if (keyInfo.isActive) FontWeight.SemiBold else FontWeight.Normal,
                             )
                             IconButton(onClick = { viewModel.removeApiKey(keyInfo.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.settings_delete_key), modifier = Modifier.size(18.dp))
+                                ForgeIcon(glyph = ForgeGlyph.TRASH, tint = scheme.onSurfaceVariant, size = 18.dp, description = stringResource(R.string.settings_delete_key))
                             }
                         }
                     }
@@ -366,7 +366,7 @@ fun AgentConfigScreen(
         if (state.installedAgents.isNotEmpty()) {
             var updatesOpen by rememberSaveable { mutableStateOf(false) }
             DisclosureCard(
-                icon = Icons.Default.Refresh,
+                icon = ForgeGlyph.REFRESH,
                 title = stringResource(R.string.settings_runtime_updates),
                 subtitle = stringResource(R.string.settings_installed_agents_current),
                 expanded = updatesOpen,

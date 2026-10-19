@@ -560,6 +560,10 @@
     <string name="files_ok">OK</string>
     <string name="files_row_menu">Aksi lainnya</string>
     <string name="agent_attach">Lampirkan foto atau file</string>
+    <string name="agent_queued_title">Antrean (%1$d) — dikirim setelah agen selesai</string>
+    <string name="msg_queue_discarded">Pesan antrean dibuang karena giliran agen tidak selesai</string>
+    <string name="agent_attach_camera">Ambil foto</string>
+    <string name="agent_attach_file">Foto atau file</string>
     <string name="agent_remove_attachment">Hapus lampiran</string>
     <string name="settings_agent_wait_runtime">Instalasi runtime atau alat sedang berjalan (lihat Pengaturan). Agen bisa dipasang setelah selesai.</string>
 </resources>

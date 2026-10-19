@@ -120,7 +120,7 @@ fun SettingsScreenModern(
             val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
             var appearanceOpen by rememberSaveable { mutableStateOf(false) }
             SettingsRow(
-                icon = Icons.Default.Settings,
+                icon = ForgeGlyph.SLIDERS,
                 title = stringResource(R.string.settings_appearance),
                 subtitle = stringResource(activeThemeMode.title),
                 onClick = { appearanceOpen = !appearanceOpen },
@@ -177,7 +177,7 @@ fun SettingsScreenModern(
             val activeLanguage = languages.firstOrNull { it.code.equals(state.languageCode, ignoreCase = true) } ?: languages.first()
             var languageOpen by rememberSaveable { mutableStateOf(false) }
             SettingsRow(
-                icon = Icons.Default.List,
+                icon = ForgeGlyph.GLOBE,
                 title = stringResource(R.string.settings_language),
                 subtitle = activeLanguage.nativeName,
                 onClick = { languageOpen = !languageOpen },
@@ -218,7 +218,7 @@ fun SettingsScreenModern(
         var toolsOpen by rememberSaveable { mutableStateOf(true) }
         val optionalInstalled = state.installedDevStacks.count { it != DevStack.WEB }
         DisclosureCard(
-            icon = Icons.Default.Build,
+            icon = ForgeGlyph.CODE,
             title = stringResource(R.string.settings_developer_tools),
             subtitle = stringResource(R.string.settings_core_plus_optional, optionalInstalled),
             expanded = toolsOpen,
@@ -267,7 +267,7 @@ fun SettingsScreenModern(
         // ───────────────────────── Linux runtime ─────────────────────────
         var runtimeOpen by rememberSaveable { mutableStateOf(false) }
         DisclosureCard(
-            icon = Icons.Default.Lock,
+            icon = ForgeGlyph.TERMINAL,
             title = stringResource(R.string.settings_linux_runtime),
             subtitle = stringResource(R.string.onb_subtitle),
             expanded = runtimeOpen,
@@ -290,7 +290,7 @@ fun SettingsScreenModern(
                     onClick = viewModel::clearTerminal,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    ForgeIcon(glyph = ForgeGlyph.TRASH, tint = MaterialTheme.colorScheme.onSurface, size = 16.dp)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(stringResource(R.string.settings_clear_terminal_history))
                 }
@@ -304,7 +304,7 @@ fun SettingsScreenModern(
             border = androidx.compose.foundation.BorderStroke(1.dp, tokens.dangerText.copy(alpha = 0.45f)),
         ) {
             SettingsRow(
-                icon = Icons.Default.Warning,
+                icon = ForgeGlyph.WARNING,
                 iconTint = tokens.dangerText,
                 title = stringResource(R.string.settings_repair_rootfs),
                 subtitle = stringResource(R.string.settings_repair_rootfs_sub),
@@ -317,13 +317,13 @@ fun SettingsScreenModern(
         ForgeSectionLabel(stringResource(R.string.settings_about), horizontalPadding = 6.dp)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             SettingsRow(
-                icon = Icons.Default.Info,
+                icon = ForgeGlyph.INFO,
                 title = stringResource(R.string.settings_version),
                 trailing = { Text("v${BuildConfig.VERSION_NAME}", color = scheme.onSurfaceVariant, fontSize = 14.sp) },
             )
             ThinDivider()
             SettingsRow(
-                icon = Icons.Default.Refresh,
+                icon = ForgeGlyph.REFRESH,
                 title = stringResource(R.string.settings_check_for_app_updates),
                 subtitle = state.updateStatusMessage ?: stringResource(R.string.settings_check_updates_sub),
                 onClick = { viewModel.checkForAppUpdates() },
@@ -377,7 +377,7 @@ internal fun AntigravityAccountCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = RoundedCornerShape(50), color = scheme.primary.copy(alpha = 0.16f), modifier = Modifier.size(44.dp)) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.AccountCircle, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(26.dp))
+                        ForgeIcon(glyph = ForgeGlyph.SHIELD, tint = scheme.primary, size = 24.dp)
                     }
                 }
                 Spacer(modifier = Modifier.width(14.dp))
@@ -499,7 +499,7 @@ internal fun AntigravityAccountCard(
         )
     }
     DisclosureCard(
-        icon = Icons.Default.Info,
+        icon = ForgeGlyph.SPARK,
         title = stringResource(R.string.settings_model_access),
         subtitle = "${state.antigravityModel.takeIf { it.isNotBlank() }?.let(::antigravityModelLabel) ?: "—"} · ${state.antigravityEffort.uppercase()}",
         expanded = modelOpen,
@@ -547,7 +547,7 @@ internal fun AntigravityAccountCard(
 /** 56dp list row: leading icon in a tinted square, title/subtitle, custom trailing. */
 @Composable
 internal fun SettingsRow(
-    icon: ImageVector,
+    icon: ForgeGlyph,
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
@@ -568,7 +568,7 @@ internal fun SettingsRow(
     ) {
         Surface(shape = RoundedCornerShape(10.dp), color = tokens.cardElevatedColor, modifier = Modifier.size(36.dp)) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+                ForgeIcon(glyph = icon, tint = iconTint, size = 20.dp)
             }
         }
         Spacer(modifier = Modifier.width(14.dp))
@@ -586,7 +586,7 @@ internal fun SettingsRow(
 /** Card with a SettingsRow header that reveals its body. */
 @Composable
 internal fun DisclosureCard(
-    icon: ImageVector,
+    icon: ForgeGlyph,
     title: String,
     subtitle: String?,
     expanded: Boolean,

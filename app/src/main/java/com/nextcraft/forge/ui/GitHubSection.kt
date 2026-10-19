@@ -182,7 +182,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                     var createOpen by rememberSaveable { mutableStateOf(false) }
                     ThinDivider()
                     SettingsRow(
-                        icon = Icons.Default.Add,
+                        icon = ForgeGlyph.PLUS,
                         title = stringResource(R.string.settings_create_push_new_github),
                         onClick = { createOpen = !createOpen },
                         trailing = { Chevron(createOpen) },

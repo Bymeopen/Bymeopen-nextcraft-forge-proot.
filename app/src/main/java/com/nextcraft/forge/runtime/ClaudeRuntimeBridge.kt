@@ -114,10 +114,9 @@ class ClaudeRuntimeBridge(
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var turnCompletedFromStream: Boolean = false
+    private val foreground = ForegroundSession(context, "ClaudeBridge")
+
     @Volatile private var activeProjectSlug: String? = null
-    @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
-    @Volatile private var lastForegroundProgressAt: Long = 0L
-    @Volatile private var foregroundResultPosted: Boolean = false
     private val streamedText = StringBuilder()
     private val streamedThinking = StringBuilder()
     private var lastReasoningTokens = 0
@@ -139,9 +138,7 @@ class ClaudeRuntimeBridge(
         userStopRequested = false
         turnCompletedFromStream = false
         activeProjectSlug = projectSlug
-        taskStartedAtElapsedRealtime = android.os.SystemClock.elapsedRealtime()
-        lastForegroundProgressAt = 0L
-        foregroundResultPosted = false
+        foreground.begin()
         toolNames.clear()
         seenToolCalls.clear()
         lastReasoningTokens = 0
@@ -864,21 +861,7 @@ class ClaudeRuntimeBridge(
 
     private fun pushForegroundProgress(detailRaw: String) {
         if (activeSessionId == null) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastForegroundProgressAt < FOREGROUND_PROGRESS_MIN_INTERVAL_MS) return
-        lastForegroundProgressAt = now
-        val detail = detailRaw.replace(Regex("\\s+"), " ").trim().take(110)
-        val elapsedMs = taskStartedAtElapsedRealtime.takeIf { it > 0 }?.let { now - it } ?: 0L
-        val text = if (elapsedMs > 0L) "$detail · ${formatElapsedShort(elapsedMs)}" else detail
-        RuntimeExecutionServiceContract.pushProgress(context, activeProjectSlug, text)
-    }
-
-    private fun formatElapsedShort(milliseconds: Long): String {
-        val totalSeconds = milliseconds / 1_000L
-        val hours = totalSeconds / 3_600L
-        val minutes = (totalSeconds % 3_600L) / 60L
-        val seconds = totalSeconds % 60L
-        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
+        foreground.progress(activeProjectSlug, detailRaw)
     }
 
     private fun terminateActiveProcessGracefully() {
@@ -893,21 +876,12 @@ class ClaudeRuntimeBridge(
         }.apply { isDaemon = true }.start()
     }
 
-    private fun startForegroundRuntime(projectName: String) {
-        RuntimeExecutionServiceContract.startForeground(context, projectName)
-    }
+    private fun startForegroundRuntime(projectName: String) = foreground.start(projectName)
 
-    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, "ClaudeBridge")
-    }
+    private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
+        foreground.finish(completed, projectName, detail)
 
-    private fun cancelForegroundRuntime() {
-        if (foregroundResultPosted) return
-        foregroundResultPosted = true
-        RuntimeExecutionServiceContract.cancelForeground(context)
-    }
+    private fun cancelForegroundRuntime() = foreground.cancel()
 
     private data class PendingPermission(
         val request: ToolRequest,
@@ -917,7 +891,6 @@ class ClaudeRuntimeBridge(
     private class ProviderSessionException(message: String) : IllegalStateException(message)
 
     companion object {
-        private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         private const val HIGH_RISK_APPROVAL_TIMEOUT_MS = 40_000L
         private const val STALE_RESPONSE_MS = 600_000L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
