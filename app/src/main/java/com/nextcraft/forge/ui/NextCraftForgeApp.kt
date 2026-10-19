@@ -371,7 +371,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         }
                     }
                     ForgeTab.AGENT -> AgentConfigScreen(state = state, viewModel = viewModel)
-                    ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
+                    ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab, onOpenFiles = viewModel::openFilesTool)
                     ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)

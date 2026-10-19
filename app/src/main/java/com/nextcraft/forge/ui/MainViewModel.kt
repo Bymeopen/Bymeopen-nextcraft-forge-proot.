@@ -588,6 +588,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Opens the Files screen from Tools on the part the entry promised (explorer or editor). */
+    fun openFilesTool(focus: FilesFocus) {
+        selectTab(ForgeTab.FILES)
+        _state.update { it.copy(filesFocus = focus) }
+    }
+
+    fun consumeFilesFocus() {
+        _state.update { it.copy(filesFocus = null) }
+    }
+
     fun selectAgent(agent: AgentKind) {
         // Switching bridges mid-run would desync providerProfile/hasSecret from the session that is
         // still streaming, and would misroute any pending tool approval to the newly selected bridge.

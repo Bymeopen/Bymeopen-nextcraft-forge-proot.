@@ -204,12 +204,17 @@ data class ForgeUiState(
     val bannerAction: BannerAction? = null,
     /** The last message of a turn that failed (not stopped); offered as "Try again" above the composer. */
     val retryPrompt: RetryPrompt? = null,
+    /** Which part of the Files screen a Tools entry asked for; consumed by the screen once applied. */
+    val filesFocus: FilesFocus? = null,
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
 ) {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
 }
+
+/** "File" opens the explorer and "Editor" opens the open file; both live on the same screen. */
+enum class FilesFocus { EXPLORER, EDITOR }
 
 /** [chatId] keeps the offer in the chat where the failure happened. */
 data class RetryPrompt(val chatId: String, val prompt: QueuedPrompt)

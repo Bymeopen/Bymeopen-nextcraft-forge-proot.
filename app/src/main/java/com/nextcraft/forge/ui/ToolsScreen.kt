@@ -29,6 +29,8 @@ private data class ToolEntry(
     val glyph: ForgeGlyph,
     @StringRes val title: Int,
     @StringRes val subtitle: Int,
+    /** Set when several entries share one screen and must open different parts of it. */
+    val filesFocus: FilesFocus? = null,
 )
 
 private data class ToolSection(@StringRes val label: Int, val entries: List<ToolEntry>)
@@ -40,8 +42,8 @@ private val toolSections = listOf(
             ToolEntry(ForgeTab.TOOLCHAINS, ForgeGlyph.BUILD, R.string.tools_toolchains, R.string.tools_toolchains_desc),
             ToolEntry(ForgeTab.DIAGNOSTICS, ForgeGlyph.SHIELD, R.string.tools_diagnostics, R.string.tools_diagnostics_desc),
             ToolEntry(ForgeTab.TERMINAL, ForgeGlyph.TERMINAL, R.string.shell_terminal, R.string.tools_terminal_desc),
-            ToolEntry(ForgeTab.FILES, ForgeGlyph.FOLDER, R.string.tools_files, R.string.tools_files_desc),
-            ToolEntry(ForgeTab.FILES, ForgeGlyph.EDIT, R.string.tools_editor, R.string.tools_editor_desc),
+            ToolEntry(ForgeTab.FILES, ForgeGlyph.FOLDER, R.string.tools_files, R.string.tools_files_desc, FilesFocus.EXPLORER),
+            ToolEntry(ForgeTab.FILES, ForgeGlyph.EDIT, R.string.tools_editor, R.string.tools_editor_desc, FilesFocus.EDITOR),
             ToolEntry(ForgeTab.PREVIEW, ForgeGlyph.GLOBE, R.string.tools_web_preview, R.string.tools_web_preview_desc),
         ),
     ),
@@ -72,6 +74,7 @@ private val toolSections = listOf(
 @Composable
 fun ToolsScreen(
     onOpen: (ForgeTab) -> Unit,
+    onOpenFiles: (FilesFocus) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -117,7 +120,7 @@ fun ToolsScreen(
                         glyph = entry.glyph,
                         title = stringResource(entry.title),
                         subtitle = stringResource(entry.subtitle),
-                        onClick = { onOpen(entry.tab) },
+                        onClick = { entry.filesFocus?.let(onOpenFiles) ?: onOpen(entry.tab) },
                     )
                 }
             }

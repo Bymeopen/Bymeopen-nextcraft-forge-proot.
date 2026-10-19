@@ -117,16 +117,26 @@ fun FilesAndDiffScreen(
         }
     }
 
+    // A Tools entry can ask for a specific part: "File" the explorer, "Editor" the open file. Declared after the
+    // effect above so it wins on first composition. With nothing open, the editor request shows the explorer.
+    androidx.compose.runtime.LaunchedEffect(state.filesFocus) {
+        val focus = state.filesFocus ?: return@LaunchedEffect
+        mode = if (focus == FilesFocus.EDITOR && state.selectedFilePath != null) "editor" else "files"
+        viewModel.consumeFilesFocus()
+    }
+
+    // The title says where you are: the same screen is "File" in the explorer and "Editor" on an open file.
+    val screenTitle = stringResource(if (mode == "editor") R.string.tools_editor else R.string.files_files)
     Column(modifier = Modifier.fillMaxSize()) {
         if (inProject) {
             ForgeProjectHeader(
-                title = state.activeProject?.name ?: stringResource(R.string.files_files),
-                subtitle = stringResource(R.string.files_files),
+                title = state.activeProject?.name ?: screenTitle,
+                subtitle = screenTitle,
                 onBack = { viewModel.projectBack() },
             )
         } else {
             ForgeLargeTitle(
-                title = stringResource(R.string.files_files),
+                title = screenTitle,
                 subtitle = state.activeProject?.name,
             )
         }
