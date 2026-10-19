@@ -96,6 +96,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.statusBarsPadding
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -684,12 +685,21 @@ private fun RuntimeOnboardingScreen(
     val snap = state.setupSnapshot
     val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
     val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
 
+    // The gate renders before the main Scaffold, so it must set its own background and content
+    // colour: without this Surface, LocalContentColor falls back to black on the dark themes.
+    Surface(
+        color = scheme.background,
+        contentColor = scheme.onBackground,
+        modifier = Modifier.fillMaxSize(),
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 24.dp),
+            .statusBarsPadding()
+            .padding(top = 12.dp, bottom = 24.dp),
     ) {
         ForgeLargeTitle(
             title = stringResource(R.string.onb_title),
@@ -714,15 +724,28 @@ private fun RuntimeOnboardingScreen(
         )
 
         ForgeSectionLabel(stringResource(R.string.onb_stacks))
-        DevStack.entries.forEach { stack ->
-            ForgeToggleRow(
-                title = stack.displayLabel(),
-                subtitle = stack.displayDescription() + " · " + stack.installsSummary,
-                checked = stack in state.selectedDevStacks,
-                enabled = !isInstalling,
-                onCheckedChange = { onToggleStack(stack) },
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
+        // One card groups the stack toggles; the description alone is enough (installsSummary repeated it).
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = tokens.cardContainerColor,
+            contentColor = scheme.onSurface,
+            border = tokens.cardBorderStroke,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+                DevStack.entries.forEach { stack ->
+                    ForgeToggleRow(
+                        title = stack.displayLabel(),
+                        subtitle = stack.displayDescription(),
+                        checked = stack in state.selectedDevStacks,
+                        enabled = !isInstalling,
+                        onCheckedChange = { onToggleStack(stack) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+            }
         }
 
         if (snap.status != RuntimeSetupStatus.IDLE) {
@@ -801,6 +824,7 @@ private fun RuntimeOnboardingScreen(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) { Text(stringResource(R.string.onb_continue_anyway)) }
+    }
     }
 }
 
