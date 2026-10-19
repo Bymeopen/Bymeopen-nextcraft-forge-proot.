@@ -218,13 +218,22 @@ fun AgentScreen(
         }
 
         if (state.messages.isEmpty()) {
-            EmptyAgentWelcome(
-                state = state,
-                onQuickPrompt = { quick ->
-                    viewModel.sendPrompt(quick)
-                },
-                modifier = Modifier.weight(1f),
-            )
+            // Empty chat: one quiet greeting from the agent, nothing else competing with the composer.
+            Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = tokens.cardContainerColor,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    border = tokens.cardBorderStroke,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.agent_greeting),
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    )
+                }
+            }
         } else {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
@@ -272,11 +281,11 @@ fun AgentScreen(
             }
         }
 
-        // Linear-style composer: one rounded surface with the input, a provider chip and a round send/stop button.
+        // Composer: one capsule, the field and a round send/stop button. The agent name is in the header.
         val running = state.sessionRunning
         val canSend = promptInput.isNotBlank()
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(28.dp),
             color = tokens.cardContainerColor,
             contentColor = MaterialTheme.colorScheme.onSurface,
             border = tokens.cardBorderStroke,
@@ -284,18 +293,21 @@ fun AgentScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+            Row(
+                modifier = Modifier.padding(start = 8.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextField(
                     value = promptInput,
                     onValueChange = { promptInput = it },
                     placeholder = {
                         Text(
-                            stringResource(R.string.agent_ask_to_build_refactor, state.agentKind.displayTitle()),
+                            stringResource(R.string.agent_message_placeholder, state.agentKind.displayTitle()),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
                     maxLines = 5,
                     colors = TextFieldDefaults.textFieldColors(
                         containerColor = Color.Transparent,
@@ -304,64 +316,44 @@ fun AgentScreen(
                         disabledIndicatorColor = Color.Transparent,
                     ),
                 )
-                Row(
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 10.dp, end = 4.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // The provider and model are configured in Settings, so the chip is the shortcut there.
-                    AssistChip(
-                        onClick = { viewModel.selectTab(ForgeTab.SETTINGS) },
-                        label = {
-                            Text(
-                                state.agentKind.displayTitle(),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        shape = RoundedCornerShape(100),
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(
-                                when {
-                                    running -> MaterialTheme.colorScheme.error
-                                    canSend -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
-                                },
-                            )
-                            .clickable(
-                                enabled = running || canSend,
-                                role = Role.Button,
-                                onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
-                            ) {
-                                if (running) {
-                                    viewModel.stopActiveTask()
-                                } else {
-                                    val text = promptInput.trim()
-                                    if (text.isNotEmpty()) {
-                                        promptInput = ""
-                                        viewModel.sendPrompt(text)
-                                    }
-                                }
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                running -> MaterialTheme.colorScheme.error
+                                canSend -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
                             },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = if (running) Icons.Default.Close else Icons.Default.Send,
-                            contentDescription = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
-                            tint = when {
-                                running -> MaterialTheme.colorScheme.onError
-                                canSend -> MaterialTheme.colorScheme.onPrimary
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.size(20.dp),
                         )
-                    }
+                        .clickable(
+                            enabled = running || canSend,
+                            role = Role.Button,
+                            onClickLabel = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                        ) {
+                            if (running) {
+                                viewModel.stopActiveTask()
+                            } else {
+                                val text = promptInput.trim()
+                                if (text.isNotEmpty()) {
+                                    promptInput = ""
+                                    viewModel.sendPrompt(text)
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (running) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
+                        contentDescription = stringResource(if (running) R.string.agent_stop else R.string.agent_send),
+                        tint = when {
+                            running -> MaterialTheme.colorScheme.onError
+                            canSend -> MaterialTheme.colorScheme.onPrimary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
             }
         }
@@ -381,7 +373,6 @@ private fun AgentHeader(
     onSelectAgent: (AgentKind) -> Unit,
     onClearChat: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     var chatsOpen by rememberSaveable { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val activeChat = state.chats.firstOrNull { it.id == state.activeChatId }
@@ -411,63 +402,8 @@ private fun AgentHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        ForgeActionPill {
-            ForgePillIcon(
-                icon = Icons.Default.PlayArrow,
-                description = stringResource(R.string.launch_build_and_install_apk),
-                onClick = onRun,
-            )
-            ForgePillIcon(
-                icon = Icons.Default.Refresh,
-                description = stringResource(R.string.agent_project_chats),
-                onClick = { chatsOpen = true },
-            )
-            Box {
-                ForgePillIcon(
-                    icon = Icons.Default.MoreVert,
-                    description = stringResource(R.string.agent_more),
-                    onClick = { menuOpen = true },
-                )
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    Text(
-                        text = stringResource(R.string.agent_switch_agent),
-                        fontSize = 12.sp,
-                        color = scheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    )
-                    AgentKind.entries.forEach { kind ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(kind.displayTitle(), fontWeight = FontWeight.SemiBold)
-                                    Text(kind.displaySubtitle(), fontSize = 12.sp, color = scheme.onSurfaceVariant)
-                                }
-                            },
-                            leadingIcon = if (kind == state.agentKind) {
-                                { Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected)) }
-                            } else {
-                                null
-                            },
-                            enabled = !state.sessionRunning,
-                            onClick = {
-                                menuOpen = false
-                                onSelectAgent(kind)
-                            },
-                        )
-                    }
-                    if (state.messages.isNotEmpty()) {
-                        Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.agent_clear_chat)) },
-                            enabled = !state.sessionRunning,
-                            onClick = {
-                                menuOpen = false
-                                onClearChat()
-                            },
-                        )
-                    }
-                }
-            }
+        IconButton(onClick = { chatsOpen = true }) {
+            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.agent_project_chats), tint = scheme.onSurface)
         }
     }
 
@@ -705,53 +641,6 @@ private fun ToolApprovalCard(
                             .heightIn(min = 44.dp),
                     ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold) }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyAgentWelcome(
-    state: ForgeUiState,
-    onQuickPrompt: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MaterialTheme.colorScheme
-    val suggestions = listOf(
-        stringResource(R.string.agent_sugg_inspect),
-        stringResource(R.string.agent_sugg_compose),
-        stringResource(R.string.agent_sugg_tests),
-        stringResource(R.string.agent_sugg_audit),
-    )
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.agent_welcome_hint),
-            fontSize = 14.sp,
-            color = scheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        suggestions.forEach { prompt ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .clickable(role = Role.Button) { onQuickPrompt(prompt) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Star,
-                    contentDescription = null,
-                    tint = scheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(14.dp))
-                Text(text = prompt, fontSize = 15.sp, modifier = Modifier.weight(1f))
             }
         }
     }

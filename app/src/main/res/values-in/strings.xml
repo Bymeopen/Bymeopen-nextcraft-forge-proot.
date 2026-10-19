@@ -427,4 +427,6 @@
     <string name="nav_chat">Chat</string>
     <string name="nav_files">File</string>
     <string name="nav_preview">Pratinjau</string>
+    <string name="agent_greeting">Hai! Ceritakan apa yang ingin kamu bangun atau ubah.</string>
+    <string name="agent_message_placeholder">Pesan untuk %1$s…</string>
 </resources>
