@@ -97,6 +97,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -143,7 +145,10 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         if (!viewModel.projectBack()) backTarget?.let(viewModel::selectTab)
     }
 
+    // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
+    // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
         topBar = {},
         bottomBar = {
@@ -190,7 +195,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .statusBarsPadding(),
         ) {
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(
@@ -619,7 +625,7 @@ private fun ForgeBottomBar(
             .fillMaxWidth()
             .padding(outerPadding),
     ) {
-        Column {
+        Column(modifier = Modifier.navigationBarsPadding()) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
             BoxWithConstraints(
                 modifier = Modifier
@@ -813,41 +819,62 @@ private fun RuntimeOnboardingScreen(
         }
 
         if (snap.status != RuntimeSetupStatus.IDLE) {
+            // Progress card: status glyph, message, percent on the right, a soft bar underneath.
             val pct = (snap.progress.coerceIn(0f, 1f) * 100f).toInt()
-            Row(
+            val progressStatus = when (snap.status) {
+                RuntimeSetupStatus.RUNNING -> ForgeStatus.RUNNING
+                RuntimeSetupStatus.CANCELLED -> ForgeStatus.SKIPPED
+                else -> if (snap.errorMessage != null) ForgeStatus.FAILED else ForgeStatus.DONE
+            }
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = tokens.cardContainerColor,
+                contentColor = scheme.onSurface,
+                border = tokens.cardBorderStroke,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .padding(start = 14.dp, end = 14.dp, top = 16.dp),
             ) {
-                ForgeStatusIcon(
-                    status = when (snap.status) {
-                        RuntimeSetupStatus.RUNNING -> ForgeStatus.RUNNING
-                        RuntimeSetupStatus.CANCELLED -> ForgeStatus.SKIPPED
-                        else -> if (snap.errorMessage != null) ForgeStatus.FAILED else ForgeStatus.DONE
-                    },
-                    iconSize = 22.dp,
-                )
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(snap.message, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        text = snap.errorMessage ?: stringResource(R.string.onb_progress_pct, pct, snap.status.name.lowercase()),
-                        fontSize = 13.sp,
-                        color = if (snap.errorMessage != null) scheme.error else scheme.onSurfaceVariant,
-                    )
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ForgeStatusIcon(status = progressStatus, iconSize = 20.dp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(snap.message, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2)
+                            Text(
+                                text = snap.errorMessage ?: stringResource(progressStatus.labelRes),
+                                fontSize = 13.sp,
+                                color = if (snap.errorMessage != null) scheme.error else scheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text = "$pct%",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(tokens.cardElevatedColor),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(snap.progress.coerceIn(0f, 1f))
+                                .fillMaxHeight()
+                                .background(scheme.primary),
+                        )
+                    }
                 }
             }
-            LinearProgressIndicator(
-                progress = snap.progress.coerceIn(0f, 1f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp)
-                    .height(3.dp),
-            )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+        // One primary capsule (install / resume / pause), then quiet text actions, then the escape link.
         if (isInstalling) {
             OutlinedButton(
                 onClick = onPauseSetup,
@@ -855,8 +882,8 @@ private fun RuntimeOnboardingScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .heightIn(min = 44.dp),
-            ) { Text(stringResource(R.string.launch_pause)) }
+                    .heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.launch_pause), fontWeight = FontWeight.SemiBold) }
         } else {
             ForgePrimaryButton(
                 text = stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime),
@@ -864,30 +891,29 @@ private fun RuntimeOnboardingScreen(
                 enabled = state.arm64Supported,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 20.dp)
+                    .heightIn(min = 48.dp),
             )
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.Center,
         ) {
-            OutlinedButton(
-                onClick = onRepairRootfs,
-                shape = RoundedCornerShape(100),
-                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-            ) { Text(stringResource(R.string.onb_repair)) }
-            OutlinedButton(
-                onClick = onRefreshStatus,
-                shape = RoundedCornerShape(100),
-                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-            ) { Text(stringResource(R.string.onb_recheck)) }
+            TextButton(onClick = onRepairRootfs, enabled = !isInstalling) { Text(stringResource(R.string.onb_repair)) }
+            Text("·", color = scheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
+            TextButton(onClick = onRefreshStatus) { Text(stringResource(R.string.onb_recheck)) }
         }
+        Divider(
+            color = scheme.outlineVariant,
+            thickness = 0.5.dp,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+        )
         TextButton(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
-        ) { Text(stringResource(R.string.onb_continue_anyway)) }
+        ) { Text(stringResource(R.string.onb_continue_anyway), color = scheme.onSurfaceVariant) }
     }
     }
 }
