@@ -200,7 +200,7 @@ internal fun ForgeBottomBar(
             // Taller with larger system text, and labels stop scaling at 1.3x (five tabs share the width).
             val density = LocalDensity.current
             val navFontScale = density.fontScale.coerceAtMost(NAV_MAX_FONT_SCALE)
-            val barHeight = 72.dp + (navFontScale - 1f).coerceAtLeast(0f) * 16.dp
+            val barHeight = 72.dp + 16.dp * (navFontScale - 1f).coerceAtLeast(0f)
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
