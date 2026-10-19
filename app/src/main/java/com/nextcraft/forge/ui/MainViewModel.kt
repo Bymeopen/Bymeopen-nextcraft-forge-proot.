@@ -48,6 +48,12 @@ import com.nextcraft.forge.runtime.AndroidLogcatState
 import com.nextcraft.forge.runtime.AndroidProjectTemplateGenerator
 import com.nextcraft.forge.runtime.AntigravityAuthController
 import com.nextcraft.forge.runtime.ClaudeAuthController
+import com.nextcraft.forge.runtime.SshController
+import com.nextcraft.forge.runtime.SnapshotsController
+import com.nextcraft.forge.runtime.RomStudioController
+import com.nextcraft.forge.runtime.DiagnosticsController
+import com.nextcraft.forge.runtime.CiCdController
+import com.nextcraft.forge.runtime.BuildMatrixController
 import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
@@ -114,6 +120,13 @@ enum class ForgeTab(val title: String) {
     ANDROID("Android"),
     PREVIEW("Preview"),
     SETTINGS("Settings"),
+    TOOLCHAINS("Toolchains"),
+    DIAGNOSTICS("Diagnostics"),
+    BUILD_MATRIX("Build Matrix"),
+    SSH("SSH"),
+    CICD("CI/CD"),
+    ROM("ROM Studio"),
+    CHECKPOINTS("Checkpoints"),
 }
 
 enum class SetupScope { RUNTIME, AGENT }
@@ -238,6 +251,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val claudeAuth = ClaudeAuthController(application)
+
+    // Developer tools (Tools tab). Each owns its state flow and runs its commands in the chroot.
+    val diagnostics = DiagnosticsController(application)
+    val buildMatrix = BuildMatrixController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
+    val cicd = CiCdController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
+    val ssh = SshController(application)
+    val rom = RomStudioController(application)
+    val snapshots = SnapshotsController(
+        application,
+        { _state.value.activeProject },
+        { checkpoints.ensureWorkspace(it) },
+        { _state.value.sessionRunning || _state.value.terminalRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING },
+    )
 
     private val claudeRuntime = ClaudeRuntimeBridge(
         context = application,

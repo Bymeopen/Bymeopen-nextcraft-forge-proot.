@@ -527,8 +527,9 @@ private fun ProjectRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val guestPath = "/workspace/${project.slug}"
                 Text(
-                    text = "/workspace/${project.slug}",
+                    text = guestPath,
                     fontSize = 13.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     color = muted,

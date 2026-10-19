@@ -1,0 +1,201 @@
+package com.nextcraft.forge.runtime
+
+import android.content.Context
+import com.nextcraft.forge.model.Project
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+
+enum class TargetStatus { PENDING, RUNNING, OK, FAILED }
+
+data class BuildTarget(
+    val id: String,
+    val name: String,
+    val command: String,
+    /** Detected from the project files (not user-made); cannot be deleted, only switched off. */
+    val detected: Boolean,
+    val enabled: Boolean,
+)
+
+data class BuildMatrixState(
+    val projectId: String? = null,
+    val projectName: String = "",
+    val targets: List<BuildTarget> = emptyList(),
+    val statuses: Map<String, TargetStatus> = emptyMap(),
+    val log: String = "",
+    val running: Boolean = false,
+)
+
+/** A build target found in a project folder: stable id, label and the shell command that builds it. */
+internal data class DetectedTarget(val id: String, val name: String, val command: String)
+
+/** Looks at the files of [workspace] and proposes build targets for Android/Gradle, Node, Python, CMake and Make. */
+internal fun detectBuildTargets(workspace: File): List<DetectedTarget> {
+    val found = mutableListOf<DetectedTarget>()
+    val androidRoot = findAndroidProjectRoot(workspace)
+    if (androidRoot != null) {
+        val relative = androidRoot.relativeTo(workspace).invariantSeparatorsPath
+        for ((task, label) in listOf("assembleDebug" to "Android debug APK", "assembleRelease" to "Android release APK", "test" to "Android unit tests", "lint" to "Android lint", "clean" to "Gradle clean")) {
+            val gradle = androidGradleCommand(androidRoot, task)
+            val command = if (relative.isEmpty()) gradle else "cd ${ChrootRunner.quote(relative)} && $gradle"
+            found += DetectedTarget("gradle:$task", label, command)
+        }
+    }
+    val packageJson = File(workspace, "package.json")
+    if (packageJson.isFile) {
+        found += DetectedTarget("npm:install", "npm install", "npm install --no-audit --no-fund")
+        val scripts = runCatching { JSONObject(packageJson.readText()).optJSONObject("scripts") }.getOrNull()
+        scripts?.keys()?.asSequence()?.filter { Regex("[A-Za-z0-9:_-]{1,40}").matches(it) }?.take(8)?.forEach { key ->
+            found += DetectedTarget("npm:run:$key", "npm run $key", "npm run ${ChrootRunner.quote(key)}")
+        }
+    }
+    if (File(workspace, "requirements.txt").isFile) found += DetectedTarget("pip:requirements", "pip install -r requirements.txt", "pip install -r requirements.txt")
+    if (File(workspace, "pyproject.toml").isFile || File(workspace, "pytest.ini").isFile || File(workspace, "tests").isDirectory) {
+        found += DetectedTarget("python:pytest", "pytest", "python3 -m pytest -q")
+    }
+    if (File(workspace, "CMakeLists.txt").isFile) {
+        found += DetectedTarget("cmake:build", "CMake build", "cmake -S . -B build && cmake --build build -j2")
+    }
+    if (File(workspace, "Makefile").isFile) found += DetectedTarget("make:all", "make", "make -j2")
+    return found
+}
+
+/** Build matrix: the project's build targets (detected plus your own), run one after another inside the chroot. */
+class BuildMatrixController(
+    context: Context,
+    private val activeProject: () -> Project?,
+    private val workspaceFor: (String) -> File,
+) {
+    private val appContext = context.applicationContext
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val runner = ChrootRunner(appContext)
+    private val prefs = appContext.getSharedPreferences("forge_tools", Context.MODE_PRIVATE)
+    private val mutable = MutableStateFlow(BuildMatrixState())
+    val state: StateFlow<BuildMatrixState> = mutable.asStateFlow()
+    private var job: Job? = null
+
+    private fun prefKey(projectId: String) = "buildmatrix_${projectId.filter { it.isLetterOrDigit() || it == '-' }}"
+
+    /** Reloads the targets for the active project; keeps the log while a run is in progress. */
+    fun load() {
+        val project = activeProject() ?: run {
+            mutable.update { BuildMatrixState() }
+            return
+        }
+        if (mutable.value.running && mutable.value.projectId == project.id) return
+        scope.launch {
+            val workspace = withContext(Dispatchers.IO) { runCatching { workspaceFor(project.id) }.getOrNull() }
+            val detected = withContext(Dispatchers.IO) { workspace?.let { runCatching { detectBuildTargets(it) }.getOrDefault(emptyList()) }.orEmpty() }
+            val stored = readStored(project.id)
+            val targets = detected.map {
+                BuildTarget(it.id, it.name, it.command, detected = true, enabled = it.id !in stored.disabled)
+            } + stored.custom.map { BuildTarget(it.id, it.name, it.command, detected = false, enabled = it.id !in stored.disabled) }
+            mutable.update { BuildMatrixState(projectId = project.id, projectName = project.name, targets = targets) }
+        }
+    }
+
+    fun toggle(id: String) {
+        val project = mutable.value.projectId ?: return
+        val stored = readStored(project)
+        val disabled = stored.disabled.toMutableSet().also { if (!it.add(id)) it.remove(id) }
+        writeStored(project, stored.copy(disabled = disabled))
+        mutable.update { s -> s.copy(targets = s.targets.map { if (it.id == id) it.copy(enabled = !it.enabled) else it }) }
+    }
+
+    fun addCustom(name: String, command: String) {
+        val project = mutable.value.projectId ?: return
+        val cleanName = name.trim().take(60)
+        val cleanCommand = command.trim().take(2_000)
+        if (cleanName.isEmpty() || cleanCommand.isEmpty()) return
+        val target = StoredTarget("custom:${UUID.randomUUID()}", cleanName, cleanCommand)
+        val stored = readStored(project)
+        writeStored(project, stored.copy(custom = stored.custom + target))
+        mutable.update { it.copy(targets = it.targets + BuildTarget(target.id, target.name, target.command, detected = false, enabled = true)) }
+    }
+
+    fun remove(id: String) {
+        val project = mutable.value.projectId ?: return
+        val stored = readStored(project)
+        writeStored(project, stored.copy(custom = stored.custom.filterNot { it.id == id }))
+        mutable.update { s -> s.copy(targets = s.targets.filterNot { it.id == id && !it.detected }) }
+    }
+
+    fun runSelected() {
+        val snapshot = mutable.value
+        val project = activeProject()?.takeIf { it.id == snapshot.projectId } ?: return
+        val selected = snapshot.targets.filter { it.enabled }
+        if (snapshot.running || selected.isEmpty()) return
+        mutable.update { it.copy(running = true, log = "", statuses = selected.associate { t -> t.id to TargetStatus.PENDING }) }
+        job = scope.launch {
+            try {
+                val workspace = withContext(Dispatchers.IO) { workspaceFor(project.id) }
+                for (target in selected) {
+                    mutable.update { it.copy(statuses = it.statuses + (target.id to TargetStatus.RUNNING), log = appendLog(it.log, "\n▶ ${target.name}\n")) }
+                    val result = runCatching {
+                        runner.run(workspace, project.slug, target.command, timeoutMillis = 45 * 60_000L) { chunk ->
+                            mutable.update { it.copy(log = appendLog(it.log, chunk)) }
+                        }
+                    }
+                    val ok = result.getOrNull()?.ok == true
+                    val note = when {
+                        result.isFailure -> "✕ ${result.exceptionOrNull()?.message ?: "failed to start"}\n"
+                        result.getOrNull()?.timedOut == true -> "✕ timed out\n"
+                        ok -> "✓ ${target.name}\n"
+                        else -> "✕ ${target.name} (exit ${result.getOrNull()?.exitCode})\n"
+                    }
+                    mutable.update { it.copy(statuses = it.statuses + (target.id to if (ok) TargetStatus.OK else TargetStatus.FAILED), log = appendLog(it.log, note)) }
+                }
+            } catch (cancelled: CancellationException) {
+                mutable.update { it.copy(log = appendLog(it.log, "\n■ stopped\n")) }
+                throw cancelled
+            } finally {
+                mutable.update { it.copy(running = false) }
+            }
+        }
+    }
+
+    fun cancel() {
+        job?.cancel()
+    }
+
+    private data class StoredTarget(val id: String, val name: String, val command: String)
+    private data class Stored(val custom: List<StoredTarget>, val disabled: Set<String>)
+
+    private fun readStored(projectId: String): Stored = runCatching {
+        val json = JSONObject(prefs.getString(prefKey(projectId), "{}") ?: "{}")
+        val custom = json.optJSONArray("custom") ?: JSONArray()
+        val disabled = json.optJSONArray("disabled") ?: JSONArray()
+        Stored(
+            custom = (0 until custom.length()).mapNotNull { i ->
+                custom.optJSONObject(i)?.let { StoredTarget(it.optString("id"), it.optString("name"), it.optString("command")) }
+                    ?.takeIf { it.id.isNotBlank() && it.command.isNotBlank() }
+            },
+            disabled = (0 until disabled.length()).map { disabled.optString(it) }.toSet(),
+        )
+    }.getOrDefault(Stored(emptyList(), emptySet()))
+
+    private fun writeStored(projectId: String, stored: Stored) {
+        val json = JSONObject()
+            .put("custom", JSONArray(stored.custom.map { JSONObject().put("id", it.id).put("name", it.name).put("command", it.command) }))
+            .put("disabled", JSONArray(stored.disabled.toList()))
+        prefs.edit().putString(prefKey(projectId), json.toString()).apply()
+    }
+
+    private fun appendLog(current: String, text: String): String = (current + text).takeLast(MAX_LOG_CHARS)
+
+    private companion object {
+        const val MAX_LOG_CHARS = 80_000
+    }
+}

@@ -274,6 +274,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
                     ForgeTab.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                     ForgeTab.SETTINGS -> SettingsScreenModern(state = state, viewModel = viewModel)
+                    ForgeTab.TOOLCHAINS -> ToolchainsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
+                    ForgeTab.BUILD_MATRIX -> BuildMatrixScreen(state = state, viewModel = viewModel)
+                    ForgeTab.SSH -> SshScreen(viewModel = viewModel)
+                    ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
+                    ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
+                    ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
                 }
             }
         }
@@ -577,7 +584,10 @@ private val projectEntries = listOf(
 )
 
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
-private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
+private val toolsGroup = setOf(
+    ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+)
 
 private fun ForgeTab.navIndex(): Int {
     val tab = if (this in toolsGroup) ForgeTab.TOOLS else this
