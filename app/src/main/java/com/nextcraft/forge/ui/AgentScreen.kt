@@ -53,6 +53,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.filled.Refresh
@@ -281,9 +288,25 @@ fun AgentScreen(
             }
         }
 
-        // Composer: one capsule, the field and a round send/stop button. The agent name is in the header.
+        // Composer: one capsule, attach + field + round send/stop button. The agent name is in the header.
         val running = state.sessionRunning
-        val canSend = promptInput.isNotBlank()
+        val canSend = promptInput.isNotBlank() || state.pendingAttachments.isNotEmpty()
+        val attachPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isNotEmpty()) viewModel.attachFilesToPrompt(uris)
+        }
+        if (state.pendingAttachments.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.pendingAttachments.forEach { att ->
+                    AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = { viewModel.removePendingAttachment(att.id) })
+                }
+            }
+        }
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = tokens.cardContainerColor,
@@ -294,9 +317,13 @@ fun AgentScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
             Row(
-                modifier = Modifier.padding(start = 8.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Attach: photos or any file; it lands in attachments/ inside the workspace.
+                IconButton(onClick = { attachPicker.launch(arrayOf("*/*")) }, enabled = !running) {
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 TextField(
                     value = promptInput,
                     onValueChange = { promptInput = it },
@@ -336,7 +363,7 @@ fun AgentScreen(
                                 viewModel.stopActiveTask()
                             } else {
                                 val text = promptInput.trim()
-                                if (text.isNotEmpty()) {
+                                if (text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) {
                                     promptInput = ""
                                     viewModel.sendPrompt(text)
                                 }
@@ -657,8 +684,13 @@ private fun ChatMessageCard(
 
     if (message.fromUser) {
         MessageContainer(fromUser = true, contentColor = textColor) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (message.text.isNotBlank()) MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+                if (message.attachments.isNotEmpty()) {
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        message.attachments.forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                    }
+                }
             }
         }
         return
@@ -712,16 +744,31 @@ private fun ToolCallRow(item: ActivityItem) {
             .clickable(role = Role.Button, onClickLabel = stringResource(if (open) R.string.a11y_collapse else R.string.a11y_expand)) { open = !open }
             .padding(horizontal = 4.dp, vertical = 8.dp),
     ) {
+        // Kind decides glyph and tint: Think = accent, Write/Edit = warning, Bash/Read = quiet. Status still shows as a dot.
+        val kind = toolKind(item)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ForgeStatusIcon(
-                status = if (item.isComplete) ForgeStatus.DONE else ForgeStatus.RUNNING,
-                iconSize = 15.dp,
-            )
+            Box {
+                Icon(
+                    imageVector = kind.icon,
+                    contentDescription = null,
+                    tint = kind.tint(scheme, tokens),
+                    modifier = Modifier.size(18.dp),
+                )
+                if (!item.isComplete) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(tokens.warningText),
+                    )
+                }
+            }
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = if (item.detail.isBlank()) item.title else "${item.title} · ${item.detail.lineSequence().first()}",
                 fontSize = 14.sp,
-                color = scheme.onSurfaceVariant,
+                color = if (kind == ToolKind.THINK) scheme.onSurface else scheme.onSurfaceVariant,
                 fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -768,5 +815,54 @@ private fun MessageContainer(
         ) { content() }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
+    }
+}
+
+/** Tool-call kinds, derived from the activity title, each with its own glyph and tint. */
+private enum class ToolKind(val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    THINK(Icons.Default.Star), BASH(Icons.Default.List), READ(Icons.Default.Info), WRITE(Icons.Default.Edit), OTHER(Icons.Default.Build);
+
+    fun tint(scheme: androidx.compose.material3.ColorScheme, tokens: ForgeThemeTokens): Color = when (this) {
+        THINK -> scheme.primary
+        WRITE -> tokens.warningText
+        BASH, READ, OTHER -> scheme.onSurfaceVariant
+    }
+}
+
+private fun toolKind(item: ActivityItem): ToolKind {
+    val t = item.title.lowercase()
+    return when {
+        "think" in t || "reason" in t -> ToolKind.THINK
+        item.isCommand || "bash" in t || "shell" in t || "run" in t || "exec" in t -> ToolKind.BASH
+        "write" in t || "edit" in t || "create" in t || "patch" in t -> ToolKind.WRITE
+        "read" in t || "view" in t || "search" in t || "grep" in t || "list" in t -> ToolKind.READ
+        else -> ToolKind.OTHER
+    }
+}
+
+/** Small capsule naming an attached file; [onRemove] null makes it read-only (sent messages). */
+@Composable
+private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100))
+            .background(tokens.cardElevatedColor)
+            .padding(start = 12.dp, end = if (onRemove == null) 12.dp else 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = if (size < 1024 * 1024) "${(size / 1024).coerceAtLeast(1)} KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", size / (1024.0 * 1024.0)),
+            fontSize = 12.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        if (onRemove != null) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_remove_attachment), tint = scheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+            }
+        }
     }
 }

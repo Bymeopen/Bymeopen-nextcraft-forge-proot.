@@ -429,4 +429,20 @@
     <string name="nav_preview">Pratinjau</string>
     <string name="agent_greeting">Hai! Ceritakan apa yang ingin kamu bangun atau ubah.</string>
     <string name="agent_message_placeholder">Pesan untuk %1$s…</string>
+    <string name="msg_files_uploaded">%1$d file diunggah</string>
+    <string name="msg_zip_saved">ZIP tersimpan · %1$d file</string>
+    <string name="msg_zip_failed">ZIP tidak bisa ditulis</string>
+    <string name="files_download_zip">Unduh ZIP</string>
+    <string name="files_selected_count">%1$d dipilih</string>
+    <string name="files_add_menu">Tambah</string>
+    <string name="files_new_folder">Folder baru</string>
+    <string name="files_upload_here">Unggah ke sini</string>
+    <string name="files_rename">Ganti nama</string>
+    <string name="files_delete">Hapus</string>
+    <string name="files_folder_name">Nama folder</string>
+    <string name="files_new_name">Nama baru</string>
+    <string name="files_ok">OK</string>
+    <string name="files_row_menu">Aksi lainnya</string>
+    <string name="agent_attach">Lampirkan foto atau file</string>
+    <string name="agent_remove_attachment">Hapus lampiran</string>
 </resources>
