@@ -69,7 +69,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.BuildConfig
@@ -90,6 +93,15 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     var githubTokenInput by remember { mutableStateOf("") }
+    // Coming back from the GitHub tab in the browser: poll at once so the connection lands without waiting.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.resumeGitHubDeviceSignIn()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     var newRepoName by rememberSaveable { mutableStateOf("") }
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
     var newRepoPrivate by rememberSaveable { mutableStateOf(true) }
@@ -129,21 +141,28 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                         onClick = { viewModel.startGitHubDeviceSignIn() },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    fun connectToken() {
+                        val token = githubTokenInput.trim()
+                        if (token.isNotEmpty()) {
+                            viewModel.connectGitHubWithToken(token)
+                            githubTokenInput = ""
+                        }
+                    }
                     ForgeTextField(
                         kind = ForgeFieldKind.SECRET, imeAction = ImeAction.Done,
+                        onImeAction = { connectToken() },
                         value = githubTokenInput,
-                        onValueChange = { githubTokenInput = it },
+                        onValueChange = { value ->
+                            githubTokenInput = value
+                            // A pasted token that already has GitHub's shape connects by itself; no second tap needed.
+                            if (looksLikeGitHubToken(value)) connectToken()
+                        },
                         label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedButton(
                         shape = RoundedCornerShape(100),
-                        onClick = {
-                            if (githubTokenInput.isNotBlank()) {
-                                viewModel.connectGitHubWithToken(githubTokenInput)
-                                githubTokenInput = ""
-                            }
-                        },
+                        onClick = { connectToken() },
                         enabled = githubTokenInput.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     ) { Text(stringResource(R.string.settings_connect)) }
@@ -249,4 +268,11 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
         }
 
     }
+}
+
+/** GitHub token prefixes (classic, fine-grained, OAuth, app) with enough length to be a complete paste. */
+internal fun looksLikeGitHubToken(value: String): Boolean {
+    val v = value.trim()
+    return (v.startsWith("github_pat_") && v.length >= 60) ||
+        (listOf("ghp_", "gho_", "ghu_", "ghs_", "ghr_").any(v::startsWith) && v.length >= 40)
 }

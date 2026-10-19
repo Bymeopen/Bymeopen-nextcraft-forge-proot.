@@ -106,6 +106,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 )
                 OutlinedButton(
                     shape = RoundedCornerShape(100),
+                    // Allowed while a browser login is waiting: the controller restarts the flow in SSO mode.
                     onClick = { scope.launch { viewModel.claudeAuth.beginLogin(ClaudeLoginMode.SSO, email) } },
                     enabled = !inFlight,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),

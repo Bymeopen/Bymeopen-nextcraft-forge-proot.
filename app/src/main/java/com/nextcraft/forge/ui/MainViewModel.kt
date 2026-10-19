@@ -95,6 +95,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -215,6 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
+    private var githubClientId: String = GitHubClient.DEFAULT_CLIENT_ID
     /** Bridge actually running the current session; approvals must go here, not to whatever agentKind is selected now. */
     private var activeRuntimeBridge: RuntimeBridge? = null
     private val logLineIdCounter = AtomicLong(1L)
@@ -2505,17 +2507,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_error, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
                 return@launch
             }
+            githubClientId = cleanId
             _state.update {
                 it.copy(
                     githubDeviceCode = deviceCode,
                     githubStatusMessage = UiText.res(R.string.msg_gh_open_and_enter, deviceCode.verificationUri, deviceCode.userCode),
                 )
             }
-            var intervalSec = deviceCode.intervalSeconds
-            var networkFailures = 0
-            val deadline = System.currentTimeMillis() + deviceCode.expiresInSeconds * 1000L
+            pollGitHubDeviceToken(cleanId, deviceCode, pollImmediately = false)
+        }
+    }
+
+    /**
+     * Called when the app returns to the foreground while a device code is still on screen: the user has most likely
+     * just approved it in the browser, so poll right away instead of waiting out the interval, and restart the loop if
+     * it was lost.
+     */
+    fun resumeGitHubDeviceSignIn() {
+        val deviceCode = _state.value.githubDeviceCode ?: return
+        if (_state.value.githubLogin.isNotBlank()) return
+        githubPollJob?.cancel()
+        githubPollJob = viewModelScope.launch { pollGitHubDeviceToken(githubClientId, deviceCode, pollImmediately = true) }
+    }
+
+    private suspend fun pollGitHubDeviceToken(cleanId: String, deviceCode: GitHubDeviceCode, pollImmediately: Boolean) {
+        var intervalSec = deviceCode.intervalSeconds
+        var networkFailures = 0
+        var first = pollImmediately
+        val deadline = System.currentTimeMillis() + deviceCode.expiresInSeconds * 1000L
+        coroutineScope {
             while (isActive && System.currentTimeMillis() < deadline) {
-                delay(intervalSec * 1000L)
+                if (first) first = false else delay(intervalSec * 1000L)
                 val poll = withContext(Dispatchers.IO) {
                     runCatching { githubClient.pollDeviceToken(cleanId, deviceCode.deviceCode) }
                         .onSuccess { networkFailures = 0 }
@@ -2534,7 +2556,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             _state.update {
                                 it.copy(githubDeviceCode = null, githubStatusMessage = err.message?.let { UiText.Raw(it) } ?: UiText.res(R.string.msg_gh_token_store_failed))
                             }
-                            return@launch
+                            return@coroutineScope
                         }
                         val account = withContext(Dispatchers.IO) {
                             runCatching { githubClient.account(poll.accessToken) }.getOrNull()
@@ -2556,14 +2578,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 githubStatusMessage = UiText.res(R.string.msg_gh_connected, login.ifBlank { getApplication<Application>().getString(R.string.msg_gh_user) }, repos.size),
                             )
                         }
-                        return@launch
+                        return@coroutineScope
                     }
                     is GitHubTokenPoll.Pending -> {
                         if (poll.slowDown) intervalSec += 5L
                     }
                     is GitHubTokenPoll.Failure -> {
                         _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = UiText.Raw(poll.message)) }
-                        return@launch
+                        return@coroutineScope
                     }
                 }
             }
