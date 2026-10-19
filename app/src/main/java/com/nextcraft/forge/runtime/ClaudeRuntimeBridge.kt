@@ -152,10 +152,11 @@ class ClaudeRuntimeBridge(
         streamedThinking.clear()
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting Claude Code…")
-        val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
-        if (secret.isBlank()) {
+        val storedLogin = usesStoredClaudeLogin(provider)
+        val secret = if (storedLogin) "" else secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
+        if (secret.isBlank() && !storedLogin) {
             val message = if (provider.kind == ProviderKind.CLAUDE) {
-                "No Claude subscription token is saved. Add one from Agent → AI provider."
+                "Not signed in to Claude. Open Agent → AI provider and sign in, or add a subscription token."
             } else {
                 "No API key is saved for ${provider.kind.title}."
             }
@@ -201,6 +202,7 @@ class ClaudeRuntimeBridge(
                 provider,
                 authToken = secret,
                 localGatewayUrl = formatGateway?.url ?: openRouterGateway?.url,
+                useStoredLogin = storedLogin,
             )
             Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}")
             Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
@@ -333,14 +335,26 @@ class ClaudeRuntimeBridge(
      * Runs a one-turn "reply ok" prompt with the saved credentials to prove Claude Code can
      * authenticate inside Root Chroot.
      */
+    /**
+     * True for the Claude subscription provider when no token was entered by hand but `claude auth login` left a login
+     * in the guest: the CLI then authenticates (and refreshes) with its own credentials file.
+     */
+    private fun usesStoredClaudeLogin(provider: ProviderProfile): Boolean {
+        if (provider.kind != ProviderKind.CLAUDE) return false
+        val vault = com.nextcraft.forge.data.ApiKeyVault(context)
+        val manualToken = listOf(ProviderKind.CLAUDE, ProviderKind.ANTHROPIC).any { !vault.get(it.name).isNullOrBlank() }
+        return !manualToken && installer.hasClaudeLoginCredential()
+    }
+
     suspend fun hello(provider: ProviderProfile, timeoutMillis: Long = 90_000L): String = withContext(Dispatchers.IO) {
         val startedAt = android.os.SystemClock.elapsedRealtime()
-        val secret = secretFor(provider).orEmpty()
-        check(secret.isNotBlank()) { "No Claude subscription token is saved." }
+        val storedLogin = usesStoredClaudeLogin(provider)
+        val secret = if (storedLogin) "" else secretFor(provider).orEmpty()
+        check(secret.isNotBlank() || storedLogin) { "Not signed in to Claude." }
         val installed = installer.installedRuntime()
         val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
         val outputFile = File(context.cacheDir, "claude-hello-${System.nanoTime()}.log")
-        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret)
+        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, useStoredLogin = storedLogin)
         val command = listOf(
             launch.executable,
             "-p", "Reply with exactly: ok",
