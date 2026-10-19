@@ -81,6 +81,21 @@ import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.layout.heightIn
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -125,23 +140,15 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     Scaffold(
         containerColor = Color.Transparent,
-        topBar = {
-            // Every screen except Agent now draws its own large title; Agent keeps the project/agent switcher bar.
-            if (state.activeTab == ForgeTab.AGENT) ForgeTopBar(
-                state = state,
-                onSelectProject = viewModel::selectProject,
-                onDeleteProject = viewModel::deleteProject,
-                onOpenNewProject = { showNewProjectDialog = true },
-                onSelectAgent = viewModel::selectAgent,
-                onSelectThemeMode = viewModel::setThemeMode,
-            )
-        },
+        topBar = {},
         bottomBar = {
             // adjustResize lifts the bar above the keyboard and eats the composer's space; hide it while typing.
             if (!imeVisible) {
                 ForgeBottomBar(
                     activeTab = state.activeTab,
                     changedCount = state.changedItems.size,
+                    agentRunning = state.sessionRunning,
+                    terminalBusy = state.terminalRunning,
                     onSelectTab = viewModel::selectTab,
                 )
             }
@@ -152,7 +159,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            state.bannerMessage?.let { banner ->
+            state.bannerMessage?.asString()?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -201,6 +208,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         state = state,
                         onOpenProject = viewModel::openProject,
                         onNewProject = { showNewProjectDialog = true },
+                        onQuickProject = {
+                            viewModel.createQuickProject()
+                            viewModel.selectTab(ForgeTab.AGENT)
+                        },
+                        onImportZip = viewModel::importZipProject,
+                        onCloneGitUrl = viewModel::cloneGitUrl,
+                        onConnectGitHub = { viewModel.selectTab(ForgeTab.SETTINGS) },
                         onDeleteProject = viewModel::deleteProject,
                         onNewQuickProject = {
                             viewModel.createQuickProject()
@@ -470,9 +484,9 @@ private fun ForgeTopBar(
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(mode.title, fontWeight = FontWeight.SemiBold)
+                                        Text(stringResource(mode.title), fontWeight = FontWeight.SemiBold)
                                         Text(
-                                            text = mode.subtitle,
+                                            text = stringResource(mode.subtitle),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -497,115 +511,176 @@ private fun ForgeTopBar(
     }
 }
 
-private data class NavEntry(val tab: ForgeTab, val icon: ImageVector, @StringRes val label: Int)
+private data class NavEntry(val tab: ForgeTab, @StringRes val label: Int)
 
 private val navEntries = listOf(
-    NavEntry(ForgeTab.PROJECTS, Icons.Default.Home, R.string.nav_projects),
-    NavEntry(ForgeTab.AGENT, Icons.Default.Star, R.string.nav_agent),
-    NavEntry(ForgeTab.TOOLS, Icons.Default.Build, R.string.nav_tools),
-    NavEntry(ForgeTab.SETTINGS, Icons.Default.Settings, R.string.nav_settings),
+    NavEntry(ForgeTab.PROJECTS, R.string.nav_projects),
+    NavEntry(ForgeTab.TERMINAL, R.string.nav_terminal),
+    NavEntry(ForgeTab.AGENT, R.string.nav_agent),
+    NavEntry(ForgeTab.TOOLS, R.string.nav_tools),
+    NavEntry(ForgeTab.SETTINGS, R.string.nav_settings),
 )
 
-// Screens reachable from the Tools launcher keep the Tools tab highlighted (Terminal has its own round button).
-private val toolsGroup = setOf(
-    ForgeTab.TOOLS,
-    ForgeTab.FILES,
-    ForgeTab.ANDROID,
-    ForgeTab.PREVIEW,
-)
+// Screens reachable from the Tools launcher keep the Tools tab highlighted.
+private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
+
+private fun ForgeTab.navIndex(): Int {
+    val tab = if (this in toolsGroup) ForgeTab.TOOLS else this
+    return navEntries.indexOfFirst { it.tab == tab }.coerceAtLeast(0)
+}
 
 /**
- * Linear-style floating capsule: four icon-only tabs (selected = soft pill) plus a detached
- * round button for the terminal. Same shape in every theme; only colours/border come from tokens.
+ * Five labelled tabs with ONE physical selection pill that slides between them (420 ms, slight overshoot).
+ * Material differs per theme: Dark/White draw a full-width bar fused to the screen, Glass floats a capsule.
+ * With animations disabled the pill snaps and only colours change.
  */
 @Composable
 private fun ForgeBottomBar(
     activeTab: ForgeTab,
     changedCount: Int,
+    agentRunning: Boolean,
+    terminalBusy: Boolean,
     onSelectTab: (ForgeTab) -> Unit,
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val barBorder = if (tokens.isGlass || tokens.isWhite) tokens.cardBorderStroke else null
-    val barShadow = if (tokens.isGlass) 12.dp else 0.dp
+    val reduceMotion = rememberReduceMotion()
+    val selectedIndex = activeTab.navIndex()
+    val pillOffset by animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.72f, stiffness = 380f),
+        label = "navPill",
+    )
 
-    Row(
+    val floating = tokens.isGlass
+    val outerPadding = if (floating) PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp) else PaddingValues(0.dp)
+    val shape = if (floating) RoundedCornerShape(100) else RoundedCornerShape(0.dp)
+    val pillFill = if (tokens.isWhite) scheme.primary.copy(alpha = 0.10f) else scheme.primary.copy(alpha = 0.18f)
+    val pillEdge = scheme.primary.copy(alpha = 0.30f)
+    val pillShape = RoundedCornerShape(if (floating) 100 else 22)
+
+    Surface(
+        shape = shape,
+        color = tokens.bottomBarContainerColor,
+        contentColor = scheme.onSurface,
+        border = if (floating) tokens.cardBorderStroke else null,
+        shadowElevation = if (floating) 12.dp else 0.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 25.dp, end = 25.dp, top = 8.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(outerPadding),
     ) {
-        Surface(
-            shape = RoundedCornerShape(100),
-            color = tokens.bottomBarContainerColor,
-            contentColor = scheme.onSurface,
-            border = barBorder,
-            shadowElevation = barShadow,
-            modifier = Modifier
-                .weight(1f)
-                .height(53.dp),
-        ) {
-            Row(
+        Column {
+            if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+            BoxWithConstraints(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
-                navEntries.forEach { entry ->
-                    val label = stringResource(entry.label)
-                    val selected = if (entry.tab == ForgeTab.TOOLS) activeTab in toolsGroup else activeTab == entry.tab
+                val slot = maxWidth / navEntries.size
+                val pillInset = 6.dp
+                // Pill: the only moving object. A radial gradient drawn behind it gives the soft outward glow
+                // (no blur, so it costs nothing on low-end GPUs). White skips the glow: it would look muddy.
+                val glow = !tokens.isWhite
+                Box(
+                    modifier = Modifier
+                        .offset(x = slot * pillOffset)
+                        .width(slot)
+                        .fillMaxHeight(),
+                ) {
+                    if (glow) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .drawBehind {
+                                    drawRect(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(scheme.primary.copy(alpha = 0.28f), Color.Transparent),
+                                            center = center,
+                                            radius = size.maxDimension * 0.62f,
+                                        ),
+                                    )
+                                },
+                        )
+                    }
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(100))
-                            .background(if (selected) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                            .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = entry.icon,
-                            contentDescription = label,
-                            tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp),
+                            .matchParentSize()
+                            .padding(pillInset)
+                            .clip(pillShape)
+                            .background(pillFill)
+                            .border(1.dp, pillEdge, pillShape),
+                    )
+                }
+                Row(modifier = Modifier.fillMaxSize()) {
+                    navEntries.forEachIndexed { index, entry ->
+                        val label = stringResource(entry.label)
+                        val selected = index == selectedIndex
+                        val tint by animateColorAsState(
+                            targetValue = if (selected) scheme.primary else scheme.onSurfaceVariant,
+                            animationSpec = if (reduceMotion) snap() else tween(220),
+                            label = "navTint",
                         )
-                        // Pending file changes live under Tools; show a quiet accent dot when it is not open.
-                        if (entry.tab == ForgeTab.TOOLS && changedCount > 0 && !selected) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 9.dp, end = 18.dp)
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(scheme.primary),
+                        // Glyph morph follows the same spring as the pill so icon and pill arrive together.
+                        val morph by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0f,
+                            animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.72f, stiffness = 380f),
+                            label = "navMorph",
+                        )
+                        val live = when (entry.tab) {
+                            ForgeTab.AGENT -> agentRunning
+                            ForgeTab.TERMINAL -> terminalBusy
+                            else -> false
+                        }
+                        val badge: String? = when (entry.tab) {
+                            ForgeTab.AGENT -> if (agentRunning) stringResource(R.string.nav_badge_agent_running) else null
+                            ForgeTab.TOOLS -> if (changedCount > 0) stringResource(R.string.nav_badge_files_changed, changedCount) else null
+                            ForgeTab.TERMINAL -> if (terminalBusy) stringResource(R.string.nav_badge_terminal_busy) else null
+                            else -> null
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(pillShape)
+                                .clickable(role = Role.Tab, onClickLabel = label) { onSelectTab(entry.tab) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Box {
+                                NavGlyph(
+                                    tab = entry.tab,
+                                    progress = morph,
+                                    live = live,
+                                    tint = tint,
+                                    reduceMotion = reduceMotion,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = if (badge == null) label else "$label, $badge"
+                                    },
+                                )
+                                if (badge != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 3.dp, y = (-2).dp)
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(scheme.primary),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = tint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
                 }
-            }
-        }
-        Surface(
-            shape = CircleShape,
-            color = tokens.bottomBarContainerColor,
-            contentColor = scheme.onSurface,
-            border = barBorder,
-            shadowElevation = barShadow,
-            modifier = Modifier.size(53.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                    .background(if (activeTab == ForgeTab.TERMINAL) scheme.onSurface.copy(alpha = 0.10f) else Color.Transparent)
-                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_terminal)) { onSelectTab(ForgeTab.TERMINAL) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.List,
-                    contentDescription = stringResource(R.string.shell_terminal),
-                    modifier = Modifier.size(22.dp),
-                )
             }
         }
     }
@@ -623,164 +698,124 @@ private fun RuntimeOnboardingScreen(
 ) {
     val snap = state.setupSnapshot
     val isInstalling = snap.status == RuntimeSetupStatus.RUNNING
-    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(bottom = 24.dp),
     ) {
-        Text(
-            text = stringResource(R.string.shell_nextcraft_forge),
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "Ubuntu 24.04 LTS ARM64 Root Chroot (`su -mm`) Environment Setup",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        ForgeLargeTitle(
+            title = stringResource(R.string.onb_title),
+            subtitle = stringResource(R.string.onb_subtitle),
         )
 
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_arm64),
-                    ok = state.arm64Supported,
-                    detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
-                )
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_root),
-                    ok = state.rootAvailable,
-                    detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
-                )
-                StatusCheckRow(
-                    label = stringResource(R.string.shell_check_rootfs),
-                    ok = state.runtimeInstalled,
-                    detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
-                )
-            }
-        }
+        ForgeSectionLabel(stringResource(R.string.onb_checks))
+        StatusCheckRow(
+            label = stringResource(R.string.shell_check_arm64),
+            ok = state.arm64Supported,
+            detail = stringResource(if (state.arm64Supported) R.string.shell_supported else R.string.shell_requires_arm64),
+        )
+        StatusCheckRow(
+            label = stringResource(R.string.shell_check_root),
+            ok = state.rootAvailable,
+            detail = stringResource(if (state.rootAvailable) R.string.shell_root_granted else R.string.shell_root_required),
+        )
+        StatusCheckRow(
+            label = stringResource(R.string.shell_check_rootfs),
+            ok = state.runtimeInstalled,
+            detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
+        )
 
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.shell_select_development_stacks_to),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                DevStack.entries.forEach { stack ->
-                    val selected = stack in state.selectedDevStacks
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isInstalling, role = Role.Button) { onToggleStack(stack) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Switch(
-                            checked = selected,
-                            onCheckedChange = { if (!isInstalling) onToggleStack(stack) },
-                            enabled = !isInstalling,
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stack.displayLabel(), fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = stack.displayDescription(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = stack.installsSummary,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = tokens.accentText,
-                            )
-                        }
-                    }
-                }
-            }
+        ForgeSectionLabel(stringResource(R.string.onb_stacks))
+        DevStack.entries.forEach { stack ->
+            ForgeToggleRow(
+                title = stack.displayLabel(),
+                subtitle = stack.displayDescription() + " · " + stack.installsSummary,
+                checked = stack in state.selectedDevStacks,
+                enabled = !isInstalling,
+                onCheckedChange = { onToggleStack(stack) },
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
         }
 
         if (snap.status != RuntimeSetupStatus.IDLE) {
             val pct = (snap.progress.coerceIn(0f, 1f) * 100f).toInt()
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(snap.message, style = MaterialTheme.typography.titleMedium)
-                    snap.errorMessage?.let { err ->
-                        Text(
-                            text = err,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.dangerText,
-                        )
-                    }
-                    LinearProgressIndicator(
-                        progress = snap.progress.coerceIn(0f, 1f),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "$pct% • Status: ${snap.status.name}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Button(
-                onClick = onStartSetup,
-                enabled = state.arm64Supported && !isInstalling,
-                modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime))
-            }
-            if (isInstalling) {
-                OutlinedButton(onClick = onPauseSetup) {
-                    Text(stringResource(R.string.launch_pause))
+                ForgeStatusIcon(
+                    status = when (snap.status) {
+                        RuntimeSetupStatus.RUNNING -> ForgeStatus.RUNNING
+                        RuntimeSetupStatus.CANCELLED -> ForgeStatus.SKIPPED
+                        else -> if (snap.errorMessage != null) ForgeStatus.FAILED else ForgeStatus.DONE
+                    },
+                    iconSize = 22.dp,
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(snap.message, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = snap.errorMessage ?: stringResource(R.string.onb_progress_pct, pct, snap.status.name.lowercase()),
+                        fontSize = 13.sp,
+                        color = if (snap.errorMessage != null) scheme.error else scheme.onSurfaceVariant,
+                    )
                 }
             }
+            LinearProgressIndicator(
+                progress = snap.progress.coerceIn(0f, 1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                    .height(3.dp),
+            )
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+        if (isInstalling) {
+            OutlinedButton(
+                onClick = onPauseSetup,
+                shape = RoundedCornerShape(100),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.launch_pause)) }
+        } else {
+            ForgePrimaryButton(
+                text = stringResource(if (snap.status == RuntimeSetupStatus.CANCELLED) R.string.shell_resume_setup else R.string.shell_install_runtime),
+                onClick = onStartSetup,
+                enabled = state.arm64Supported,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+            )
+        }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             OutlinedButton(
                 onClick = onRepairRootfs,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.shell_repair_mounts_dpkg))
-            }
+                shape = RoundedCornerShape(100),
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.onb_repair)) }
             OutlinedButton(
                 onClick = onRefreshStatus,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.shell_re_check_root))
-            }
+                shape = RoundedCornerShape(100),
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+            ) { Text(stringResource(R.string.onb_recheck)) }
         }
-
         TextButton(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
-        ) {
-            Text(stringResource(R.string.shell_continue_to_ide_workspace))
-        }
+        ) { Text(stringResource(R.string.onb_continue_anyway)) }
     }
 }
 
@@ -790,25 +825,18 @@ private fun StatusCheckRow(
     ok: Boolean,
     detail: String,
 ) {
-    val tokens = LocalForgeThemeTokens.current
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
-            contentDescription = null,
-            tint = if (ok) tokens.successText else tokens.warningText,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(modifier = Modifier.width(10.dp))
+        ForgeStatusIcon(if (ok) ForgeStatus.DONE else ForgeStatus.FAILED, iconSize = 20.dp)
+        Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(text = detail, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -825,7 +853,8 @@ private fun NewProjectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.shell_create_workspace_project)) },
+        shape = RoundedCornerShape(24.dp),
+        title = { Text(stringResource(R.string.np_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -834,6 +863,7 @@ private fun NewProjectDialog(
                     label = { Text(stringResource(R.string.shell_project_name)) },
                     placeholder = { Text(stringResource(R.string.shell_my_awesome_app)) },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -842,46 +872,34 @@ private fun NewProjectDialog(
                     label = { Text(stringResource(R.string.shell_description)) },
                     placeholder = { Text(stringResource(R.string.shell_optional_project_summary)) },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Switch(
-                        checked = isAndroid,
-                        onCheckedChange = { isAndroid = it },
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(stringResource(R.string.shell_generate_android_app_template))
-                }
+                ForgeToggleRow(
+                    title = stringResource(R.string.np_android_template),
+                    subtitle = stringResource(R.string.np_android_template_sub),
+                    checked = isAndroid,
+                    onCheckedChange = { isAndroid = it },
+                )
                 if (isAndroid) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        AndroidTemplate.entries.forEach { item ->
-                            FilterChip(
-                                selected = template == item,
-                                onClick = { template = item },
-                                label = { Text(item.label) },
-                            )
-                        }
-                    }
+                    ForgePillTabs(
+                        items = AndroidTemplate.entries.map { it.label },
+                        selectedIndex = AndroidTemplate.entries.indexOf(template),
+                        onSelect = { template = AndroidTemplate.entries[it] },
+                        modifier = Modifier.padding(horizontal = 0.dp),
+                    )
                 }
             }
         },
         confirmButton = {
             Button(
                 onClick = { onCreate(name, description, isAndroid, template) },
-            ) {
-                Text(stringResource(R.string.files_create))
-            }
+                enabled = name.isNotBlank(),
+                shape = RoundedCornerShape(100),
+            ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.agent_cancel))
-            }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
         },
     )
 }

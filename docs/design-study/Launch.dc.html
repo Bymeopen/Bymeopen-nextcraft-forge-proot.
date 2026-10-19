@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Launch screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap">
+<style>body{margin:0;font-family:Inter,system-ui,sans-serif}a{color:inherit;text-decoration:none}a:hover{color:inherit}.mono{font-family:"JetBrains Mono",ui-monospace,monospace}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: {{bg}}; color: {{text}}; position: relative; overflow: hidden">
+  <div style="height: 44px; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 28px 6px; font-size: 14px; font-weight: 600"><span>4:16</span><span>82</span></div>
+  <div style="display: flex; align-items: center; padding: 10px 14px 0 20px; gap: 10px">
+    <div style="flex: 1; display: flex; flex-direction: column"><div style="font-size: 27px; font-weight: 600">Launch</div><div style="font-size: 14px; color: {{muted}}">my-todo-app</div></div>
+    <div style="height: 38px; border-radius: 19px; background: {{pillBg}}; display: flex; align-items: center; padding: 0 4px">
+      <button type="button" onClick="{{primaryAction}}" aria-label="{{primaryLabel}}" style="width: 44px; height: 38px; border: 0; background: transparent; color: {{primaryColor}}; font-size: 16px; cursor: pointer; font-family: inherit">{{primaryGlyph}}</button>
+      <button type="button" aria-label="More build actions" style="width: 44px; height: 38px; border: 0; background: transparent; color: {{text}}; font-size: 20px; cursor: pointer; font-family: inherit">⋮</button>
+    </div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 14px; padding: 14px 20px 6px">
+    <span style="width: 22px; height: 22px; border-radius: 50%; background: {{statusBg}}; border: 2px solid {{statusRing}}; box-sizing: border-box; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700">{{statusGlyph}}</span>
+    <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 19px; font-weight: 600">{{headline}}</span><span style="font-size: 14px; color: {{muted}}">{{subline}}</span></span>
+  </div>
+  <sc-if value="{{building}}" hint-placeholder-val="{{true}}">
+    <div style="margin: 4px 20px 0; height: 3px; border-radius: 2px; background: {{raised}}; overflow: hidden"><div style="height: 3px; width: 46%; background: {{accent}}"></div></div>
+  </sc-if>
+  <sc-if value="{{showCta}}" hint-placeholder-val="{{false}}">
+    <button type="button" style="margin: 10px 20px 0; height: 44px; border-radius: 22px; border: 0; background: {{accent}}; color: {{onAccent}}; font-family: inherit; font-weight: 600; font-size: 15px; cursor: pointer">{{ctaLabel}}</button>
+  </sc-if>
+  <div style="display: flex; gap: 6px; padding: 12px 14px 6px">
+    <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="4">
+      <button type="button" onClick="{{tb.pick}}" style="height: 34px; padding: 0 15px; border-radius: 17px; border: 0; background: {{tb.bg}}; color: {{tb.color}}; font-size: 15px; font-family: inherit; cursor: pointer">{{tb.name}}</button>
+    </sc-for>
+  </div>
+  <div style="flex: 1; overflow: auto; padding-bottom: 90px">
+    <sc-if value="{{showStages}}" hint-placeholder-val="{{true}}">
+      <sc-for list="{{stages}}" as="s" hint-placeholder-count="6">
+        <div style="display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 8px 20px; box-sizing: border-box">
+          <span style="width: 20px; height: 20px; border-radius: 50%; background: {{s.bg}}; border: 2px {{s.borderStyle}} {{s.ring}}; box-sizing: border-box; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">{{s.glyph}}</span>
+          <span style="font-size: 16px; font-weight: 500; color: {{s.color}}">{{s.name}}</span>
+        </div>
+      </sc-for>
+    </sc-if>
+    <sc-if value="{{showIssues}}" hint-placeholder-val="{{false}}">
+      <div style="display: flex; flex-direction: column">
+        <sc-for list="{{issues}}" as="i" hint-placeholder-count="2">
+          <a href="Files.dc.html" style="display: flex; gap: 12px; padding: 12px 20px; border-bottom: 0.5px solid {{line}}">
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #E5484D; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; margin-top: 2px">×</span>
+            <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15px; font-weight: 500">{{i.title}}</span><span class="mono" style="font-size: 12.5px; color: {{muted}}">{{i.where}}</span></span>
+            <span style="color: {{muted}}">›</span>
+          </a>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{showLog}}" hint-placeholder-val="{{false}}">
+      <div class="mono" style="margin: 6px 14px; padding: 12px; border-radius: 12px; background: {{term}}; color: {{termText}}; font-size: 12px; line-height: 17px; white-space: pre-line">> Task :app:compileDebugKotlin
+> Task :app:mergeDebugResources
+w: unused variable 'x'
+BUILD SUCCESSFUL in 41s</div>
+    </sc-if>
+  </div>
+  <a href="Main.dc.html" style="position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: {{barBg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; color: {{muted}}; border-top: 0.5px solid {{line}}">Projects · Terminal · Agent · Tools · Settings — open Navigation for the live bar</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["linear","system","white","glass"],"default":"linear","section":"Theme"},"phase":{"editor":"enum","options":["idle","building","failed","succeeded"],"default":"building","section":"State"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 0, lastPhase: null }; }
+  renderVals() {
+    const t = this.props.theme ?? 'linear';
+    const P = {
+      linear: { bg: '#0B0B0B', text: '#EDEDED', muted: '#9C9C9C', line: '#1E1E1E', ring: '#4A4A4A', accent: '#5E6AD2', onAccent: '#FFFFFF', raised: '#1B1B1B', barBg: '#131313', pillBg: 'rgba(255,255,255,.07)', term: '#070707', termText: '#E6E6E6' },
+      system: { bg: '#141218', text: '#E6E0E9', muted: '#CAC4D0', line: '#2B2930', ring: '#6F6B76', accent: '#D0BCFF', onAccent: '#381E72', raised: '#2B2930', barBg: '#211F26', pillBg: 'rgba(255,255,255,.08)', term: '#0F0D13', termText: '#E6E0E9' },
+      white:  { bg: '#FFFFFF', text: '#111111', muted: '#666666', line: '#E4E4E4', ring: '#BDBDBD', accent: '#D70F47', onAccent: '#FFFFFF', raised: '#EFEFEF', barBg: '#F7F7F7', pillBg: 'rgba(0,0,0,.06)', term: '#F3F3F3', termText: '#222222' },
+      glass:  { bg: 'linear-gradient(160deg,#0D1326 0%,#1A1038 55%,#0B1B2E 100%)', text: '#FFFFFF', muted: '#C3C8DC', line: 'rgba(255,255,255,.12)', ring: '#7A81A0', accent: '#7C8CFF', onAccent: '#0B1030', raised: 'rgba(255,255,255,.10)', barBg: 'rgba(255,255,255,.07)', pillBg: 'rgba(255,255,255,.10)', term: 'rgba(7,10,20,.58)', termText: '#F8FAFC' },
+    }[t];
+    const phase = this.props.phase ?? 'building';
+    // A failed build jumps to Issues once, like the app does.
+    let tab = this.state.tab;
+    if (phase === 'failed' && this.state.lastPhase !== 'failed') { tab = 1; this.state.tab = 1; }
+    this.state.lastPhase = phase;
+    const yellow = '#F2C94C';
+    const stageNames = ['Prepare', 'Resolve dependencies', 'Compile', 'Resources', 'Package APK', 'Install'];
+    const reached = { idle: -1, building: 2, failed: 2, succeeded: 4 }[phase];
+    const stages = stageNames.map((name, i) => {
+      let st = 'todo';
+      if (reached >= 0) {
+        if (i < reached) st = 'done';
+        else if (i === reached) st = phase === 'failed' ? 'failed' : (phase === 'succeeded' ? 'done' : 'running');
+        else st = phase === 'succeeded' ? 'skipped' : 'todo';
+      }
+      const m = {
+        done: { bg: P.accent, ring: P.accent, glyph: '✓', borderStyle: 'solid', color: P.text },
+        running: { bg: 'transparent', ring: yellow, glyph: '◐', borderStyle: 'solid', color: P.text },
+        failed: { bg: '#E5484D', ring: '#E5484D', glyph: '×', borderStyle: 'solid', color: P.text },
+        todo: { bg: 'transparent', ring: P.ring, glyph: '', borderStyle: 'solid', color: P.muted },
+        skipped: { bg: 'transparent', ring: P.ring, glyph: '', borderStyle: 'dotted', color: P.muted },
+      }[st];
+      return { name, ...m };
+    });
+    const head = {
+      idle: ['Ready to build', 'Last build: succeeded 3m ago', 'transparent', P.ring, ''],
+      building: ['Building', 'Compile · 00:42', 'transparent', yellow, '◐'],
+      failed: ['Build failed', '2 errors · 1 warning', '#E5484D', '#E5484D', '×'],
+      succeeded: ['Build succeeded', 'app-debug.apk · 4.1 MB · 58s', P.accent, P.accent, '✓'],
+    }[phase];
+    const tabNames = ['Stages', phase === 'failed' ? 'Issues (2)' : 'Issues', 'Log', 'Logcat'];
+    const tabs = tabNames.map((name, i) => ({ name, bg: i === tab ? P.pillBg : 'transparent', color: i === tab ? P.text : P.muted, pick: () => this.setState({ tab: i }) }));
+    return {
+      ...P, stages, tabs,
+      headline: head[0], subline: head[1], statusBg: head[2], statusRing: head[3], statusGlyph: head[4],
+      building: phase === 'building',
+      showCta: phase === 'failed' || phase === 'succeeded',
+      ctaLabel: phase === 'failed' ? 'Fix with Agent' : 'Install APK',
+      primaryGlyph: phase === 'building' ? '✕' : '▶', primaryLabel: phase === 'building' ? 'Cancel build' : 'Build and install APK',
+      primaryColor: phase === 'building' ? '#E5484D' : P.text, primaryAction: () => {},
+      showStages: tab === 0, showIssues: tab === 1, showLog: tab === 2 || tab === 3,
+      issues: [{ title: 'Unresolved reference: foo', where: 'MainActivity.kt:42' }, { title: 'Type mismatch: String vs Int', where: 'Utils.kt:18' }],
+    };
+  }
+}
+</script>
+</body>
+</html>

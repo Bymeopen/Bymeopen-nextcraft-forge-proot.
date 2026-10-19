@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>body{margin:0;font-family:Inter,system-ui,sans-serif}a{color:inherit;text-decoration:none}a:hover{color:inherit}.mono{font-family:"JetBrains Mono",ui-monospace,monospace}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: {{bg}}; color: {{text}}; position: relative; overflow: hidden">
+  <div style="height: 44px; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 28px 6px; font-size: 14px; font-weight: 600"><span>4:16</span><span>82</span></div>
+  <div style="display: flex; align-items: center; padding: 10px 14px 0 20px; gap: 10px">
+    <div style="flex: 1; display: flex; flex-direction: column">
+      <div style="font-size: 27px; font-weight: 600">Agent</div>
+      <div style="font-size: 14px; color: {{muted}}">my-todo-app · {{agentName}}</div>
+    </div>
+    <div style="height: 38px; border-radius: 19px; background: {{pillBg}}; display: flex; align-items: center; padding: 0 4px; position: relative">
+      <button type="button" aria-label="New chat" style="width: 44px; height: 38px; border: 0; background: transparent; color: {{text}}; font-size: 20px; cursor: pointer; font-family: inherit">+</button>
+      <button type="button" onClick="{{toggleMenu}}" aria-label="Switch agent" style="width: 44px; height: 38px; border: 0; background: transparent; color: {{text}}; font-size: 20px; cursor: pointer; font-family: inherit">⋮</button>
+      <sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}">
+        <div style="position: absolute; top: 44px; right: 0; width: 220px; border-radius: 14px; background: {{card}}; border: {{cardBorder}}; box-shadow: 0 12px 32px rgba(0,0,0,.35); padding: 6px; display: flex; flex-direction: column; z-index: 3">
+          <div style="font-size: 12px; color: {{muted}}; padding: 6px 12px">Switch agent</div>
+          <sc-for list="{{agents}}" as="a" hint-placeholder-count="3">
+            <button type="button" onClick="{{a.pick}}" style="appearance: none; border: 0; background: {{a.bg}}; color: {{text}}; text-align: left; border-radius: 10px; padding: 10px 12px; font-family: inherit; cursor: pointer; display: flex; flex-direction: column">
+              <span style="font-size: 14px; font-weight: 600">{{a.name}}</span>
+              <span style="font-size: 12px; color: {{muted}}">{{a.sub}}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+  <div style="display: flex; gap: 6px; padding: 10px 14px 6px">
+    <sc-for list="{{chats}}" as="c" hint-placeholder-count="2">
+      <button type="button" onClick="{{c.pick}}" style="height: 34px; padding: 0 15px; border-radius: 17px; border: 0; background: {{c.bg}}; color: {{c.color}}; font-size: 15px; font-family: inherit; cursor: pointer">{{c.name}}</button>
+    </sc-for>
+  </div>
+  <div style="flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 6px 0 180px">
+    <div style="margin: 0 18px; border-radius: 16px; background: {{raised}}; padding: 10px 12px; font-size: 15px">Add a delete button to the todo list</div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 20px; font-size: 13.5px; color: {{muted}}"><span style="width: 14px; height: 14px; border-radius: 50%; background: {{accent}}"></span><span class="mono" style="color: {{text}}; font-size: 13px">Edit TodoList.kt</span></div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 20px; font-size: 13.5px; color: {{muted}}"><span style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid #F2C94C; box-sizing: border-box"></span><span class="mono" style="color: {{text}}; font-size: 13px">Run build</span></div>
+    <div style="padding: 4px 20px; font-size: 15px; line-height: 1.5">I added a delete icon to each row and wired it to <span class="mono" style="background: {{raised}}; padding: 1px 5px; border-radius: 5px; font-size: 13.5px">onDelete</span>. The build is running.</div>
+    <div style="margin: 6px 14px 0; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; display: flex; overflow: hidden">
+      <div style="width: 3px; background: #E5484D"></div>
+      <div style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; gap: 12px; align-items: center">
+          <span style="width: 20px; height: 20px; border-radius: 50%; background: #E5484D; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700">×</span>
+          <span style="display: flex; flex-direction: column"><span style="font-size: 16px; font-weight: 500">Approval needed</span><span style="font-size: 13px; color: {{muted}}">bash · high risk</span></span>
+        </div>
+        <div style="font-size: 14px; color: {{muted}}">The agent wants to remove the build cache directory.</div>
+        <div class="mono" style="font-size: 12.5px; padding: 10px; border-radius: 12px; background: {{term}}; color: {{termText}}">rm -rf app/build</div>
+        <div style="display: flex; gap: 8px">
+          <button type="button" style="flex: 1; height: 44px; border-radius: 22px; border: 1px solid {{ring}}; background: transparent; color: {{text}}; font-family: inherit; font-size: 15px; cursor: pointer">Deny</button>
+          <button type="button" style="flex: 1; height: 44px; border-radius: 22px; border: 0; background: #E5484D; color: #fff; font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Approve</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="position: absolute; left: 14px; right: 14px; bottom: 86px; border-radius: 20px; background: {{card}}; border: {{cardBorder}}; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px">
+    <label style="font-size: 15.5px; color: {{muted}}"><span style="position: absolute; left: -9999px">Message</span><input type="text" placeholder="Ask the agent to build, refactor, or fix…" style="width: 100%; border: 0; background: transparent; color: {{text}}; font-family: inherit; font-size: 15.5px; outline: 0"></label>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <a href="Settings.dc.html" style="height: 32px; padding: 0 11px; border-radius: 16px; background: {{pillBg}}; display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: {{muted}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F2733B"></span>{{agentName}}</a>
+      <span style="flex: 1"></span>
+      <button type="button" onClick="{{toggleRun}}" aria-label="{{sendLabel}}" style="width: 38px; height: 38px; border-radius: 50%; border: 0; background: {{sendBg}}; color: {{sendFg}}; font-family: inherit; font-size: 16px; cursor: pointer">{{sendGlyph}}</button>
+    </div>
+  </div>
+  <a href="Main.dc.html" style="position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: {{barBg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; color: {{muted}}; border-top: 0.5px solid {{line}}">Projects · Terminal · Agent · Tools · Settings — open Navigation for the live bar</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["linear","system","white","glass"],"default":"linear","section":"Theme"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { menuOpen: false, agent: 0, chat: 0, running: true }; }
+  renderVals() {
+    const t = this.props.theme ?? 'linear';
+    const P = {
+      linear: { bg: '#0B0B0B', text: '#EDEDED', muted: '#9C9C9C', line: '#1E1E1E', ring: '#4A4A4A', accent: '#5E6AD2', onAccent: '#FFFFFF', card: '#131313', raised: '#1B1B1B', cardBorder: '0', barBg: '#131313', pillBg: 'rgba(255,255,255,.07)', term: '#070707', termText: '#E6E6E6' },
+      system: { bg: '#141218', text: '#E6E0E9', muted: '#CAC4D0', line: '#2B2930', ring: '#6F6B76', accent: '#D0BCFF', onAccent: '#381E72', card: '#211F26', raised: '#2B2930', cardBorder: '0', barBg: '#211F26', pillBg: 'rgba(255,255,255,.08)', term: '#0F0D13', termText: '#E6E0E9' },
+      white:  { bg: '#FFFFFF', text: '#111111', muted: '#666666', line: '#E4E4E4', ring: '#BDBDBD', accent: '#D70F47', onAccent: '#FFFFFF', card: '#F7F7F7', raised: '#EFEFEF', cardBorder: '0.5px solid #E4E4E4', barBg: '#F7F7F7', pillBg: 'rgba(0,0,0,.06)', term: '#F3F3F3', termText: '#222222' },
+      glass:  { bg: 'linear-gradient(160deg,#0D1326 0%,#1A1038 55%,#0B1B2E 100%)', text: '#FFFFFF', muted: '#C3C8DC', line: 'rgba(255,255,255,.12)', ring: '#7A81A0', accent: '#7C8CFF', onAccent: '#0B1030', card: 'rgba(255,255,255,.06)', raised: 'rgba(255,255,255,.10)', cardBorder: '1px solid rgba(255,255,255,.22)', barBg: 'rgba(255,255,255,.07)', pillBg: 'rgba(255,255,255,.10)', term: 'rgba(7,10,20,.58)', termText: '#F8FAFC' },
+    }[t];
+    const agentsRaw = [['Claude Code', 'Official claude-code CLI in Root Chroot'], ['DeepSeek Harness', 'JSON-RPC SDK harness, multi-provider'], ['Antigravity CLI', 'Google agentic coding CLI']];
+    const agents = agentsRaw.map(([name, sub], i) => ({ name, sub, bg: i === this.state.agent ? P.pillBg : 'transparent', pick: () => this.setState({ agent: i, menuOpen: false }) }));
+    const chats = ['Main chat', 'Refactor list'].map((name, i) => ({ name, bg: i === this.state.chat ? P.pillBg : 'transparent', color: i === this.state.chat ? P.text : P.muted, pick: () => this.setState({ chat: i }) }));
+    const running = this.state.running;
+    return {
+      ...P, agents, chats,
+      agentName: agentsRaw[this.state.agent][0],
+      menuOpen: this.state.menuOpen,
+      toggleMenu: () => this.setState({ menuOpen: !this.state.menuOpen }),
+      toggleRun: () => this.setState({ running: !running }),
+      sendLabel: running ? 'Stop' : 'Send', sendGlyph: running ? '■' : '↑',
+      sendBg: running ? '#E5484D' : P.accent, sendFg: running ? '#fff' : P.onAccent,
+    };
+  }
+}
+</script>
+</body>
+</html>

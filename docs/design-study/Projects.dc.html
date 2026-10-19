@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Projects screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>body{margin:0;font-family:Inter,system-ui,sans-serif}a{color:inherit;text-decoration:none}a:hover{color:inherit}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: {{bg}}; color: {{text}}; position: relative; overflow: hidden">
+  <div style="height: 44px; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 28px 6px; font-size: 14px; font-weight: 600"><span>4:16</span><span>82</span></div>
+  <div style="flex: 1; overflow: auto; display: flex; flex-direction: column; padding-bottom: 90px">
+    <div style="padding: 10px 20px 0; display: flex; flex-direction: column">
+      <div style="font-size: 14px; color: {{muted}}">NextCraft Forge</div>
+      <div style="font-size: 27px; font-weight: 600; line-height: 32px; margin-top: 2px">Build from your phone</div>
+      <div style="font-size: 14px; color: {{muted}}; margin: 4px 0 14px">Chat, review changes, and preview your project.</div>
+      <div style="display: flex; gap: 10px">
+        <button type="button" style="flex: 1; height: 44px; border-radius: 22px; border: 0; background: {{accent}}; color: {{onAccent}}; font-family: inherit; font-weight: 600; font-size: 15px; cursor: pointer">Quick project</button>
+        <button type="button" style="flex: 1; height: 44px; border-radius: 22px; border: 1px solid {{ring}}; background: transparent; color: {{text}}; font-family: inherit; font-weight: 600; font-size: 15px; cursor: pointer">+ New project</button>
+      </div>
+    </div>
+    <div style="margin: 14px 14px 0; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; display: flex; flex-direction: column">
+      <button type="button" onClick="{{toggle}}" aria-label="Bring an existing project" style="appearance: none; background: transparent; border: 0; display: flex; align-items: center; gap: 12px; padding: 14px 10px 14px 16px; text-align: left; color: inherit; font-family: inherit; cursor: pointer">
+        <span style="flex: 1; display: flex; flex-direction: column">
+          <span style="font-size: 16px; font-weight: 500">Bring an existing project</span>
+          <span style="font-size: 14px; color: {{muted}}">{{importSub}}</span>
+        </span>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{muted}}; transform: rotate({{chev}}); transition: transform 220ms"><path d="M6 9l6 6 6-6"></path></svg>
+      </button>
+      <sc-if value="{{open}}" hint-placeholder-val="{{true}}">
+        <div style="padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; gap: 10px">
+            <button type="button" style="flex: 1; height: 52px; border-radius: 14px; border: 0; background: {{raised}}; color: {{text}}; font-family: inherit; font-weight: 500; font-size: 15px; cursor: pointer">ZIP file</button>
+            <button type="button" style="flex: 1; height: 52px; border-radius: 14px; border: 0; background: {{raised}}; color: {{text}}; font-family: inherit; font-weight: 500; font-size: 15px; cursor: pointer">Git URL</button>
+          </div>
+          <a href="Settings.dc.html" style="min-height: 60px; border-radius: 14px; background: {{raised}}; display: flex; align-items: center; gap: 12px; padding: 10px 14px; box-sizing: border-box">
+            <span style="width: 20px; height: 20px; border-radius: 4px; border: 2px solid {{accent}}; box-sizing: border-box"></span>
+            <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15px; font-weight: 500">Connect GitHub</span><span style="font-size: 13px; color: {{muted}}">Browse your remote repositories</span></span>
+            <span style="font-size: 13px; color: {{muted}}">›</span>
+          </a>
+        </div>
+      </sc-if>
+    </div>
+    <div style="padding: 22px 20px 6px; font-size: 17px; font-weight: 600">Your projects</div>
+    <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+      <a href="Agent.dc.html" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 16px; box-sizing: border-box">
+        <span style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 10px; border-radius: 50%; background: {{p.dotBg}}; border: 1.5px solid {{p.dotRing}}; box-sizing: border-box"></span></span>
+        <span style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+          <span style="font-size: 14px; font-weight: 500; color: {{p.titleColor}}">{{p.name}}</span>
+          <span style="font-size: 12.5px; color: {{muted}}">{{p.sub}}</span>
+        </span>
+        <span style="font-size: 12px; color: {{muted}}">{{p.when}}</span>
+      </a>
+    </sc-for>
+  </div>
+  <a href="Main.dc.html" style="position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: {{barBg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; color: {{muted}}; border-top: 0.5px solid {{line}}">Projects · Terminal · Agent · Tools · Settings — open Navigation for the live bar</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["linear","system","white","glass"],"default":"linear","section":"Theme"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { open: true }; }
+  renderVals() {
+    const t = this.props.theme ?? 'linear';
+    const P = {
+      linear: { bg: '#0B0B0B', text: '#EDEDED', muted: '#9C9C9C', line: '#1E1E1E', ring: '#4A4A4A', accent: '#5E6AD2', onAccent: '#FFFFFF', card: '#131313', raised: '#1B1B1B', cardBorder: '0', barBg: '#131313' },
+      system: { bg: '#141218', text: '#E6E0E9', muted: '#CAC4D0', line: '#2B2930', ring: '#6F6B76', accent: '#D0BCFF', onAccent: '#381E72', card: '#211F26', raised: '#2B2930', cardBorder: '0', barBg: '#211F26' },
+      white:  { bg: '#FFFFFF', text: '#111111', muted: '#666666', line: '#E4E4E4', ring: '#BDBDBD', accent: '#D70F47', onAccent: '#FFFFFF', card: '#F7F7F7', raised: '#EFEFEF', cardBorder: '0.5px solid #E4E4E4', barBg: '#F7F7F7' },
+      glass:  { bg: 'linear-gradient(160deg,#0D1326 0%,#1A1038 55%,#0B1B2E 100%)', text: '#FFFFFF', muted: '#C3C8DC', line: 'rgba(255,255,255,.12)', ring: '#7A81A0', accent: '#7C8CFF', onAccent: '#0B1030', card: 'rgba(255,255,255,.06)', raised: 'rgba(255,255,255,.10)', cardBorder: '1px solid rgba(255,255,255,.22)', barBg: 'rgba(255,255,255,.07)' },
+    }[t];
+    const open = this.state.open;
+    const projects = [
+      { name: 'nextcraft-forge', sub: 'Android · Build succeeded', when: '3m', active: true },
+      { name: 'my-todo-app', sub: 'Android · Compiling', when: '12m', active: false },
+      { name: 'api-playground', sub: 'General · Build failed, 2 errors', when: '2h', active: false },
+      { name: 'Quick chat 14 Oct', sub: 'Quick chat', when: 'yesterday', active: false },
+    ].map((p) => ({ ...p, dotBg: p.active ? P.accent : 'transparent', dotRing: p.active ? P.accent : P.ring, titleColor: p.active ? P.text : P.muted }));
+    return {
+      ...P, open, projects,
+      chev: open ? '180deg' : '0deg',
+      importSub: open ? 'Import files or clone complete Git history' : 'ZIP file, Git repository, or GitHub',
+      toggle: () => this.setState({ open: !open }),
+    };
+  }
+}
+</script>
+</body>
+</html>

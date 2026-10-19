@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>body{margin:0;font-family:Inter,system-ui,sans-serif}a{color:inherit;text-decoration:none}a:hover{color:inherit}.sw{transition:background 180ms}.kn{transition:transform 180ms}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: {{bg}}; color: {{text}}; position: relative; overflow: hidden">
+  <div style="height: 44px; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 28px 6px; font-size: 14px; font-weight: 600"><span>4:16</span><span>82</span></div>
+  <div style="padding: 10px 20px 0; display: flex; flex-direction: column"><div style="font-size: 27px; font-weight: 600">Settings</div><div style="font-size: 14px; color: {{muted}}">General · AI · GitHub · Runtime · About</div></div>
+  <div style="display: flex; gap: 6px; padding: 12px 14px 6px; overflow: auto">
+    <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="5">
+      <button type="button" onClick="{{tb.pick}}" style="height: 34px; padding: 0 14px; border-radius: 17px; border: 0; background: {{tb.bg}}; color: {{tb.color}}; font-size: 14.5px; font-family: inherit; cursor: pointer; white-space: nowrap">{{tb.name}}</button>
+    </sc-for>
+  </div>
+  <div style="flex: 1; overflow: auto; padding: 6px 0 90px; display: flex; flex-direction: column">
+    <sc-if value="{{showGeneral}}" hint-placeholder-val="{{true}}">
+      <div style="padding: 10px 20px 6px; font-size: 13px; font-weight: 500; color: {{muted}}">Appearance</div>
+      <div style="margin: 0 14px; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 6px 4px; display: flex; flex-direction: column">
+        <sc-for list="{{themes}}" as="th" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 12px; box-sizing: border-box">
+            <span style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid {{th.ring}}; box-sizing: border-box; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 10px; border-radius: 50%; background: {{th.dot}}"></span></span>
+            <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15.5px; font-weight: 500">{{th.name}}</span><span style="font-size: 13px; color: {{muted}}">{{th.sub}}</span></span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding: 22px 20px 6px; font-size: 13px; font-weight: 500; color: {{muted}}">Behaviour</div>
+      <div style="margin: 0 14px; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 6px 4px; display: flex; flex-direction: column">
+        <sc-for list="{{toggles}}" as="tg" hint-placeholder-count="4">
+          <button type="button" onClick="{{tg.flip}}" role="switch" aria-checked="{{tg.on}}" style="appearance: none; border: 0; background: transparent; color: inherit; font-family: inherit; text-align: left; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; box-sizing: border-box; cursor: pointer">
+            <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15.5px; font-weight: 500">{{tg.name}}</span><span style="font-size: 13px; color: {{muted}}">{{tg.sub}}</span></span>
+            <span class="sw" style="width: 48px; height: 28px; border-radius: 14px; background: {{tg.track}}; position: relative; flex: none"><span class="kn" style="position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: {{tg.knob}}; transform: translateX({{tg.x}})"></span></span>
+          </button>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{showAi}}" hint-placeholder-val="{{false}}">
+      <div style="padding: 10px 20px 6px; font-size: 13px; font-weight: 500; color: {{muted}}">Providers</div>
+      <div style="margin: 0 14px; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 6px 4px; display: flex; flex-direction: column">
+        <sc-for list="{{providers}}" as="pv" hint-placeholder-count="3">
+          <a href="Agent.dc.html" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; box-sizing: border-box">
+            <span style="width: 10px; height: 10px; border-radius: 50%; background: {{pv.dot}}"></span>
+            <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15.5px; font-weight: 500">{{pv.name}}</span><span style="font-size: 13px; color: {{muted}}">{{pv.sub}}</span></span>
+            <span style="font-size: 13px; color: {{muted}}">{{pv.state}} ›</span>
+          </a>
+        </sc-for>
+      </div>
+      <div style="padding: 22px 20px 6px; font-size: 13px; font-weight: 500; color: {{muted}}">Default model</div>
+      <div style="margin: 0 14px; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 14px 16px; display: flex; align-items: center; gap: 12px">
+        <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15.5px; font-weight: 500">claude-sonnet-5-5</span><span style="font-size: 13px; color: {{muted}}">Used by new chats</span></span>
+        <span style="font-size: 13px; color: {{muted}}">Change ›</span>
+      </div>
+    </sc-if>
+    <sc-if value="{{showGithub}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 10px 14px 0; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 18px 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 12px"><span style="width: 36px; height: 36px; border-radius: 50%; background: {{raised}}"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 15.5px; font-weight: 500">Not connected</span><span style="font-size: 13px; color: {{muted}}">Sign in to clone and push repositories</span></span></div>
+        <button type="button" style="height: 44px; border-radius: 22px; border: 0; background: {{accent}}; color: {{onAccent}}; font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Connect GitHub</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{showRuntime}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 10px 14px 0; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 6px 4px; display: flex; flex-direction: column">
+        <sc-for list="{{runtimeRows}}" as="rr" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 12px; box-sizing: border-box; border-bottom: 0.5px solid {{line}}"><span style="flex: 1; font-size: 15px">{{rr.k}}</span><span style="font-size: 14px; color: {{muted}}">{{rr.v}}</span></div>
+        </sc-for>
+        <button type="button" style="margin: 10px 8px 8px; height: 44px; border-radius: 22px; border: 1px solid {{ring}}; background: transparent; color: {{text}}; font-family: inherit; font-size: 15px; cursor: pointer">Reinstall runtime</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{showAbout}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 10px 14px 0; border-radius: 18px; background: {{card}}; border: {{cardBorder}}; padding: 18px 16px; display: flex; flex-direction: column; gap: 4px">
+        <span style="font-size: 17px; font-weight: 600">NextCraft Forge</span>
+        <span style="font-size: 13px; color: {{muted}}">Version 0.9.0 · build 142</span>
+        <span style="font-size: 13px; color: {{muted}}; margin-top: 10px">Build from your phone. Chat, review changes, preview.</span>
+      </div>
+    </sc-if>
+  </div>
+  <a href="Main.dc.html" style="position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: {{barBg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; color: {{muted}}; border-top: 0.5px solid {{line}}">Projects · Terminal · Agent · Tools · Settings — open Navigation for the live bar</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["linear","system","white","glass"],"default":"linear","section":"Theme"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 0, on: [true, true, false, true] }; }
+  renderVals() {
+    const t = this.props.theme ?? 'linear';
+    const P = {
+      linear: { bg: '#0B0B0B', text: '#EDEDED', muted: '#9C9C9C', line: '#1E1E1E', ring: '#4A4A4A', accent: '#5E6AD2', onAccent: '#FFFFFF', card: '#131313', raised: '#1B1B1B', cardBorder: '0', barBg: '#131313', pillBg: 'rgba(255,255,255,.07)', trackOff: '#2A2A2A', knob: '#FFFFFF' },
+      system: { bg: '#141218', text: '#E6E0E9', muted: '#CAC4D0', line: '#2B2930', ring: '#6F6B76', accent: '#D0BCFF', onAccent: '#381E72', card: '#211F26', raised: '#2B2930', cardBorder: '0', barBg: '#211F26', pillBg: 'rgba(255,255,255,.08)', trackOff: '#49454F', knob: '#E6E0E9' },
+      white:  { bg: '#FFFFFF', text: '#111111', muted: '#666666', line: '#E4E4E4', ring: '#BDBDBD', accent: '#D70F47', onAccent: '#FFFFFF', card: '#F7F7F7', raised: '#EFEFEF', cardBorder: '0.5px solid #E4E4E4', barBg: '#F7F7F7', pillBg: 'rgba(0,0,0,.06)', trackOff: '#D9D9D9', knob: '#FFFFFF' },
+      glass:  { bg: 'linear-gradient(160deg,#0D1326 0%,#1A1038 55%,#0B1B2E 100%)', text: '#FFFFFF', muted: '#C3C8DC', line: 'rgba(255,255,255,.12)', ring: '#7A81A0', accent: '#7C8CFF', onAccent: '#0B1030', card: 'rgba(255,255,255,.06)', raised: 'rgba(255,255,255,.10)', cardBorder: '1px solid rgba(255,255,255,.22)', barBg: 'rgba(255,255,255,.07)', pillBg: 'rgba(255,255,255,.10)', trackOff: 'rgba(255,255,255,.18)', knob: '#FFFFFF' },
+    }[t];
+    const tab = this.state.tab;
+    const tabs = ['General', 'AI', 'GitHub', 'Runtime', 'About'].map((name, i) => ({ name, bg: i === tab ? P.pillBg : 'transparent', color: i === tab ? P.text : P.muted, pick: () => this.setState({ tab: i }) }));
+    const themeRows = [['Linear', 'Dark, indigo accent', 'linear'], ['System', 'Follows Material You', 'system'], ['White', 'Light, coral accent', 'white'], ['Glass', 'Translucent over gradient', 'glass']];
+    const themes = themeRows.map(([name, sub, key]) => ({ name, sub, ring: key === t ? P.accent : P.ring, dot: key === t ? P.accent : 'transparent' }));
+    const toggleRows = [['Reduce motion', 'Cross-fade instead of slide'], ['Haptics on tab change', 'Light tick on the sliding pill'], ['Keep screen on while building', 'Prevents sleep during long builds'], ['Auto-open Issues after a failed build', 'Jumps once per failure']];
+    const toggles = toggleRows.map(([name, sub], i) => {
+      const on = this.state.on[i];
+      return { name, sub, on, track: on ? P.accent : P.trackOff, knob: P.knob, x: on ? '20px' : '0px',
+        flip: () => { const next = [...this.state.on]; next[i] = !on; this.setState({ on: next }); } };
+    });
+    const providers = [
+      { name: 'Anthropic', sub: 'API key set · 2 models', dot: '#3DD68C', state: 'Ready' },
+      { name: 'DeepSeek', sub: 'JSON-RPC harness', dot: '#3DD68C', state: 'Ready' },
+      { name: 'Google Antigravity', sub: 'OAuth required', dot: '#F2C94C', state: 'Sign in' },
+    ];
+    const runtimeRows = [{ k: 'Distribution', v: 'Ubuntu 24.04' }, { k: 'JDK', v: '17.0.12' }, { k: 'Node', v: '20.18' }, { k: 'Disk used', v: '2.4 GB' }];
+    return {
+      ...P, tabs, themes, toggles, providers, runtimeRows,
+      showGeneral: tab === 0, showAi: tab === 1, showGithub: tab === 2, showRuntime: tab === 3, showAbout: tab === 4,
+    };
+  }
+}
+</script>
+</body>
+</html>

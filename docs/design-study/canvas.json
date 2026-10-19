@@ -1,0 +1,28 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-18T06:40:00Z"},
+  "title": "Forge Design Study",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html":      {"x": 0,    "y": 0,    "w": 390, "h": 844, "title": "Navigation", "is_interactive": true},
+    "Projects.dc.html":  {"x": 470,  "y": 0,    "w": 390, "h": 844, "title": "Projects",   "is_interactive": true},
+    "Agent.dc.html":     {"x": 940,  "y": 0,    "w": 390, "h": 844, "title": "Agent",      "is_interactive": true},
+    "Launch.dc.html":    {"x": 1410, "y": 0,    "w": 390, "h": 844, "title": "Launch",     "is_interactive": true},
+    "Files.dc.html":     {"x": 0,    "y": 1090, "w": 390, "h": 844, "title": "Files",      "is_interactive": true},
+    "Terminal.dc.html":  {"x": 470,  "y": 1090, "w": 390, "h": 844, "title": "Terminal",   "is_interactive": true},
+    "Tools.dc.html":     {"x": 940,  "y": 1090, "w": 390, "h": 844, "title": "Tools",      "is_interactive": true},
+    "Settings.dc.html":  {"x": 1410, "y": 1090, "w": 390, "h": 844, "title": "Settings",   "is_interactive": true},
+    "Onboarding.dc.html":{"x": 1880, "y": 1090, "w": 390, "h": 844, "title": "Onboarding", "is_interactive": true}
+  },
+  "order": [
+    "Main.dc.html", "Projects.dc.html", "Agent.dc.html", "Launch.dc.html",
+    "Files.dc.html", "Terminal.dc.html", "Tools.dc.html", "Settings.dc.html", "Onboarding.dc.html"
+  ],
+  "notes": {
+    "t1": {"x": 0, "y": -300, "text": "Forge Design Study — tap any tab to switch screens; use Tweaks › theme to see Linear, System, White, Glass", "kind": "title1", "maxW": 1800},
+    "t2": {"x": 0, "y": 790,  "text": "Tool screens, settings and first run", "kind": "title1", "maxW": 2270},
+    "n1": {"x": 1880, "y": 0, "w": 390, "text": "Decisions in force:\n• One shape language for all 4 themes; themes change colour and surface only.\n• Nav: 5 labelled tabs, one sliding pill with glow; Dark/White = fused bar, Glass = floating capsule.\n• Accent: indigo #5E6AD2 (Linear/Glass), coral #D70F47 (White).\n• Text through strings.xml; every clickable declares a role.\n• Status is carried by icon shape, never colour alone.", "fill": "blue", "size": "s"}
+  },
+  "designSystems": []
+}
