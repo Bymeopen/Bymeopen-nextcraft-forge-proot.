@@ -195,6 +195,7 @@
     <string name="shell_check_root">Akses root (mount namespace `su -mm`)</string>
     <string name="shell_root_granted">Magisk / KernelSU / APatch diizinkan</string>
     <string name="shell_root_required">Hak akses root diperlukan untuk chroot</string>
+    <string name="shell_proot_fallback">Tanpa root: memakai mesin PRoot bawaan (build lebih lambat)</string>
     <string name="shell_check_rootfs">Rootfs Ubuntu 24.04 &amp; toolchain Agent</string>
     <string name="shell_installed_ready">Terpasang &amp; siap</string>
     <string name="shell_resume_setup">Lanjutkan pemasangan</string>
