@@ -70,7 +70,15 @@ internal class NativeSpawnProcess private constructor(
         return status
     }
 
+    /**
+     * True once the child has exited (and been reaped). Signalling after that point could hit an unrelated process
+     * group that reused the pid, and [NativeSpawn.kill] escalates to a root `kill` on EPERM, so every kill path checks.
+     */
+    private fun hasExited(): Boolean =
+        if (delegateProcess != null) !delegateProcess.isAlive else pollExit() != null
+
     override fun destroy() {
+        if (hasExited()) return
         if (delegateProcess != null) {
             delegateProcess.destroy()
             killViaRootIfNeeded(pid, 15)
@@ -82,6 +90,7 @@ internal class NativeSpawnProcess private constructor(
 
     /** Send the same interrupt signal produced by Ctrl+C in a real terminal. */
     internal fun interrupt() {
+        if (hasExited()) return
         if (delegateProcess != null) {
             killViaRootIfNeeded(pid, 2)
             return
@@ -90,6 +99,10 @@ internal class NativeSpawnProcess private constructor(
     }
 
     override fun destroyForcibly(): Process {
+        if (hasExited()) {
+            runCatching { stdin.close() }
+            return this
+        }
         if (delegateProcess != null) {
             delegateProcess.destroyForcibly()
             killViaRootIfNeeded(pid, 9)

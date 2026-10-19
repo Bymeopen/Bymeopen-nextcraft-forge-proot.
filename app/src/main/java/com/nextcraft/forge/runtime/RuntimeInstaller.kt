@@ -2913,11 +2913,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     "${'$'}ROOTFS"|"${'$'}ROOTFS"/*)
                         ;;
                     *)
-                        chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_WORKSPACE" 2>/dev/null || true
+                        chown -R -h "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_WORKSPACE" 2>/dev/null || true
                         chmod -R u+rwX,g+rwX "${'$'}HOST_WORKSPACE" 2>/dev/null || true
                         ;;
                 esac
-                chown -R "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
+                chown -R -h "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
                 chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
             }
             # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
@@ -3050,6 +3050,7 @@ internal data class GitConfigEntry(
 internal fun mergeGitConfig(existing: String, entries: List<GitConfigEntry>): String {
     val lines = existing.lines().dropLastWhile { it.isBlank() }.toMutableList()
     fun sectionOf(line: String) = Regex("^\\s*\\[\\s*([A-Za-z0-9.-]+)\\s*]\\s*$").find(line)?.groupValues?.get(1)?.lowercase()
+    fun isHeader(line: String) = Regex("^\\s*\\[[^\\]]*]").containsMatchIn(line)
     fun keyOf(line: String) = Regex("^\\s*([A-Za-z][A-Za-z0-9-]*)\\s*(=|$)").find(line)?.groupValues?.get(1)?.lowercase()
     for (entry in entries) {
         val wanted = entry.section.lowercase()
@@ -3061,7 +3062,9 @@ internal fun mergeGitConfig(existing: String, entries: List<GitConfigEntry>): St
             continue
         }
         var end = start + 1
-        while (end < lines.size && sectionOf(lines[end]) == null) end++
+        // Any header ends the section, including subsections such as [credential "https://github.com"], so an entry is
+        // never appended inside (or matched against) another section's keys.
+        while (end < lines.size && !isHeader(lines[end])) end++
         val sameKey = (start + 1 until end).filter { keyOf(lines[it]) == entry.key.lowercase() }
         if (entry.multiValue) {
             val present = sameKey.any { lines[it].substringAfter('=', "").trim() == entry.value }
