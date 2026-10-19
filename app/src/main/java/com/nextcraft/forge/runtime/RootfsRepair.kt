@@ -57,6 +57,12 @@ internal object RootfsRepair {
         val quotedRootfs = shellSingleQuote(canonicalPath)
         val unmountScript = """
             ROOTFS_PATH=$quotedRootfs
+            # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
+            # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
+            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
+                mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
+            done
+
             for pass in 1 2 3; do
                 MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
                 [ -z "${'$'}MOUNTS" ] && break

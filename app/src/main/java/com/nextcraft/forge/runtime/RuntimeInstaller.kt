@@ -17,6 +17,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -290,10 +291,26 @@ class RuntimeInstaller(private val context: Context) {
             }
             opIndex++
         }
+        // One broken stack (e.g. Android tools that cannot run) must not keep the others from installing:
+        // install every selected stack, then report all failures together.
+        val failedStacks = mutableListOf<Pair<DevStack, Throwable>>()
         missingStacks.forEach { stack ->
             val slice = 0.26f / totalStackOps
             val from = 0.72f + opIndex * slice
-            applyStack(chrootExec, stack, from, from + slice, onProgress)
+            try {
+                applyStack(chrootExec, stack, from, from + slice, onProgress)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("RuntimeInstaller", "Installing ${stack.label} failed", e)
+                failedStacks += stack to e
+                onProgress(
+                    RuntimeInstallProgress(
+                        "${stack.label} failed: ${e.message?.take(160).orEmpty()}",
+                        from + slice,
+                    ),
+                )
+            }
             opIndex++
         }
 
@@ -301,6 +318,11 @@ class RuntimeInstaller(private val context: Context) {
             AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(chrootExec, 0.985f, onProgress)
             AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(chrootExec, 0.985f, onProgress)
             AgentKind.ANTIGRAVITY -> ensureAgyInstalled(chrootExec, 0.985f, onProgress)
+        }
+        check(failedStacks.isEmpty()) {
+            failedStacks.joinToString(separator = "\n") { (stack, error) ->
+                "${stack.label}: ${error.message?.take(200).orEmpty()}"
+            }
         }
         onProgress(RuntimeInstallProgress("NextCraft Forge Root Chroot setup complete", 1f))
         return InstalledRuntime(chrootExec, rootfs)
@@ -966,26 +988,9 @@ class RuntimeInstaller(private val context: Context) {
         ).forEach { removePath(File(rootfs, it)) }
     }
 
+    /** Removes the current overlay layout and every previous one, so an upgrade does not leave an old JDK behind. */
     private fun removeAndroidStack() {
-        listOf(
-            "root/android-sdk",
-            "root/maven",
-            "root/.pocket-android-tools-version",
-            "root/.gradle/caches",
-            "root/.gradle/daemon",
-            "root/.gradle/native",
-            "root/.gradle/notifications",
-            "root/.gradle/wrapper/dists",
-            "root/.gradle/init.d/pocketdev-android.gradle",
-            "opt/gradle",
-            "opt/jdk-17.0.20.1+1",
-            "usr/local/bin/jar",
-            "usr/local/bin/jarsigner",
-            "usr/local/bin/java",
-            "usr/local/bin/javac",
-            "usr/local/bin/javadoc",
-            "usr/local/bin/keytool",
-        ).forEach { removePath(File(rootfs, it)) }
+        AndroidToolchain.REMOVABLE_HOST_PATHS.forEach { removePath(File(rootfs, it)) }
         removeAndroidGradleProperty()
     }
 
@@ -1108,35 +1113,37 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         val marker = File(rootfs, "root/.pocket-android-tools-version")
-        val androidHome = File(rootfs, "root/android-sdk")
-        val gradleHome = File(rootfs, "opt/gradle")
-        val localMaven = File(rootfs, "root/maven/localMvnRepository")
-        if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION ||
-            !File(androidHome, "platforms/android-36/android.jar").isFile ||
-            !File(androidHome, "build-tools/35.0.0/aapt2").isFile ||
-            !File(gradleHome, "gradle-8.14.3/bin/gradle").isFile ||
-            !localMaven.isDirectory
-        ) {
+        if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION || !hasAndroidToolchainFiles(rootfs)) {
+            // An older layout (different JDK/Gradle directories) would otherwise stay behind next to the new one.
+            if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION && marker.isFile) removeAndroidStack()
             installRuntimeOverlay(
                 ANDROID_BUNDLE,
-                "Installing Android SDK 36, Build Tools 35, Gradle 8.14.3, and Maven cache…",
+                "Installing Android SDK ${AndroidToolchain.COMPILE_SDK}, Build Tools ${AndroidToolchain.BUILD_TOOLS_VERSION}, " +
+                    "Gradle ${AndroidToolchain.GRADLE_VERSION}, and Maven cache…",
                 from,
                 to,
                 onProgress,
             )
-            makeAndroidToolsExecutable(androidHome, gradleHome)
+            makeAndroidToolsExecutable(rootfs)
             marker.parentFile?.mkdirs()
             marker.writeText(ANDROID_TOOLS_VERSION)
         }
         writeAndroidGradleConfiguration(rootfs)
 
+        val jdk = AndroidToolchain.JDK_MAJOR
         verifyGuest(
             chrootExec,
-            "java -version 2>&1 | grep -E '\"17\\.|version 17' && " +
-                "gradle --version && aapt2 version && test -f \"${'$'}ANDROID_HOME/platforms/android-36/android.jar\"",
-            "Failed to verify Android SDK, Gradle, and Java 17",
+            "java -version 2>&1 | grep -E '\"$jdk\\.|version $jdk' && " +
+                "gradle --version && aapt2 version && test -f ${AndroidToolchain.ANDROID_JAR_GUEST_PATH}",
+            "Failed to verify Android SDK, Gradle, and Java $jdk",
         )
     }
+
+    private fun hasAndroidToolchainFiles(runtimeRootfs: File): Boolean =
+        File(runtimeRootfs, AndroidToolchain.ANDROID_JAR_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.AAPT2_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.MAVEN_HOST_DIR).let { it.isDirectory && !it.list().isNullOrEmpty() }
 
     private suspend fun installRuntimeOverlay(
         bundle: RuntimeBundle,
@@ -1244,45 +1251,19 @@ class RuntimeInstaller(private val context: Context) {
         return destination
     }
 
-    private fun makeAndroidToolsExecutable(androidHome: File, gradleHome: File) {
-        val buildTools = File(androidHome, "build-tools/35.0.0")
+    private fun makeAndroidToolsExecutable(runtimeRootfs: File) {
+        val buildTools = File(runtimeRootfs, AndroidToolchain.BUILD_TOOLS_HOST_DIR)
         listOf("aapt", "aapt2", "aidl", "apksigner", "d8", "dexdump", "split-select", "zipalign")
             .map { File(buildTools, it) }
-            .plus(File(gradleHome, "gradle-8.14.3/bin/gradle"))
+            .plus(File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH))
             .filter(File::isFile)
             .forEach { Os.chmod(it.absolutePath, 0b111101101) }
     }
 
     private fun writeAndroidGradleInitScript(runtimeRootfs: File) {
-        val script = File(runtimeRootfs, "root/.gradle/init.d/pocketdev-android.gradle")
+        val script = File(runtimeRootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/"))
         script.parentFile?.mkdirs()
-        script.writeText(
-            """
-            def pocketMaven = uri('/root/maven/localMvnRepository')
-            beforeSettings { settings ->
-                settings.pluginManagement.repositories {
-                    maven { url = pocketMaven }
-                    google()
-                    mavenCentral()
-                    gradlePluginPortal()
-                }
-            }
-            settingsEvaluated { settings ->
-                settings.dependencyResolutionManagement.repositories {
-                    maven { url = pocketMaven }
-                }
-            }
-            gradle.beforeProject { project ->
-                project.extensions.extraProperties.set(
-                    'android.aapt2FromMavenOverride',
-                    '/root/android-sdk/build-tools/35.0.0/aapt2'
-                )
-                project.buildscript.repositories {
-                    maven { url = pocketMaven }
-                }
-            }
-            """.trimIndent() + "\n",
-        )
+        script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
     }
 
     @Synchronized
@@ -1349,11 +1330,8 @@ class RuntimeInstaller(private val context: Context) {
             DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
             DevStack.ANDROID ->
                 File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+                    hasAndroidToolchainFiles(rootfs) &&
+                    File(rootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/")).isFile
         }
     }
 
@@ -1855,12 +1833,12 @@ class RuntimeInstaller(private val context: Context) {
             val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
-                put("ANDROID_HOME", "/root/android-sdk")
-                put("ANDROID_SDK_ROOT", "/root/android-sdk")
-                put("GRADLE_HOME", "/opt/gradle/gradle-8.14.3")
+                put("ANDROID_HOME", AndroidToolchain.SDK_GUEST_DIR)
+                put("ANDROID_SDK_ROOT", AndroidToolchain.SDK_GUEST_DIR)
+                put("GRADLE_HOME", AndroidToolchain.GRADLE_HOME_GUEST_DIR)
                 put("GRADLE_USER_HOME", "/root/.gradle")
-                put("ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride", "/root/android-sdk/build-tools/35.0.0/aapt2")
-                put("PATH", "/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:$basePath")
+                put("ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride", AndroidToolchain.AAPT2_GUEST_PATH)
+                put("PATH", "${AndroidToolchain.GUEST_PATH_PREFIX}:$basePath")
             } else {
                 put("PATH", basePath)
             }
@@ -2422,7 +2400,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val PREVIOUS_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val NEXTCRAFT_CORE_TOOLS_VERSION = "nextcraft-core-2026.10.1"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
-        private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
+        private const val ANDROID_TOOLS_VERSION = AndroidToolchain.TOOLS_VERSION
         private const val ANDROID_AAPT2_PROPERTY = "android.aapt2FromMavenOverride"
         private const val GRADLE_JVMARGS_PROPERTY = "org.gradle.jvmargs"
         private const val GRADLE_WORKERS_PROPERTY = "org.gradle.workers.max"
@@ -2435,8 +2413,38 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             GRADLE_PARALLEL_PROPERTY,
             KOTLIN_EXECUTION_PROPERTY,
         )
-        private const val ANDROID_AAPT2_GUEST_PATH = "/root/android-sdk/build-tools/35.0.0/aapt2"
-        private const val ANDROID_AAPT2_HOST_PATH = "root/android-sdk/build-tools/35.0.0/aapt2"
+        private const val ANDROID_AAPT2_GUEST_PATH = AndroidToolchain.AAPT2_GUEST_PATH
+        private const val ANDROID_AAPT2_HOST_PATH = AndroidToolchain.AAPT2_HOST_PATH
+
+        /**
+         * Gradle init script that makes the offline Maven repository and the ARM64 aapt2 visible to every build.
+         * `build-android-bundle.sh` ships a byte-identical copy; keep both in sync.
+         */
+        internal val ANDROID_GRADLE_INIT_SCRIPT = """
+            def pocketMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            beforeSettings { settings ->
+                settings.pluginManagement.repositories {
+                    maven { url = pocketMaven }
+                    google()
+                    mavenCentral()
+                    gradlePluginPortal()
+                }
+            }
+            settingsEvaluated { settings ->
+                settings.dependencyResolutionManagement.repositories {
+                    maven { url = pocketMaven }
+                }
+            }
+            gradle.beforeProject { project ->
+                project.extensions.extraProperties.set(
+                    '$ANDROID_AAPT2_PROPERTY',
+                    '$ANDROID_AAPT2_GUEST_PATH'
+                )
+                project.buildscript.repositories {
+                    maven { url = pocketMaven }
+                }
+            }
+        """.trimIndent() + "\n"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
         const val DSH_VERSION = "0.1.2-rc.1"
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
@@ -2468,12 +2476,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             compressedBytes = 55_419_626L,
             baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
         )
+        /** Built by scripts/runtime-bundles/build-android-bundle.sh; versions in [AndroidToolchain]. */
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
-            fileName = "pocketdev-android-arm64-2026.09.1.tar.zst",
-            sha256 = "01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6",
-            compressedBytes = 569_652_007L,
-            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
+            fileName = "nextcraft-android-arm64-2026.10.1.tar.zst",
+            sha256 = "8b4ecf057daa6fd54acd950712f8adb4eb7722c7bc557136f2ea31d7a2bbfd60",
+            compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek Harness",
@@ -2561,6 +2569,47 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
                 fi
             }
 
+            # Android's /apex is a tmpfs with every APEX module mounted below it, and /system/bin/linker64 (the interpreter
+            # of Bionic tools such as aapt2) points into /apex/com.android.runtime. A plain bind leaves those modules out.
+            # A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
+            # and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
+            # its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
+            has_submounts() {
+                awk -v prefix="${'$'}1/" 'index(${'$'}2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
+            }
+
+            make_slave() {
+                mount --make-rslave "${'$'}1" 2>/dev/null || mount -o rslave "${'$'}1" 2>/dev/null ||
+                    mount --make-slave "${'$'}1" 2>/dev/null || mount -o slave "${'$'}1" 2>/dev/null
+            }
+
+            mount_bionic() {
+                local src="${'$'}1"
+                local dst="${'$'}2"
+                mkdir -p "${'$'}dst"
+                # Earlier versions bound these directories without their submounts; replace such a mount.
+                if is_mounted "${'$'}dst" && has_submounts "${'$'}src" && ! has_submounts "${'$'}dst"; then
+                    umount "${'$'}dst" 2>/dev/null || umount -l "${'$'}dst" 2>/dev/null || true
+                fi
+                is_mounted "${'$'}dst" && return 0
+                mount -o bind "${'$'}src" "${'$'}dst" || return 1
+                if ! make_slave "${'$'}dst"; then
+                    echo "Warning: mount propagation cannot be changed; ${'$'}dst is bound without its submounts" >&2
+                    mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
+                    return 0
+                fi
+                # Parents first, so each module lands on a mount point that is already a slave copy.
+                awk -v prefix="${'$'}src/" 'index(${'$'}2, prefix) == 1 { print ${'$'}2 }' /proc/mounts | sort | while read -r sub; do
+                    target="${'$'}dst${'$'}{sub#"${'$'}src"}"
+                    [ -d "${'$'}sub" ] && [ -d "${'$'}target" ] || continue
+                    is_mounted "${'$'}target" && continue
+                    if mount -o bind "${'$'}sub" "${'$'}target" 2>/dev/null && ! make_slave "${'$'}target"; then
+                        umount "${'$'}target" 2>/dev/null || true
+                    fi
+                done
+                mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
+            }
+
             mount_dynamic_bind() {
                 local src="${'$'}1"
                 local dst="${'$'}2"
@@ -2597,7 +2646,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
 
             for bionic_dir in /system /apex /vendor /product; do
                 if [ -d "${'$'}bionic_dir" ]; then
-                    mount_once "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir" "bind" "ro"
+                    mount_bionic "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir"
                 fi
             done
 
@@ -2696,6 +2745,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             fi
             ROOTFS_REAL=${'$'}(realpath "${'$'}ROOTFS" 2>/dev/null || printf '%s' "${'$'}ROOTFS")
             ROOTFS_CLEAN="${'$'}{ROOTFS_REAL%/}"
+            # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
+            # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
+            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
+                mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
+            done
+
             for pass in 1 2 3; do
                 MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
                 if [ -z "${'$'}MOUNTS" ]; then

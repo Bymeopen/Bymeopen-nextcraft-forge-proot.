@@ -276,7 +276,7 @@ enum class DevStack(
     ANDROID(
         "Android (Java / Kotlin)",
         "Build Android app projects at native Chroot speed and install them directly on this phone.",
-        "JDK 17, ARM64 Android SDK 36, Build Tools 35, Gradle 8.14.3, and an offline Maven cache",
+        com.nextcraft.forge.runtime.AndroidToolchain.SUMMARY,
     ),
     CPP(
         "C / C++",

@@ -81,6 +81,47 @@ mount_once() {
     fi
 }
 
+# Android's /apex is a tmpfs with every APEX module mounted below it, and /system/bin/linker64 (the interpreter
+# of Bionic tools such as aapt2) points into /apex/com.android.runtime. A plain bind leaves those modules out.
+# A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
+# and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
+# its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
+has_submounts() {
+    awk -v prefix="$1/" 'index($2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
+}
+
+make_slave() {
+    mount --make-rslave "$1" 2>/dev/null || mount -o rslave "$1" 2>/dev/null ||
+        mount --make-slave "$1" 2>/dev/null || mount -o slave "$1" 2>/dev/null
+}
+
+mount_bionic() {
+    local src="$1"
+    local dst="$2"
+    mkdir -p "$dst"
+    # Earlier versions bound these directories without their submounts; replace such a mount.
+    if is_mounted "$dst" && has_submounts "$src" && ! has_submounts "$dst"; then
+        umount "$dst" 2>/dev/null || umount -l "$dst" 2>/dev/null || true
+    fi
+    is_mounted "$dst" && return 0
+    mount -o bind "$src" "$dst" || return 1
+    if ! make_slave "$dst"; then
+        echo "Warning: mount propagation cannot be changed; $dst is bound without its submounts" >&2
+        mount -o remount,bind,ro "$dst" 2>/dev/null || true
+        return 0
+    fi
+    # Parents first, so each module lands on a mount point that is already a slave copy.
+    awk -v prefix="$src/" 'index($2, prefix) == 1 { print $2 }' /proc/mounts | sort | while read -r sub; do
+        target="$dst${sub#"$src"}"
+        [ -d "$sub" ] && [ -d "$target" ] || continue
+        is_mounted "$target" && continue
+        if mount -o bind "$sub" "$target" 2>/dev/null && ! make_slave "$target"; then
+            umount "$target" 2>/dev/null || true
+        fi
+    done
+    mount -o remount,bind,ro "$dst" 2>/dev/null || true
+}
+
 # Fungsi Dynamic Bind Mount: mendeteksi pergantian proyek (misal pindah dari proj-A ke proj-B)
 # Menggunakan state file per-destination agar sesi paralel (mis. probe hello vs workspace) tidak saling menimpa state
 mount_dynamic_bind() {
@@ -122,7 +163,7 @@ mount_once "tmpfs" "tmpfs"    "$ROOTFS/dev/shm" "rw,nosuid,nodev,mode=1777"
 # 3. Read-Only Bind Mount partisi Bionic Android (Agar binary Bionic aapt2 jalan di dalam Ubuntu 24.04)
 for sysdir in /system /apex /vendor /product; do
     if [ -d "$sysdir" ]; then
-        mount_once "bind" "$sysdir" "$ROOTFS$sysdir" "ro"
+        mount_bionic "$sysdir" "$ROOTFS$sysdir"
     fi
 done
 
@@ -158,10 +199,11 @@ BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/u
 if [ -d "$ROOTFS/root/android-sdk" ]; then
     export ANDROID_HOME="${ANDROID_HOME:-/root/android-sdk}"
     export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/root/android-sdk}"
-    export GRADLE_HOME="${GRADLE_HOME:-/opt/gradle/gradle-8.14.3}"
+    # Keep in sync with AndroidToolchain.kt (RuntimeInstaller sets the same environment for in-app launches).
+    export GRADLE_HOME="${GRADLE_HOME:-/opt/gradle/gradle-9.8.1}"
     export GRADLE_USER_HOME="${GRADLE_USER_HOME:-/root/.gradle}"
-    export ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride="/root/android-sdk/build-tools/35.0.0/aapt2"
-    export PATH="/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:$BASE_PATH"
+    export ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride="/root/android-sdk/build-tools/36.0.0/aapt2"
+    export PATH="/opt/gradle/gradle-9.8.1/bin:/root/android-sdk/build-tools/36.0.0:/root/android-sdk/cmdline-tools/latest/bin:$BASE_PATH"
 else
     export PATH="$BASE_PATH"
 fi

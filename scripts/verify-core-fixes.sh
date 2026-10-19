@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # NextCraft Forge — Automated Verification Test Suite for Core System & Block 1–4 Engine
 # Tests BUG-001 through BUG-025 across all 27 Kotlin Core Engine files + Native JNI/C + Chroot Scripts.
+#
+# NOTE: section 5 compiles the app against the legacy Android bundle layout (Gradle 8.14.3, android-36, Kotlin 1.9.22,
+# Compose compiler 1.5.10 under /root/maven). The 2026.10.1 bundle (Gradle 9.8.1, android-37.2, Kotlin 2.4.21, Compose
+# compiler plugin) does not carry those artifacts; that section is kept for the legacy runtime and needs a rewrite
+# before it can run on the new bundle.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
