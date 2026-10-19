@@ -116,7 +116,9 @@ class RuntimeInstaller(private val context: Context) {
     private fun repairLegacyMacosMetadata() {
         if (macosMetadataRepairMarker.isFile) return
         if (!rootfs.isDirectory) return
-        stripMacosMetadataArtifacts(rootfs)
+        // isInstalled() can run while a chroot session is mounted: stay out of the bind mounts (/proc, /system,
+        // /workspace, ...) so the walk is neither huge nor able to delete "._*" files from a user's project.
+        stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         macosMetadataRepairMarker.parentFile?.mkdirs()
         macosMetadataRepairMarker.writeText("1")
     }
@@ -1296,7 +1298,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("Installed ${bundle.label} runtime bundle", to))
     }
 
-    private fun stripMacosMetadataArtifacts(root: File) {
+    private fun stripMacosMetadataArtifacts(root: File, skipTopLevel: Set<String> = emptySet()) {
         if (!root.isDirectory) return
         val queue = ArrayDeque<File>()
         queue.add(root)
@@ -1305,6 +1307,7 @@ class RuntimeInstaller(private val context: Context) {
             val current = queue.removeFirst()
             val children = current.listFiles() ?: continue
             for (child in children) {
+                if (current == root && child.name in skipTopLevel) continue
                 if (child.name.startsWith("._")) {
                     if (child.isDirectory) child.deleteRecursively() else child.delete()
                     removed++
@@ -2603,6 +2606,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
