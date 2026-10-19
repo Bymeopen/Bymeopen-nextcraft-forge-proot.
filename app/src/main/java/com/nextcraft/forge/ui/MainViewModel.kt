@@ -97,6 +97,9 @@ import com.nextcraft.forge.R
 /** What the Projects tab shows: the project list, the chats of the open project, or one conversation. */
 enum class ProjectView { LIST, CHATS, CONVERSATION }
 
+/** The in-project bottom bar: Chat (chats + conversation), Files, Terminal, Preview. */
+enum class ProjectPane { CHAT, FILES, TERMINAL, PREVIEW }
+
 enum class ForgeTab(val title: String) {
     PROJECTS("Projects"),
     AGENT("Agent"),
@@ -121,6 +124,7 @@ data class ForgeUiState(
     val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     val activeTab: ForgeTab = ForgeTab.PROJECTS,
     val projectView: ProjectView = ProjectView.LIST,
+    val projectPane: ProjectPane = ProjectPane.CHAT,
     val themeMode: String = "dark",
     val projects: List<Project> = emptyList(),
     val activeProjectId: String = "",
@@ -1221,13 +1225,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openProject(projectId: String) = leaveOpenFile {
         selectProject(projectId)
         if (_state.value.activeProjectId == projectId) {
-            _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CHATS) }
+            _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CHATS, projectPane = ProjectPane.CHAT) }
         }
+    }
+
+    /** Switches the in-project bottom bar; Files and Preview refresh their data like the global tabs do. */
+    fun selectProjectPane(pane: ProjectPane) {
+        _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectPane = pane) }
+        if (pane == ProjectPane.FILES) _state.value.activeProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+        if (pane == ProjectPane.PREVIEW) scanLocalPreviewPorts()
     }
 
     /** Shows the active chat's conversation under the Projects tab. */
     fun openConversation() {
-        _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CONVERSATION) }
+        _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CONVERSATION, projectPane = ProjectPane.CHAT) }
     }
 
     /** Opens one chat of the active project and shows its conversation. */
@@ -1238,6 +1249,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** One step up inside the Projects tab; false when already on the project list. */
     fun projectBack(): Boolean {
+        if (_state.value.projectPane != ProjectPane.CHAT) {
+            _state.update { it.copy(projectPane = ProjectPane.CHAT) }
+            return true
+        }
         val next = when (_state.value.projectView) {
             ProjectView.CONVERSATION -> ProjectView.CHATS
             ProjectView.CHATS -> ProjectView.LIST

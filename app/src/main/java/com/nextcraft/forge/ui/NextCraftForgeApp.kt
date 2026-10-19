@@ -149,13 +149,41 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         bottomBar = {
             // adjustResize lifts the bar above the keyboard and eats the composer's space; hide it while typing.
             if (!imeVisible) {
-                ForgeBottomBar(
-                    activeTab = state.activeTab,
-                    changedCount = state.changedItems.size,
-                    agentRunning = state.sessionRunning,
-                    terminalBusy = state.terminalRunning,
-                    onSelectTab = viewModel::selectTab,
-                )
+                val inProject = state.activeTab == ForgeTab.PROJECTS && state.projectView != ProjectView.LIST
+                if (inProject) {
+                    // Inside a project the bar belongs to the project: Chat · Files · Terminal · Preview.
+                    ForgeBottomBar(
+                        entries = projectEntries,
+                        selectedTab = when (state.projectPane) {
+                            ProjectPane.CHAT -> ForgeTab.AGENT
+                            ProjectPane.FILES -> ForgeTab.FILES
+                            ProjectPane.TERMINAL -> ForgeTab.TERMINAL
+                            ProjectPane.PREVIEW -> ForgeTab.PREVIEW
+                        },
+                        changedCount = state.changedItems.size,
+                        agentRunning = state.sessionRunning,
+                        terminalBusy = state.terminalRunning,
+                        onSelectTab = { tab ->
+                            viewModel.selectProjectPane(
+                                when (tab) {
+                                    ForgeTab.FILES -> ProjectPane.FILES
+                                    ForgeTab.TERMINAL -> ProjectPane.TERMINAL
+                                    ForgeTab.PREVIEW -> ProjectPane.PREVIEW
+                                    else -> ProjectPane.CHAT
+                                },
+                            )
+                        },
+                    )
+                } else {
+                    ForgeBottomBar(
+                        entries = navEntries,
+                        selectedTab = state.activeTab,
+                        changedCount = state.changedItems.size,
+                        agentRunning = state.sessionRunning,
+                        terminalBusy = state.terminalRunning,
+                        onSelectTab = viewModel::selectTab,
+                    )
+                }
             }
         },
     ) { innerPadding ->
@@ -221,8 +249,16 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onDeleteProject = viewModel::deleteProject,
                             onNewQuickProject = viewModel::createQuickProject,
                         )
-                        ProjectView.CHATS -> ProjectChatsScreen(state = state, viewModel = viewModel)
-                        ProjectView.CONVERSATION -> AgentScreen(state = state, viewModel = viewModel)
+                        ProjectView.CHATS, ProjectView.CONVERSATION -> when (state.projectPane) {
+                            ProjectPane.CHAT -> if (state.projectView == ProjectView.CHATS) {
+                                ProjectChatsScreen(state = state, viewModel = viewModel)
+                            } else {
+                                AgentScreen(state = state, viewModel = viewModel)
+                            }
+                            ProjectPane.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
+                            ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                            ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
+                        }
                     }
                     ForgeTab.AGENT -> AgentConfigScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
@@ -516,16 +552,24 @@ private fun ForgeTopBar(
 
 private data class NavEntry(val tab: ForgeTab, @StringRes val label: Int)
 
+/** Global bar: four destinations. Terminal lives inside the project bar and in Tools. */
 private val navEntries = listOf(
     NavEntry(ForgeTab.PROJECTS, R.string.nav_projects),
-    NavEntry(ForgeTab.TERMINAL, R.string.nav_terminal),
     NavEntry(ForgeTab.AGENT, R.string.nav_agent),
     NavEntry(ForgeTab.TOOLS, R.string.nav_tools),
     NavEntry(ForgeTab.SETTINGS, R.string.nav_settings),
 )
 
+/** In-project bar. The AGENT key draws the chat glyph; the others map 1:1 to ProjectPane. */
+private val projectEntries = listOf(
+    NavEntry(ForgeTab.AGENT, R.string.nav_chat),
+    NavEntry(ForgeTab.FILES, R.string.nav_files),
+    NavEntry(ForgeTab.TERMINAL, R.string.nav_terminal),
+    NavEntry(ForgeTab.PREVIEW, R.string.nav_preview),
+)
+
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
-private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW)
+private val toolsGroup = setOf(ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW, ForgeTab.TERMINAL)
 
 private fun ForgeTab.navIndex(): Int {
     val tab = if (this in toolsGroup) ForgeTab.TOOLS else this
@@ -539,7 +583,8 @@ private fun ForgeTab.navIndex(): Int {
  */
 @Composable
 private fun ForgeBottomBar(
-    activeTab: ForgeTab,
+    entries: List<NavEntry>,
+    selectedTab: ForgeTab,
     changedCount: Int,
     agentRunning: Boolean,
     terminalBusy: Boolean,
@@ -548,7 +593,8 @@ private fun ForgeBottomBar(
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     val reduceMotion = rememberReduceMotion()
-    val selectedIndex = activeTab.navIndex()
+    // Global entries collapse the Tools group onto Tools; the project bar matches its keys directly.
+    val selectedIndex = entries.indexOfFirst { it.tab == selectedTab }.takeIf { it >= 0 } ?: selectedTab.navIndex()
     val pillOffset by animateFloatAsState(
         targetValue = selectedIndex.toFloat(),
         animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.72f, stiffness = 380f),
@@ -580,7 +626,7 @@ private fun ForgeBottomBar(
                     .height(72.dp)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
-                val slot = maxWidth / navEntries.size
+                val slot = maxWidth / entries.size
                 val pillInset = 6.dp
                 // Pill: the only moving object. A radial gradient drawn behind it gives the soft outward glow
                 // (no blur, so it costs nothing on low-end GPUs). White skips the glow: it would look muddy.
@@ -616,7 +662,7 @@ private fun ForgeBottomBar(
                     )
                 }
                 Row(modifier = Modifier.fillMaxSize()) {
-                    navEntries.forEachIndexed { index, entry ->
+                    entries.forEachIndexed { index, entry ->
                         val label = stringResource(entry.label)
                         val selected = index == selectedIndex
                         val tint by animateColorAsState(
@@ -637,7 +683,7 @@ private fun ForgeBottomBar(
                         }
                         val badge: String? = when (entry.tab) {
                             ForgeTab.AGENT -> if (agentRunning) stringResource(R.string.nav_badge_agent_running) else null
-                            ForgeTab.TOOLS -> if (changedCount > 0) stringResource(R.string.nav_badge_files_changed, changedCount) else null
+                            ForgeTab.TOOLS, ForgeTab.FILES -> if (changedCount > 0) stringResource(R.string.nav_badge_files_changed, changedCount) else null
                             ForgeTab.TERMINAL -> if (terminalBusy) stringResource(R.string.nav_badge_terminal_busy) else null
                             else -> null
                         }

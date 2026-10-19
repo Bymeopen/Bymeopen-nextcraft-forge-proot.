@@ -424,4 +424,7 @@
     <string name="chats_empty">Belum ada obrolan. Mulai satu untuk membahas proyek ini dengan agen.</string>
     <string name="chats_open_project_tools">Perkakas proyek</string>
     <string name="chats_new_chat">Obrolan baru</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_files">File</string>
+    <string name="nav_preview">Pratinjau</string>
 </resources>
