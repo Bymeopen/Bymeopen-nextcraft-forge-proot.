@@ -443,7 +443,7 @@ private fun WorkspaceTreeList(
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = if (entry.isDirectory) "${entry.name} (${childCounts[entry.path] ?: 0})" else entry.name,
-                        fontSize = 15.sp,
+                        fontSize = ForgeType.body,
                         color = if (entry.isDirectory) scheme.onSurface else tokens.accentText,
                         fontWeight = if (entry.isDirectory || isSelected) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 2,
@@ -453,7 +453,7 @@ private fun WorkspaceTreeList(
                     if (!entry.isDirectory) {
                         Text(
                             text = formatBytes(entry.sizeBytes),
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             color = scheme.onSurfaceVariant,
                         )
                     }
@@ -553,7 +553,7 @@ private fun WorkspaceFileEditor(
         ) {
             Text(
                 text = stringResource(R.string.files_select_a_file_from),
-                fontSize = 14.sp,
+                fontSize = ForgeType.control,
                 color = scheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(14.dp))
@@ -576,7 +576,7 @@ private fun WorkspaceFileEditor(
             Text(
                 text = if (dirty) "$selectedPath *" else selectedPath,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -585,7 +585,7 @@ private fun WorkspaceFileEditor(
             if (!editable) {
                 Text(
                     text = stringResource(R.string.files_read_only_badge),
-                    fontSize = 12.sp,
+                    fontSize = ForgeType.caption,
                     fontWeight = FontWeight.SemiBold,
                     color = tokens.warningText,
                     modifier = Modifier.padding(end = 8.dp),
@@ -717,7 +717,7 @@ private fun WorkspaceDiffReviewList(
                                 color = tokens.successText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = ForgeType.caption,
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -725,7 +725,7 @@ private fun WorkspaceDiffReviewList(
                                 color = tokens.dangerText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = ForgeType.caption,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(

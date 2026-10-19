@@ -33,7 +33,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 
 /** One selectable model: [id] is what the agent receives, [label] is what the user reads, [badge] a short tier hint. */
@@ -78,7 +77,7 @@ fun ModelPickerDialog(
                 if (loading) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
-                        Text(stringResource(R.string.model_picker_loading), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                        Text(stringResource(R.string.model_picker_loading), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                     }
                 }
                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
@@ -106,7 +105,7 @@ fun ModelPickerDialog(
                         item(key = "empty") {
                             Text(
                                 stringResource(R.string.model_picker_empty),
-                                fontSize = 14.sp,
+                                fontSize = ForgeType.control,
                                 color = scheme.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 12.dp),
                             )
@@ -135,13 +134,13 @@ private fun ModelRow(label: String, id: String, badge: String, selected: Boolean
         RadioButton(selected = selected, onClick = null)
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(label, fontSize = ForgeType.body, fontWeight = FontWeight.Medium)
             if (id.isNotEmpty() && id != label) {
-                Text(id, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+                Text(id, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
             }
         }
         if (badge.isNotEmpty()) {
-            Text(badge, fontSize = 12.sp, color = scheme.primary, modifier = Modifier.padding(start = 8.dp))
+            Text(badge, fontSize = ForgeType.caption, color = scheme.primary, modifier = Modifier.padding(start = 8.dp))
         }
     }
 }

@@ -106,112 +106,6 @@ import kotlinx.coroutines.withContext
 import com.nextcraft.forge.model.generateQuickChatIdentity
 import com.nextcraft.forge.R
 
-/** What the Projects tab shows: the project list, the chats of the open project, or one conversation. */
-enum class ProjectView { LIST, CHATS, CONVERSATION }
-
-/** The in-project bottom bar: Chat (chats + conversation), Files, Terminal, Preview. */
-enum class ProjectPane { CHAT, FILES, TERMINAL, PREVIEW }
-
-enum class ForgeTab(val title: String) {
-    PROJECTS("Projects"),
-    AGENT("Agent"),
-    TOOLS("Tools"),
-    FILES("Files"),
-    TERMINAL("Terminal"),
-    ANDROID("Android"),
-    PREVIEW("Preview"),
-    SETTINGS("Settings"),
-    TOOLCHAINS("Toolchains"),
-    DIAGNOSTICS("Diagnostics"),
-    BUILD_MATRIX("Build Matrix"),
-    SSH("SSH"),
-    CICD("CI/CD"),
-    ROM("ROM Studio"),
-    CHECKPOINTS("Checkpoints"),
-}
-
-enum class SetupScope { RUNTIME, AGENT }
-
-data class ForgeUiState(
-    val arm64Supported: Boolean = true,
-    val rootAvailable: Boolean = false,
-    val runtimeInstalled: Boolean = false,
-    val setupSnapshot: RuntimeSetupSnapshot = RuntimeSetupSnapshot(),
-    val selectedDevStacks: Set<DevStack> = setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID),
-    val installedDevStacks: Set<DevStack> = emptySet(),
-    val installedAgents: Set<AgentKind> = emptySet(),
-    val agentUpdates: Map<AgentKind, AgentUpdateInfo> = emptyMap(),
-    /** Which Settings card owns the progress of the current runtime operation. */
-    val setupScope: SetupScope = SetupScope.RUNTIME,
-    val checkingAgentUpdates: Boolean = false,
-    val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
-    val activeTab: ForgeTab = ForgeTab.PROJECTS,
-    val projectView: ProjectView = ProjectView.LIST,
-    val projectPane: ProjectPane = ProjectPane.CHAT,
-    val themeMode: String = "dark",
-    val projects: List<Project> = emptyList(),
-    val activeProjectId: String = "",
-    val chats: List<ProjectChat> = emptyList(),
-    val activeChatId: String = "main",
-    val messages: List<ChatMessage> = emptyList(),
-    val sessionRunning: Boolean = false,
-    val activeStatusLine: String? = null,
-    val pendingToolRequest: ToolRequest? = null,
-    val changedItems: List<ChangeItem> = emptyList(),
-    val workspaceFiles: List<WorkspaceEntry> = emptyList(),
-    val selectedFilePath: String? = null,
-    val selectedFileContent: String = "",
-    val selectedFileEditable: Boolean = true,
-    val selectedFileDirty: Boolean = false,
-    /** Set while the user is asked whether to save or discard unsaved editor changes before leaving the file. */
-    val unsavedChangesPrompt: String? = null,
-    val fileSavedBanner: String? = null,
-    /** Files picked for the next prompt; copied into the workspace's attachments/ folder. */
-    val pendingAttachments: List<ChatAttachment> = emptyList(),
-    /** Messages sent while the agent was busy; delivered as the next turn once the current one completes. */
-    val queuedPrompts: List<QueuedPrompt> = emptyList(),
-    val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
-    val terminalRunning: Boolean = false,
-    val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
-    val androidLogcat: AndroidLogcatState = AndroidLogcatState(),
-    val previewUrl: String = "http://127.0.0.1:3000",
-    val activeLocalPorts: List<Int> = emptyList(),
-    val providerProfile: ProviderProfile = ProviderProfile(ProviderKind.ANTHROPIC),
-    val savedApiKeys: List<com.nextcraft.forge.data.ApiKeyInfo> = emptyList(),
-    val discoveredModels: List<DiscoveredModel> = emptyList(),
-    val apiStatusMessage: UiText? = null,
-    val apiBusy: Boolean = false,
-    val githubLogin: String = "",
-    val githubDeviceCode: GitHubDeviceCode? = null,
-    val githubRepos: List<GitHubRepository> = emptyList(),
-    val githubStatusMessage: UiText? = null,
-    val languageCode: String = "system",
-    val interactiveHighRiskApprovals: Boolean = true,
-    val autoApproveAllTools: Boolean = false,
-    val autoSyncGitHub: Boolean = false,
-    val antigravityModel: String = "gemini-2.5-pro",
-    val antigravityEffort: String = "high",
-    /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
-    val antigravityModels: List<String> = emptyList(),
-    val antigravityModelsLoading: Boolean = false,
-    val updateInfo: AppUpdateInfo? = null,
-    val updateStatusMessage: String? = null,
-    /** 0..1 while an app update APK is downloading, null otherwise. */
-    val updateProgress: Float? = null,
-    val checkingAppUpdate: Boolean = false,
-    val bannerMessage: UiText? = null,
-) {
-    val activeProject: Project?
-        get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
-}
-
-/** A message (and its attachments) the user sent while the agent was still working. */
-data class QueuedPrompt(
-    val id: String = UUID.randomUUID().toString(),
-    val text: String,
-    val attachments: List<ChatAttachment> = emptyList(),
-)
-
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = AppPreferences(application)
     private val vault = ApiKeyVault(application)
@@ -851,32 +745,73 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val currentProjects = _state.value.projects
         if (currentProjects.size <= 1) return
+        val index = currentProjects.indexOfFirst { it.id == projectId }
+        if (index < 0) return
+        val removed = currentProjects[index]
+        // A second delete inside the undo window makes the first one final.
+        finalizePendingDelete()
         val updated = currentProjects.filterNot { it.id == projectId }
-        if (updated.size == currentProjects.size) return
-        currentProjects.firstOrNull { it.id == projectId }?.slug?.let { slug ->
-            synchronized(reservedSlugs) { reservedSlugs -= slug }
-        }
         preferences.saveProjects(updated)
-        viewModelScope.launch(Dispatchers.IO) {
-            // Each saveAgentConversation is a synchronous commit(); keep those off the main thread.
-            runCatching {
-                preferences.loadProjectChats(projectId).forEach { chat ->
-                    AgentKind.entries.forEach { agent ->
-                        preferences.saveAgentConversation(agent, projectId, chat.id, null)
-                    }
-                }
-                preferences.deleteProjectChats(projectId)
-            }
-            runCatching {
-                File(getApplication<Application>().filesDir, "workspaces/$projectId").deleteRecursively()
-                checkpoints.checkpointDir(projectId).deleteRecursively()
-            }
+        pendingDelete = PendingDelete(removed, index)
+        pendingDeleteJob = viewModelScope.launch {
+            delay(UNDO_WINDOW_MS)
+            finalizePendingDelete()
         }
-        _state.update { it.copy(projects = updated) }
+        _state.update { it.copy(projects = updated, undoDelete = ProjectUndo(removed.id, removed.name)) }
         if (_state.value.activeProjectId == projectId) {
             selectProject(updated.first().id)
         }
     }
+
+    /** Restores the project removed by [deleteProject] if its undo window is still open. */
+    fun undoDeleteProject() {
+        val pending = pendingDelete ?: return
+        pendingDeleteJob?.cancel()
+        pendingDelete = null
+        val restored = _state.value.projects.toMutableList().also {
+            it.add(pending.index.coerceIn(0, it.size), pending.project)
+        }
+        preferences.saveProjects(restored)
+        _state.update { it.copy(projects = restored, undoDelete = null) }
+    }
+
+    /** The Snackbar was dismissed or timed out on its own; the deletion stays pending until its window ends. */
+    fun clearUndoPrompt() {
+        _state.update { it.copy(undoDelete = null) }
+    }
+
+    /** Wipes the files of the project waiting in the undo window. Safe to call when nothing is pending. */
+    private fun finalizePendingDelete() {
+        val pending = pendingDelete ?: return
+        pendingDelete = null
+        pendingDeleteJob?.cancel()
+        val project = pending.project
+        synchronized(reservedSlugs) { reservedSlugs -= project.slug }
+        _state.update { it.copy(undoDelete = null) }
+        viewModelScope.launch(Dispatchers.IO) { wipeProjectData(project) }
+    }
+
+    /** Blocking: removes chats, workspace and checkpoints of [project]. Call off the main thread. */
+    private fun wipeProjectData(project: Project) {
+        // Each saveAgentConversation is a synchronous commit().
+        runCatching {
+            preferences.loadProjectChats(project.id).forEach { chat ->
+                AgentKind.entries.forEach { agent ->
+                    preferences.saveAgentConversation(agent, project.id, chat.id, null)
+                }
+            }
+            preferences.deleteProjectChats(project.id)
+        }
+        runCatching {
+            File(getApplication<Application>().filesDir, "workspaces/${project.id}").deleteRecursively()
+            checkpoints.checkpointDir(project.id).deleteRecursively()
+        }
+    }
+
+    private data class PendingDelete(val project: Project, val index: Int)
+
+    private var pendingDelete: PendingDelete? = null
+    private var pendingDeleteJob: Job? = null
 
     /** Renames the display name only; the slug (the /workspace/<slug> path agents and chats are bound to) stays. */
     fun renameProject(projectId: String, newName: String) {
@@ -1429,6 +1364,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Switches the in-project bottom bar; Files and Preview refresh their data like the global tabs do. */
     fun selectProjectPane(pane: ProjectPane) {
         _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectPane = pane) }
+        refreshPaneData(pane)
+    }
+
+    /** Two-pane layout: the workspace pane appears beside the chat without changing [ForgeUiState.projectPane]. */
+    fun onSidePaneShown(pane: ProjectPane) = refreshPaneData(pane)
+
+    private fun refreshPaneData(pane: ProjectPane) {
         if (pane == ProjectPane.FILES) _state.value.activeProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
         if (pane == ProjectPane.PREVIEW) scanLocalPreviewPorts()
     }
@@ -1445,10 +1387,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** One step up inside the Projects tab; false when already on the project list. */
-    fun projectBack(): Boolean {
+    fun projectBack(paneBesideChat: Boolean = false): Boolean {
         if (_state.value.projectPane != ProjectPane.CHAT) {
             _state.update { it.copy(projectPane = ProjectPane.CHAT) }
-            return true
+            // Two-pane layout: the chat is already visible, so closing the pane would look like a no-op Back.
+            if (!paneBesideChat) return true
         }
         val next = when (_state.value.projectView) {
             ProjectView.CONVERSATION -> ProjectView.CHATS
@@ -3180,6 +3123,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // viewModelScope is cancelled here, so a project still in its undo window is wiped on a plain thread.
+        pendingDelete?.project?.let { project -> Thread { wipeProjectData(project) }.start() }
         RuntimeTaskController.requestStop()
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
@@ -3188,6 +3133,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        /** How long a deleted project stays restorable. */
+        const val UNDO_WINDOW_MS = 6_000L
+
         const val MAX_IMPORT_ENTRIES = 50_000
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024

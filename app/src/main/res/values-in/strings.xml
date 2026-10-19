@@ -176,7 +176,7 @@
     <string name="launch_errors_warnings">%1$d error · %2$d peringatan</string>
     <string name="launch_no_build_output">Belum ada output build. Ketuk putar untuk mengompilasi.</string>
     <string name="nav_projects">Proyek</string>
-    <string name="nav_agent">Agent</string>
+    <string name="nav_agent">Atur AI</string>
     <string name="nav_tools">Alat</string>
     <string name="nav_settings">Pengaturan</string>
     <string name="status_done">Selesai</string>
@@ -439,6 +439,7 @@
     <string name="onb_checks">Pemeriksaan perangkat</string>
     <string name="onb_stacks">Stack yang dipasang</string>
     <string name="onb_progress_pct">%1$d%% · %2$s</string>
+    <string name="onb_root_help">Forge menjalankan agen di dalam chroot Ubuntu yang membutuhkan root. Berikan akses root di Magisk, KernelSU, atau APatch, lalu ketuk Periksa ulang. Anda tetap bisa menjelajah aplikasi lewat Lanjut tanpa runtime.</string>
     <string name="onb_continue_anyway">Lanjut tanpa runtime</string>
     <string name="onb_repair">Perbaiki mount</string>
     <string name="onb_recheck">Periksa ulang</string>
@@ -464,6 +465,8 @@
     <string name="files_unsaved_save">Simpan</string>
     <string name="files_unsaved_discard">Buang</string>
     <string name="msg_busy_before_quick_project">Selesaikan atau hentikan tugas aktif sebelum memulai Quick project.</string>
+    <string name="msg_project_deleted">\"%1$s\" dihapus</string>
+    <string name="action_undo">Urungkan</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>
     <string name="msg_agy_probing">Memeriksa Antigravity CLI di dalam chroot…</string>
     <string name="msg_agy_verified">Antigravity CLI terverifikasi: %1$s</string>
@@ -532,7 +535,7 @@
     <string name="launch_preview_not_running_hint">Masukkan URL localhost di atas, atau jalankan server web lokal di terminal proyek.</string>
     <string name="launch_force_rebuild">Build ulang paksa</string>
     <string name="launch_copy_apk_path">Salin path APK</string>
-    <string name="agent_config_title">Agen AI</string>
+    <string name="agent_config_title">Atur AI</string>
     <string name="chats_subtitle">%1$d obrolan</string>
     <string name="chats_empty">Belum ada obrolan. Mulai satu untuk membahas proyek ini dengan agen.</string>
     <string name="chats_empty_title">Belum ada obrolan</string>

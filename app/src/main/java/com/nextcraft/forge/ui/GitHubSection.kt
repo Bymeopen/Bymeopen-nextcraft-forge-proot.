@@ -71,7 +71,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.BuildConfig
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
@@ -98,7 +97,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.settings_repository_sync), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 state.githubStatusMessage?.asString()?.let { status ->
-                    Text(text = status, fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                    Text(text = status, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                 }
                 state.githubDeviceCode?.let { dc ->
                     Surface(shape = RoundedCornerShape(14.dp), color = tokens.cardElevatedColor, modifier = Modifier.fillMaxWidth()) {
@@ -232,14 +231,14 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                         ThinDivider()
                         Text(
                             text = stringResource(R.string.settings_your_repositories_tap_clone),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             fontWeight = FontWeight.Medium,
                             color = scheme.onSurfaceVariant,
                         )
                         state.githubRepos.take(10).forEach { repo ->
                             Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontSize = ForgeType.control, fontWeight = FontWeight.SemiBold)
                                     if (repo.description.isNotBlank()) {
                                         Text(repo.description, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }

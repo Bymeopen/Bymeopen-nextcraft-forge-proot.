@@ -36,7 +36,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.runtime.ClaudeAuthStatus
 import com.nextcraft.forge.runtime.ClaudeLoginMode
@@ -79,7 +78,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 fontWeight = FontWeight.SemiBold,
             )
             auth.message?.let {
-                Text(it, fontSize = 13.sp, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (inFlight) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
@@ -158,7 +157,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
             }
             Text(
                 text = stringResource(R.string.settings_claude_footnote),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )

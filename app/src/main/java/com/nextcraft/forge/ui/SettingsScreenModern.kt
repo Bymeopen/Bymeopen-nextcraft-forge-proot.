@@ -71,7 +71,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.BuildConfig
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
@@ -152,13 +151,13 @@ fun SettingsScreenModern(
                                     ) {
                                         Text(
                                             text = stringResource(mode.title),
-                                            fontSize = 15.sp,
+                                            fontSize = ForgeType.body,
                                             fontWeight = FontWeight.SemiBold,
                                             color = if (selected) scheme.primary else scheme.onSurface,
                                         )
                                         Text(
                                             text = stringResource(mode.subtitle),
-                                            fontSize = 12.sp,
+                                            fontSize = ForgeType.caption,
                                             color = scheme.onSurfaceVariant,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
@@ -173,7 +172,7 @@ fun SettingsScreenModern(
             }
             ThinDivider()
 
-            val languages = AppLanguage.entries
+            val languages = AppLanguage.selectable
             val activeLanguage = languages.firstOrNull { it.code.equals(state.languageCode, ignoreCase = true) } ?: languages.first()
             var languageOpen by rememberSaveable { mutableStateOf(false) }
             SettingsRow(
@@ -232,12 +231,12 @@ fun SettingsScreenModern(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(stack.displayLabel(), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                            Text(stack.displayDescription(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                            Text(stack.displayLabel(), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
+                            Text(stack.displayDescription(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         when {
-                            stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = 14.sp, color = scheme.onSurfaceVariant)
+                            stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
                             installed -> Row(verticalAlignment = Alignment.CenterVertically) {
                                 ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
                                 TextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
@@ -279,7 +278,7 @@ fun SettingsScreenModern(
                 KeyValueRow(stringResource(R.string.settings_active_agent), state.agentKind.displayTitle())
                 if (state.installedAgents.isNotEmpty()) {
                     ThinDivider()
-                    Text(stringResource(R.string.settings_installed_agents), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant)
+                    Text(stringResource(R.string.settings_installed_agents), fontSize = ForgeType.control, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant)
                     state.installedAgents.forEach { kind ->
                         KeyValueRow(kind.displayTitle(), state.agentUpdates[kind]?.latestVersion?.let { stringResource(R.string.settings_agent_update, it) } ?: stringResource(R.string.settings_agent_installed))
                     }
@@ -319,7 +318,7 @@ fun SettingsScreenModern(
             SettingsRow(
                 icon = ForgeGlyph.INFO,
                 title = stringResource(R.string.settings_version),
-                trailing = { Text("v${BuildConfig.VERSION_NAME}", color = scheme.onSurfaceVariant, fontSize = 14.sp) },
+                trailing = { Text("v${BuildConfig.VERSION_NAME}", color = scheme.onSurfaceVariant, fontSize = ForgeType.control) },
             )
             ThinDivider()
             SettingsRow(
@@ -395,7 +394,7 @@ internal fun AntigravityAccountCard(
                     )
                     Text(
                         text = agyAuth.message ?: stringResource(R.string.settings_google_required),
-                        fontSize = 13.sp,
+                        fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -465,11 +464,11 @@ internal fun AntigravityAccountCard(
                 }
             }
             state.apiStatusMessage?.let { msg ->
-                Text(text = msg.asString(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                Text(text = msg.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
             }
             Text(
                 text = stringResource(R.string.settings_antigravity_footnote),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -508,7 +507,7 @@ internal fun AntigravityAccountCard(
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_antigravity_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                    Text(stringResource(R.string.settings_antigravity_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                     Text(
                         text = agyModelInput.ifBlank { state.antigravityModel }.ifBlank { "—" }.let { if (it == "—") it else antigravityModelLabel(it) },
                         fontSize = ForgeType.cardTitle,
@@ -573,9 +572,9 @@ internal fun SettingsRow(
         }
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
             if (subtitle != null) {
-                Text(subtitle, fontSize = 13.sp, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(modifier = Modifier.width(10.dp))
@@ -638,11 +637,11 @@ internal fun RadioRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    fontSize = 13.sp,
+                    fontSize = ForgeType.secondary,
                     color = scheme.onSurfaceVariant,
                     fontFamily = if (mono) FontFamily.Monospace else null,
                     maxLines = 2,
@@ -657,8 +656,8 @@ internal fun RadioRow(
 @Composable
 internal fun KeyValueRow(key: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(key, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(key, fontSize = ForgeType.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, fontSize = ForgeType.body, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

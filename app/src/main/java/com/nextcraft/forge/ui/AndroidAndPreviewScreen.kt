@@ -263,7 +263,7 @@ fun AndroidBuildScreen(
                     } else {
                         build.message ?: build.stage.displayLabel()
                     },
-                    fontSize = 14.sp,
+                    fontSize = ForgeType.control,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -334,7 +334,7 @@ fun AndroidBuildScreen(
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
                             text = stringResource(row.title),
-                            fontSize = 16.sp,
+                            fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.Medium,
                             color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         )
@@ -378,7 +378,7 @@ fun AndroidBuildScreen(
                             text = build.log.ifBlank { stringResource(R.string.launch_no_build_output) },
                             color = tokens.terminalText,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             lineHeight = 17.sp,
                         )
                     }
@@ -452,7 +452,7 @@ private fun BuildIssuesList(
                                 issue.line?.let { append(":").append(it) }
                             },
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             fontWeight = FontWeight.SemiBold,
                             color = tokens.accentText,
                         )

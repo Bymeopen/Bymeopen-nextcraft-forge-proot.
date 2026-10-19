@@ -159,7 +159,7 @@ fun TerminalScreen(
                     text = state.terminalOutput.ifEmpty { "Ready.\n" },
                     color = tokens.terminalText,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = ForgeType.caption,
                     lineHeight = 18.sp,
                 )
             }
@@ -181,7 +181,7 @@ fun TerminalScreen(
                         Text(
                             text = cmd,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                         )
                     },
                 )
@@ -245,7 +245,7 @@ fun TerminalScreen(
                         Text(
                             text = stringResource(R.string.terminal_run_command_in_the),
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
                         )
                     },
@@ -291,6 +291,6 @@ private fun TerminalKey(label: String, description: String, enabled: Boolean, on
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
         modifier = Modifier.height(36.dp).semantics { contentDescription = description },
     ) {
-        Text(label, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = if (enabled) scheme.onSurface else scheme.onSurfaceVariant)
+        Text(label, fontFamily = FontFamily.Monospace, fontSize = ForgeType.secondary, color = if (enabled) scheme.onSurface else scheme.onSurfaceVariant)
     }
 }

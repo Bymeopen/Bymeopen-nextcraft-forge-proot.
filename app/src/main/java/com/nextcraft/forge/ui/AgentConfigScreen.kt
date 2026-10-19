@@ -46,7 +46,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ProviderKind
@@ -117,7 +116,7 @@ fun AgentConfigScreen(
                     }
                     Text(
                         text = stringResource(R.string.settings_agent_install_hint, agent.downloadNote),
-                        fontSize = 14.sp,
+                        fontSize = ForgeType.control,
                         color = scheme.onSurfaceVariant,
                     )
                     ForgePrimaryButton(
@@ -130,7 +129,7 @@ fun AgentConfigScreen(
                         // A stack/Core install holds the runtime lock; its progress is shown in Settings.
                         Text(
                             text = stringResource(R.string.settings_agent_wait_runtime),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }
@@ -238,12 +237,12 @@ fun AgentConfigScreen(
                     }
                     if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     state.apiStatusMessage?.asString()?.let { msg ->
-                        Text(text = msg, fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                        Text(text = msg, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                     }
                     // Model choice for every provider: discovered models when available, otherwise sensible presets.
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.settings_current_model), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                            Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                             Text(
                                 text = state.providerProfile.model.ifBlank { "default" },
                                 fontSize = ForgeType.cardTitle,
@@ -272,7 +271,7 @@ fun AgentConfigScreen(
                     if (state.discoveredModels.isNotEmpty()) {
                         Text(
                             text = stringResource(R.string.settings_models_found, state.discoveredModels.size),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             fontWeight = FontWeight.Medium,
                             color = scheme.onSurfaceVariant,
                         )
@@ -300,7 +299,7 @@ fun AgentConfigScreen(
                     ThinDivider()
                     Text(
                         text = stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
-                        fontSize = 15.sp,
+                        fontSize = ForgeType.body,
                         fontWeight = FontWeight.SemiBold,
                     )
                     state.savedApiKeys.forEach { keyInfo ->
@@ -377,7 +376,7 @@ fun AgentConfigScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 44.dp)) {
                             ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(kind.displayTitle(), fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            Text(kind.displayTitle(), fontSize = ForgeType.body, modifier = Modifier.weight(1f))
                             state.agentUpdates[kind]?.let { info ->
                                 TextButton(onClick = { viewModel.updateAgent(kind) }, enabled = !runtimeBusy) {
                                     Text(stringResource(R.string.settings_agent_update, info.latestVersion))

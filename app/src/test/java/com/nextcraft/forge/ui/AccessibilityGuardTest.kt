@@ -35,8 +35,8 @@ class AccessibilityGuardTest {
     }
 
     private companion object {
-        // 35 = 23 + 6 on the Projects hero/import card (icons beside their own label text).
-        // 37 = 35 + 1 (Rename item in the project menu) + 1 (Developer Tools header tile); both sit beside visible text.
-        const val BASELINE = 38
+        // Audited: all 14 sit beside visible text or inside a control with onClickLabel (expand chevrons,
+        // leading icons, status glyphs). Tightened from 38 (18 before the unused ForgeTopBar was removed) so a new unlabeled icon fails the test.
+        const val BASELINE = 14
     }
 }

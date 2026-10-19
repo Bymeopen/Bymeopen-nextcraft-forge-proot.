@@ -37,7 +37,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.runtime.SshHost
 import com.nextcraft.forge.runtime.TargetStatus
@@ -64,15 +63,15 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         if (matrix.targets.isEmpty()) {
-            Text(stringResource(R.string.tool_no_targets), fontSize = 14.sp, color = scheme.onSurfaceVariant)
+            Text(stringResource(R.string.tool_no_targets), fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
         }
         matrix.targets.forEach { target ->
             ToolCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = target.enabled, onCheckedChange = { viewModel.buildMatrix.toggle(target.id) }, enabled = !matrix.running)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(target.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(target.command, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(target.name, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
+                        Text(target.command, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Text(matrix.statuses[target.id].mark(), fontSize = ForgeType.cardTitle, color = scheme.primary, modifier = Modifier.padding(horizontal = 6.dp))
                     if (!target.detected) {
@@ -139,14 +138,14 @@ fun SshScreen(viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         ToolCard {
-            Text(stringResource(R.string.tool_ssh_client), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.tool_ssh_client), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
             Text(
                 text = when (ssh.clientInstalled) {
                     true -> stringResource(R.string.tool_ssh_client_ready)
                     false -> stringResource(R.string.tool_ssh_client_missing)
                     null -> stringResource(R.string.tool_checking)
                 },
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -164,12 +163,12 @@ fun SshScreen(viewModel: MainViewModel) {
             }
         }
         ToolSectionLabel(stringResource(R.string.tool_ssh_hosts))
-        if (ssh.hosts.isEmpty()) Text(stringResource(R.string.tool_ssh_no_hosts), fontSize = 14.sp, color = scheme.onSurfaceVariant)
+        if (ssh.hosts.isEmpty()) Text(stringResource(R.string.tool_ssh_no_hosts), fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
         ssh.hosts.forEach { host ->
             ToolCard {
-                Text(host.alias, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(host.alias, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
                 val address = "${host.user}@${host.host}:${host.port}" + if (host.forward.isNotEmpty()) "  ·  -L ${host.forward}" else ""
-                Text(address, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+                Text(address, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.ssh.testConnection(host) }, enabled = !ssh.busy && ssh.clientInstalled == true) { Text(stringResource(R.string.tool_ssh_test)) }
                     OutlinedButton(shape = RoundedCornerShape(100), onClick = { remoteFor = host }, enabled = !ssh.busy && ssh.clientInstalled == true) { Text(stringResource(R.string.tool_ssh_run)) }
@@ -210,7 +209,7 @@ fun SshScreen(viewModel: MainViewModel) {
                     OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text(stringResource(R.string.tool_ssh_host)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text(stringResource(R.string.tool_ssh_port)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = forward, onValueChange = { forward = it }, label = { Text(stringResource(R.string.tool_ssh_forward)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    error?.let { Text(it, fontSize = 13.sp, color = scheme.error) }
+                    error?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.error) }
                 }
             },
             confirmButton = {
@@ -254,7 +253,7 @@ fun CiCdScreen(viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         if (ci.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        ci.message?.let { Text(it, fontSize = 14.sp, color = scheme.onSurfaceVariant) }
+        ci.message?.let { Text(it, fontSize = ForgeType.control, color = scheme.onSurfaceVariant) }
         OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel.cicd::refresh, enabled = !ci.loading, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.tool_refresh))
         }
@@ -272,8 +271,8 @@ fun CiCdScreen(viewModel: MainViewModel) {
                 ToolCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(workflow.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text(workflow.path, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(workflow.name, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
+                            Text(workflow.path, fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.cicd.dispatch(workflow) }, enabled = !ci.loading && workflow.state == "active") {
                             Text(stringResource(R.string.tool_run))
@@ -289,13 +288,13 @@ fun CiCdScreen(viewModel: MainViewModel) {
                 ToolCard(modifier = Modifier.padding(0.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(run.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(run.name, fontSize = ForgeType.body, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             val runInfo = "${run.branch} · ${run.event} · ${run.createdAt.take(16).replace('T', ' ')}"
-                            Text(runInfo, fontSize = 12.sp, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(runInfo, fontSize = ForgeType.caption, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Text(
                             text = outcome,
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             fontWeight = FontWeight.Medium,
                             color = if (run.conclusion == "success") scheme.primary else if (run.conclusion == null) scheme.onSurfaceVariant else scheme.error,
                             modifier = Modifier.padding(horizontal = 8.dp),
@@ -320,7 +319,7 @@ fun RomStudioScreen(viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         ToolCard {
-            Text(stringResource(R.string.tool_rom_warning, rom.freeStorage), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+            Text(stringResource(R.string.tool_rom_warning, rom.freeStorage), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
         }
         OutlinedTextField(shape = RoundedCornerShape(14.dp), value = rom.manifestUrl, onValueChange = { viewModel.rom.update(manifestUrl = it) }, label = { Text(stringResource(R.string.tool_rom_manifest)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -328,7 +327,7 @@ fun RomStudioScreen(viewModel: MainViewModel) {
             OutlinedTextField(shape = RoundedCornerShape(14.dp), value = rom.directory, onValueChange = { viewModel.rom.update(directory = it) }, label = { Text(stringResource(R.string.tool_rom_folder)) }, singleLine = true, modifier = Modifier.weight(1f))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.tool_rom_jobs, rom.jobs), fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.tool_rom_jobs, rom.jobs), fontSize = ForgeType.control, modifier = Modifier.weight(1f))
             OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.rom.update(jobs = rom.jobs - 1) }) { Text("−") }
             OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.rom.update(jobs = rom.jobs + 1) }, modifier = Modifier.padding(start = 8.dp)) { Text("+") }
         }

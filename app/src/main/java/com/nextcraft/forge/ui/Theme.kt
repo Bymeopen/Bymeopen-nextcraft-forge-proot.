@@ -358,7 +358,7 @@ val LocalForgeThemeTokens = staticCompositionLocalOf<ForgeThemeTokens> { DarkThe
 val ForgeCodeTextStyle = TextStyle(
     fontFamily = FontFamily.Monospace,
     fontWeight = FontWeight.Normal,
-    fontSize = 13.sp,
+    fontSize = ForgeType.secondary,
     lineHeight = 19.sp,
 )
 

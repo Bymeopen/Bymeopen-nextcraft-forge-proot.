@@ -332,7 +332,7 @@ fun ForgePillTabs(
             ) {
                 Text(
                     text = label,
-                    fontSize = 15.sp,
+                    fontSize = ForgeType.body,
                     color = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
                     maxLines = 1,
                 )

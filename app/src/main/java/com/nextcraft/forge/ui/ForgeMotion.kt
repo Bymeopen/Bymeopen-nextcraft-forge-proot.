@@ -22,6 +22,7 @@ import androidx.compose.animation.with
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -137,10 +138,21 @@ object ForgeType {
     val cardTitle = 17.sp       // card headings, SemiBold
     val rowTitle = 16.sp        // list rows, Medium
     val body = 15.sp            // prose, Normal
+    val control = 14.sp         // buttons, inline status and helper text
     val secondary = 13.sp       // subtitles and metadata, muted
     val caption = 12.sp         // section labels (uppercase, tracked) and badges
     val sectionTracking = 0.6.sp
 }
+
+/** Width breakpoints (Material window size classes): >= [expanded] shows a project as two panes. */
+object ForgeBreakpoint {
+    const val EXPANDED_DP = 840
+    val readableMaxWidth = 720.dp
+}
+
+/** True on tablets, foldables and landscape tablets where chat and workspace fit side by side. */
+@Composable
+fun rememberIsExpanded(): Boolean = LocalConfiguration.current.screenWidthDp >= ForgeBreakpoint.EXPANDED_DP
 
 /** 4dp grid. Screen edge 20, card edge 14, card inner 16, row 56, section gap 24, label-to-card 8. */
 object ForgeSpace {
