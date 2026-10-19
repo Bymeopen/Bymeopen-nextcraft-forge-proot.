@@ -317,6 +317,9 @@
     <string name="tools_ssh_desc">Remote SSH sessions and port forwarding</string>
     <string name="tools_toolchains">Toolchains Manager</string>
     <string name="tools_toolchains_desc">Manage compilers, SDKs and language packages</string>
+    <string name="tool_copied">Copied</string>
+    <string name="tool_last_crash">Last crash report</string>
+    <string name="tool_no_crash">No crash recorded. If the app closes unexpectedly, its full stack trace appears here.</string>
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>

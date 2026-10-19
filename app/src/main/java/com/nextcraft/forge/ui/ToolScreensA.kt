@@ -26,11 +26,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nextcraft.forge.CrashReporter
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
@@ -147,6 +151,30 @@ fun DiagnosticsScreen(viewModel: MainViewModel) {
         }
         diag.healthSummary?.let { Text(it, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = scheme.primary) }
         LogBox(text = diag.healthOutput, placeholder = stringResource(R.string.tool_health_placeholder))
+
+        // The full stack trace of the last crash, readable and copyable without adb.
+        val context = LocalContext.current
+        val clipboard = LocalClipboardManager.current
+        var crash by remember { mutableStateOf(CrashReporter.read(context)) }
+        ToolSectionLabel(stringResource(R.string.tool_last_crash))
+        LogBox(text = crash.orEmpty(), placeholder = stringResource(R.string.tool_no_crash))
+        if (crash != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                ForgePrimaryButton(
+                    text = stringResource(R.string.tool_copy),
+                    onClick = { clipboard.setText(AnnotatedString(crash.orEmpty())) },
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = {
+                        CrashReporter.clear(context)
+                        crash = null
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(R.string.tool_delete)) }
+            }
+        }
     }
 }
 
