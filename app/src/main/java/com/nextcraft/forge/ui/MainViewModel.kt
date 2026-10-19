@@ -73,6 +73,7 @@ import com.nextcraft.forge.runtime.readBoundedText
 import com.nextcraft.forge.runtime.startPackageLogcatProcess
 import com.nextcraft.forge.runtime.supportsArm64Runtime
 import com.nextcraft.forge.update.AppUpdateInfo
+import kotlin.concurrent.withLock
 import com.nextcraft.forge.update.AppUpdater
 import com.nextcraft.forge.update.NoPublishedReleaseException
 import java.io.File
@@ -700,11 +701,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
             val newProject = withContext(Dispatchers.IO) {
-                val usedSlugs = _state.value.projects.map { it.slug }.toSet()
-                val baseSlug = projectSlug(cleanName)
-                var slug = baseSlug
-                var suffix = 2
-                while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                val slug = reserveProjectSlug(projectSlug(cleanName))
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
@@ -742,6 +739,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val reservedSlugs = mutableSetOf<String>()
+
+    /**
+     * Picks a slug no project (nor a create/clone/import still in flight) uses. Two quick Create taps or clones of
+     * the same repo would otherwise both see the slug as free and share one guest workspace path.
+     */
+    private fun reserveProjectSlug(baseSlug: String): String = synchronized(reservedSlugs) {
+        val used = _state.value.projects.map { it.slug }.toSet() + reservedSlugs
+        var slug = baseSlug
+        var suffix = 2
+        while (slug in used) slug = "$baseSlug-${suffix++}"
+        reservedSlugs += slug
+        slug
+    }
+
     fun deleteProject(projectId: String) {
         // The workspace would be wiped under a running agent, build, or terminal process.
         if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
@@ -752,15 +764,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentProjects.size <= 1) return
         val updated = currentProjects.filterNot { it.id == projectId }
         if (updated.size == currentProjects.size) return
-        val oldChats = runCatching { preferences.loadProjectChats(projectId) }.getOrDefault(emptyList())
-        oldChats.forEach { chat ->
-            AgentKind.entries.forEach { agent ->
-                preferences.saveAgentConversation(agent, projectId, chat.id, null)
-            }
+        currentProjects.firstOrNull { it.id == projectId }?.slug?.let { slug ->
+            synchronized(reservedSlugs) { reservedSlugs -= slug }
         }
         preferences.saveProjects(updated)
-        preferences.deleteProjectChats(projectId)
         viewModelScope.launch(Dispatchers.IO) {
+            // Each saveAgentConversation is a synchronous commit(); keep those off the main thread.
+            runCatching {
+                preferences.loadProjectChats(projectId).forEach { chat ->
+                    AgentKind.entries.forEach { agent ->
+                        preferences.saveAgentConversation(agent, projectId, chat.id, null)
+                    }
+                }
+                preferences.deleteProjectChats(projectId)
+            }
             runCatching {
                 File(getApplication<Application>().filesDir, "workspaces/$projectId").deleteRecursively()
                 checkpoints.checkpointDir(projectId).deleteRecursively()
@@ -811,12 +828,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
-        AgentKind.entries.forEach { agent ->
-            preferences.saveAgentConversation(agent, project.id, chatId, null)
-        }
         preferences.saveProjectChats(project.id, updatedChats)
-        runCatching {
-            File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
+        viewModelScope.launch(Dispatchers.IO) {
+            AgentKind.entries.forEach { agent ->
+                preferences.saveAgentConversation(agent, project.id, chatId, null)
+            }
+            runCatching {
+                File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
+            }
         }
         val nextChatId = if (_state.value.activeChatId == chatId) {
             updatedChats.first().id
@@ -1581,14 +1600,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Writes the GitHub PAT into the rootfs only while [block] runs, then removes it so agent
      * processes (UID 0 inside the chroot) can never read a long-lived credential file.
      */
-    private inline fun <T> withGitHubCredentials(token: String, login: String, block: () -> T): T {
-        installer.configureGitHubAccess(token, login)
-        return try {
-            block()
-        } finally {
-            installer.clearGitHubAccess()
+    private inline fun <T> withGitHubCredentials(token: String, login: String, block: () -> T): T =
+        // One GitHub operation at a time: a finishing sync would otherwise delete the credentials of another
+        // one mid-push, and two git processes on the same workspace collide on .git/index.lock.
+        githubOperationLock.withLock {
+            installer.configureGitHubAccess(token, login)
+            try {
+                block()
+            } finally {
+                installer.clearGitHubAccess()
+            }
         }
-    }
+
+    private val githubOperationLock = java.util.concurrent.locks.ReentrantLock()
 
     fun runAndroidBuild(task: String = "assembleDebug", installAfterBuild: Boolean = false) {
         val project = _state.value.activeProject ?: return
@@ -2398,11 +2422,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val clonedProject = withContext(Dispatchers.IO) {
                 runCatching {
                     val cleanName = repo.fullName.substringAfterLast('/').ifBlank { repo.fullName }
-                    val usedSlugs = _state.value.projects.map { it.slug }.toSet()
-                    val baseSlug = projectSlug(cleanName)
-                    var slug = baseSlug
-                    var suffix = 2
-                    while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                    val slug = reserveProjectSlug(projectSlug(cleanName))
                     val project = Project(
                         name = cleanName,
                         description = repo.description.ifBlank { "Cloned from ${repo.fullName}" },
@@ -2515,11 +2535,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte()
                     if (!isZip) throw IllegalArgumentException("$displayName is not a ZIP archive")
                     val cleanName = displayName.removeSuffix(".zip").ifBlank { "Imported project" }
-                    val usedSlugs = _state.value.projects.map { it.slug }.toSet()
-                    val baseSlug = projectSlug(cleanName)
-                    var slug = baseSlug
-                    var suffix = 2
-                    while (slug in usedSlugs) slug = "$baseSlug-${suffix++}"
+                    val slug = reserveProjectSlug(projectSlug(cleanName))
                     val project = Project(
                         name = cleanName,
                         description = "Imported from $displayName",

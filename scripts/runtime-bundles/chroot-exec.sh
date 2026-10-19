@@ -1,23 +1,23 @@
 #!/system/bin/sh
-# scripts/runtime-bundles/chroot-exec.sh
-# NextCraft Forge (com.nextcraft.forge) — Pure Root Chroot Supervisor Script
-# Dipanggil via:
-#   su -mm -c "/data/data/com.nextcraft.forge/files/runtime/bin/chroot-exec.sh <rootfs> <workspace_host> <guest_workspace> <bridge_host> <app_uid> <cmd...>"
 set -e
 
 if [ "$#" -lt 6 ]; then
-    echo "Usage: $0 <rootfs> <workspace_host> <guest_workspace> <bridge_host> <app_uid> <command...>" >&2
-    exit 64
+    echo "Usage: chroot-exec.sh <rootfs> <host_workspace> <guest_workspace> <host_bridge> <app_uid> <cmd...>" >&2
+    exit 2
 fi
 
 ROOTFS="$1"
-WORKSPACE_HOST="$2"
+HOST_WORKSPACE="$2"
 GUEST_WORKSPACE="$3"
-BRIDGE_HOST="$4"
+HOST_BRIDGE="$4"
 APP_UID="$5"
 shift 5
 
-# Validasi keamanan path guest workspace (wajib /root, /workspace, atau /workspace/<slug> tanpa '..' atau nested '/')
+if [ -z "$ROOTFS" ] || [ -z "$HOST_WORKSPACE" ] || [ -z "$GUEST_WORKSPACE" ] || [ -z "$HOST_BRIDGE" ] || [ -z "$APP_UID" ]; then
+    echo "Usage: chroot-exec.sh <rootfs> <host_workspace> <guest_workspace> <host_bridge> <app_uid> <cmd...>" >&2
+    exit 2
+fi
+
 case "$GUEST_WORKSPACE" in
     *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
         echo "Invalid guest workspace path: $GUEST_WORKSPACE" >&2
@@ -41,39 +41,17 @@ is_mounted() {
     awk -v target="$1" '$2 == target { found=1; exit } END { exit !found }' /proc/mounts
 }
 
-# Exit Trap: Kembalikan kepemilikan file workspace & bridge ke UID aplikasi Android (u0_aXXX)
-# Mencegah bug EACCES pada WorkspaceCheckpoints.kt setelah proses Chroot (UID 0) selesai,
-# sekaligus mencegah chown rekursif jika WORKSPACE_HOST berada di dalam ROOTFS (misal /root)!
-cleanup_ownership() {
-    case "$WORKSPACE_HOST" in
-        "$ROOTFS"|"$ROOTFS"/*)
-            ;;
-        *)
-            chown -R "$APP_UID:$APP_UID" "$WORKSPACE_HOST" 2>/dev/null || true
-            chmod -R u+rwX,g+rwX "$WORKSPACE_HOST" 2>/dev/null || true
-            ;;
-    esac
-    chown -R "$APP_UID:$APP_UID" "$BRIDGE_HOST" 2>/dev/null || true
-    chmod -R u+rwX,g+rwX "$BRIDGE_HOST" 2>/dev/null || true
-}
-# INT/TERM harus mengakhiri skrip (exit memicu EXIT trap sekali); trap handler biasa akan
-# melanjutkan eksekusi (mis. terus me-mount) dan menjalankan cleanup dua kali.
-trap cleanup_ownership EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-# Fungsi Idempotent Mount untuk direktori sistem statis
 mount_once() {
-    local fstype="$1"
-    local src="$2"
-    local dst="$3"
+    local src="$1"
+    local dst="$2"
+    local fstype="$3"
     local opts="$4"
     mkdir -p "$dst"
     if ! is_mounted "$dst"; then
         if [ "$fstype" = "bind" ]; then
-            mount --bind "$src" "$dst"
+            mount -o bind "$src" "$dst"
             if [ "$opts" = "ro" ]; then
-                mount -o remount,ro,bind "$dst" 2>/dev/null || true
+                mount -o remount,bind,ro "$dst" 2>/dev/null || true
             fi
         else
             mount -t "$fstype" -o "$opts" "$src" "$dst"
@@ -122,8 +100,6 @@ mount_bionic() {
     mount -o remount,bind,ro "$dst" 2>/dev/null || true
 }
 
-# Fungsi Dynamic Bind Mount: mendeteksi pergantian proyek (misal pindah dari proj-A ke proj-B)
-# Menggunakan state file per-destination agar sesi paralel (mis. probe hello vs workspace) tidak saling menimpa state
 mount_dynamic_bind() {
     local src="$1"
     local dst="$2"
@@ -132,83 +108,119 @@ mount_dynamic_bind() {
     state_key=$(printf '%s' "$dst" | tr '/' '_')
     local state_file="$state_dir/$state_key"
     mkdir -p "$src" "$dst" "$state_dir"
-    local current_src=""
-    if [ -f "$state_file" ]; then
-        current_src=$(cat "$state_file" 2>/dev/null || true)
-    fi
     if is_mounted "$dst"; then
-        if [ "$current_src" != "$src" ]; then
-            umount "$dst" 2>/dev/null || umount -lf "$dst" 2>/dev/null || true
+        local prev_src=""
+        [ -f "$state_file" ] && prev_src=$(cat "$state_file" 2>/dev/null || true)
+        if [ "$prev_src" != "$src" ]; then
+            umount "$dst" 2>/dev/null || umount -l "$dst" 2>/dev/null || true
         fi
     fi
     if ! is_mounted "$dst"; then
-        mount --bind "$src" "$dst"
+        mount -o bind "$src" "$dst"
         printf '%s' "$src" > "$state_file"
     fi
 }
 
-# 1. Pastikan partisi /data mengizinkan exec & suid di dalam mount namespace ini
-mount -o remount,exec,suid /data 2>/dev/null || true
+# Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
+if ! is_mounted "$ROOTFS"; then
+    mount -o bind "$ROOTFS" "$ROOTFS" 2>/dev/null || true
+fi
+mount -o remount,bind,suid,exec "$ROOTFS" 2>/dev/null || true
 
-# 2. Mount virtual filesystems kernel Linux
-# Bind-mount /dev dan /dev/pts dari host agar slave PTY yang dibuka oleh forge_spawn.c
-# di sisi host memiliki inode yang 100% identik di dalam Chroot (/dev/pts/<N>).
-mount_once "bind"  "/dev"     "$ROOTFS/dev"     "rw"
-mount_once "bind"  "/dev/pts" "$ROOTFS/dev/pts" "rw"
-mount_once "proc"  "proc"     "$ROOTFS/proc"    "rw,nosuid,nodev,noexec,relatime"
-mount_once "sysfs" "sysfs"    "$ROOTFS/sys"     "rw,nosuid,nodev,noexec,relatime"
-mount_once "tmpfs" "tmpfs"    "$ROOTFS/tmp"     "rw,nosuid,nodev,mode=1777"
-mount_once "tmpfs" "tmpfs"    "$ROOTFS/dev/shm" "rw,nosuid,nodev,mode=1777"
+mount_once "/dev" "$ROOTFS/dev" "bind" "rw"
+mount_once "/dev/pts" "$ROOTFS/dev/pts" "bind" "rw"
+mount_once "proc" "$ROOTFS/proc" "proc" "rw,nosuid,nodev,noexec"
+mount_once "sysfs" "$ROOTFS/sys" "sysfs" "rw,nosuid,nodev,noexec"
+mount_once "tmpfs" "$ROOTFS/tmp" "tmpfs" "rw,nosuid,nodev,mode=1777"
+mount_once "tmpfs" "$ROOTFS/dev/shm" "tmpfs" "rw,nosuid,nodev,mode=1777,size=256M"
 
-# 3. Read-Only Bind Mount partisi Bionic Android (Agar binary Bionic aapt2 jalan di dalam Ubuntu 24.04)
-for sysdir in /system /apex /vendor /product; do
-    if [ -d "$sysdir" ]; then
-        mount_bionic "$sysdir" "$ROOTFS$sysdir"
+for bionic_dir in /system /apex /vendor /product; do
+    if [ -d "$bionic_dir" ]; then
+        mount_bionic "$bionic_dir" "$ROOTFS$bionic_dir"
     fi
 done
 
-# 4. Dynamic Bind Mount Workspace Proyek & Folder IPC Bridge
-# Mendukung /nextcraft-bridge, /pocketdev-bridge, dan /pocket-bridge untuk kompatibilitas penuh dengan hook agen
-if [ "$WORKSPACE_HOST" != "$ROOTFS$GUEST_WORKSPACE" ]; then
-    mount_dynamic_bind "$WORKSPACE_HOST" "$ROOTFS$GUEST_WORKSPACE"
+mkdir -p "$HOST_WORKSPACE" "$HOST_BRIDGE"
+if [ "$HOST_WORKSPACE" != "$ROOTFS$GUEST_WORKSPACE" ]; then
+    mount_dynamic_bind "$HOST_WORKSPACE" "$ROOTFS$GUEST_WORKSPACE"
 fi
-mount_dynamic_bind "$BRIDGE_HOST" "$ROOTFS/nextcraft-bridge"
-mount_dynamic_bind "$BRIDGE_HOST" "$ROOTFS/pocketdev-bridge"
-mount_dynamic_bind "$BRIDGE_HOST" "$ROOTFS/pocket-bridge"
+mount_dynamic_bind "$HOST_BRIDGE" "$ROOTFS/nextcraft-bridge"
+mount_dynamic_bind "$HOST_BRIDGE" "$ROOTFS/pocketdev-bridge"
+mount_dynamic_bind "$HOST_BRIDGE" "$ROOTFS/pocket-bridge"
+HOST_RESP="$HOST_BRIDGE-responses"
+mkdir -p "$HOST_RESP"
+chown "$APP_UID:$APP_UID" "$HOST_RESP" 2>/dev/null || true
+mount_dynamic_bind "$HOST_RESP" "$ROOTFS/pocketdev-bridge-responses"
+mount -o remount,bind,ro "$ROOTFS/pocketdev-bridge-responses" 2>/dev/null || true
 
-# 5. Pastikan DNS resolver tersedia
 if [ ! -s "$ROOTFS/etc/resolv.conf" ]; then
+    mkdir -p "$ROOTFS/etc"
     printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" > "$ROOTFS/etc/resolv.conf"
 fi
 
-# 6. Bersihkan variabel environment spesifik Android Bionic tanpa menghapus variabel AI/Gateway
-# (ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_*, DEEPSEEK_*, SSH_CONNECTION tetap utuh!)
-unset LD_LIBRARY_PATH LD_PRELOAD
-unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_DATA ANDROID_I18N_ROOT
-unset ANDROID_ROOT ANDROID_RUNTIME_ROOT ANDROID_STORAGE ANDROID_TZDATA_ROOT
+fix_workspace_ownership() {
+    case "$HOST_WORKSPACE" in
+        "$ROOTFS"|"$ROOTFS"/*)
+            ;;
+        *)
+            chown -R "$APP_UID:$APP_UID" "$HOST_WORKSPACE" 2>/dev/null || true
+            chmod -R u+rwX,g+rwX "$HOST_WORKSPACE" 2>/dev/null || true
+            ;;
+    esac
+    chown -R "$APP_UID:$APP_UID" "$HOST_BRIDGE" 2>/dev/null || true
+    chmod -R u+rwX,g+rwX "$HOST_BRIDGE" 2>/dev/null || true
+}
+# INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
+# resume execution (keep mounting) and run the ownership fix twice.
+trap fix_workspace_ownership EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+unset ANDROID_ROOT ANDROID_DATA ANDROID_ART_ROOT ANDROID_I18N_ROOT ANDROID_TZDATA_ROOT
+unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_RUNTIME_ROOT ANDROID_STORAGE
 unset ASEC_MOUNTPOINT BOOTCLASSPATH DEX2OATBOOTCLASSPATH EXTERNAL_STORAGE SYSTEMSERVERCLASSPATH
+unset LD_PRELOAD LD_LIBRARY_PATH
 
 export HOME="/root"
 export USER="root"
 export LOGNAME="root"
-export LANG="${LANG:-C.UTF-8}"
 export TERM="${TERM:-xterm-256color}"
+export LANG="${LANG:-C.UTF-8}"
+export TMPDIR="/tmp"
+export CLAUDE_CONFIG_DIR="/root/.claude"
+export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+export CURL_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
+export NODE_EXTRA_CA_CERTS="/etc/ssl/certs/ca-certificates.crt"
+export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
+export GIT_SSL_CAINFO="/etc/ssl/certs/ca-certificates.crt"
+export NODE_OPTIONS="${NODE_OPTIONS:---dns-result-order=ipv4first}"
+export COREPACK_ENABLE_DOWNLOAD_PROMPT="0"
 export GLIBC_TUNABLES="glibc.pthread.rseq=0"
+export NEXTCRAFT_BRIDGE_DIR="/pocketdev-bridge"
+export POCKETDEV_BRIDGE_DIR="/pocketdev-bridge"
+export NEXTCRAFT_RESPONSE_DIR="/pocketdev-bridge-responses"
+export PATH="${PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+case ":$PATH:" in
+    *:/root/.local/bin:*) ;;
+    *) export PATH="/opt/nextcraft/bin:/root/.local/bin:$PATH" ;;
+esac
 
-BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-if [ -d "$ROOTFS/root/android-sdk" ]; then
-    export ANDROID_HOME="${ANDROID_HOME:-/root/android-sdk}"
-    export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/root/android-sdk}"
-    # Keep in sync with AndroidToolchain.kt (RuntimeInstaller sets the same environment for in-app launches).
-    export GRADLE_HOME="${GRADLE_HOME:-/opt/gradle/gradle-9.8.1}"
-    export GRADLE_USER_HOME="${GRADLE_USER_HOME:-/root/.gradle}"
-    export ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride="/root/android-sdk/build-tools/36.0.0/aapt2"
-    export PATH="/opt/gradle/gradle-9.8.1/bin:/root/android-sdk/build-tools/36.0.0:/root/android-sdk/cmdline-tools/latest/bin:$BASE_PATH"
-else
-    export PATH="$BASE_PATH"
+CHROOT_BIN=""
+for candidate in /system/bin/chroot /system/xbin/chroot /sbin/chroot /debug_ramdisk/chroot "$ROOTFS/usr/sbin/chroot"; do
+    if [ -x "$candidate" ]; then
+        CHROOT_BIN="$candidate"
+        break
+    fi
+done
+if [ -z "$CHROOT_BIN" ]; then
+    if command -v busybox >/dev/null 2>&1; then
+        CHROOT_BIN="busybox chroot"
+    else
+        echo "chroot binary not found on host or guest rootfs" >&2
+        exit 127
+    fi
 fi
 
-# 7. Masuk ke Chroot Ubuntu 24.04 LTS ARM64, pindah ke direktori $GUEST_WORKSPACE, dan eksekusi perintah
 # Run the guest command as a child and forward INT/TERM to it. With a plain foreground command the shell only runs
 # its trap after the command exits, so a cancelled npm install or Gradle build kept running until it finished, and
 # a later SIGKILL of this script orphaned it and skipped the ownership fix. Stdin (the
@@ -218,13 +230,16 @@ exec 3<&0
 forward_signal() {
     kill "-$1" "$child" 2>/dev/null || true
 }
-chroot "$ROOTFS" /bin/sh -c 'cd "$1" && shift && exec "$@"' -- "$GUEST_WORKSPACE" "$@" <&3 3<&- &
+
+$CHROOT_BIN "$ROOTFS" /usr/bin/env \
+    GUEST_WORKSPACE="$GUEST_WORKSPACE" \
+    /bin/sh -c 'cd "$GUEST_WORKSPACE" && exec "$@"' -- "$@" <&3 3<&- &
 child=$!
 trap 'forward_signal INT' INT
 trap 'forward_signal TERM' TERM
 # wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
 while :; do
-    # `|| child_status=$?` keeps set -e from aborting when a trapped signal interrupts wait (status 128+N).
+    # `|| child_status=...` keeps set -e from aborting when a trapped signal interrupts wait (status 128+N).
     child_status=0
     wait "$child" || child_status=$?
     kill -0 "$child" 2>/dev/null || break

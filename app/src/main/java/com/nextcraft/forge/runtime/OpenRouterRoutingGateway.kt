@@ -84,26 +84,42 @@ internal class OpenRouterRoutingGateway(
             val split = line.indexOf(':')
             if (split > 0) headers[line.substring(0, split).lowercase(Locale.US)] = line.substring(split + 1).trim()
         }
-        val output = BufferedOutputStream(socket.getOutputStream())
+        val output = GatewayOutput(socket.getOutputStream())
         if (!isAuthorized(headers)) {
             writeJson(output, 401, errorJson("Missing or invalid loopback gateway credentials"))
             return
         }
-        val length = headers["content-length"]?.toIntOrNull() ?: 0
-        if (length !in 0..MAX_REQUEST_BYTES) {
-            writeJson(output, 413, errorJson("Request is too large"))
-            return
+        if (headers["expect"]?.equals("100-continue", ignoreCase = true) == true) {
+            // Without this the client waits for a go-ahead until the socket timeout before sending the body.
+            output.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray())
+            output.flush()
         }
-        val body = ByteArray(length)
-        var offset = 0
-        while (offset < length) {
-            val count = input.read(body, offset, length - offset)
-            if (count < 0) break
-            offset += count
-        }
-        if (offset < length) {
-            writeJson(output, 400, errorJson("Truncated request body"))
-            return
+        val body: ByteArray
+        var offset: Int
+        if (headers["transfer-encoding"]?.lowercase()?.contains("chunked") == true) {
+            // No Content-Length: reading it as 0 would turn the request into an empty body.
+            body = readChunkedBody(input) ?: run {
+                writeJson(output, 400, errorJson("Malformed or too large chunked request body"))
+                return
+            }
+            offset = body.size
+        } else {
+            val length = headers["content-length"]?.toIntOrNull() ?: 0
+            if (length !in 0..MAX_REQUEST_BYTES) {
+                writeJson(output, 413, errorJson("Request is too large"))
+                return
+            }
+            body = ByteArray(length)
+            offset = 0
+            while (offset < length) {
+                val count = input.read(body, offset, length - offset)
+                if (count < 0) break
+                offset += count
+            }
+            if (offset < length) {
+                writeJson(output, 400, errorJson("Truncated request body"))
+                return
+            }
         }
         if (path.endsWith("/count_tokens")) {
             writeJson(output, 200, JSONObject().put("input_tokens", body.decodeToString(0, offset).length / 4 + 1).toString())
@@ -128,10 +144,10 @@ internal class OpenRouterRoutingGateway(
                 return
             }
             if (!forwardUpstream(endpoint, headers, routedBody, output, allowRetry = true)) {
-                writeJson(output, 502, errorJson("OpenRouter upstream request failed"))
+                writeFailure(output, "OpenRouter upstream request failed")
             }
         }.onFailure { error ->
-            writeJson(output, 502, errorJson(error.message ?: "OpenRouter request failed"))
+            writeFailure(output, error.message ?: "OpenRouter request failed")
         }
     }
 
@@ -139,7 +155,7 @@ internal class OpenRouterRoutingGateway(
         endpoint: String,
         headers: Map<String, String>,
         routedBody: ByteArray,
-        output: BufferedOutputStream,
+        output: GatewayOutput,
         allowRetry: Boolean,
     ): Boolean {
         val currentKey = activeApiKey
@@ -179,6 +195,7 @@ internal class OpenRouterRoutingGateway(
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val reason = if (code in 200..299) "OK" else "Error"
             val contentType = connection.contentType ?: "application/json"
+            output.eventStream = contentType.contains("text/event-stream", ignoreCase = true)
             output.write(
                 "HTTP/1.1 $code $reason\r\nContent-Type: $contentType\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n".toByteArray(),
             )
@@ -209,6 +226,52 @@ internal class OpenRouterRoutingGateway(
 
     private fun isPlainHttpAllowedEndpoint(url: String): Boolean =
         com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(url)
+
+    /**
+     * Reports a failure on a response that may already be under way: once the status line is out, a second HTTP
+     * response would land inside the event stream, so a stream gets an Anthropic `error` event and anything else
+     * is just closed.
+     */
+    private fun writeFailure(output: GatewayOutput, message: String) {
+        runCatching {
+            when {
+                !output.committed -> writeJson(output, 502, errorJson(message))
+                output.eventStream -> {
+                    val error = JSONObject().put("type", "error")
+                        .put("error", JSONObject().put("type", "api_error").put("message", message))
+                    output.write("event: error\ndata: $error\n\n".toByteArray())
+                    output.flush()
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    /** Reads an HTTP/1.1 chunked body, or returns null when it is malformed or larger than [MAX_REQUEST_BYTES]. */
+    private fun readChunkedBody(input: BufferedInputStream): ByteArray? {
+        val body = ByteArrayOutputStream()
+        while (true) {
+            val sizeLine = readLine(input) ?: return null
+            val size = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: return null
+            if (size < 0 || body.size() + size > MAX_REQUEST_BYTES) return null
+            if (size == 0) {
+                while (true) {
+                    val trailer = readLine(input) ?: return null
+                    if (trailer.isEmpty()) break
+                }
+                return body.toByteArray()
+            }
+            val chunk = ByteArray(size)
+            var read = 0
+            while (read < size) {
+                val count = input.read(chunk, read, size - read)
+                if (count < 0) return null
+                read += count
+            }
+            body.write(chunk)
+            if (readLine(input) != "") return null
+        }
+    }
 
     private fun writeJson(output: BufferedOutputStream, code: Int, body: String) {
         val bytes = body.toByteArray()

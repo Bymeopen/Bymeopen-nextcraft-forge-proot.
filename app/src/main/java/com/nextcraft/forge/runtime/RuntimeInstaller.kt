@@ -589,6 +589,30 @@ class RuntimeInstaller(private val context: Context) {
         )
     }
 
+    /**
+     * Swaps [target] for a new binary and keeps the old one until [verify] passes. A binary that downloads and
+     * checksums fine but cannot run (e.g. a glibc mismatch) is rolled back instead of leaving a broken agent that
+     * still counts as installed.
+     */
+    private suspend fun replaceBinaryWithRollback(
+        target: File,
+        install: () -> Unit,
+        verify: suspend () -> Unit,
+    ) {
+        val previous = File(target.parentFile, ".${target.name}.previous")
+        previous.delete()
+        if (target.exists()) Os.rename(target.absolutePath, previous.absolutePath)
+        try {
+            install()
+            verify()
+            previous.delete()
+        } catch (e: Throwable) {
+            target.delete()
+            if (previous.exists()) runCatching { Os.rename(previous.absolutePath, target.absolutePath) }
+            throw e
+        }
+    }
+
     private suspend fun updateClaude(
         runtime: InstalledRuntime,
         expectedVersion: String,
@@ -609,16 +633,23 @@ class RuntimeInstaller(private val context: Context) {
         claude.parentFile?.mkdirs()
         val staged = File(claude.parentFile, ".claude-$latest.installing")
         try {
-            downloaded.copyTo(staged, overwrite = true)
-            Os.chmod(staged.absolutePath, 0b111101101)
-            Os.rename(staged.absolutePath, claude.absolutePath)
-        } catch (e: Throwable) {
-            staged.delete()
-            throw e
+            replaceBinaryWithRollback(
+                target = claude,
+                install = {
+                    try {
+                        downloaded.copyTo(staged, overwrite = true)
+                        Os.chmod(staged.absolutePath, 0b111101101)
+                        Os.rename(staged.absolutePath, claude.absolutePath)
+                    } catch (e: Throwable) {
+                        staged.delete()
+                        throw e
+                    }
+                },
+                verify = { verifyGuest(runtime.chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify updated Claude Code") },
+            )
         } finally {
             downloaded.delete()
         }
-        verifyGuest(runtime.chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify updated Claude Code")
         claudeMarker.writeText(latest)
     }
 
@@ -639,6 +670,10 @@ class RuntimeInstaller(private val context: Context) {
         val destination = File(rootfs, AGY_GUEST_PATH.removePrefix("/"))
         var found = false
         try {
+          replaceBinaryWithRollback(
+            target = destination,
+            verify = { verifyGuest(runtime.chrootExec, "$AGY_GUEST_PATH --version", "Failed to verify updated Antigravity CLI") },
+            install = {
             @Suppress("DEPRECATION")
             TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(downloaded.inputStream()))).use { archive ->
                 var entry = archive.nextTarEntry
@@ -660,10 +695,11 @@ class RuntimeInstaller(private val context: Context) {
                 }
             }
             check(found) { "Antigravity update archive is incomplete" }
+            },
+          )
         } finally {
             downloaded.delete()
         }
-        verifyGuest(runtime.chrootExec, "$AGY_GUEST_PATH --version", "Failed to verify updated Antigravity CLI")
         agyMarker.writeText(latest)
     }
 
