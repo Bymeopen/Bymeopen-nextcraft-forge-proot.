@@ -775,6 +775,17 @@ fun WebPreviewScreen(
                             view: WebView,
                             request: android.webkit.WebResourceRequest,
                         ): Boolean = request.url.scheme?.lowercase() !in setOf("http", "https")
+
+                        // Without this the app process is killed when the renderer dies (e.g. low memory).
+                        override fun onRenderProcessGone(
+                            view: WebView,
+                            detail: android.webkit.RenderProcessGoneDetail,
+                        ): Boolean {
+                            if (webViewRef === view) webViewRef = null
+                            (view.parent as? android.view.ViewGroup)?.removeView(view)
+                            runCatching { view.destroy() }
+                            return true
+                        }
                     }
                     runCatching { loadUrl(state.previewUrl) }
                     webViewRef = this
