@@ -1010,26 +1010,9 @@ class RuntimeInstaller(private val context: Context) {
         ).forEach { removePath(File(rootfs, it)) }
     }
 
+    /** Removes the current overlay layout and every previous one, so an upgrade does not leave an old JDK behind. */
     private fun removeAndroidStack() {
-        listOf(
-            "root/android-sdk",
-            "root/maven",
-            "root/.pocket-android-tools-version",
-            "root/.gradle/caches",
-            "root/.gradle/daemon",
-            "root/.gradle/native",
-            "root/.gradle/notifications",
-            "root/.gradle/wrapper/dists",
-            "root/.gradle/init.d/pocketdev-android.gradle",
-            "opt/gradle",
-            "opt/jdk-17.0.20.1+1",
-            "usr/local/bin/jar",
-            "usr/local/bin/jarsigner",
-            "usr/local/bin/java",
-            "usr/local/bin/javac",
-            "usr/local/bin/javadoc",
-            "usr/local/bin/keytool",
-        ).forEach { removePath(File(rootfs, it)) }
+        AndroidToolchain.REMOVABLE_HOST_PATHS.forEach { removePath(File(rootfs, it)) }
         removeAndroidGradleProperty()
     }
 
@@ -1155,35 +1138,37 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         val marker = File(rootfs, "root/.pocket-android-tools-version")
-        val androidHome = File(rootfs, "root/android-sdk")
-        val gradleHome = File(rootfs, "opt/gradle")
-        val localMaven = File(rootfs, "root/maven/localMvnRepository")
-        if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION ||
-            !File(androidHome, "platforms/android-36/android.jar").isFile ||
-            !File(androidHome, "build-tools/35.0.0/aapt2").isFile ||
-            !File(gradleHome, "gradle-8.14.3/bin/gradle").isFile ||
-            !localMaven.isDirectory
-        ) {
+        if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION || !hasAndroidToolchainFiles(rootfs)) {
+            // An older layout (different JDK/Gradle directories) would otherwise stay behind next to the new one.
+            if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION && marker.isFile) removeAndroidStack()
             installRuntimeOverlay(
                 ANDROID_BUNDLE,
-                "Installing Android SDK 36, Build Tools 35, Gradle 8.14.3, and Maven cache…",
+                "Installing Android SDK ${AndroidToolchain.COMPILE_SDK}, Build Tools ${AndroidToolchain.BUILD_TOOLS_VERSION}, " +
+                    "Gradle ${AndroidToolchain.GRADLE_VERSION}, and Maven cache…",
                 from,
                 to,
                 onProgress,
             )
-            makeAndroidToolsExecutable(androidHome, gradleHome)
+            makeAndroidToolsExecutable(rootfs)
             marker.parentFile?.mkdirs()
             marker.writeText(ANDROID_TOOLS_VERSION)
         }
         writeAndroidGradleConfiguration(rootfs)
 
+        val jdk = AndroidToolchain.JDK_MAJOR
         verifyGuest(
             chrootExec,
-            "java -version 2>&1 | grep -E '\"17\\.|version 17' && " +
-                "gradle --version && aapt2 version && test -f \"${'$'}ANDROID_HOME/platforms/android-36/android.jar\"",
-            "Failed to verify Android SDK, Gradle, and Java 17",
+            "java -version 2>&1 | grep -E '\"$jdk\\.|version $jdk' && " +
+                "gradle --version && aapt2 version && test -f ${AndroidToolchain.ANDROID_JAR_GUEST_PATH}",
+            "Failed to verify Android SDK, Gradle, and Java $jdk",
         )
     }
+
+    private fun hasAndroidToolchainFiles(runtimeRootfs: File): Boolean =
+        File(runtimeRootfs, AndroidToolchain.ANDROID_JAR_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.AAPT2_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH).isFile &&
+            File(runtimeRootfs, AndroidToolchain.MAVEN_HOST_DIR).let { it.isDirectory && !it.list().isNullOrEmpty() }
 
     private suspend fun installRuntimeOverlay(
         bundle: RuntimeBundle,
@@ -1291,45 +1276,19 @@ class RuntimeInstaller(private val context: Context) {
         return destination
     }
 
-    private fun makeAndroidToolsExecutable(androidHome: File, gradleHome: File) {
-        val buildTools = File(androidHome, "build-tools/35.0.0")
+    private fun makeAndroidToolsExecutable(runtimeRootfs: File) {
+        val buildTools = File(runtimeRootfs, AndroidToolchain.BUILD_TOOLS_HOST_DIR)
         listOf("aapt", "aapt2", "aidl", "apksigner", "d8", "dexdump", "split-select", "zipalign")
             .map { File(buildTools, it) }
-            .plus(File(gradleHome, "gradle-8.14.3/bin/gradle"))
+            .plus(File(runtimeRootfs, AndroidToolchain.GRADLE_LAUNCHER_HOST_PATH))
             .filter(File::isFile)
             .forEach { Os.chmod(it.absolutePath, 0b111101101) }
     }
 
     private fun writeAndroidGradleInitScript(runtimeRootfs: File) {
-        val script = File(runtimeRootfs, "root/.gradle/init.d/pocketdev-android.gradle")
+        val script = File(runtimeRootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/"))
         script.parentFile?.mkdirs()
-        script.writeText(
-            """
-            def pocketMaven = uri('/root/maven/localMvnRepository')
-            beforeSettings { settings ->
-                settings.pluginManagement.repositories {
-                    maven { url = pocketMaven }
-                    google()
-                    mavenCentral()
-                    gradlePluginPortal()
-                }
-            }
-            settingsEvaluated { settings ->
-                settings.dependencyResolutionManagement.repositories {
-                    maven { url = pocketMaven }
-                }
-            }
-            gradle.beforeProject { project ->
-                project.extensions.extraProperties.set(
-                    'android.aapt2FromMavenOverride',
-                    '/root/android-sdk/build-tools/35.0.0/aapt2'
-                )
-                project.buildscript.repositories {
-                    maven { url = pocketMaven }
-                }
-            }
-            """.trimIndent() + "\n",
-        )
+        script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
     }
 
     @Synchronized
@@ -1396,11 +1355,8 @@ class RuntimeInstaller(private val context: Context) {
             DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
             DevStack.ANDROID ->
                 File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-                    File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-                    File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-                    File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-                    File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-                    File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+                    hasAndroidToolchainFiles(rootfs) &&
+                    File(rootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/")).isFile
         }
     }
 
@@ -1903,12 +1859,12 @@ class RuntimeInstaller(private val context: Context) {
             val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
-                put("ANDROID_HOME", "/root/android-sdk")
-                put("ANDROID_SDK_ROOT", "/root/android-sdk")
-                put("GRADLE_HOME", "/opt/gradle/gradle-8.14.3")
+                put("ANDROID_HOME", AndroidToolchain.SDK_GUEST_DIR)
+                put("ANDROID_SDK_ROOT", AndroidToolchain.SDK_GUEST_DIR)
+                put("GRADLE_HOME", AndroidToolchain.GRADLE_HOME_GUEST_DIR)
                 put("GRADLE_USER_HOME", "/root/.gradle")
-                put("ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride", "/root/android-sdk/build-tools/35.0.0/aapt2")
-                put("PATH", "/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:$basePath")
+                put("ORG_GRADLE_PROJECT_android_aapt2FromMavenOverride", AndroidToolchain.AAPT2_GUEST_PATH)
+                put("PATH", "${AndroidToolchain.GUEST_PATH_PREFIX}:$basePath")
             } else {
                 put("PATH", basePath)
             }
@@ -2517,7 +2473,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         private const val PREVIOUS_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val NEXTCRAFT_CORE_TOOLS_VERSION = "nextcraft-core-2026.10.1"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
-        private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
+        private const val ANDROID_TOOLS_VERSION = AndroidToolchain.TOOLS_VERSION
         private const val ANDROID_AAPT2_PROPERTY = "android.aapt2FromMavenOverride"
         private const val GRADLE_JVMARGS_PROPERTY = "org.gradle.jvmargs"
         private const val GRADLE_WORKERS_PROPERTY = "org.gradle.workers.max"
@@ -2530,8 +2486,38 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             GRADLE_PARALLEL_PROPERTY,
             KOTLIN_EXECUTION_PROPERTY,
         )
-        private const val ANDROID_AAPT2_GUEST_PATH = "/root/android-sdk/build-tools/35.0.0/aapt2"
-        private const val ANDROID_AAPT2_HOST_PATH = "root/android-sdk/build-tools/35.0.0/aapt2"
+        private const val ANDROID_AAPT2_GUEST_PATH = AndroidToolchain.AAPT2_GUEST_PATH
+        private const val ANDROID_AAPT2_HOST_PATH = AndroidToolchain.AAPT2_HOST_PATH
+
+        /**
+         * Gradle init script that makes the offline Maven repository and the ARM64 aapt2 visible to every build.
+         * `build-android-bundle.sh` ships a byte-identical copy; keep both in sync.
+         */
+        internal val ANDROID_GRADLE_INIT_SCRIPT = """
+            def pocketMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            beforeSettings { settings ->
+                settings.pluginManagement.repositories {
+                    maven { url = pocketMaven }
+                    google()
+                    mavenCentral()
+                    gradlePluginPortal()
+                }
+            }
+            settingsEvaluated { settings ->
+                settings.dependencyResolutionManagement.repositories {
+                    maven { url = pocketMaven }
+                }
+            }
+            gradle.beforeProject { project ->
+                project.extensions.extraProperties.set(
+                    '$ANDROID_AAPT2_PROPERTY',
+                    '$ANDROID_AAPT2_GUEST_PATH'
+                )
+                project.buildscript.repositories {
+                    maven { url = pocketMaven }
+                }
+            }
+        """.trimIndent() + "\n"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
         const val DSH_VERSION = "0.1.2-rc.1"
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
@@ -2563,12 +2549,12 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             compressedBytes = 55_419_626L,
             baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
         )
+        /** Built by scripts/runtime-bundles/build-android-bundle.sh; versions in [AndroidToolchain]. */
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
-            fileName = "pocketdev-android-arm64-2026.09.1.tar.zst",
-            sha256 = "01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6",
-            compressedBytes = 569_652_007L,
-            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
+            fileName = "nextcraft-android-arm64-2026.10.1.tar.zst",
+            sha256 = "8b4ecf057daa6fd54acd950712f8adb4eb7722c7bc557136f2ea31d7a2bbfd60",
+            compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek Harness",
