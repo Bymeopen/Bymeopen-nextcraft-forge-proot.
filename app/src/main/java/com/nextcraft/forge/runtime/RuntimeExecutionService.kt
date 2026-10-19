@@ -62,7 +62,7 @@ class RuntimeExecutionService : Service() {
             ACTION_PROGRESS, LEGACY_ACTION_PROGRESS -> {
                 if (!taskRunning) {
                     // Stray progress for a finished task must not leave an idle service running.
-                    stopSelf()
+                    stopSelf(startId)
                     return START_NOT_STICKY
                 }
                 incomingTitle?.takeIf(String::isNotBlank)?.let { notificationTitleOverride = it }

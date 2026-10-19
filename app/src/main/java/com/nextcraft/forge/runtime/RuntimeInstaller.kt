@@ -149,7 +149,8 @@ class RuntimeInstaller(private val context: Context) {
 
     /** Replaces the script via rename so a concurrent launch never executes a half-written file. */
     private fun writeScriptAtomically(target: File, content: String) {
-        val staged = File(target.parentFile, "${target.name}.tmp")
+        // Unique per call: several RuntimeInstaller instances can refresh the scripts at the same time.
+        val staged = File(target.parentFile, "${target.name}.${AndroidProcess.myPid()}.${System.nanoTime()}.tmp")
         try {
             staged.writeText(content)
             Os.rename(staged.absolutePath, target.absolutePath)
@@ -469,7 +470,8 @@ class RuntimeInstaller(private val context: Context) {
         val cleanLogin = login.trim().replace("\r", "").replace("\n", "").ifEmpty { "x-access-token" }
         val rootHome = File(rootfs, "root").apply { mkdirs() }
         val gitCredentials = File(rootHome, ".git-credentials")
-        gitCredentials.writeText("https://$cleanLogin:$cleanToken@github.com\n")
+        // git/gh rewrite these as root inside the chroot; reclaim ownership instead of failing with EACCES.
+        writeRootfsFileAtomically(gitCredentials, "https://$cleanLogin:$cleanToken@github.com\n")
         runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
 
         // Merge instead of replacing: the user's own name, email, aliases and editor settings must survive connecting
@@ -500,7 +502,8 @@ class RuntimeInstaller(private val context: Context) {
 
         val ghConfigDir = File(rootHome, ".config/gh").apply { mkdirs() }
         val ghHosts = File(ghConfigDir, "hosts.yml")
-        ghHosts.writeText(
+        writeRootfsFileAtomically(
+            ghHosts,
             buildString {
                 appendLine("github.com:")
                 appendLine("    oauth_token: $cleanToken")
@@ -514,8 +517,12 @@ class RuntimeInstaller(private val context: Context) {
     /** Removes stored Git and GitHub CLI credentials from the guest rootfs. */
     fun clearGitHubAccess() {
         val rootHome = File(rootfs, "root")
-        File(rootHome, ".git-credentials").delete()
-        File(rootHome, ".config/gh/hosts.yml").delete()
+        listOf(File(rootHome, ".git-credentials"), File(rootHome, ".config/gh/hosts.yml")).forEach { file ->
+            if (!file.exists() || file.delete()) return@forEach
+            // Root-owned after git/gh rewrote it: take it back, otherwise "Disconnect" would leave the token on disk.
+            RootfsRepair.reclaimOwnership(file, AndroidProcess.myUid())
+            if (!file.delete() && file.exists()) Log.w("RuntimeInstaller", "Could not remove ${file.name}")
+        }
     }
 
     /** Versions recorded after each real agent binary has been installed and verified. */
@@ -2084,7 +2091,7 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         if (!parent.canWrite() || (target.exists() && !target.canWrite())) {
             RootfsRepair.reclaimOwnership(if (parent.canWrite()) target else parent, AndroidProcess.myUid())
         }
-        val temp = File(parent, ".${target.name}.${AndroidProcess.myPid()}.tmp")
+        val temp = File(parent, ".${target.name}.${AndroidProcess.myPid()}.${System.nanoTime()}.tmp")
         try {
             FileOutputStream(temp).use { out ->
                 out.write(content.toByteArray(Charsets.UTF_8))
@@ -2850,8 +2857,9 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
             trap 'forward_signal TERM' TERM
             # wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
             while :; do
-                wait "${'$'}child"
-                child_status=${'$'}?
+                # `|| child_status=...` keeps set -e from aborting when a trapped signal interrupts wait (status 128+N).
+                child_status=0
+                wait "${'$'}child" || child_status=${'$'}?
                 kill -0 "${'$'}child" 2>/dev/null || break
             done
             exit "${'$'}child_status"

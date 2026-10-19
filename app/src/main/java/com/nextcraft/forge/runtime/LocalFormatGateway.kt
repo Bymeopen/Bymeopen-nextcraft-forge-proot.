@@ -336,10 +336,15 @@ internal class LocalFormatGateway(
         val text = message.stringOrEmpty("content")
         if (text.isNotBlank()) content.put(JSONObject().put("type", "text").put("text", text))
         val calls = message.optJSONArray("tool_calls") ?: JSONArray()
+        val finishReason = source.optJSONArray("choices")?.optJSONObject(0)?.stringOrEmpty("finish_reason").orEmpty()
+        val cutOff = finishReason == "length"
         for (index in 0 until calls.length()) {
             val call = calls.getJSONObject(index)
             val function = call.optJSONObject("function") ?: JSONObject()
-            val arguments = runCatching { JSONObject(function.stringOrEmpty("arguments", "{}")) }.getOrDefault(JSONObject())
+            val parsedArguments = runCatching { JSONObject(function.stringOrEmpty("arguments", "{}")) }.getOrNull()
+            // A call cut off by the token limit has partial arguments; running it would act on invalid input.
+            if (parsedArguments == null && cutOff) continue
+            val arguments = parsedArguments ?: JSONObject()
             content.put(
                 JSONObject().put("type", "tool_use")
                     .put("id", call.stringOrEmpty("id").ifBlank { "tool_${UUID.randomUUID()}" })
@@ -348,10 +353,9 @@ internal class LocalFormatGateway(
             )
         }
         val usage = source.optJSONObject("usage") ?: JSONObject()
-        val finishReason = source.optJSONArray("choices")?.optJSONObject(0)?.stringOrEmpty("finish_reason").orEmpty()
         val stopReason = when {
+            cutOff -> "max_tokens"
             calls.length() > 0 -> "tool_use"
-            finishReason == "length" -> "max_tokens"
             // Reported as a normal end_turn, a filtered answer looked complete; Anthropic calls this a refusal.
             finishReason == "content_filter" -> "refusal"
             else -> "end_turn"
@@ -695,6 +699,8 @@ internal class LocalFormatGateway(
         closeOpenBlock()
         if (finished) {
             for ((_, call) in pendingToolCalls.toSortedMap()) {
+                // Arguments cut off by the token limit are not valid JSON; the call must not reach the client.
+                if (truncated && call.arguments.isNotEmpty() && runCatching { JSONObject(call.arguments.toString()) }.isFailure) continue
                 val idx = nextBlockIndex++
                 emitEvent(
                     "content_block_start",
@@ -737,8 +743,8 @@ internal class LocalFormatGateway(
                         .put(
                             "stop_reason",
                             when {
-                                sawToolCalls -> "tool_use"
                                 truncated -> "max_tokens"
+                                sawToolCalls -> "tool_use"
                                 filtered -> "refusal"
                                 else -> "end_turn"
                             },

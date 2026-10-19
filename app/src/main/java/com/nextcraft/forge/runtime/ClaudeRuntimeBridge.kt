@@ -273,8 +273,10 @@ class ClaudeRuntimeBridge(
                 Log.d("ClaudeBridge", "Process exited with code $exit")
                 permissionWatcher.cancelAndJoin()
                 pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
-                    permission.response.writeText("deny")
+                    // A failed write here must not turn a finished run into a failure.
+                    runCatching { permission.response.writeText("deny") }
                     pending.remove(permission.request.approvalId)
+                    eventBus.emit(RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId))
                 }
                 val changed = checkpoints.changedFiles(workspace, before)
                 if (changed.isNotEmpty()) {
@@ -524,7 +526,8 @@ class ClaudeRuntimeBridge(
                 Log.d("ClaudeBridge", "Approving permission request $approvalId for $toolName ($paths, risk=$risk)")
                 response.writeText("allow")
                 runCatching { file.delete() }
-                eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, explanation))
+                // Completion is reported by the stream's tool_result; emitting it at approval time marked long
+                // commands as finished before they had run and produced a duplicate row later.
             }
         }.onFailure {
             runCatching { responseFile(file, approvalId).writeText("deny") }
@@ -914,11 +917,19 @@ private val ENV_ASSIGNMENT_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")
 
 // awk and sed are safe for plain text processing, but their scripts can run commands or write files.
 private val AWK_WORD_REGEX = Regex("\\bawk\\b")
-private val AWK_EXEC_REGEX = Regex("""\|\s*\\?"|system\s*\(|getline|\|&|\bpopen\b""")
+private val AWK_EXEC_REGEX = Regex("""\|\s*\\?"|system\s*\(|getline|\|&|\bpopen\b|\bENVIRON\b""")
 private val SED_WORD_REGEX = Regex("\\bsed\\b")
 private val SED_EXEC_OR_WRITE_REGEX = Regex("""(?:^|[;{}'"\s/0-9$,!])(?:e(?:['";}\s]|$)|[wWrR]\s)""")
 
+// jq can print the process environment (`jq -n env`, `$ENV`), which holds provider keys.
+private val JQ_WORD_REGEX = Regex("\\bjq\\b")
+private val JQ_ENV_REGEX = Regex("""\benv\b|[$]ENV|\binput_filename\b""")
+
+// A shell variable expansion can print an exported secret (`echo "$ANTHROPIC_API_KEY"`); those commands need the user.
+private val VARIABLE_EXPANSION_REGEX = Regex("""\$[A-Za-z_{@*#?0-9!-]""")
+
 private fun scriptCanEscapeSandbox(text: String): Boolean =
+    (JQ_WORD_REGEX.containsMatchIn(text) && JQ_ENV_REGEX.containsMatchIn(text)) ||
     (AWK_WORD_REGEX.containsMatchIn(text) && AWK_EXEC_REGEX.containsMatchIn(text)) ||
         (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
 
@@ -946,6 +957,13 @@ private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-crede
 
 private fun isSensitivePath(path: String): Boolean =
     SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
+
+private val CREDENTIAL_PATH_PARTS = listOf(
+    "/proc/", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook",
+    "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge", "/.gradle/gradle.properties",
+)
+
+private fun isCredentialPath(path: String): Boolean = CREDENTIAL_PATH_PARTS.any(path::contains)
 
 private fun maskQuotedAndEscapedSeparators(input: String): String {
     val out = StringBuilder(input.length)
@@ -1007,10 +1025,13 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
     if (DANGEROUS_PATTERNS.any(preview::contains)) return RiskLevel.HIGH
     if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
+    // Reads and searches must not reach credentials or the process environment either (/proc/self/environ, ~/.claude).
+    if (tool != "Bash" && paths.any(::isCredentialPath)) return RiskLevel.HIGH
     return when (tool) {
         "Bash" -> {
             val text = command.orEmpty().replace(SAFE_STREAM_REDIRECT_REGEX, " ")
             val hasUnsafeSyntax = listOf("`", "$(", "<(", ">", "<", "\n", "\r").any(text::contains) ||
+                VARIABLE_EXPANSION_REGEX.containsMatchIn(text) ||
                 scriptCanEscapeSandbox(text)
             val masked = maskQuotedAndEscapedSeparators(text)
             val segments = masked.split(Regex("&&|\\|\\||[;|&]")).filter(String::isNotBlank)

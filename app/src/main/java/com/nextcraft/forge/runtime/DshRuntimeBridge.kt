@@ -327,9 +327,13 @@ class DshRuntimeBridge(
             if (line.isBlank()) return
             if (line.endsWith("... [truncated]") || line.length > MAX_DSH_PROTOCOL_LINE_CHARS) {
                 val duplicate = parser.consumeDuplicateAssistantMessage(line)
-                val hasTurnEnd = line.contains("\"turn/end\"") || line.contains("TurnCompleted")
-                if (hasTurnEnd) {
+                // Judge the frame by its own header: file or log text inside a tool result can contain "TurnCompleted".
+                val head = line.take(400)
+                if (head.contains("\"turn/end\"")) {
                     handle(DshSdkProtocolEvent.TurnCompleted)
+                } else if (head.contains("\"tool/result\"")) {
+                    // A large tool output is not a protocol failure; the agent continues with it.
+                    Log.d("DshBridge", "Dropped oversized tool/result frame (${line.length} chars)")
                 } else if (!duplicate) {
                     handle(DshSdkProtocolEvent.Failed("DeepSeek Harness sent an oversized response"))
                 }

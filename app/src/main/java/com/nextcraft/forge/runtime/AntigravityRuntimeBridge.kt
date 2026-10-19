@@ -599,24 +599,29 @@ class AntigravityRuntimeBridge(
 }
 
 internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): String {
-    val value = "$raw $diagnostic".replace(Regex("\\s+"), " ").trim()
-    return when {
-        ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
-            "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
-        value.contains("authentication required", true) ||
-            value.contains("authentication failed", true) ||
-            value.contains("not signed in", true) ||
-            value.contains("not logged in", true) ->
-            "Antigravity needs Google sign-in. Open Settings → Coding agent."
-        value.contains("out of credits", true) || value.contains("quota", true) ->
-            "Your Antigravity account is out of credits. Check the account plan or wait for credits to reset."
-        value.contains("timed out", true) || value.contains("timeout", true) ->
-            "Antigravity reached the 60-minute task limit. Your files were kept."
-        value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
-            "The selected Antigravity model is unavailable. Refresh models in Settings."
-        value.isBlank() -> "Antigravity could not complete the task."
-        else -> raw.replace(Regex("\\s+"), " ").trim().take(500)
-    }
+    val rawValue = raw.replace(Regex("\\s+"), " ").trim()
+    // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
+    // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
+    return classifyAntigravityError(rawValue, allowTimeout = true)
+        ?: classifyAntigravityError("$rawValue ${diagnostic.replace(Regex("\\s+"), " ").trim()}", allowTimeout = false)
+        ?: rawValue.ifBlank { "Antigravity could not complete the task." }.take(500)
+}
+
+private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
+    ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
+        "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
+    value.contains("authentication required", true) ||
+        value.contains("authentication failed", true) ||
+        value.contains("not signed in", true) ||
+        value.contains("not logged in", true) ->
+        "Antigravity needs Google sign-in. Open Settings → Coding agent."
+    value.contains("out of credits", true) || value.contains("quota", true) ->
+        "Your Antigravity account is out of credits. Check the account plan or wait for credits to reset."
+    allowTimeout && (value.contains("timed out", true) || value.contains("timeout", true)) ->
+        "Antigravity reached the 60-minute task limit. Your files were kept."
+    value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
+        "The selected Antigravity model is unavailable. Refresh models in Settings."
+    else -> null
 }
 
 private val ANTIGRAVITY_NETWORK_ERRORS = listOf(

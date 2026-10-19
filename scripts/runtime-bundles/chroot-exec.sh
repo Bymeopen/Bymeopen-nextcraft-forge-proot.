@@ -224,8 +224,9 @@ trap 'forward_signal INT' INT
 trap 'forward_signal TERM' TERM
 # wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
 while :; do
-    wait "$child"
-    child_status=$?
+    # `|| child_status=$?` keeps set -e from aborting when a trapped signal interrupts wait (status 128+N).
+    child_status=0
+    wait "$child" || child_status=$?
     kill -0 "$child" 2>/dev/null || break
 done
 exit "$child_status"
