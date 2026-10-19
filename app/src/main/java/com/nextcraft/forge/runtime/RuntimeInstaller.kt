@@ -1782,7 +1782,7 @@ class RuntimeInstaller(private val context: Context) {
                 ?.let(::readProcessOutputSafely)
                 .orEmpty()
                 .trim()
-            check(exit == 0) { actionableProcessError(output, failureMessage) }
+            check(exit == 0) { actionableProcessError(output, failureMessage, exit) }
         } catch (e: TimeoutCancellationException) {
             throw IllegalStateException("$failureMessage: timed out", e)
         } finally {
@@ -1865,12 +1865,18 @@ class RuntimeInstaller(private val context: Context) {
             File(targetRootfs, "usr/bin/bash").isFile &&
             isSupportedRootfsVersion(File(targetRootfs, ".pocket-rootfs-version").readTextOrNull())
 
-    private fun actionableProcessError(output: String, fallback: String): String {
+    private fun actionableProcessError(output: String, fallback: String, exitCode: Int? = null): String {
         val lines = output.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
         val chrootError = lines.firstOrNull {
             it.startsWith("chroot:") || it.startsWith("mount:") || it.contains("Permission denied", ignoreCase = true)
         }
-        return chrootError ?: output.trim().takeLast(1_000).ifBlank { fallback }
+        // A silent failure (binary killed by a signal, proot refusing to start) leaves no output: the exit code is
+        // then the only clue. Shells report a signal as 128+N.
+        val exitHint = exitCode?.takeIf { it != 0 }?.let { code ->
+            val signal = if (code > 128) " (signal ${code - 128})" else ""
+            " [exit $code$signal, engine ${RuntimeEngines.current().name.lowercase()}]"
+        }.orEmpty()
+        return chrootError ?: output.trim().takeLast(1_000).ifBlank { fallback } + exitHint
     }
 
     private fun readProcessOutputSafely(file: File): String = runCatching {
