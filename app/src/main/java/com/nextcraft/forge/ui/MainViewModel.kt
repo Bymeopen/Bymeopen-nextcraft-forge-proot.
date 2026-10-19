@@ -13,6 +13,7 @@ import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.ChangeItem
+import com.nextcraft.forge.model.ChatAttachment
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.Project
@@ -149,6 +150,8 @@ data class ForgeUiState(
     /** Set while the user is asked whether to save or discard unsaved editor changes before leaving the file. */
     val unsavedChangesPrompt: String? = null,
     val fileSavedBanner: String? = null,
+    /** Files picked for the next prompt; copied into the workspace's attachments/ folder. */
+    val pendingAttachments: List<ChatAttachment> = emptyList(),
     val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
     val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
@@ -880,12 +883,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendPrompt(promptText: String) {
+        val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
-        if (cleanPrompt.isEmpty() || _state.value.sessionRunning) return
+        if ((cleanPrompt.isEmpty() && attachments.isEmpty()) || _state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
-        val userMsg = ChatMessage(fromUser = true, text = cleanPrompt)
+        val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
+        // The agent sees the attachments as workspace paths it can open with its own tools.
+        val agentPrompt = if (attachments.isEmpty()) {
+            cleanPrompt
+        } else {
+            buildString {
+                append(cleanPrompt.ifEmpty { "See the attached files." })
+                append("\n\nAttached files (inside the workspace):\n")
+                attachments.forEach { append("- ").append(it.relativePath).append(" (").append(it.mimeType).append(")\n") }
+            }
+        }
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
@@ -925,6 +939,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sessionRunning = true,
                 activeStatusLine = "Starting ${_state.value.agentKind.title}…",
                 pendingToolRequest = null,
+                pendingAttachments = emptyList(),
             )
         }
 
@@ -941,7 +956,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     projectId = project.id,
                     projectSlug = project.slug,
                     projectKind = project.kind,
-                    prompt = cleanPrompt,
+                    prompt = agentPrompt,
                     conversationHistory = historyBefore + userMsg,
                     provider = _state.value.providerProfile,
                 )
@@ -1426,6 +1441,151 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (ok) {
                 refreshWorkspaceFilesAndChanges(project.id)
                 openWorkspaceFile(cleanPath)
+            }
+        }
+    }
+
+    /** Creates an empty folder inside the workspace. */
+    fun createWorkspaceFolder(relativePath: String) {
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/').trimEnd('/')
+        if (cleanPath.isEmpty()) return
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(project.id), cleanPath).mkdirs() }.getOrDefault(false)
+            }
+            if (ok) refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
+    /** Renames a file or folder in place (same parent); the open editor follows the file. */
+    fun renameWorkspaceEntry(relativePath: String, newName: String) {
+        if (_state.value.sessionRunning) return
+        val project = _state.value.activeProject ?: return
+        val cleanPath = relativePath.trim().trimStart('/')
+        val name = newName.trim()
+        if (cleanPath.isEmpty() || name.isEmpty() || name.contains('/') || name == "." || name == "..") return
+        val parent = cleanPath.substringBeforeLast('/', "")
+        val newPath = if (parent.isEmpty()) name else "$parent/$name"
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val from = checkpoints.safeWorkspaceFile(ws, cleanPath)
+                    val to = checkpoints.safeWorkspaceFile(ws, newPath)
+                    from.exists() && !to.exists() && from.renameTo(to)
+                }.getOrDefault(false)
+            }
+            if (ok) {
+                if (_state.value.selectedFilePath == cleanPath) {
+                    _state.update { it.copy(selectedFilePath = newPath) }
+                }
+                refreshWorkspaceFilesAndChanges(project.id)
+            }
+        }
+    }
+
+    /** Copies picked documents (any type) into [targetDir] of the workspace; names are de-duplicated. */
+    fun importFilesToWorkspace(uris: List<android.net.Uri>, targetDir: String = "") {
+        val project = _state.value.activeProject ?: return
+        if (uris.isEmpty()) return
+        val dir = targetDir.trim().trimStart('/').trimEnd('/')
+        viewModelScope.launch {
+            val copied = withContext(Dispatchers.IO) { copyUrisIntoWorkspace(project.id, uris, dir) }
+            if (copied.isNotEmpty()) {
+                _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_files_uploaded, copied.size)) }
+                refreshWorkspaceFilesAndChanges(project.id)
+            }
+        }
+    }
+
+    /** Picks files for the next prompt: stored under attachments/ so the agent can read them. */
+    fun attachFilesToPrompt(uris: List<android.net.Uri>) {
+        val project = _state.value.activeProject ?: return
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val copied = withContext(Dispatchers.IO) { copyUrisIntoWorkspace(project.id, uris, "attachments") }
+            if (copied.isNotEmpty()) {
+                _state.update { it.copy(pendingAttachments = it.pendingAttachments + copied) }
+            }
+        }
+    }
+
+    fun removePendingAttachment(id: String) {
+        _state.update { st -> st.copy(pendingAttachments = st.pendingAttachments.filterNot { it.id == id }) }
+    }
+
+    private fun copyUrisIntoWorkspace(projectId: String, uris: List<android.net.Uri>, dir: String): List<ChatAttachment> {
+        val resolver = getApplication<Application>().contentResolver
+        val ws = checkpoints.ensureWorkspace(projectId)
+        val out = mutableListOf<ChatAttachment>()
+        uris.forEach { uri ->
+            runCatching {
+                val display = queryDisplayName(uri) ?: "file-${System.currentTimeMillis()}"
+                val safeName = display.replace(Regex("[^A-Za-z0-9._ -]"), "_").ifBlank { "file" }
+                var rel = if (dir.isEmpty()) safeName else "$dir/$safeName"
+                var target = checkpoints.safeWorkspaceFile(ws, rel)
+                var n = 2
+                while (target.exists()) {
+                    val base = safeName.substringBeforeLast('.', safeName)
+                    val ext = safeName.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+                    rel = (if (dir.isEmpty()) "" else "$dir/") + "$base-$n$ext"
+                    target = checkpoints.safeWorkspaceFile(ws, rel)
+                    n++
+                }
+                target.parentFile?.mkdirs()
+                resolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                    ?: error("No stream for $uri")
+                out += ChatAttachment(
+                    displayName = display,
+                    relativePath = rel,
+                    mimeType = resolver.getType(uri) ?: "application/octet-stream",
+                    sizeBytes = target.length(),
+                )
+            }.onFailure { Log.w("MainViewModel", "Import failed for $uri", it) }
+        }
+        return out
+    }
+
+    private fun queryDisplayName(uri: android.net.Uri): String? =
+        runCatching {
+            getApplication<Application>().contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/')
+
+    /** Writes a ZIP of [paths] (or the whole workspace when empty) to a document the user chose. */
+    fun exportWorkspaceZip(target: android.net.Uri, paths: List<String>) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ws = checkpoints.ensureWorkspace(project.id)
+                    val ignored = setOf(".git", ".gradle", "build", "node_modules", "__pycache__")
+                    val roots = if (paths.isEmpty()) listOf(ws) else paths.map { checkpoints.safeWorkspaceFile(ws, it) }
+                    var written = 0
+                    getApplication<Application>().contentResolver.openOutputStream(target)?.use { os ->
+                        java.util.zip.ZipOutputStream(os.buffered()).use { zip ->
+                            roots.forEach { root ->
+                                root.walkTopDown()
+                                    .onEnter { d -> d == root || (d.name !in ignored && !Files.isSymbolicLink(d.toPath())) }
+                                    .filter { it.isFile && !Files.isSymbolicLink(it.toPath()) }
+                                    .forEach { file ->
+                                        zip.putNextEntry(java.util.zip.ZipEntry(file.relativeTo(ws).invariantSeparatorsPath))
+                                        file.inputStream().use { it.copyTo(zip) }
+                                        zip.closeEntry()
+                                        written++
+                                    }
+                            }
+                        }
+                    } ?: error("Cannot open $target")
+                    written
+                }.getOrElse { Log.w("MainViewModel", "ZIP export failed", it); -1 }
+            }
+            _state.update {
+                it.copy(
+                    fileSavedBanner = if (count >= 0) getApplication<Application>().getString(R.string.msg_zip_saved, count) else getApplication<Application>().getString(R.string.msg_zip_failed),
+                )
             }
         }
     }

@@ -97,6 +97,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 
 @Composable
 fun NextCraftForgeApp(viewModel: MainViewModel) {
@@ -143,7 +145,10 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         if (!viewModel.projectBack()) backTarget?.let(viewModel::selectTab)
     }
 
+    // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
+    // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
         topBar = {},
         bottomBar = {
@@ -190,7 +195,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .statusBarsPadding(),
         ) {
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(
@@ -619,7 +625,7 @@ private fun ForgeBottomBar(
             .fillMaxWidth()
             .padding(outerPadding),
     ) {
-        Column {
+        Column(modifier = Modifier.navigationBarsPadding()) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
             BoxWithConstraints(
                 modifier = Modifier
