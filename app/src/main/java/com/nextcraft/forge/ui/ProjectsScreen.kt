@@ -525,7 +525,7 @@ private fun ProjectRow(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = if (locked) stringResource(R.string.projects_agent_running) else project.description.ifBlank { project.subtitle() },
+                    text = if (locked) stringResource(R.string.projects_agent_running) else project.localizedDescription().ifBlank { project.subtitle() },
                     fontSize = ForgeType.body,
                     color = muted,
                     maxLines = 2,
@@ -541,7 +541,7 @@ private fun ProjectRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = listOf(project.language, project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
+                    text = listOf(project.localizedLanguage(), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
                     fontSize = ForgeType.secondary,
                     color = muted,
                     maxLines = 1,
@@ -633,3 +633,14 @@ private fun Project.subtitle(): String = when {
     type == ProjectType.ANDROID -> stringResource(R.string.projects_android) + (androidTemplate?.let { " · ${it.label}" } ?: "")
     else -> stringResource(R.string.projects_general)
 }
+
+/** Projects saved by older builds store English defaults; show them in the current language. */
+@Composable
+private fun Project.localizedDescription(): String = when (description) {
+    "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
+    "General coding workspace" -> stringResource(R.string.project_general_desc)
+    else -> description
+}
+
+@Composable
+private fun Project.localizedLanguage(): String = if (language == "Multi-language") stringResource(R.string.project_lang_multi) else language

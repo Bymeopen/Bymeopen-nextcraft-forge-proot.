@@ -244,8 +244,9 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .statusBarsPadding(),
+                // innerPadding already carries the status bar and cutout (contentWindowInsets); adding
+                // statusBarsPadding() here doubled the top gap.
+                .padding(innerPadding),
         ) {
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(

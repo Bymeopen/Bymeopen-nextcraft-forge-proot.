@@ -208,7 +208,7 @@ internal fun ForgeBottomBar(
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 val slot = maxWidth / entries.size
-                val pillInset = 6.dp
+                val pillInset = if (entries.size >= 5) 2.dp else 6.dp
                 // Pill: the only moving object. A radial gradient drawn behind it gives the soft outward glow
                 // (no blur, so it costs nothing on low-end GPUs). White skips the glow: it would look muddy.
                 val glow = !tokens.isWhite

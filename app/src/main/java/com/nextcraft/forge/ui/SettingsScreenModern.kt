@@ -161,8 +161,6 @@ fun SettingsScreenModern(
                                             text = stringResource(mode.subtitle),
                                             fontSize = ForgeType.caption,
                                             color = scheme.onSurfaceVariant,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                 }
@@ -203,15 +201,30 @@ fun SettingsScreenModern(
                 subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
                 checked = state.interactiveHighRiskApprovals,
                 onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
-                modifier = Modifier.padding(horizontal = 6.dp),
+                modifier = Modifier.padding(horizontal = 14.dp),
             )
             ForgeToggleRow(
                 title = stringResource(R.string.settings_auto_approve_all_tools),
                 subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
                 checked = state.autoApproveAllTools,
                 onCheckedChange = viewModel::setAutoApproveAllTools,
-                modifier = Modifier.padding(horizontal = 6.dp),
+                modifier = Modifier.padding(horizontal = 14.dp),
             )
+            if (state.autoApproveAllTools) {
+                // Both switches together mean nothing is ever confirmed: say so where the user is looking.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    ForgeIcon(ForgeGlyph.WARNING, tint = tokens.warningText, size = 16.dp, modifier = Modifier.padding(top = 2.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_auto_approve_warning),
+                        fontSize = ForgeType.secondary,
+                        color = tokens.warningText,
+                    )
+                }
+            }
         }
 
         // ───────────────────────── Developer tools ─────────────────────────
@@ -241,6 +254,8 @@ fun SettingsScreenModern(
                             stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
                             installed -> Row(verticalAlignment = Alignment.CenterVertically) {
                                 ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(stringResource(R.string.settings_agent_installed), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                                 ForgeTextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
                                     Text(stringResource(R.string.settings_remove), color = tokens.dangerText)
                                 }

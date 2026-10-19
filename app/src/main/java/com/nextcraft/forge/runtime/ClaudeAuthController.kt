@@ -203,7 +203,7 @@ class ClaudeAuthController(
                             val account = readAccountEmail()
                             mutableState.value = ClaudeAuthState(
                                 ClaudeAuthStatus.SIGNED_IN,
-                                message = account?.let { "Connected as $it" } ?: "Claude account connected",
+                                message = account?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) } ?: context.getString(com.nextcraft.forge.R.string.auth_claude_connected),
                                 accountEmail = account,
                             )
                             onSignedInChanged(true)

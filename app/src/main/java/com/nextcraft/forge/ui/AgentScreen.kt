@@ -116,6 +116,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
@@ -781,13 +782,22 @@ private fun ChatMessageCard(
     val textColor = scheme.onSurface
 
     if (message.fromUser) {
-        MessageContainer(fromUser = true, contentColor = textColor) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // User bubbles hug their text: no permanent copy button (it forced a 48dp minimum height); a long-press copies.
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val copiedLabel = stringResource(R.string.tool_copy)
+        MessageContainer(
+            fromUser = true,
+            contentColor = textColor,
+            onLongClick = {
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text))
+            },
+            longClickLabel = copiedLabel,
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (message.text.isNotBlank()) {
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false, modifier = Modifier.padding(end = 32.dp))
-                        CopyMessageButton(message.text, Modifier.align(Alignment.TopEnd))
-                    }
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
                 }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -975,9 +985,12 @@ private fun ToolCallRow(item: ActivityItem) {
 
 /** User messages sit in a soft rounded surface; agent replies flow on the canvas without a card. */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun MessageContainer(
     fromUser: Boolean,
     contentColor: Color,
+    onLongClick: (() -> Unit)? = null,
+    longClickLabel: String? = null,
     content: @Composable () -> Unit,
 ) {
     if (fromUser) {
@@ -985,7 +998,14 @@ private fun MessageContainer(
             shape = RoundedCornerShape(16.dp),
             color = LocalForgeThemeTokens.current.cardElevatedColor,
             contentColor = contentColor,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .then(
+                    if (onLongClick != null) {
+                        Modifier.combinedClickable(onLongClickLabel = longClickLabel, onLongClick = onLongClick, onClick = {})
+                    } else Modifier,
+                ),
         ) { content() }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }

@@ -105,7 +105,7 @@
     <string name="settings_one_time_device_code">One-Time Device Code: %1$s</string>
     <string name="settings_copy_code_open_github">Copy Code &amp; Open GitHub</string>
     <string name="settings_copy_code">Copy Code</string>
-    <string name="settings_sign_in_with_github">Sign In with GitHub (OAuth Device Flow)</string>
+    <string name="settings_sign_in_with_github">Sign in with GitHub</string>
     <string name="settings_or_paste_github_personal">Or Paste GitHub Personal Access Token</string>
     <string name="settings_connect">Connect</string>
     <string name="settings_connected_as">Connected as @%1$s</string>
@@ -677,4 +677,15 @@
     <string name="agent_effort_low">Low</string>
     <string name="agent_effort_medium">Medium</string>
     <string name="agent_effort_high">High</string>
+    <string name="model_default_recommended">Default (recommended for your plan)</string>
+    <string name="model_opusplan">Opus plans, Sonnet builds</string>
+    <string name="auth_connected_as">Connected as %1$s</string>
+    <string name="auth_claude_connected">Claude account connected</string>
+    <string name="auth_google_connected">Google account connected</string>
+    <string name="agent_key_not_needed">No API key needed with your Claude login</string>
+    <string name="msg_gh_denied">GitHub authorization was cancelled.</string>
+    <string name="project_default_sandbox_desc">Default workspace inside Ubuntu ARM64 Root Chroot</string>
+    <string name="project_general_desc">General coding workspace</string>
+    <string name="project_lang_multi">Multi-language</string>
+    <string name="settings_auto_approve_warning">Every tool runs without confirmation. Turn this off to review commands first.</string>
 </resources>

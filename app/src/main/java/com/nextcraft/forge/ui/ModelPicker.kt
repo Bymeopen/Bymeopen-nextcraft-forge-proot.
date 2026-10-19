@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
 
 /** One selectable model: [id] is what the agent receives, [label] is what the user reads, [badge] a short tier hint. */
-data class ModelOption(val id: String, val label: String, val badge: String = "")
+data class ModelOption(val id: String, val label: String, val badge: String = "", @androidx.annotation.StringRes val labelRes: Int? = null)
 
 /**
  * Searchable model list shared by every agent (Claude Code, DeepSeek Harness, Antigravity), shown as a bottom sheet:
@@ -124,7 +124,7 @@ fun ModelPickerDialog(
                 }
                 items(filtered, key = { it.id }) { option ->
                     ModelRow(
-                        label = option.label,
+                        label = option.labelRes?.let { stringResource(it) } ?: option.label,
                         id = option.id,
                         badge = option.badge,
                         selected = option.id == selectedId,
