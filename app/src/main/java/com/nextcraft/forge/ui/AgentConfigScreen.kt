@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +52,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ProviderKind
@@ -132,7 +132,7 @@ fun AgentConfigScreen(
                     }
                     Text(
                         text = stringResource(R.string.settings_agent_install_hint, agent.downloadNote),
-                        fontSize = 14.sp,
+                        fontSize = ForgeType.control,
                         color = scheme.onSurfaceVariant,
                     )
                     ForgePrimaryButton(
@@ -145,7 +145,7 @@ fun AgentConfigScreen(
                         // A stack/Core install holds the runtime lock; its progress is shown in Settings.
                         Text(
                             text = stringResource(R.string.settings_agent_wait_runtime),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }
@@ -202,31 +202,28 @@ fun AgentConfigScreen(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (!provider.fixedBaseUrl && provider != ProviderKind.CLAUDE) {
-                            OutlinedTextField(
-                                shape = RoundedCornerShape(14.dp),
+                            ForgeTextField(
+                                kind = ForgeFieldKind.URL, imeAction = ImeAction.Next, error = baseUrlInput.takeIf { it.isNotBlank() && !FieldValidation.isHttpUrl(it) }?.let { stringResource(R.string.field_error_url) },
                                 value = baseUrlInput,
                                 onValueChange = { baseUrlInput = it },
                                 label = { Text(stringResource(R.string.settings_api_base_url)) },
-                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
+                        ForgeTextField(
+                            kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next,
                             value = modelInput,
                             onValueChange = { modelInput = it },
                             label = { Text(stringResource(R.string.settings_model_identifier)) },
-                            singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         if (provider == ProviderKind.LLM_ROUTER) {
-                            OutlinedTextField(
-                                shape = RoundedCornerShape(14.dp),
+                            ForgeTextField(
+                                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                                 value = openRouterOrderInput,
                                 onValueChange = { openRouterOrderInput = it },
                                 label = { Text(stringResource(R.string.settings_openrouter_provider_order_comma)) },
                                 placeholder = { Text("anthropic,google-vertex,deepseek") },
-                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -253,7 +250,7 @@ fun AgentConfigScreen(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
+                ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
                     Text(stringResource(R.string.settings_discover_models))
                 }
             }
@@ -288,7 +285,7 @@ fun AgentConfigScreen(
                         }
                         if (state.discoveredModels.isNotEmpty()) {
                             Text(
-                                text = stringResource(R.string.settings_models_found, state.discoveredModels.size),
+                                text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
                                 fontSize = ForgeType.secondary,
                                 fontWeight = FontWeight.Medium,
                                 color = scheme.onSurfaceVariant,
@@ -354,22 +351,19 @@ fun AgentConfigScreen(
                                 }
                             }
                         }
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
+                        ForgeTextField(
+                            kind = ForgeFieldKind.NAME, imeAction = ImeAction.Next,
                             value = keyLabelInput,
                             onValueChange = { keyLabelInput = it },
                             label = { Text(stringResource(R.string.settings_label)) },
                             placeholder = { Text("Primary") },
-                            singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        OutlinedTextField(
-                            shape = RoundedCornerShape(14.dp),
+                        ForgeTextField(
+                            kind = ForgeFieldKind.SECRET, imeAction = ImeAction.Done,
                             value = keySecretInput,
                             onValueChange = { keySecretInput = it },
                             label = { Text(stringResource(R.string.settings_api_key_token)) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         ForgePrimaryButton(
@@ -419,13 +413,13 @@ fun AgentConfigScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 44.dp)) {
                             ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(kind.displayTitle(), fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            Text(kind.displayTitle(), fontSize = ForgeType.body, modifier = Modifier.weight(1f))
                             state.agentUpdates[kind]?.let { info ->
-                                TextButton(onClick = { viewModel.updateAgent(kind) }, enabled = !runtimeBusy) {
+                                ForgeTextButton(onClick = { viewModel.updateAgent(kind) }, enabled = !runtimeBusy) {
                                     Text(stringResource(R.string.settings_agent_update, info.latestVersion))
                                 }
                             }
-                            TextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
+                            ForgeTextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
                                 Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
                             }
                         }

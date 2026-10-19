@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +40,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 
 /** One selectable model: [id] is what the agent receives, [label] is what the user reads, [badge] a short tier hint. */
@@ -94,12 +94,11 @@ fun ModelPickerDialog(
                     }
                 }
             }
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Search,
                 value = query,
                 onValueChange = { query = it },
                 placeholder = { Text(stringResource(R.string.model_picker_search)) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
             if (loading) {
@@ -155,7 +154,7 @@ private fun ModelRow(label: String, id: String, badge: String, selected: Boolean
         shape = RoundedCornerShape(14.dp),
         color = if (selected) tokens.cardElevatedColor else tokens.cardContainerColor,
         border = tokens.cardBorderStroke,
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.RadioButton, onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.RadioButton, onClick = onClick).forgeSelected(selected),
     ) {
         Row(modifier = Modifier.padding(horizontal = ForgeSpace.cardInner, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {

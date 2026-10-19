@@ -8,6 +8,8 @@
 
 ---
 
+> **Pembaruan 2026-10-19 (audit UX ulang):** tabel baseline di §0 sudah usang. Kondisi terukur sekarang: 557 string (id & en lengkap), 627 pemakaian `stringResource`, 13 literal `Text`, 56 `semantics`/`Role`, 6 file guard test. Yang masih terbuka: locale ar/es/hi/ru/zh-CN hanya stub (disembunyikan dari pemilih lewat `AppLanguage.translated`), screenshot test (Paparazzi/Roborazzi) belum ada, dan `MainViewModel` masih ±3.100 baris.
+
 ## 0. Audit baseline (diukur dari repo, bukan asumsi)
 
 | Temuan | Nilai terukur | Dampak | Prioritas |

@@ -48,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,7 +72,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.BuildConfig
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
@@ -98,7 +98,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.settings_repository_sync), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 state.githubStatusMessage?.asString()?.let { status ->
-                    Text(text = status, fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                    Text(text = status, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                 }
                 state.githubDeviceCode?.let { dc ->
                     Surface(shape = RoundedCornerShape(14.dp), color = tokens.cardElevatedColor, modifier = Modifier.fillMaxWidth()) {
@@ -117,7 +117,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            TextButton(onClick = { clipboard.setText(AnnotatedString(dc.userCode)) }) {
+                            ForgeTextButton(onClick = { clipboard.setText(AnnotatedString(dc.userCode)) }) {
                                 Text(stringResource(R.string.settings_copy_code))
                             }
                         }
@@ -129,13 +129,11 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                         onClick = { viewModel.startGitHubDeviceSignIn() },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    OutlinedTextField(
-                        shape = RoundedCornerShape(14.dp),
+                    ForgeTextField(
+                        kind = ForgeFieldKind.SECRET, imeAction = ImeAction.Done,
                         value = githubTokenInput,
                         onValueChange = { githubTokenInput = it },
                         label = { Text(stringResource(R.string.settings_or_paste_github_personal)) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedButton(
@@ -158,7 +156,7 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = viewModel::disconnectGitHub) { Text(stringResource(R.string.settings_disconnect)) }
+                        ForgeTextButton(onClick = viewModel::disconnectGitHub) { Text(stringResource(R.string.settings_disconnect)) }
                     }
                     ForgeToggleRow(
                         title = stringResource(R.string.settings_auto_commit_push),
@@ -190,21 +188,19 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                     )
                     AnimatedVisibility(visible = createOpen) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedTextField(
-                                shape = RoundedCornerShape(14.dp),
+                            ForgeTextField(
+                                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next,
                                 value = newRepoName,
                                 onValueChange = { newRepoName = it },
                                 label = { Text(stringResource(R.string.settings_repository_name)) },
                                 placeholder = { Text(state.activeProject?.slug ?: "my-forge-repo") },
-                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            OutlinedTextField(
-                                shape = RoundedCornerShape(14.dp),
+                            ForgeTextField(
+                                kind = ForgeFieldKind.TEXT, imeAction = ImeAction.Done,
                                 value = newRepoDesc,
                                 onValueChange = { newRepoDesc = it },
                                 label = { Text(stringResource(R.string.settings_description_optional)) },
-                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             ForgeToggleRow(
@@ -232,19 +228,19 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
                         ThinDivider()
                         Text(
                             text = stringResource(R.string.settings_your_repositories_tap_clone),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             fontWeight = FontWeight.Medium,
                             color = scheme.onSurfaceVariant,
                         )
                         state.githubRepos.take(10).forEach { repo ->
                             Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(repo.fullName, fontFamily = FontFamily.Monospace, fontSize = ForgeType.control, fontWeight = FontWeight.SemiBold)
                                     if (repo.description.isNotBlank()) {
                                         Text(repo.description, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
-                                TextButton(onClick = { viewModel.cloneGitHubRepository(repo) }) { Text(stringResource(R.string.settings_clone)) }
+                                ForgeTextButton(onClick = { viewModel.cloneGitHubRepository(repo) }) { Text(stringResource(R.string.settings_clone)) }
                             }
                         }
                     }

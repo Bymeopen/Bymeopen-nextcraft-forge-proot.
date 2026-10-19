@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -218,8 +219,8 @@ fun AgentScreen(
                         if (state.sessionRunning) {
                             OutlinedButton(
                                 onClick = viewModel::stopActiveTask,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.heightIn(min = ForgeSpace.minTouch),
                             ) {
                                 Text(stringResource(R.string.agent_stop), fontSize = ForgeType.caption)
                             }
@@ -250,7 +251,7 @@ fun AgentScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.agent_greeting),
-                        fontSize = 16.sp,
+                        fontSize = ForgeType.rowTitle,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     )
                 }
@@ -297,7 +298,7 @@ fun AgentScreen(
                         ) {
                             Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.agent_latest), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text(stringResource(R.string.agent_latest), fontWeight = FontWeight.SemiBold, fontSize = ForgeType.control)
                         }
                     }
                 }
@@ -339,7 +340,7 @@ fun AgentScreen(
             ) {
                 Text(
                     stringResource(R.string.agent_queued_title, state.queuedPrompts.size),
-                    fontSize = 12.sp,
+                    fontSize = ForgeType.caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 state.queuedPrompts.forEach { queued ->
@@ -403,6 +404,8 @@ fun AgentScreen(
                     },
                     modifier = Modifier.weight(1f),
                     maxLines = 5,
+                    // Enter stays a newline (messages are multi-line); send is the round button.
+                    keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
                     colors = TextFieldDefaults.textFieldColors(
                         containerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
@@ -428,6 +431,7 @@ fun AgentScreen(
                 )
                 Box(
                     modifier = Modifier
+                        .forgeMinTouch()
                         .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
                         .size(40.dp)
                         .clip(CircleShape)
@@ -494,14 +498,15 @@ private fun AgentHeader(
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
                 text = state.activeProject?.name ?: stringResource(R.string.agent_title),
-                fontSize = 24.sp,
+                modifier = Modifier.forgeHeading(),
+                fontSize = ForgeType.screenTitle,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = listOfNotNull(state.agentKind.displayTitle(), activeChat?.displayTitle()).joinToString(" · "),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -568,7 +573,7 @@ private fun ProjectChatsDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(chat.displayTitle(), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (current) {
-                                Text(stringResource(R.string.agent_current_chat), fontSize = 12.sp, color = scheme.onSurfaceVariant)
+                                Text(stringResource(R.string.agent_current_chat), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
                             }
                         }
                         if (current) {
@@ -583,7 +588,7 @@ private fun ProjectChatsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
         },
     )
 }
@@ -621,10 +626,10 @@ private fun AntigravityOAuthBanner(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.agent_google_account), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.agent_google_account), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
                     Text(
                         text = authState.message ?: stringResource(R.string.agent_required_for_antigravity),
-                        fontSize = 13.sp,
+                        fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                     )
                 }
@@ -644,12 +649,11 @@ private fun AntigravityOAuthBanner(
                     ) { Text(stringResource(R.string.agent_copy_link)) }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    ForgeTextField(
+                        kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                         value = verificationCode,
                         onValueChange = { verificationCode = it },
-                        placeholder = { Text(stringResource(R.string.agent_paste_google_verification_code), fontSize = 13.sp) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
+                        placeholder = { Text(stringResource(R.string.agent_paste_google_verification_code), fontSize = ForgeType.secondary) },
                         modifier = Modifier.weight(1f),
                     )
                     ForgePrimaryButton(
@@ -709,15 +713,15 @@ private fun ToolApprovalCard(
                     ForgeStatusIcon(ForgeStatus.FAILED, iconSize = 20.dp)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.agent_approval_title), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.agent_approval_title), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
                         Text(
                             text = stringResource(R.string.agent_approval_sub, request.toolName, request.risk.name.lowercase()),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }
                 }
-                Text(text = request.explanation, fontSize = 14.sp, color = scheme.onSurfaceVariant)
+                Text(text = request.explanation, fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
                 request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
                     Text(
                         text = cmd,
@@ -786,7 +790,7 @@ private fun ChatMessageCard(
         if (message.workedMillis > 0L) {
             Text(
                 text = stringResource(R.string.agent_worked_for, formatWorked(message.workedMillis)),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
             )
@@ -826,6 +830,7 @@ private fun ChatMessageCard(
                     text = stringResource(R.string.agent_thinking),
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
+                    modifier = Modifier.forgeLive(),
                 )
             }
         }
@@ -845,6 +850,7 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
     val label = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy)
     Box(
         modifier = modifier
+            .forgeMinTouch()
             .size(36.dp)
             .clip(CircleShape)
             .clickable(role = Role.Button, onClickLabel = label) {
@@ -910,7 +916,7 @@ private fun ToolCallRow(item: ActivityItem) {
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = if (item.detail.isBlank()) item.title else "${item.title} · ${item.detail.lineSequence().first()}",
-                fontSize = 14.sp,
+                fontSize = ForgeType.control,
                 color = if (kind == ToolKind.THINK) scheme.onSurface else scheme.onSurfaceVariant,
                 fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
                 maxLines = 1,
@@ -1005,15 +1011,15 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, sh
             .padding(start = 12.dp, end = if (onRemove == null) 12.dp else 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+        Text(name, fontSize = ForgeType.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
         if (showSize) Spacer(modifier = Modifier.width(6.dp))
         if (showSize) Text(
             text = if (size < 1024 * 1024) "${(size / 1024).coerceAtLeast(1)} KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", size / (1024.0 * 1024.0)),
-            fontSize = 12.sp,
+            fontSize = ForgeType.caption,
             color = scheme.onSurfaceVariant,
         )
         if (onRemove != null) {
-            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(ForgeSpace.minTouch)) {
                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_remove_attachment), tint = scheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
             }
         }

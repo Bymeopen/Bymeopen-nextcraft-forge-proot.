@@ -24,6 +24,30 @@ class AccessibilityGuardTest {
         assertTrue("clickable without role:\n" + offenders.joinToString("\n"), offenders.isEmpty())
     }
 
+    /** A tab or radio announces "selected" only if the row says so; a role alone reads as "tab" in every state. */
+    @Test
+    fun tabsAndRadios_declareSelection() {
+        val role = Regex("""Role\.(Tab|RadioButton)""")
+        val offenders = uiFiles.flatMap { file ->
+            val text = file.readText()
+            role.findAll(text).filter { m ->
+                val window = text.substring(m.range.first, minOf(text.length, m.range.last + 400))
+                "forgeSelected" !in window && "selectable(" !in window
+            }.map { "${file.name}: ${text.substring(0, it.range.first).count { c -> c == '\n' } + 1}" }.toList()
+        }
+        assertTrue("tab/radio without selection state:\n" + offenders.joinToString("\n"), offenders.isEmpty())
+    }
+
+    /** Titles are headings so TalkBack heading navigation works; the shared title composables must set it. */
+    @Test
+    fun sharedTitles_areHeadings() {
+        val src = File("src/main/java/com/nextcraft/forge/ui/ForgeComponents.kt").readText()
+        listOf("ForgeLargeTitle", "ForgeSectionLabel").forEach { name ->
+            val body = src.substringAfter("fun $name(").substringBefore("\n}\n")
+            assertTrue("$name must apply forgeHeading()", "forgeHeading()" in body)
+        }
+    }
+
     /**
      * Icons with contentDescription = null are decorative; each one must sit beside visible text or
      * inside a labelled control. Informative icons need a description. Lower BASELINE when you fix one.
@@ -35,8 +59,8 @@ class AccessibilityGuardTest {
     }
 
     private companion object {
-        // 35 = 23 + 6 on the Projects hero/import card (icons beside their own label text).
-        // 37 = 35 + 1 (Rename item in the project menu) + 1 (Developer Tools header tile); both sit beside visible text.
-        const val BASELINE = 38
+        // Audited: all 14 sit beside visible text or inside a control with onClickLabel (expand chevrons,
+        // leading icons, status glyphs). Tightened from 38 (18 before the unused ForgeTopBar was removed) so a new unlabeled icon fails the test.
+        const val BASELINE = 14
     }
 }
