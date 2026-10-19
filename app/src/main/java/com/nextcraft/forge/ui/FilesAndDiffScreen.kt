@@ -90,7 +90,8 @@ fun FilesAndDiffScreen(
     var newFolderBaseDir by rememberSaveable { mutableStateOf<String?>(null) }
     var renameTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingDeletePath by rememberSaveable { mutableStateOf<String?>(null) }
-    var selecting by rememberSaveable { mutableStateOf(false) }
+    // Not saveable, like selectedPaths: restoring `selecting` without its list made "export selection" export everything.
+    var selecting by remember { mutableStateOf(false) }
     val selectedPaths = remember { mutableStateListOf<String>() }
     var uploadDir by rememberSaveable { mutableStateOf("") }
     val uploadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->

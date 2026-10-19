@@ -819,6 +819,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         slug
     }
 
+    /**
+     * Prepends [project] to the list atomically and persists the result. Callers used to read the list after a
+     * suspend point and write it back, which erased renames or deletes made while an import or clone was running.
+     */
+    private fun prependProject(project: Project): List<Project> {
+        var updated: List<Project> = emptyList()
+        _state.update { current ->
+            updated = listOf(project) + current.projects
+            current.copy(projects = updated)
+        }
+        preferences.saveProjects(updated)
+        return updated
+    }
+
     fun deleteProject(projectId: String) {
         // The workspace would be wiped under a running agent, build, or terminal process.
         if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
@@ -970,7 +984,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             fromUser = false,
             text = "",
         )
-        val historyBefore = _state.value.messages
+        // A placeholder left behind by an abnormal end would repeat its LazyColumn key ("Key was already used" crash).
+        val historyBefore = _state.value.messages.filterNot { it.id == "streaming-assistant" }
         val updatedMessages = historyBefore + userMsg + assistantPlaceholder
         preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
 
@@ -2764,12 +2779,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             clonedProject.onSuccess { newProject ->
-                val updated = listOf(newProject) + _state.value.projects
-                preferences.saveProjects(updated)
-                configureAllProjectRoots(updated)
+                configureAllProjectRoots(prependProject(newProject))
                 _state.update {
                     it.copy(
-                        projects = updated,
                         githubStatusMessage = UiText.res(R.string.msg_gh_cloned, repo.fullName, newProject.name),
                     )
                 }
@@ -2800,10 +2812,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 checkpoints.ensureWorkspace(project.id)
                 project
             }
-            val updated = listOf(project) + _state.value.projects
-            preferences.saveProjects(updated)
-            configureAllProjectRoots(updated)
-            _state.update { it.copy(projects = updated) }
+            configureAllProjectRoots(prependProject(project))
             leaveOpenFile {
                 selectProject(project.id)
                 openConversation()
@@ -2856,10 +2865,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     val ws = checkpoints.ensureWorkspace(project.id)
                     val root = ws.canonicalFile
+                    try {
                     app.contentResolver.openInputStream(uri)?.use { input ->
                         java.util.zip.ZipInputStream(input).use { zip ->
                             var entry = zip.nextEntry
+                            var entries = 0
+                            var written = 0L
                             while (entry != null) {
+                                // Bound entry count and expanded size so a zip bomb cannot fill the device.
+                                if (++entries > MAX_IMPORT_ENTRIES) throw IllegalArgumentException("Archive has too many files")
                                 val target = File(root, entry.name).canonicalFile
                                 // Zip-slip guard: refuse entries that escape the workspace.
                                 if (!target.path.startsWith(root.path + File.separator) && target != root) {
@@ -2869,21 +2883,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     target.mkdirs()
                                 } else {
                                     target.parentFile?.mkdirs()
-                                    target.outputStream().use { zip.copyTo(it) }
+                                    target.outputStream().use { out ->
+                                        val buffer = ByteArray(64 * 1024)
+                                        while (true) {
+                                            val count = zip.read(buffer)
+                                            if (count < 0) break
+                                            written += count
+                                            if (written > MAX_IMPORT_BYTES) throw IllegalArgumentException("Archive is larger than ${MAX_IMPORT_BYTES / (1024 * 1024)} MB when extracted")
+                                            out.write(buffer, 0, count)
+                                        }
+                                    }
                                 }
                                 zip.closeEntry()
                                 entry = zip.nextEntry
                             }
                         }
                     } ?: throw IllegalStateException("Cannot open $displayName")
+                    } catch (error: Throwable) {
+                        // Nothing registered this workspace yet: remove the half-extracted files and free the slug.
+                        runCatching { ws.deleteRecursively() }
+                        synchronized(reservedSlugs) { reservedSlugs -= slug }
+                        throw error
+                    }
                     project
                 }
             }
             result.onSuccess { newProject ->
-                val updated = listOf(newProject) + _state.value.projects
-                preferences.saveProjects(updated)
-                configureAllProjectRoots(updated)
-                _state.update { it.copy(projects = updated, bannerMessage = UiText.res(R.string.msg_imported, newProject.name)) }
+                configureAllProjectRoots(prependProject(newProject))
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_imported, newProject.name)) }
                 leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_import_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
@@ -3102,6 +3129,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        const val MAX_IMPORT_ENTRIES = 50_000
+        const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
     }
