@@ -23,7 +23,7 @@ class AntigravityAuthController(
     private val mutableState = MutableStateFlow(
         AntigravityAuthState(
             status = if (initiallySignedIn) AntigravityAuthStatus.SIGNED_IN else AntigravityAuthStatus.SIGNED_OUT,
-            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { "Connected as $it" },
+            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) },
             accountEmail = initialAccountEmail.takeIf(String::isNotBlank),
         ),
     )
@@ -204,7 +204,7 @@ class AntigravityAuthController(
                         onSignedInChanged(true, email)
                         mutableState.value = AntigravityAuthState(
                             AntigravityAuthStatus.SIGNED_IN,
-                            message = email?.let { "Connected as $it" } ?: "Google account connected",
+                            message = email?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) } ?: context.getString(com.nextcraft.forge.R.string.auth_google_connected),
                             accountEmail = email,
                         )
                         // Leave the official CLI cleanly so it flushes credential/session state.

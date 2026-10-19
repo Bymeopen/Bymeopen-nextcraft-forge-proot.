@@ -196,7 +196,7 @@ fun AgentConfigScreen(
                 AgentDisclosureRow(
                     icon = ForgeGlyph.INFO,
                     title = stringResource(R.string.settings_endpoint_protocol),
-                    subtitle = if (provider.fixedBaseUrl || provider == ProviderKind.CLAUDE) state.providerProfile.model.ifBlank { "default" } else state.providerProfile.baseUrl,
+                    subtitle = state.providerProfile.baseUrl.ifBlank { provider.displaySubtitle() },
                     expanded = endpointOpen,
                     onToggle = { endpointOpen = !endpointOpen },
                 ) {
@@ -316,7 +316,7 @@ fun AgentConfigScreen(
                 AgentDisclosureRow(
                     icon = ForgeGlyph.LOCK,
                     title = stringResource(R.string.agent_credentials),
-                    subtitle = if (activeKey == null) stringResource(R.string.agent_no_key_saved) else stringResource(R.string.agent_keys_saved, state.savedApiKeys.size, activeKey.name),
+                    subtitle = if (activeKey == null) stringResource(if (provider == ProviderKind.CLAUDE) R.string.agent_key_not_needed else R.string.agent_no_key_saved) else stringResource(R.string.agent_keys_saved, state.savedApiKeys.size, activeKey.name),
                     expanded = credentialsOpen,
                     onToggle = { credentialsOpen = !credentialsOpen },
                 ) {

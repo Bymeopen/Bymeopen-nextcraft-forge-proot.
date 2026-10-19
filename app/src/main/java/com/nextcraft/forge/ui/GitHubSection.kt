@@ -106,8 +106,9 @@ fun GitHubSection(state: ForgeUiState, viewModel: MainViewModel) {
     var newRepoDesc by rememberSaveable { mutableStateOf("") }
     var newRepoPrivate by rememberSaveable { mutableStateOf(true) }
     Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // The dialog is the card: no second bordered card inside it.
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.settings_repository_sync), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 state.githubStatusMessage?.asString()?.let { status ->
                     Text(text = status, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)

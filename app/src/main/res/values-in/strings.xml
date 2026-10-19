@@ -105,7 +105,7 @@
     <string name="settings_one_time_device_code">Kode perangkat sekali pakai: %1$s</string>
     <string name="settings_copy_code_open_github">Salin kode &amp; buka GitHub</string>
     <string name="settings_copy_code">Salin kode</string>
-    <string name="settings_sign_in_with_github">Masuk dengan GitHub (OAuth Device Flow)</string>
+    <string name="settings_sign_in_with_github">Masuk dengan GitHub</string>
     <string name="settings_or_paste_github_personal">Atau tempel GitHub Personal Access Token</string>
     <string name="settings_connect">Hubungkan</string>
     <string name="settings_connected_as">Terhubung sebagai @%1$s</string>
@@ -665,4 +665,15 @@
     <string name="agent_effort_low">Rendah</string>
     <string name="agent_effort_medium">Sedang</string>
     <string name="agent_effort_high">Tinggi</string>
+    <string name="model_default_recommended">Default (disarankan untuk paket Anda)</string>
+    <string name="model_opusplan">Opus merencanakan, Sonnet membangun</string>
+    <string name="auth_connected_as">Terhubung sebagai %1$s</string>
+    <string name="auth_claude_connected">Akun Claude terhubung</string>
+    <string name="auth_google_connected">Akun Google terhubung</string>
+    <string name="agent_key_not_needed">Tidak perlu kunci API, memakai login Claude</string>
+    <string name="msg_gh_denied">Otorisasi GitHub dibatalkan.</string>
+    <string name="project_default_sandbox_desc">Ruang kerja bawaan di dalam Ubuntu ARM64 Root Chroot</string>
+    <string name="project_general_desc">Ruang kerja pemrograman umum</string>
+    <string name="project_lang_multi">Multibahasa</string>
+    <string name="settings_auto_approve_warning">Semua alat berjalan tanpa konfirmasi. Matikan agar perintah ditinjau dulu.</string>
 </resources>

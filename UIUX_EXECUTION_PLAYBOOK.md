@@ -362,3 +362,5 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Batch 3: ForgeIcons (21 glyph stroke 1.8dp) dipakai baris Settings/Agent config, menu Files, pohon file, jenis tool-call, riwayat dan lampir di chat; divider pohon dihapus (hanya dalam kartu); placeholder 60%; haptic tick tab dan kirim.
 
 - Batch A (reset): shared ForgeProjectHeader / ForgeListRow / ForgeEmptyState (ForgeShared.kt); project header on Chats, Files, Terminal, Preview and tool screens; Tools launcher single-accent stroke tiles; uniform empty states (Projects, Chats, Preview); diff review buttons 48dp.
+
+- UX audit fixes: removed doubled status-bar inset, compact user bubbles (long-press copy), Agent endpoint/credentials subtitles, localised model/auth/project strings, borderless GitHub dialog, auto-approve warning, aligned settings toggles, Android-only run button, active chat marked by weight, Editor duplicate removed from Tools, nav pill fits Pengaturan.

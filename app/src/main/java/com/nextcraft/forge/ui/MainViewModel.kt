@@ -355,7 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val defaultProject = Project(
             name = "Forge Sandbox",
-            description = "Default workspace inside Ubuntu ARM64 Root Chroot",
+            description = getApplication<Application>().getString(R.string.project_default_sandbox_desc),
             language = "Kotlin / TypeScript / Python",
             slug = "forge-sandbox",
         )
@@ -691,9 +691,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
-                        if (isAndroid) "Android (${androidTemplate.label}) project" else "General coding workspace"
+                        if (isAndroid) "Android (${androidTemplate.label}) project" else getApplication<Application>().getString(R.string.project_general_desc)
                     },
-                    language = if (isAndroid) "Kotlin" else "Multi-language",
+                    language = if (isAndroid) "Kotlin" else getApplication<Application>().getString(R.string.project_lang_multi),
                     slug = slug,
                     type = if (isAndroid) ProjectType.ANDROID else ProjectType.GENERAL,
                     androidTemplate = if (isAndroid) androidTemplate else null,
@@ -2584,7 +2584,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (poll.slowDown) intervalSec += 5L
                     }
                     is GitHubTokenPoll.Failure -> {
-                        _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = UiText.Raw(poll.message)) }
+                        val text = when (poll.reason) {
+                            GitHubTokenPoll.Failure.Reason.EXPIRED -> UiText.res(R.string.msg_gh_code_expired)
+                            GitHubTokenPoll.Failure.Reason.DENIED -> UiText.res(R.string.msg_gh_denied)
+                            GitHubTokenPoll.Failure.Reason.OTHER -> UiText.Raw(poll.message)
+                        }
+                        _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = text) }
                         return@coroutineScope
                     }
                 }
@@ -2866,7 +2871,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val project = Project(
                     name = identity.displayName,
                     description = "Quick project",
-                    language = "Multi-language",
+                    language = getApplication<Application>().getString(R.string.project_lang_multi),
                     slug = identity.slug,
                     kind = ProjectKind.QUICK_PROJECT,
                 )
@@ -2925,7 +2930,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val project = Project(
                         name = cleanName,
                         description = "Imported from $displayName",
-                        language = "Multi-language",
+                        language = getApplication<Application>().getString(R.string.project_lang_multi),
                         slug = slug,
                     )
                     val ws = checkpoints.ensureWorkspace(project.id)

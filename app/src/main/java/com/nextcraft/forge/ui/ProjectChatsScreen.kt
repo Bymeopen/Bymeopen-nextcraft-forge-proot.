@@ -59,11 +59,14 @@ fun ProjectChatsScreen(
             ).joinToString(" · "),
             onBack = { viewModel.projectBack() },
             actions = {
-                ForgePillIcon(
-                    icon = Icons.Default.PlayArrow,
-                    description = stringResource(R.string.launch_build_and_install_apk),
-                    onClick = { viewModel.selectTab(ForgeTab.ANDROID) },
-                )
+                // Build & install only means something for Android projects.
+                if (project?.type == com.nextcraft.forge.model.ProjectType.ANDROID) {
+                    ForgePillIcon(
+                        icon = Icons.Default.PlayArrow,
+                        description = stringResource(R.string.launch_build_and_install_apk),
+                        onClick = { viewModel.selectTab(ForgeTab.ANDROID) },
+                    )
+                }
                 ForgeGlyphPillIcon(
                     glyph = ForgeGlyph.BUILD,
                     description = stringResource(R.string.chats_open_project_tools),
@@ -103,7 +106,7 @@ fun ProjectChatsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ForgeStatusIcon(
-                        status = if (active && state.sessionRunning) ForgeStatus.RUNNING else if (active) ForgeStatus.DONE else ForgeStatus.TODO,
+                        status = if (active && state.sessionRunning) ForgeStatus.RUNNING else ForgeStatus.TODO,
                         iconSize = 16.dp,
                     )
                     Spacer(modifier = Modifier.width(14.dp))
@@ -111,7 +114,9 @@ fun ProjectChatsScreen(
                         Text(
                             text = chat.displayTitle(),
                             fontSize = ForgeType.rowTitle,
-                            fontWeight = FontWeight.Medium,
+                            // The open chat is marked by weight and colour, not by a "done" check.
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (active) scheme.primary else scheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
