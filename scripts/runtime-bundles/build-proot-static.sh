@@ -97,10 +97,12 @@ guest "cd /build && tar -xzf talloc.tar.gz && cd talloc-$TALLOC_VERSION && \
 echo "Building proot (static)"
 # LDFLAGS/CFLAGS go through the environment, not make arguments: the GNUmakefile appends `pkg-config --libs talloc`
 # with `+=`, and a command-line LDFLAGS would override that and drop -ltalloc.
+# --build-id=none and a fixed SOURCE_DATE_EPOCH keep the binary byte-identical across builds.
 guest "cd /build/proot/src && \
-  PKG_CONFIG_PATH=/build/talloc-prefix/lib/pkgconfig LDFLAGS='-static -L/build/talloc-prefix/lib' \
-  CFLAGS='-O2 -I/build/talloc-prefix/include' make -j\$(nproc) >/dev/null && \
-  strip proot && ./proot --version | head -1"
+  PKG_CONFIG_PATH=/build/talloc-prefix/lib/pkgconfig LDFLAGS='-static -L/build/talloc-prefix/lib -Wl,--build-id=none' \
+  CFLAGS='-O2 -I/build/talloc-prefix/include -ffile-prefix-map=/build=.' SOURCE_DATE_EPOCH=1757116800 \
+  make -j\$(nproc) >/dev/null && \
+  strip --strip-all --remove-section=.comment --remove-section=.note proot && ./proot --version | head -1"
 
 mkdir -p "$OUT_DIR"
 cp "$rootfs/build/proot/src/proot" "$OUT_DIR/libproot.so"

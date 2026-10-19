@@ -78,6 +78,8 @@ import com.nextcraft.forge.runtime.findDebugApk
 import com.nextcraft.forge.runtime.hasAndroidLogcatAccess
 import com.nextcraft.forge.runtime.inferAndroidBuildStage
 import com.nextcraft.forge.runtime.RuntimeEngine
+import com.nextcraft.forge.runtime.RuntimeEngineChoice
+import com.nextcraft.forge.runtime.RuntimeEngines
 import com.nextcraft.forge.runtime.parseAndroidBuildIssues
 import com.nextcraft.forge.runtime.readBoundedText
 import com.nextcraft.forge.runtime.startPackageLogcatProcess
@@ -204,6 +206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ForgeUiState(
             themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
             languageCode = AppStrings.languageCode(application),
+            runtimeEngineChoice = RuntimeEngineChoice.fromStored(preferences.runtimeEngine).id,
         ),
     )
     val state: StateFlow<ForgeUiState> = _state.asStateFlow()
@@ -2991,6 +2994,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(bannerMessage = failed, bannerAction = BannerAction(BannerActionKind.RETRY_IMPORT, failed)) }
             }
         }
+    }
+
+    /** Stores the engine choice and re-detects, so the onboarding row and the next launch follow it. */
+    fun setRuntimeEngineChoice(id: String) {
+        val choice = RuntimeEngineChoice.fromStored(id)
+        preferences.runtimeEngine = choice.id
+        RuntimeEngines.invalidate()
+        _state.update { it.copy(runtimeEngineChoice = choice.id) }
+        refreshRuntimeStatus()
     }
 
     fun setLanguageCode(code: String) {

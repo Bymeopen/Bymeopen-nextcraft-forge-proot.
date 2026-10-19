@@ -25,13 +25,21 @@ check "glibc"             'ldd --version | head -1'
 check "disk /"            'df -h / | awk "NR==2{print \$4\" free\"; exit (\$5+0>95)}"'
 check "/tmp writable"     'f=$(mktemp) && rm -f "$f" && echo ok'
 
-echo "== Mount"
-for m in /dev /dev/pts /proc /sys /tmp /system /apex /vendor /product; do
-  check "mount $m"        "grep -q ' $m ' /proc/mounts && echo mounted"
-done
-# Bionic tools need the APEX modules mounted under /apex (see docs/RUNTIME_KNOWN_ISSUES.md #1).
-check "apex submounts"    'n=$(grep -c " /apex/" /proc/mounts); echo "$n submount"; [ "$n" -gt 0 ]'
-check "linker64"          't=$(readlink -f /system/bin/linker64) && test -e "$t" && echo "$t"'
+if [ -n "${PROOT_TMP_DIR:-}" ]; then
+  # proot-exec.sh exports PROOT_TMP_DIR; there are no kernel mounts in this mode (ADR-007), only path bindings.
+  echo "== Mount (mesin PRoot: dilewati)"
+  check "engine"            'echo proot'
+  for d in /dev /proc /sys /tmp /system; do check "bind $d" "test -d $d && echo bound"; done
+else
+  echo "== Mount"
+  check "engine"            'echo chroot'
+  for m in /dev /dev/pts /proc /sys /tmp /system /apex /vendor /product; do
+    check "mount $m"        "grep -q ' $m ' /proc/mounts && echo mounted"
+  done
+  # Bionic tools need the APEX modules mounted under /apex (see docs/RUNTIME_KNOWN_ISSUES.md #1).
+  check "apex submounts"    'n=$(grep -c " /apex/" /proc/mounts); echo "$n submount"; [ "$n" -gt 0 ]'
+  check "linker64"          't=$(readlink -f /system/bin/linker64) && test -e "$t" && echo "$t"'
+fi
 
 echo "== Jaringan"
 check "DNS"               'getent hosts archive.ubuntu.com'

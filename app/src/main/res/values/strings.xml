@@ -576,6 +576,13 @@
     <string name="msg_agents_up_to_date">All installed agents are up to date.</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_language">Language</string>
+    <string name="settings_runtime_engine">Runtime engine</string>
+    <string name="engine_auto">Automatic</string>
+    <string name="engine_auto_sub">Root chroot when granted, otherwise PRoot</string>
+    <string name="engine_chroot">Root chroot</string>
+    <string name="engine_chroot_sub">Requires Magisk / KernelSU / APatch; fastest</string>
+    <string name="engine_proot">PRoot (no root)</string>
+    <string name="engine_proot_sub">Never asks for root; builds run slower</string>
     <string name="settings_agent_not_installed">%1$s is not installed</string>
     <string name="settings_agent_install_hint">Install its %1$s agent package to use it with your existing projects.</string>
     <string name="settings_agent_install_named">Install %1$s</string>
