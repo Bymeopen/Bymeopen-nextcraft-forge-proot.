@@ -2480,14 +2480,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // Subscription login: verify through Claude Code itself; the Messages API would reject the OAuth token.
             if (_state.value.agentKind == AgentKind.CLAUDE_CODE && isClaudeSubscriptionLogin(profile, apiKey)) {
+                // Keep the real reason: swallowing it left "Rejected" on screen with no way to see what failed.
                 val probe = if (_state.value.runtimeInstalled) {
-                    runCatching { claudeRuntime.hello(profile, 45_000L) }.getOrNull()
-                } else null
-                val text = if (!probe.isNullOrBlank()) {
-                    UiText.res(R.string.msg_claude_cli_verified, probe.take(80))
+                    runCatching { claudeRuntime.hello(profile, 45_000L) }
                 } else {
-                    UiText.res(R.string.msg_claude_cli_unverified)
+                    Result.failure(IllegalStateException(getApplication<Application>().getString(R.string.msg_runtime_not_installed)))
                 }
+                val text = probe.fold(
+                    onSuccess = { UiText.res(R.string.msg_claude_cli_verified, it.take(80)) },
+                    onFailure = { UiText.res(R.string.msg_claude_cli_unverified, (it.message ?: it.javaClass.simpleName).take(200)) },
+                )
                 _state.update { it.copy(apiBusy = false, apiStatusMessage = text) }
                 return@launch
             }

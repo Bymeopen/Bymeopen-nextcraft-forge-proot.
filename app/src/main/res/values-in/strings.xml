@@ -678,5 +678,6 @@
     <string name="settings_auto_approve_warning">Semua alat berjalan tanpa konfirmasi. Matikan agar perintah ditinjau dulu.</string>
     <string name="msg_subscription_models">Login langganan: model berasal dari Claude Code, tanpa permintaan katalog.</string>
     <string name="msg_claude_cli_verified">✓ Claude Code terverifikasi: %1$s</string>
-    <string name="msg_claude_cli_unverified">✕ Claude Code tidak menjawab. Pastikan runtime terpasang dan Anda sudah masuk.</string>
+    <string name="msg_claude_cli_unverified">✕ Pemeriksaan Claude Code gagal: %1$s</string>
+    <string name="msg_runtime_not_installed">Runtime Linux belum terpasang.</string>
 </resources>
