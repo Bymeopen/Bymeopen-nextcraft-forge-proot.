@@ -406,4 +406,20 @@
     <string name="settings_version">Version</string>
     <string name="settings_check_updates_sub">Looks for a newer APK</string>
     <string name="settings_models_found">%1$d models found · tap to use</string>
+    <string name="a11y_back">Back</string>
+    <string name="agent_latest">Latest</string>
+    <string name="agent_project_chats">Project chats</string>
+    <string name="agent_current_chat">Current chat</string>
+    <string name="agent_close">Close</string>
+    <string name="agent_worked_for">Worked for %1$s</string>
+    <string name="terminal_project_terminal">Project terminal</string>
+    <string name="terminal_env_root_chroot">Ubuntu root chroot</string>
+    <string name="terminal_key_previous">Previous command</string>
+    <string name="terminal_key_next">Next command</string>
+    <string name="terminal_key_clear_input">Clear input</string>
+    <string name="launch_preview_url">Preview URL</string>
+    <string name="launch_preview_not_running">Preview not running</string>
+    <string name="launch_preview_not_running_hint">Enter a localhost URL above, or start a local web server in the project terminal.</string>
+    <string name="launch_force_rebuild">Force rebuild</string>
+    <string name="launch_copy_apk_path">Copy APK path</string>
 </resources>

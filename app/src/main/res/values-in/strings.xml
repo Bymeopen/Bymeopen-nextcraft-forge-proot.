@@ -403,4 +403,20 @@
     <string name="settings_version">Versi</string>
     <string name="settings_check_updates_sub">Mencari APK yang lebih baru</string>
     <string name="settings_models_found">%1$d model ditemukan · ketuk untuk memakai</string>
+    <string name="a11y_back">Kembali</string>
+    <string name="agent_latest">Terbaru</string>
+    <string name="agent_project_chats">Obrolan proyek</string>
+    <string name="agent_current_chat">Obrolan saat ini</string>
+    <string name="agent_close">Tutup</string>
+    <string name="agent_worked_for">Bekerja selama %1$s</string>
+    <string name="terminal_project_terminal">Terminal proyek</string>
+    <string name="terminal_env_root_chroot">Ubuntu root chroot</string>
+    <string name="terminal_key_previous">Perintah sebelumnya</string>
+    <string name="terminal_key_next">Perintah berikutnya</string>
+    <string name="terminal_key_clear_input">Bersihkan input</string>
+    <string name="launch_preview_url">URL pratinjau</string>
+    <string name="launch_preview_not_running">Pratinjau belum berjalan</string>
+    <string name="launch_preview_not_running_hint">Masukkan URL localhost di atas, atau jalankan server web lokal di terminal proyek.</string>
+    <string name="launch_force_rebuild">Build ulang paksa</string>
+    <string name="launch_copy_apk_path">Salin path APK</string>
 </resources>

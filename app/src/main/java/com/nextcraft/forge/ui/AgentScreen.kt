@@ -53,6 +53,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -143,6 +148,8 @@ fun AgentScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         AgentHeader(
             state = state,
+            onBack = { viewModel.selectTab(ForgeTab.PROJECTS) },
+            onRun = { viewModel.selectTab(ForgeTab.ANDROID) },
             onSelectChat = viewModel::selectChat,
             onCreateChat = { viewModel.createChat() },
             onDeleteChat = viewModel::deleteChat,
@@ -219,23 +226,48 @@ fun AgentScreen(
                 modifier = Modifier.weight(1f),
             )
         } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(state.messages, key = { it.id }) { message ->
-                    ChatMessageCard(
-                        message = message,
-                        agentName = state.agentKind.displayTitle(),
-                        onRunSnippet = { cmd ->
-                            viewModel.runTerminalCommand(cmd)
-                            viewModel.selectTab(ForgeTab.TERMINAL)
-                        },
-                    )
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(state.messages, key = { it.id }) { message ->
+                        ChatMessageCard(
+                            message = message,
+                            agentName = state.agentKind.displayTitle(),
+                            onRunSnippet = { cmd ->
+                                viewModel.runTerminalCommand(cmd)
+                                viewModel.selectTab(ForgeTab.TERMINAL)
+                            },
+                        )
+                    }
+                }
+                // "Latest" pill: shown once the reader has scrolled up from the newest message.
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                val awayFromEnd = state.messages.size > 1 && lastVisible < state.messages.lastIndex
+                if (awayFromEnd) {
+                    Surface(
+                        shape = RoundedCornerShape(100),
+                        color = tokens.cardElevatedColor,
+                        contentColor = tokens.accentText,
+                        border = tokens.cardBorderStroke,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(100))
+                            .clickable(role = Role.Button) { scope.launch { listState.animateScrollToItem(state.messages.lastIndex) } },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(stringResource(R.string.agent_latest), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        }
+                    }
                 }
             }
         }
@@ -341,6 +373,8 @@ fun AgentScreen(
 @Composable
 private fun AgentHeader(
     state: ForgeUiState,
+    onBack: () -> Unit,
+    onRun: () -> Unit,
     onSelectChat: (String) -> Unit,
     onCreateChat: () -> Unit,
     onDeleteChat: (String) -> Unit,
@@ -348,90 +382,168 @@ private fun AgentHeader(
     onClearChat: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    var chatsOpen by rememberSaveable { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ForgeLargeTitle(
-                title = stringResource(R.string.agent_title),
-                subtitle = listOfNotNull(state.activeProject?.name, state.agentKind.displayTitle()).joinToString(" · "),
-                modifier = Modifier.weight(1f),
+    val activeChat = state.chats.firstOrNull { it.id == state.activeChatId }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 14.dp, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Back to Projects: the project name is the title, so this header reads as "inside a project".
+        IconButton(onClick = onBack) {
+            Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.a11y_back), tint = scheme.onSurface)
+        }
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                text = state.activeProject?.name ?: stringResource(R.string.agent_title),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            ForgeActionPill {
+            Text(
+                text = listOfNotNull(state.agentKind.displayTitle(), activeChat?.displayTitle()).joinToString(" · "),
+                fontSize = 13.sp,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        ForgeActionPill {
+            ForgePillIcon(
+                icon = Icons.Default.PlayArrow,
+                description = stringResource(R.string.launch_build_and_install_apk),
+                onClick = onRun,
+            )
+            ForgePillIcon(
+                icon = Icons.Default.Refresh,
+                description = stringResource(R.string.agent_project_chats),
+                onClick = { chatsOpen = true },
+            )
+            Box {
                 ForgePillIcon(
-                    icon = Icons.Default.Add,
-                    description = stringResource(R.string.agent_new_chat),
-                    onClick = onCreateChat,
+                    icon = Icons.Default.MoreVert,
+                    description = stringResource(R.string.agent_more),
+                    onClick = { menuOpen = true },
                 )
-                Box {
-                    ForgePillIcon(
-                        icon = Icons.Default.MoreVert,
-                        description = stringResource(R.string.agent_more),
-                        onClick = { menuOpen = true },
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    Text(
+                        text = stringResource(R.string.agent_switch_agent),
+                        fontSize = 12.sp,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                     )
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        Text(
-                            text = stringResource(R.string.agent_switch_agent),
-                            fontSize = 12.sp,
-                            color = scheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    AgentKind.entries.forEach { kind ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(kind.displayTitle(), fontWeight = FontWeight.SemiBold)
+                                    Text(kind.displaySubtitle(), fontSize = 12.sp, color = scheme.onSurfaceVariant)
+                                }
+                            },
+                            leadingIcon = if (kind == state.agentKind) {
+                                { Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected)) }
+                            } else {
+                                null
+                            },
+                            enabled = !state.sessionRunning,
+                            onClick = {
+                                menuOpen = false
+                                onSelectAgent(kind)
+                            },
                         )
-                        AgentKind.entries.forEach { kind ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(kind.displayTitle(), fontWeight = FontWeight.SemiBold)
-                                        Text(kind.displaySubtitle(), fontSize = 12.sp, color = scheme.onSurfaceVariant)
-                                    }
-                                },
-                                leadingIcon = if (kind == state.agentKind) {
-                                    { Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected)) }
-                                } else {
-                                    null
-                                },
-                                enabled = !state.sessionRunning,
-                                onClick = {
-                                    menuOpen = false
-                                    onSelectAgent(kind)
-                                },
-                            )
-                        }
-                        if (state.messages.isNotEmpty()) {
-                            Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.agent_clear_chat)) },
-                                enabled = !state.sessionRunning,
-                                onClick = {
-                                    menuOpen = false
-                                    onClearChat()
-                                },
-                            )
-                        }
+                    }
+                    if (state.messages.isNotEmpty()) {
+                        Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.agent_clear_chat)) },
+                            enabled = !state.sessionRunning,
+                            onClick = {
+                                menuOpen = false
+                                onClearChat()
+                            },
+                        )
                     }
                 }
             }
         }
-        if (state.chats.isNotEmpty()) {
-            val titles = state.chats.map { it.displayTitle() }
-            val selectedIndex = state.chats.indexOfFirst { it.id == state.activeChatId }.coerceAtLeast(0)
-            // Long-press the active chat's tab to delete it (only when more than one chat exists).
-            ForgePillTabs(
-                items = titles,
-                selectedIndex = selectedIndex,
-                onSelect = { onSelectChat(state.chats[it].id) },
-                onLongPress = if (state.chats.size > 1) {
-                    { index -> if (index == selectedIndex) onDeleteChat(state.chats[index].id) }
-                } else {
-                    null
-                },
-                longPressLabel = stringResource(R.string.agent_delete_chat),
-            )
-        }
     }
+
+    if (chatsOpen) {
+        ProjectChatsDialog(
+            state = state,
+            onDismiss = { chatsOpen = false },
+            onCreateChat = {
+                chatsOpen = false
+                onCreateChat()
+            },
+            onSelectChat = {
+                chatsOpen = false
+                onSelectChat(it)
+            },
+            onDeleteChat = onDeleteChat,
+        )
+    }
+}
+
+/** "Project chats": one primary New chat action, then every chat of the project with the current one checked. */
+@Composable
+private fun ProjectChatsDialog(
+    state: ForgeUiState,
+    onDismiss: () -> Unit,
+    onCreateChat: () -> Unit,
+    onSelectChat: (String) -> Unit,
+    onDeleteChat: (String) -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(22.dp),
+        containerColor = tokens.cardContainerColor,
+        title = { Text(stringResource(R.string.agent_project_chats), fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ForgePrimaryButton(
+                    text = stringResource(R.string.agent_new_chat),
+                    onClick = onCreateChat,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                state.chats.forEach { chat ->
+                    val current = chat.id == state.activeChatId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (current) scheme.primary.copy(alpha = 0.12f) else tokens.cardElevatedColor)
+                            .clickable(role = Role.Button) { onSelectChat(chat.id) }
+                            .padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+                            .height(48.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(chat.displayTitle(), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (current) {
+                                Text(stringResource(R.string.agent_current_chat), fontSize = 12.sp, color = scheme.onSurfaceVariant)
+                            }
+                        }
+                        if (current) {
+                            Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected), tint = scheme.primary)
+                        } else if (state.chats.size > 1) {
+                            IconButton(onClick = { onDeleteChat(chat.id) }) {
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_delete_chat), tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
+        },
+    )
 }
 
 @Composable
@@ -651,74 +763,102 @@ private fun ChatMessageCard(
     agentName: String,
     onRunSnippet: (String) -> Unit,
 ) {
-    var expandTools by remember { mutableStateOf(false) }
-    val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     val textColor = scheme.onSurface
 
-    MessageContainer(fromUser = message.fromUser, contentColor = textColor) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (message.fromUser) "You" else agentName,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (message.fromUser) scheme.onSurfaceVariant else tokens.accentText,
-                )
-                if (message.workItems.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable(
-                                role = Role.Button,
-                                onClickLabel = stringResource(if (expandTools) R.string.a11y_collapse else R.string.a11y_expand),
-                            ) { expandTools = !expandTools }
-                            .padding(horizontal = 8.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.agent_tool_steps, message.workItems.size),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = textColor,
-                        )
-                        Icon(
-                            imageVector = if (expandTools) {
-                                Icons.Default.KeyboardArrowUp
-                            } else {
-                                Icons.Default.KeyboardArrowDown
-                            },
-                            contentDescription = null,
-                            tint = textColor,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
+    if (message.fromUser) {
+        MessageContainer(fromUser = true, contentColor = textColor) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
+            }
+        }
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        // Each tool call is one collapsed row ("Bash · command ⌄"); tap to read its detail.
+        message.workItems.forEach { item -> ToolCallRow(item) }
+        if (message.workedMillis > 0L) {
+            Text(
+                text = stringResource(R.string.agent_worked_for, formatWorked(message.workedMillis)),
+                fontSize = 13.sp,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
+            )
+        }
+        if (message.text.isNotBlank()) {
+            MessageContainer(fromUser = false, contentColor = textColor) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet)
                 }
             }
+        } else if (message.workItems.isEmpty()) {
+            Text(
+                text = stringResource(R.string.agent_thinking),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+    }
+}
 
-            if (expandTools && message.workItems.isNotEmpty()) {
-                ToolActivityList(items = message.workItems)
-            }
+private fun formatWorked(millis: Long): String {
+    val totalSec = millis / 1000
+    val m = totalSec / 60
+    val sec = totalSec % 60
+    return if (m > 0) "${m}m ${sec}s" else "${sec}s"
+}
 
-            if (message.text.isNotBlank()) {
-                MarkdownText(
-                    markdown = message.text,
-                    color = textColor,
-                    onRunCode = onRunSnippet,
-                )
-            } else if (!message.fromUser) {
-                Text(
-                    text = stringResource(R.string.agent_thinking),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
-                )
-            }
+/** One collapsed tool call: status glyph, "Title · detail" on one line, chevron; expands to the full detail. */
+@Composable
+private fun ToolCallRow(item: ActivityItem) {
+    var open by remember { mutableStateOf(false) }
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(role = Role.Button, onClickLabel = stringResource(if (open) R.string.a11y_collapse else R.string.a11y_expand)) { open = !open }
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ForgeStatusIcon(
+                status = if (item.isComplete) ForgeStatus.DONE else ForgeStatus.RUNNING,
+                iconSize = 15.dp,
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = if (item.detail.isBlank()) item.title else "${item.title} · ${item.detail.lineSequence().first()}",
+                fontSize = 14.sp,
+                color = scheme.onSurfaceVariant,
+                fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = scheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        if (open && item.detail.isNotBlank()) {
+            Text(
+                text = item.detail,
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp,
+                color = tokens.terminalText,
+                fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(tokens.terminalBackground)
+                    .padding(10.dp),
+            )
         }
     }
 }
@@ -739,51 +879,5 @@ private fun MessageContainer(
         ) { content() }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
-    }
-}
-
-@Composable
-private fun ToolActivityList(items: List<ActivityItem>) {
-    val tokens = LocalForgeThemeTokens.current
-    val shape = RoundedCornerShape(12.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.cardElevatedColor)
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        items.forEach { item ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-            ) {
-                ForgeStatusIcon(
-                    status = if (item.isComplete) ForgeStatus.DONE else ForgeStatus.RUNNING,
-                    iconSize = 15.dp,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    if (item.detail.isNotBlank()) {
-                        Text(
-                            text = item.detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
