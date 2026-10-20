@@ -14,7 +14,7 @@ VERSION_NAME="${3:?versionName}"
 TAG="${4:?release tag}"
 VARIANT="${5:-release}"
 NOTES="${6:-}"
-REPO="${NEXTCRAFT_REPO:-bymeopen/nextcraft-forge-proot}"
+REPO="${NEXTCRAFT_REPO:-Bymeopen/Bymeopen-nextcraft-forge-proot}"
 OUT="${NEXTCRAFT_OUT_DIR:-$(dirname "$APK")}/update-manifest.json"
 
 [[ -f "$APK" ]] || { echo "APK not found: $APK" >&2; exit 1; }

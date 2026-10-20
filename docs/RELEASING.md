@@ -1,6 +1,6 @@
 # Merilis aplikasi dan update dalam aplikasi
 
-Cek update di Settings membaca `https://github.com/bymeopen/nextcraft-forge-proot/releases/latest/download/update-manifest.json`.
+Cek update di Settings membaca `https://github.com/Bymeopen/Bymeopen-nextcraft-forge-proot/releases/latest/download/update-manifest.json`.
 
 ## Rilis lewat GitHub Actions
 
