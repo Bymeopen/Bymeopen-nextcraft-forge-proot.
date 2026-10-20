@@ -806,6 +806,12 @@ fun WebPreviewScreen(
                     webViewRef = webView
                 }
             },
+            // The view leaves composition when the server stops; destroy it there, not only when the screen closes.
+            onRelease = { view ->
+                if (webViewRef === view) webViewRef = null
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                (view as? WebView)?.let { runCatching { it.stopLoading(); it.destroy() } }
+            },
         )
         }
     }
