@@ -32,6 +32,9 @@ import com.nextcraft.forge.R
 import com.nextcraft.forge.model.DiffLine
 import com.nextcraft.forge.model.DiffLineType
 
+private const val MAX_LISTED_FILES = 300
+private val skippedFolders = listOf("node_modules", ".git", "build", "dist", ".gradle", "__pycache__")
+
 /** The text of a file as read-only "context" lines, so the diff viewer's gutter and colouring also serve plain reading. */
 internal fun fileAsViewerLines(content: String): List<DiffLine> =
     content.split('\n').let { lines -> if (lines.size > 1 && lines.last().isEmpty()) lines.dropLast(1) else lines }
@@ -47,7 +50,11 @@ fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
     val scheme = MaterialTheme.colorScheme
     var showChanges by rememberSaveable { mutableStateOf(true) }
     var openPath by rememberSaveable { mutableStateOf<String?>(null) }
-    val files = remember(state.workspaceFiles) { state.workspaceFiles.filter { !it.isDirectory } }
+    // Generated and vendored folders would bury the project's own files and make the list thousands of rows long.
+    val allFiles = remember(state.workspaceFiles) {
+        state.workspaceFiles.filter { entry -> !entry.isDirectory && skippedFolders.none { "/$it/" in "/${entry.path}" } }
+    }
+    val files = remember(allFiles) { allFiles.take(MAX_LISTED_FILES) }
 
     ToolScaffold(
         title = stringResource(R.string.tools_code_viewer),
@@ -138,6 +145,9 @@ fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
         } else {
             if (files.isEmpty()) {
                 Text(stringResource(R.string.code_viewer_no_files), color = scheme.onSurfaceVariant, fontSize = ForgeType.control)
+            }
+            if (allFiles.size > files.size) {
+                Text(stringResource(R.string.code_viewer_files_capped, files.size, allFiles.size), color = scheme.onSurfaceVariant, fontSize = ForgeType.caption)
             }
             files.forEach { entry ->
                 val dir = entry.path.substringBeforeLast('/', "")

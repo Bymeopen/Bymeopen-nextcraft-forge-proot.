@@ -248,12 +248,12 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 // statusBarsPadding() here doubled the top gap.
                 .padding(innerPadding),
         ) {
-            // A notice with no action is information, not a task: it clears itself so it does not follow people from
-            // screen to screen. Notices that offer an action stay until acted on or dismissed.
+            // Plain confirmations ("all agents are up to date") clear themselves so they do not follow people from
+            // screen to screen. Errors and notices that offer an action stay until read, acted on or dismissed.
             val bannerKey = state.bannerMessage
-            val bannerHasAction = state.bannerAction != null
-            LaunchedEffect(bannerKey, bannerHasAction) {
-                if (bannerKey != null && !bannerHasAction) {
+            val bannerClears = state.bannerAction == null && (bannerKey as? UiText.Res)?.id in transientBanners
+            LaunchedEffect(bannerKey, bannerClears) {
+                if (bannerKey != null && bannerClears) {
                     kotlinx.coroutines.delay(8_000)
                     viewModel.dismissBanner()
                 }
@@ -421,3 +421,6 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         )
     }
 }
+
+/** Banners that only confirm something; everything else (errors, blocked actions, offers) stays on screen. */
+private val transientBanners = setOf(R.string.msg_agents_up_to_date, R.string.msg_imported, R.string.msg_queue_discarded)

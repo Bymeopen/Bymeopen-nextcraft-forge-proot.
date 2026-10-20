@@ -82,3 +82,22 @@ class CodeSyntaxTest {
         }
     }
 }
+
+class FileViewerLinesTest {
+    @Test
+    fun numbersLinesFromOneAndIgnoresTheTrailingNewline() {
+        val lines = fileAsViewerLines("a\nb\n")
+        assertEquals(listOf("a", "b"), lines.map { it.text })
+        assertEquals(listOf(1, 2), lines.map { it.newLine })
+    }
+
+    @Test
+    fun windowsLineEndingsDoNotLeaveCarriageReturns() {
+        assertEquals(listOf("a", "b"), fileAsViewerLines("a\r\nb").map { it.text })
+    }
+
+    @Test
+    fun emptyFileIsOneEmptyLine() {
+        assertEquals(1, fileAsViewerLines("").size)
+    }
+}
