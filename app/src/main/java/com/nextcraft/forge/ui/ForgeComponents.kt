@@ -341,7 +341,7 @@ fun ForgePillIcon(
             .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 48.dp, height = 48.dp) // 48 dp is the minimum touch target
             .clip(RoundedCornerShape(100))
-            .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

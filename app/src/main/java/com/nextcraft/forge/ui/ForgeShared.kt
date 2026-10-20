@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.ripple.rememberRipple
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -108,7 +108,7 @@ fun ForgeGlyphPillIcon(
             .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 44.dp, height = 38.dp)
             .clip(RoundedCornerShape(100))
-            .clickable(interactionSource = interaction, indication = rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         ForgeIcon(glyph, tint = if (enabled) tint else tint.copy(alpha = 0.38f), description = description)
@@ -136,7 +136,7 @@ fun ForgeListRow(
         modifier = modifier
             .fillMaxWidth()
             .forgePressScale(interaction, pressedScale = 0.985f)
-            .clickable(interactionSource = interaction, indication = rememberRipple(), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = 64.dp)
             .padding(horizontal = ForgeSpace.screen, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

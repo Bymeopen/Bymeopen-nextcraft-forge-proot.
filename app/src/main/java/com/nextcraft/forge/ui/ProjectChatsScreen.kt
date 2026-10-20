@@ -98,7 +98,7 @@ fun ProjectChatsScreen(
                 val active = chat.id == state.activeChatId
                 Row(
                     modifier = Modifier
-                        .animateItemPlacement()
+                        .animateItem(fadeInSpec = null, fadeOutSpec = null)
                         .fillMaxWidth()
                         .clickable(role = Role.Button) { viewModel.openChat(chat.id) }
                         .heightIn(min = 60.dp)

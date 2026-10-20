@@ -21,10 +21,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      # The repository has no Gradle wrapper; AGP 8.11 needs Gradle 8.13+.
+      # The repository has no Gradle wrapper; AGP 9.4 needs Gradle 9.x.
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.14.3"
+          gradle-version: "9.8.2"
       - name: Unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
       - name: Assemble debug APK

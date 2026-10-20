@@ -25,7 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.ripple.rememberRipple
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -290,7 +290,7 @@ internal fun QuickActionRow(chips: List<QuickChip>, modifier: Modifier = Modifie
                     .forgePressScale(interaction, pressedScale = 0.95f)
                     .clip(RoundedCornerShape(100))
                     .background(tokens.cardElevatedColor)
-                    .clickable(interactionSource = interaction, indication = rememberRipple(), role = Role.Button, onClick = chip.onClick)
+                    .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = chip.onClick)
                     .heightIn(min = ForgeSpace.minTouch)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,

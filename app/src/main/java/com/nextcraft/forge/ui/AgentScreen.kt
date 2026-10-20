@@ -284,7 +284,7 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        Column(modifier = Modifier.animateItemPlacement(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatMessageCard(
                                 message = message,
                                 agentName = state.agentKind.displayTitle(),
@@ -513,8 +513,11 @@ fun AgentScreen(
                     maxLines = 5,
                     // Enter stays a newline (messages are multi-line); send is the round button.
                     keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
-                    colors = TextFieldDefaults.textFieldColors(
-                        containerColor = Color.Transparent,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        errorContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
                         disabledIndicatorColor = Color.Transparent,
