@@ -1929,6 +1929,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val timeoutNotice = "\n[Command timed out after 60s]"
                 buffer.append(timeoutNotice)
                 onOutputChunk?.invoke(timeoutNotice)
+            } else {
+                // A launcher that dies before the guest prints anything (seccomp SIGSYS, missing proot, bad env file)
+                // would otherwise leave an empty terminal; show how the process ended so the failure is diagnosable.
+                val code = runCatching { process.waitFor() }.getOrDefault(-1)
+                if (code != 0 || buffer.isBlank()) {
+                    val signal = if (code > 128) " (signal ${code - 128})" else ""
+                    val notice = "\n[exit $code$signal, engine ${RuntimeEngines.current().name.lowercase()}]"
+                    buffer.append(notice)
+                    onOutputChunk?.invoke(notice)
+                }
             }
             buffer.toString()
         }.getOrElse { "Error executing command: ${it.message}" }
