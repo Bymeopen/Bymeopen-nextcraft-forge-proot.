@@ -14,3 +14,13 @@ CI proves the app compiles and the unit tests pass. These checks need a real dev
 
 ## Language
 - [ ] Switch EN <-> ID: Claude and Google (Antigravity) sign-in, Snapshots and CI/CD messages change language.
+
+## Terminal (blocked from main until the Termux licence is confirmed, see TERMINAL.md)
+- [ ] Opening the tab starts a shell in the project directory inside the chroot.
+- [ ] `vim` (edit, `:wq`), `htop`, `tmux` (split, detach/attach), `nano`, `less` render and respond.
+- [ ] Ctrl toggle + `c` interrupts; Ctrl+`d` ends the shell and the Restart overlay appears; Restart works.
+- [ ] Esc, Tab, arrows, Home/End, PgUp/PgDn behave inside vim/htop.
+- [ ] Pinch zooms the font; the keyboard opens on tap; rotation keeps the session.
+- [ ] Copy transcript and Clear work; quick-command chips run in the live shell.
+- [ ] Delete the project: no stray `su` / bash processes remain (`ps -A | grep -E "su|bash"`).
+- [ ] Release build (minified): the terminal still starts (JNI keep rule).

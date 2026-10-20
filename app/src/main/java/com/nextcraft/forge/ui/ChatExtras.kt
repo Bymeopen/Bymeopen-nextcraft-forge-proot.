@@ -143,6 +143,7 @@ internal fun ChangedFilesCard(
     onKeepAll: () -> Unit,
     onRevertAll: () -> Unit,
     modifier: Modifier = Modifier,
+    onEditInTerminal: (String) -> Unit = {},
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
@@ -171,7 +172,7 @@ internal fun ChangedFilesCard(
                 DiffCounts(adds, dels)
             }
             changes.forEach { change ->
-                ChangedFileRow(change, enabled, onOpenFile, onKeepFile, onRevertFile)
+                ChangedFileRow(change, enabled, onOpenFile, onKeepFile, onRevertFile, onEditInTerminal)
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -212,6 +213,7 @@ private fun ChangedFileRow(
     onOpenFile: (String) -> Unit,
     onKeepFile: (String) -> Unit,
     onRevertFile: (String) -> Unit,
+    onEditInTerminal: (String) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
@@ -250,7 +252,8 @@ private fun ChangedFileRow(
                 } else {
                     DiffCodeView(lines = change.diffLines, path = change.path, previewLines = DIFF_PREVIEW_LINES)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    TextButton(onClick = { onEditInTerminal(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.files_edit_in_terminal)) }
                     TextButton(onClick = { onOpenFile(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_open_in_files)) }
                     TextButton(onClick = { onKeepFile(change.path) }, enabled = enabled, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_keep)) }
                     TextButton(

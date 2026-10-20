@@ -171,7 +171,9 @@ data class ForgeUiState(
     val pendingAttachments: List<ChatAttachment> = emptyList(),
     /** Messages sent while the agent was busy; delivered as the next turn once the current one completes. */
     val queuedPrompts: List<QueuedPrompt> = emptyList(),
-    val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
+    /** Bumped when a terminal session is created, ends or is restarted, so the screen re-reads it. */
+    val terminalRevision: Int = 0,
+    /** Legacy one-shot runner flag, kept for the "busy" guards. The interactive shell is persistent, so it stays false. */
     val terminalRunning: Boolean = false,
     val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
     val androidLogcat: AndroidLogcatState = AndroidLogcatState(),

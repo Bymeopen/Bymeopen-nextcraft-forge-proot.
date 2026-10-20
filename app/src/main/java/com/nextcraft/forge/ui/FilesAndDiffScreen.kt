@@ -173,6 +173,7 @@ fun FilesAndDiffScreen(
                     onUploadIn = { dir -> uploadDir = dir; uploadPicker.launch(arrayOf("*/*")) },
                     onRename = { path -> renameTarget = path },
                     onSaveCopy = { path -> saveCopyPath = path; fileSaver.launch(path.substringAfterLast('/')) },
+                    onEditInTerminal = viewModel::editInTerminal,
                     onDelete = { path -> pendingDeletePath = path },
                     modifier = Modifier.weight(1f),
                 )
@@ -364,6 +365,7 @@ private fun WorkspaceTreeList(
     onUploadIn: (String) -> Unit,
     onRename: (String) -> Unit,
     onSaveCopy: (String) -> Unit,
+    onEditInTerminal: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -472,6 +474,7 @@ private fun WorkspaceTreeList(
                                 Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
                             }
                             if (!entry.isDirectory) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_edit_in_terminal)) }, leadingIcon = { ForgeIcon(ForgeGlyph.TERMINAL, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onEditInTerminal(entry.path) })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
                             }
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })
