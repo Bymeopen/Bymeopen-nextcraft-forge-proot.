@@ -169,6 +169,8 @@ data class ForgeUiState(
     val fileSavedBanner: String? = null,
     /** Files picked for the next prompt; copied into the workspace's attachments/ folder. */
     val pendingAttachments: List<ChatAttachment> = emptyList(),
+    /** True while the app walks through its screens taking pictures for the agent. */
+    val capturingScreens: Boolean = false,
     /** Messages sent while the agent was busy; delivered as the next turn once the current one completes. */
     val queuedPrompts: List<QueuedPrompt> = emptyList(),
     /** Bumped when a terminal session is created, ends or is restarted, so the screen re-reads it. */

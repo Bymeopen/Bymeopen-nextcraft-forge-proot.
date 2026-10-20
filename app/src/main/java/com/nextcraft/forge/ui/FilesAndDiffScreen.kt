@@ -174,6 +174,7 @@ fun FilesAndDiffScreen(
                     onRename = { path -> renameTarget = path },
                     onSaveCopy = { path -> saveCopyPath = path; fileSaver.launch(path.substringAfterLast('/')) },
                     onEditInTerminal = viewModel::editInTerminal,
+                    onInstallApk = viewModel::installWorkspaceApk,
                     onDelete = { path -> pendingDeletePath = path },
                     modifier = Modifier.weight(1f),
                 )
@@ -366,6 +367,7 @@ private fun WorkspaceTreeList(
     onRename: (String) -> Unit,
     onSaveCopy: (String) -> Unit,
     onEditInTerminal: (String) -> Unit,
+    onInstallApk: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -472,6 +474,9 @@ private fun WorkspaceTreeList(
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
                                 Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                            }
+                            if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_install_apk)) }, leadingIcon = { ForgeIcon(ForgeGlyph.BUILD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onInstallApk(entry.path) })
                             }
                             if (!entry.isDirectory) {
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_edit_in_terminal)) }, leadingIcon = { ForgeIcon(ForgeGlyph.TERMINAL, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onEditInTerminal(entry.path) })

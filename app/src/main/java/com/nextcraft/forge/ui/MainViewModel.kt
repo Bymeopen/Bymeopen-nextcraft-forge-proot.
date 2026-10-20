@@ -1214,7 +1214,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             is RuntimeEvent.SessionFailed -> {
-                appendAssistantText("\n\n[${event.reason}]")
+                // The bridges report a user stop in English; show it in the app language.
+                val reason = if (event.reason == "Stopped by user") getApplication<Application>().getString(R.string.agent_stopped_by_user) else event.reason
+                appendAssistantText("\n\n[$reason]")
                 offerRetry()
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
                 discardQueuedPrompts()
@@ -1313,6 +1315,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var workspaceRefreshRequest = 0
 
+    /**
+     * `build` is hidden from the file tree, but the way down to `build/outputs/apk` stays open
+     * so a freshly built APK can be found (and installed from the row menu).
+     */
+    private fun isApkOutputPath(ws: File, dir: File): Boolean {
+        val parts = dir.relativeTo(ws).invariantSeparatorsPath.split('/')
+        val at = parts.indexOf("build")
+        if (at < 0) return false
+        if (parts.take(at).any { it in setOf(".git", ".gradle", "node_modules", "__pycache__") }) return false
+        val below = parts.drop(at + 1)
+        return below.isEmpty() || (below.size <= 3 && below[0] == "outputs" && (below.size == 1 || below[1] == "apk"))
+    }
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {
@@ -1326,7 +1341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ws.walkTopDown()
                         .onEnter { dir ->
                             dir == ws || (
-                                dir.name !in ignored &&
+                                (dir.name !in ignored || isApkOutputPath(ws, dir)) &&
                                     !Files.isSymbolicLink(dir.toPath()) &&
                                     runCatching { dir.canonicalFile.toPath().startsWith(rootCanonical) }.getOrDefault(false)
                                 )
@@ -1664,6 +1679,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    /**
+     * Walks through the app's main screens, saves a picture of each in the project's attachments folder and adds them
+     * to the message being written, so the agent can look at the UI. The screen the person was on is restored.
+     */
+    fun captureAppScreens(window: android.view.Window) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.capturingScreens) return
+        val before = _state.value
+        val originalTab = before.activeTab
+        val originalView = before.projectView
+        val originalPane = before.projectPane
+        _state.update { it.copy(capturingScreens = true) }
+        viewModelScope.launch {
+            val folder = "attachments/app-screens-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            val added = mutableListOf<ChatAttachment>()
+            try {
+                appCaptureSteps().forEachIndexed { index, step ->
+                    if (step.pane != null) {
+                        _state.update { it.copy(projectView = ProjectView.CONVERSATION) }
+                        selectProjectPane(step.pane)
+                    } else {
+                        if (step.tab == ForgeTab.PROJECTS) _state.update { it.copy(projectView = ProjectView.LIST) }
+                        selectTab(step.tab)
+                    }
+                    delay(CAPTURE_SETTLE_MS)
+                    val bitmap = captureWindow(window) ?: return@forEachIndexed
+                    val name = "%02d-%s.png".format(index + 1, step.name)
+                    withContext(Dispatchers.IO) { savePng(project.id, "$folder/$name", name, bitmap) }?.let { added += it }
+                }
+            } finally {
+                _state.update {
+                    it.copy(
+                        activeTab = originalTab,
+                        projectView = originalView,
+                        projectPane = originalPane,
+                        capturingScreens = false,
+                        pendingAttachments = it.pendingAttachments + added,
+                        bannerMessage = if (added.isEmpty()) UiText.res(R.string.capture_failed) else UiText.res(R.string.capture_done, added.size),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun savePng(projectId: String, relativePath: String, displayName: String, bitmap: android.graphics.Bitmap): ChatAttachment? =
+        runCatching {
+            val target = checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(projectId), relativePath)
+            target.parentFile?.mkdirs()
+            target.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            ChatAttachment(displayName = displayName, relativePath = relativePath, mimeType = "image/png", sizeBytes = target.length())
+        }.onFailure { Log.w("MainViewModel", "Could not save $relativePath", it) }.getOrNull()
 
     fun removePendingAttachment(id: String) {
         _state.update { st -> st.copy(pendingAttachments = st.pendingAttachments.filterNot { it.id == id }) }
@@ -2277,6 +2344,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
+        }
+    }
+
+    /** Installs an APK that lives in the active project (e.g. one the agent built or copied), from the Files list. */
+    fun installWorkspaceApk(relativePath: String) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val apk = withContext(Dispatchers.IO) {
+                runCatching { checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(project.id), relativePath) }.getOrNull()
+            }
+            if (apk != null && apk.isFile) installBuiltApk(apk.absolutePath)
         }
     }
 
@@ -3387,6 +3465,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024
         const val TERMINAL_TRANSCRIPT_ROWS = 4000
+
+        /** Time for a screen to compose and draw before it is photographed. */
+        const val CAPTURE_SETTLE_MS = 900L
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
         const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }

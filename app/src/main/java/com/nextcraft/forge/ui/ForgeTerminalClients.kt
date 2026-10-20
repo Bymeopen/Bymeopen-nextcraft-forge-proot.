@@ -107,11 +107,21 @@ class ForgeTerminalViewClient(
     var textSizePx: Int = initialTextPx
         private set
 
+    /** Called whenever the size changes (pinch or buttons) so it can be remembered. */
+    var onTextSizeChanged: (Int) -> Unit = {}
+
+    /** Grows (+1) or shrinks (-1) the text by one step, within the allowed range. */
+    fun changeTextSize(direction: Int) {
+        val next = (textSizePx + direction * stepPx).coerceIn(minTextPx, maxTextPx)
+        if (next == textSizePx) return
+        textSizePx = next
+        view?.setTextSize(next)
+        onTextSizeChanged(next)
+    }
+
     override fun onScale(scale: Float): Float {
         if (scale < 0.9f || scale > 1.1f) {
-            val delta = if (scale > 1f) stepPx else -stepPx
-            textSizePx = (textSizePx + delta).coerceIn(minTextPx, maxTextPx)
-            view?.setTextSize(textSizePx)
+            changeTextSize(if (scale > 1f) 1 else -1)
             return 1.0f
         }
         return scale
