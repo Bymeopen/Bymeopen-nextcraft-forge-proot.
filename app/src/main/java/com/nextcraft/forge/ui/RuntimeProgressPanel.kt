@@ -124,7 +124,7 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
             val recentLines = snapshot.logs.takeLast(3).filter { it.isNotBlank() }
             if (recentLines.isNotEmpty()) {
                 Text(
-                    text = recentLines.joinToString("\n") { runtimeText(it) },
+                    text = recentLines.map { runtimeText(it) }.joinToString("\n"),
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
