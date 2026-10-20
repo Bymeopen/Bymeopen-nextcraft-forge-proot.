@@ -1636,6 +1636,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Walks through the app's main screens, saves a picture of each in the project's attachments folder and adds them
+     * to the message being written, so the agent can look at the UI. The screen the person was on is restored.
+     */
+    fun captureAppScreens(window: android.view.Window) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.capturingScreens) return
+        val before = _state.value
+        val originalTab = before.activeTab
+        val originalView = before.projectView
+        val originalPane = before.projectPane
+        _state.update { it.copy(capturingScreens = true) }
+        viewModelScope.launch {
+            val folder = "attachments/app-screens-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            val added = mutableListOf<ChatAttachment>()
+            try {
+                appCaptureSteps().forEachIndexed { index, step ->
+                    if (step.pane != null) {
+                        _state.update { it.copy(projectView = ProjectView.CONVERSATION) }
+                        selectProjectPane(step.pane)
+                    } else {
+                        if (step.tab == ForgeTab.PROJECTS) _state.update { it.copy(projectView = ProjectView.LIST) }
+                        selectTab(step.tab)
+                    }
+                    delay(CAPTURE_SETTLE_MS)
+                    val bitmap = captureWindow(window) ?: return@forEachIndexed
+                    val name = "%02d-%s.png".format(index + 1, step.name)
+                    withContext(Dispatchers.IO) { savePng(project.id, "$folder/$name", name, bitmap) }?.let { added += it }
+                }
+            } finally {
+                _state.update {
+                    it.copy(
+                        activeTab = originalTab,
+                        projectView = originalView,
+                        projectPane = originalPane,
+                        capturingScreens = false,
+                        pendingAttachments = it.pendingAttachments + added,
+                        bannerMessage = if (added.isEmpty()) UiText.res(R.string.capture_failed) else UiText.res(R.string.capture_done, added.size),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun savePng(projectId: String, relativePath: String, displayName: String, bitmap: android.graphics.Bitmap): ChatAttachment? =
+        runCatching {
+            val target = checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(projectId), relativePath)
+            target.parentFile?.mkdirs()
+            target.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            ChatAttachment(displayName = displayName, relativePath = relativePath, mimeType = "image/png", sizeBytes = target.length())
+        }.onFailure { Log.w("MainViewModel", "Could not save $relativePath", it) }.getOrNull()
+
     fun removePendingAttachment(id: String) {
         _state.update { st -> st.copy(pendingAttachments = st.pendingAttachments.filterNot { it.id == id }) }
     }
@@ -3369,6 +3421,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024
         const val TERMINAL_TRANSCRIPT_ROWS = 4000
+
+        /** Time for a screen to compose and draw before it is photographed. */
+        const val CAPTURE_SETTLE_MS = 900L
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
         const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }

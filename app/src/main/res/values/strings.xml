@@ -879,4 +879,10 @@
     <string name="code_viewer_files_capped">Showing %1$d of %2$d files (generated folders are hidden).</string>
     <string name="files_install_apk">Install APK</string>
     <string name="agent_stopped_by_user">Stopped by you</string>
+    <string name="capture_menu">App screens (automatic)</string>
+    <string name="capture_confirm_title">Capture the app screens?</string>
+    <string name="capture_confirm_message">The app opens its main screens one by one (about 10 seconds), saves a picture of each in the attachments folder of the project and attaches them to your message. They are only sent when you press send. Close any screen showing private data first.</string>
+    <string name="capture_start">Start</string>
+    <string name="capture_done">%1$d screen pictures attached</string>
+    <string name="capture_failed">Could not capture the screens</string>
 </resources>

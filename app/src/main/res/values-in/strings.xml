@@ -863,4 +863,10 @@
     <string name="code_viewer_files_capped">Menampilkan %1$d dari %2$d file (folder hasil build disembunyikan).</string>
     <string name="files_install_apk">Pasang APK</string>
     <string name="agent_stopped_by_user">Dihentikan oleh Anda</string>
+    <string name="capture_menu">Layar aplikasi (otomatis)</string>
+    <string name="capture_confirm_title">Tangkap layar aplikasi?</string>
+    <string name="capture_confirm_message">Aplikasi membuka layar utamanya satu per satu (sekitar 10 detik), menyimpan gambarnya di folder lampiran proyek, dan melampirkannya ke pesan Anda. Gambar baru dikirim saat Anda menekan kirim. Tutup dulu layar yang berisi data pribadi.</string>
+    <string name="capture_start">Mulai</string>
+    <string name="capture_done">%1$d gambar layar dilampirkan</string>
+    <string name="capture_failed">Tidak dapat menangkap layar</string>
 </resources>

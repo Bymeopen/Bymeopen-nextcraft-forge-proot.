@@ -346,6 +346,21 @@ fun AgentScreen(
         val cameraContext = LocalContext.current
         var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
         var attachMenuOpen by remember { mutableStateOf(false) }
+        var confirmCapture by remember { mutableStateOf(false) }
+        if (confirmCapture) {
+            val captureTarget = cameraContext.findWindow()
+            AlertDialog(
+                onDismissRequest = { confirmCapture = false },
+                title = { Text(stringResource(R.string.capture_confirm_title)) },
+                text = { Text(stringResource(R.string.capture_confirm_message)) },
+                confirmButton = {
+                    TextButton(onClick = { confirmCapture = false; captureTarget?.let(viewModel::captureAppScreens) }) {
+                        Text(stringResource(R.string.capture_start))
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmCapture = false }) { Text(stringResource(R.string.agent_cancel)) } },
+            )
+        }
         val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
             val uri = cameraUri?.let(android.net.Uri::parse)
             if (saved && uri != null) viewModel.attachFilesToPrompt(listOf(uri))
@@ -460,6 +475,11 @@ fun AgentScreen(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.agent_attach_file)) },
                             onClick = { attachMenuOpen = false; attachPicker.launch(arrayOf("*/*")) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.capture_menu)) },
+                            enabled = !state.capturingScreens,
+                            onClick = { attachMenuOpen = false; confirmCapture = true },
                         )
                     }
                 }
