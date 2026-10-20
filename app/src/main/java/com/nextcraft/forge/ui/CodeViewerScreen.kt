@@ -117,9 +117,9 @@ fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
                             modifier = Modifier.weight(1f).clickable(role = Role.Button) { openPath = change.path },
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("+${change.additions}", fontFamily = FontFamily.Monospace, fontSize = ForgeType.caption, color = LocalForgeThemeTokens.current.successText)
+                        Text(stringResource(R.string.diff_added, change.additions), fontFamily = FontFamily.Monospace, fontSize = ForgeType.caption, color = LocalForgeThemeTokens.current.successText)
                         Spacer(Modifier.width(6.dp))
-                        Text("−${change.deletions}", fontFamily = FontFamily.Monospace, fontSize = ForgeType.caption, color = LocalForgeThemeTokens.current.dangerText)
+                        Text(stringResource(R.string.diff_removed, change.deletions), fontFamily = FontFamily.Monospace, fontSize = ForgeType.caption, color = LocalForgeThemeTokens.current.dangerText)
                     }
                     if (change.binary || change.diffLines.isEmpty()) {
                         Text(
