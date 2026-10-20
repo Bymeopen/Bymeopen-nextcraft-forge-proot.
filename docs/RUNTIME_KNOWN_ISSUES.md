@@ -94,15 +94,15 @@ sumber yang sama) lewat `android.aapt2FromMavenOverride`; `aapt2` ARM64 itu send
 
 ### Mesin PRoot (satu-satunya mesin di repo ini)
 
-Aplikasi memakai `libproot.so` dari APK (`termux/proot` commit `e2d843ee…` + `talloc` 2.4.3 statis, dibangun oleh
-`scripts/runtime-bundles/build-proot-static.sh`; `libproot.so` 1.070.568 byte, SHA-256 `233a2109c3130cfcc89b0c41a5834f56d16b7f3465058f3c3829a19139289a62`; `libproot_loader.so` 67.528 byte, SHA-256 `71b4563794901787888a46830ad7ca6838902c7aa33acec9e5351de42639eb2c`; lihat `docs/NON_ROOT.md` untuk alasan memakai fork Termux). Bundle Core/Python/Claude/DSH/Agy/Android
+Aplikasi memakai `libproot.so` dari APK (`termux/proot` v5.1.107.98 + `talloc` 2.5.0, dibangun dengan Android NDK r27 oleh
+`scripts/runtime-bundles/build-proot-ndk.sh`; SHA-256 dan alasannya di `docs/NON_ROOT.md`). Bundle Core/Python/Claude/DSH/Agy/Android
 tidak berubah; `aapt2` statis membuat build Android tidak lagi bergantung pada `/apex`. Yang tidak tersedia di mode ini:
 `pm install` senyap (jatuh ke `PackageInstaller`), penonaktifan phantom-process killer (`adb shell device_config put
 activity_manager max_phantom_processes 2147483647` bisa dilakukan manual), `chroot-health.sh` bagian *Mount* (ERR wajar).
 Bila `proot` gagal dengan `seccomp`/`ptrace` di kernel tertentu, coba `PROOT_NO_SECCOMP=1` lewat environment agen.
 
-**Diverifikasi di perangkat tanpa root (2026-10-20)** dengan biner `termux/proot` `e2d843ee`: pemasangan Core, stack, dan agen
-berhasil semua. Dengan `proot-me` 5.5.0 sebelumnya, `npm install`, Claude, dan semua program multi-thread mati SIGSYS (exit 159)
+**Status perangkat (2026-10-20):** build glibc statis (`proot-me` 5.5.0 lalu `termux/proot`) gagal; build NDK belum diuji di
+perangkat. Dengan `proot-me` 5.5.0, `npm install`, Claude, dan semua program multi-thread mati SIGSYS (exit 159)
 karena `clone3`/`statx`/`io_uring` ditolak seccomp aplikasi; lihat `docs/NON_ROOT.md`. Claude Code tetap dari npm `2.1.112`.
 
 ## Belum terverifikasi

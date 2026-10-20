@@ -1,6 +1,6 @@
 #!/system/bin/sh
-# Non-root counterpart of chroot-exec.sh (ADR-007): same arguments, same guest layout, but the rootfs is entered with the
-# static proot shipped in the APK (NEXTCRAFT_PROOT) instead of kernel mounts and chroot. Always run as
+# PRoot supervisor (ADR-008): same arguments and guest layout as the chroot app's chroot-exec.sh, but the rootfs is
+# entered with the proot shipped in the APK (NEXTCRAFT_PROOT, termux/proot built with the NDK), no kernel mounts. Always run as
 # `/system/bin/sh proot-exec.sh …`: the app UID may not exec files from its data directory.
 set -e
 # The env file sourced before this script replaces PATH with the guest PATH; the host-side commands below
@@ -97,25 +97,60 @@ else
     export PATH="$BASE_PATH"
 fi
 
-# Bindings mirror the chroot mounts (same guest paths as chroot-exec.sh). Later bindings take precedence, so
-# /dev/shm lands on an app-writable directory. The Bionic directories are bound only where they exist.
-BIONIC_BINDS=""
+# Bindings follow `proot-distro login` (Termux), which is the proven way to run an Ubuntu rootfs on a non-root
+# phone, plus the NextCraft guest paths of chroot-exec.sh. Later bindings take precedence.
+BINDS="-b /dev -b /dev/pts -b /proc -b /sys -b $SHM_DIR:/dev/shm -b /dev/urandom:/dev/random"
+[ -e /dev/fd ] || BINDS="$BINDS -b /proc/self/fd:/dev/fd"
+[ -e /dev/stdin ] || BINDS="$BINDS -b /proc/self/fd/0:/dev/stdin"
+[ -e /dev/stdout ] || BINDS="$BINDS -b /proc/self/fd/1:/dev/stdout"
+[ -e /dev/stderr ] || BINDS="$BINDS -b /proc/self/fd/2:/dev/stderr"
+# Android hides several /proc and /sys entries from apps; programs that read them (nproc, Java, Node, apt)
+# get a plausible static copy instead of EACCES. Only unreadable entries are replaced.
+SYSDATA="$ROOTFS/.nextcraft-sysdata"
+mkdir -p "$SYSDATA/sys_empty"
+fake() {
+    # $1 host path, $2 file name under SYSDATA, $3 content
+    if [ ! -r "$1" ]; then
+        [ -s "$SYSDATA/$2" ] || printf '%s\n' "$3" > "$SYSDATA/$2"
+        BINDS="$BINDS -b $SYSDATA/$2:$1"
+    fi
+}
+fake /proc/loadavg loadavg "0.12 0.07 0.02 2/165 765"
+fake /proc/stat stat "cpu  1000 0 1000 100000 0 0 0 0 0 0
+cpu0 1000 0 1000 100000 0 0 0 0 0 0
+intr 0
+ctxt 0
+btime 1700000000
+processes 1000
+procs_running 1
+procs_blocked 0"
+fake /proc/uptime uptime "1000.00 1000.00"
+fake /proc/version version "Linux version 6.6.0-android (proot@nextcraft) (gcc (GCC) 13.3.0, GNU ld (GNU Binutils) 2.42) #1 SMP PREEMPT"
+fake /proc/vmstat vmstat "nr_free_pages 100000
+nr_zone_inactive_anon 0
+nr_zone_active_anon 0
+pgpgin 0
+pgpgout 0
+pswpin 0
+pswpout 0"
+fake /proc/sys/kernel/cap_last_cap cap_last_cap "40"
+fake /proc/sys/fs/inotify/max_user_watches max_user_watches "4096"
+fake /proc/sys/kernel/overflowuid overflowuid "65534"
+fake /proc/sys/kernel/overflowgid overflowgid "65534"
+[ -r /sys/fs/selinux ] && [ ! -r /sys/fs/selinux/enforce ] && BINDS="$BINDS -b $SYSDATA/sys_empty:/sys/fs/selinux"
 for bionic_dir in /system /apex /vendor /product; do
-    [ -d "$bionic_dir" ] && BIONIC_BINDS="$BIONIC_BINDS -b $bionic_dir"
+    [ -d "$bionic_dir" ] && BINDS="$BINDS -b $bionic_dir"
 done
-WORKSPACE_BIND=""
 if [ "$HOST_WORKSPACE" != "$ROOTFS$GUEST_WORKSPACE" ]; then
-    WORKSPACE_BIND="-b $HOST_WORKSPACE:$GUEST_WORKSPACE"
+    BINDS="$BINDS -b $HOST_WORKSPACE:$GUEST_WORKSPACE"
 fi
+BINDS="$BINDS -b $HOST_BRIDGE:/nextcraft-bridge -b $HOST_BRIDGE:/pocketdev-bridge -b $HOST_BRIDGE:/pocket-bridge -b $HOST_RESP:/pocketdev-bridge-responses"
 
-# --kill-on-exit ends every guest process with proot, so a cancelled build never lingers.
+# Same extension set as proot-distro: --kill-on-exit ends every guest process with proot (a cancelled build
+# never lingers), --link2symlink emulates hard links, --sysvipc emulates SysV IPC that Android forbids,
+# -L fixes lstat sizes for dpkg. -0 makes the guest see uid 0 (apt, npm -g).
 # shellcheck disable=SC2086
-exec "$PROOT" --kill-on-exit --link2symlink -0 -r "$ROOTFS" \
-    -b /dev -b /dev/pts -b /proc -b /sys \
-    -b "$SHM_DIR:/dev/shm" \
-    $BIONIC_BINDS \
-    $WORKSPACE_BIND \
-    -b "$HOST_BRIDGE:/nextcraft-bridge" -b "$HOST_BRIDGE:/pocketdev-bridge" -b "$HOST_BRIDGE:/pocket-bridge" \
-    -b "$HOST_RESP:/pocketdev-bridge-responses" \
+exec "$PROOT" --kill-on-exit --link2symlink --sysvipc -L -0 -r "$ROOTFS" \
+    $BINDS \
     -w "$GUEST_WORKSPACE" \
     /usr/bin/env GUEST_WORKSPACE="$GUEST_WORKSPACE" /bin/sh -c 'cd "$GUEST_WORKSPACE" && exec "$@"' -- "$@"
