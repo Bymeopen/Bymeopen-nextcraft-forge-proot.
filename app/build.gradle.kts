@@ -24,7 +24,7 @@ android {
         buildConfigField("String", "APP_VARIANT", "\"debug\"")
         // Manifest asset of the latest GitHub release; build with -PappUpdateManifestUrl=... to point elsewhere.
         val updateManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
-            ?: "https://github.com/Bymeopen/Bymeopen-nextcraft-forge-proot/releases/latest/download/update-manifest.json"
+            ?: "https://github.com/Bymeopen/nextcraft-forge-proot/releases/latest/download/update-manifest.json"
         buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 
