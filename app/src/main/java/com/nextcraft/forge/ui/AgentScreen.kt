@@ -153,6 +153,17 @@ fun AgentScreen(
         }
     }
 
+    // Every time the chat is opened (or another chat is picked) start at the newest message. rememberLazyListState
+    // is saveable, so on return it restores the old position (often the top) and ignores its initial index;
+    // this plain remember is reset on each entry and forces the jump once the messages are there.
+    var openedAtEnd by remember(state.activeChatId) { mutableStateOf(false) }
+    LaunchedEffect(state.activeChatId, state.messages.isNotEmpty()) {
+        if (!openedAtEnd && state.messages.isNotEmpty()) {
+            listState.scrollToItem(state.messages.lastIndex, Int.MAX_VALUE)
+            openedAtEnd = true
+        }
+    }
+
     var previousMessageCount by remember { mutableStateOf(state.messages.size) }
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
