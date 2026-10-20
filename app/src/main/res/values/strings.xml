@@ -819,4 +819,33 @@
     <string name="confirm_uninstall_title">Uninstall %1$s?</string>
     <string name="confirm_uninstall_message">It is removed from the Linux runtime. You can install it again later.</string>
     <string name="agent_status_not_installed">Not installed</string>
+    <!-- Runtime installer messages -->
+    <string name="rt_msg_unpack_rootfs">Unpacking Core Linux rootfs…</string>
+    <string name="rt_msg_chroot_ready_short">Root Chroot runtime ready</string>
+    <string name="rt_msg_ipc_bridge">Preparing runtime IPC bridge…</string>
+    <string name="rt_msg_setup_complete">NextCraft Forge Root Chroot setup complete</string>
+    <string name="rt_msg_prepare_ubuntu">Preparing Ubuntu Root Chroot runtime…</string>
+    <string name="rt_msg_check_files">Checking Root Chroot runtime files…</string>
+    <string name="rt_msg_check_node">Checking Node.js and npm…</string>
+    <string name="rt_msg_install_git">Installing Git and base SSL certificates…</string>
+    <string name="rt_msg_install_php">Installing PHP and extensions…</string>
+    <string name="rt_msg_update_ubuntu">Updating Ubuntu packages inside Root Chroot…</string>
+    <string name="rt_msg_chroot_ready">Linux chroot runtime is ready</string>
+    <string name="rt_msg_setup_paused">Runtime setup paused</string>
+    <string name="rt_msg_setup_failed">Runtime setup could not complete.</string>
+    <string name="rt_msg_env_ready">Your Ubuntu ARM64 chroot environment and coding tools are ready.</string>
+    <string name="rt_msg_log_done">✓ Setup completed successfully</string>
+    <string name="rt_msg_log_resume">— Resuming NextCraft Forge setup —</string>
+    <string name="rt_msg_log_paused">• Setup paused safely</string>
+    <string name="rt_msg_downloading_amount">Downloading: %1$s</string>
+    <string name="rt_msg_downloading_bundle">Downloading %1$s bundle…</string>
+    <string name="rt_msg_loading_bundle">Loading %1$s bundle…</string>
+    <string name="rt_msg_downloading">Downloading %1$s…</string>
+    <string name="rt_msg_installing">Installing %1$s…</string>
+    <string name="rt_msg_removing">Removing %1$s…</string>
+    <string name="rt_msg_installed_bundle">Installed %1$s runtime bundle</string>
+    <string name="rt_msg_installed">Installed %1$s</string>
+    <string name="rt_msg_removed">Removed %1$s</string>
+    <string name="rt_msg_stack_ready">%1$s stack is ready</string>
+    <string name="rt_msg_is_ready">%1$s is ready</string>
 </resources>
