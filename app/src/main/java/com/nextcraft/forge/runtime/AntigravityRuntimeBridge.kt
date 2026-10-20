@@ -1,5 +1,8 @@
 package com.nextcraft.forge.runtime
 
+import com.nextcraft.forge.ui.orRes
+import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
@@ -29,7 +32,7 @@ enum class AntigravityAuthStatus { SIGNED_OUT, STARTING, AWAITING_CODE, COMPLETI
 data class AntigravityAuthState(
     val status: AntigravityAuthStatus = AntigravityAuthStatus.SIGNED_OUT,
     val authorizationUrl: String? = null,
-    val message: String? = null,
+    val message: UiText? = null,
     val accountEmail: String? = null,
 )
 

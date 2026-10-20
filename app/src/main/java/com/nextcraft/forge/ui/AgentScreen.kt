@@ -110,6 +110,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -305,9 +306,12 @@ fun AgentScreen(
                 if (awayFromEnd) {
                     Surface(
                         shape = RoundedCornerShape(100),
-                        color = tokens.cardElevatedColor,
+                        // Opaque (composited over the page) and raised: the glass card colour is translucent and let the
+                        // last message show through the pill.
+                        color = tokens.cardElevatedColor.compositeOver(MaterialTheme.colorScheme.surface),
                         contentColor = tokens.accentText,
                         border = tokens.cardBorderStroke,
+                        shadowElevation = 4.dp,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 10.dp)
@@ -806,7 +810,7 @@ private fun ChatMessageCard(
         MessageContainer(fromUser = true, contentColor = textColor) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (message.text.isNotBlank()) {
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    Box {
                         MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false, modifier = Modifier.padding(end = 32.dp))
                         CopyMessageButton(message.text, Modifier.align(Alignment.TopEnd))
                     }
@@ -1003,12 +1007,14 @@ private fun MessageContainer(
     content: @Composable () -> Unit,
 ) {
     if (fromUser) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = LocalForgeThemeTokens.current.cardElevatedColor,
-            contentColor = contentColor,
-            modifier = Modifier.fillMaxWidth(),
-        ) { content() }
+        // Wraps its text and sits at the end, so a short message does not get a full-width bubble of empty space.
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = LocalForgeThemeTokens.current.cardElevatedColor,
+                contentColor = contentColor,
+            ) { content() }
+        }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
     }

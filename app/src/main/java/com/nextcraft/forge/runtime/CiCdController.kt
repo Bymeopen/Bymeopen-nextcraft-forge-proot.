@@ -1,5 +1,8 @@
 package com.nextcraft.forge.runtime
 
+import com.nextcraft.forge.ui.orRes
+import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.model.Project
@@ -23,7 +26,7 @@ data class CiCdState(
     val runs: List<GitHubWorkflowRun> = emptyList(),
     val branch: String = "main",
     val loading: Boolean = false,
-    val message: String? = null,
+    val message: UiText? = null,
 )
 
 /** Owner and repo of the `origin` remote in a workspace's .git/config, for github.com remotes only. */
@@ -50,7 +53,7 @@ class CiCdController(
     fun refresh() {
         val project = activeProject()
         if (project == null) {
-            mutable.update { CiCdState(message = "Open a project first.") }
+            mutable.update { CiCdState(message = UiText.res(R.string.rt_open_project_first)) }
             return
         }
         mutable.update { it.copy(loading = true, message = null) }
@@ -67,7 +70,7 @@ class CiCdController(
             mutable.update { current ->
                 result.fold(
                     onSuccess = { (name, workflows, runs) -> current.copy(repository = name, workflows = workflows, runs = runs, loading = false) },
-                    onFailure = { current.copy(loading = false, message = it.message ?: "Could not load the pipeline.") },
+                    onFailure = { current.copy(loading = false, message = it.message.orRes(R.string.rt_cicd_load_failed)) },
                 )
             }
         }
@@ -91,7 +94,7 @@ class CiCdController(
             mutable.update {
                 it.copy(
                     loading = false,
-                    message = result.fold({ "Started ${workflow.name} on $branch. Refresh in a few seconds." }, { e -> e.message ?: "Could not start the workflow." }),
+                    message = result.fold({ UiText.res(R.string.rt_cicd_started, workflow.name, branch) }, { e -> e.message.orRes(R.string.rt_cicd_start_failed) }),
                 )
             }
         }

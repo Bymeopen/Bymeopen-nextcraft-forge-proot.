@@ -1,5 +1,8 @@
 package com.nextcraft.forge.runtime
 
+import com.nextcraft.forge.ui.orRes
+import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.AgentKind
 import java.io.File
@@ -23,7 +26,7 @@ class AntigravityAuthController(
     private val mutableState = MutableStateFlow(
         AntigravityAuthState(
             status = if (initiallySignedIn) AntigravityAuthStatus.SIGNED_IN else AntigravityAuthStatus.SIGNED_OUT,
-            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { "Connected as $it" },
+            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { UiText.res(R.string.rt_auth_connected_as, it) },
             accountEmail = initialAccountEmail.takeIf(String::isNotBlank),
         ),
     )
@@ -78,14 +81,14 @@ class AntigravityAuthController(
         if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
-                message = "Install Antigravity CLI first in Settings.",
+                message = UiText.res(R.string.rt_auth_agy_install_first),
             )
             return
         }
         stateBeforeLogin = mutableState.value.takeIf { it.status == AntigravityAuthStatus.SIGNED_IN }
         mutableState.value = AntigravityAuthState(
             AntigravityAuthStatus.STARTING,
-            message = "Starting Antigravity sign-in…",
+            message = UiText.res(R.string.rt_auth_agy_starting),
         )
         codeSubmitted = false
         authOutput.delete()
@@ -120,7 +123,7 @@ class AntigravityAuthController(
         } catch (error: Throwable) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
-                message = error.message?.take(240) ?: "Could not start Antigravity sign-in.",
+                message = error.message?.take(240).orRes(R.string.rt_auth_agy_start_failed),
             )
             return
         }
@@ -187,7 +190,7 @@ class AntigravityAuthController(
                         loginMenuAdvanced = true
                         if (mutableState.value.status == AntigravityAuthStatus.STARTING) {
                             mutableState.value = mutableState.value.copy(
-                                message = "Google OAuth selected. Generating sign-in link…",
+                                message = UiText.res(R.string.rt_auth_agy_generating),
                             )
                         }
                     }
@@ -196,7 +199,7 @@ class AntigravityAuthController(
                         mutableState.value = AntigravityAuthState(
                             AntigravityAuthStatus.AWAITING_CODE,
                             authorizationUrl = url,
-                            message = "Open the Google link in your browser, sign in, and paste the verification code.",
+                            message = UiText.res(R.string.rt_auth_agy_open_link),
                         )
                     }
                     if (isSignedInScreen(clean)) {
@@ -204,7 +207,7 @@ class AntigravityAuthController(
                         onSignedInChanged(true, email)
                         mutableState.value = AntigravityAuthState(
                             AntigravityAuthStatus.SIGNED_IN,
-                            message = email?.let { "Connected as $it" } ?: "Google account connected",
+                            message = email?.let { UiText.res(R.string.rt_auth_connected_as, it) } ?: UiText.res(R.string.rt_auth_google_connected),
                             accountEmail = email,
                         )
                         // Leave the official CLI cleanly so it flushes credential/session state.
@@ -245,7 +248,7 @@ class AntigravityAuthController(
                         running.outputStream.flush()
                         privacyScreenCompleted = true
                         mutableState.value = mutableState.value.copy(
-                            message = "Finishing Antigravity setup…",
+                            message = UiText.res(R.string.rt_auth_agy_finishing),
                         )
                     }
                     if (!workspaceTrustCompleted &&
@@ -273,7 +276,7 @@ class AntigravityAuthController(
                     onSignedInChanged(true, null)
                     mutableState.value = AntigravityAuthState(
                         AntigravityAuthStatus.SIGNED_IN,
-                        message = "Google account connected",
+                        message = UiText.res(R.string.rt_auth_google_connected),
                     )
                 } else {
                     error("Antigravity sign-in ended before completing. Please try again.")
@@ -291,7 +294,7 @@ class AntigravityAuthController(
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
                 mutableState.value = AntigravityAuthState(
                     AntigravityAuthStatus.ERROR,
-                    message = error.message?.take(240) ?: "Antigravity sign-in failed.",
+                    message = error.message?.take(240).orRes(R.string.rt_auth_agy_failed),
                 )
             }
         } finally {
@@ -322,14 +325,14 @@ class AntigravityAuthController(
             // Callers swallow this exception, so surface it through state or the user sees nothing happen.
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
-                message = error.message?.take(240) ?: "Could not submit the verification code.",
+                message = error.message?.take(240).orRes(R.string.rt_auth_agy_code_failed),
             )
             throw error
         }
         codeSubmitted = true
         mutableState.value = mutableState.value.copy(
             status = AntigravityAuthStatus.COMPLETING,
-            message = "Completing Google sign-in…",
+            message = UiText.res(R.string.rt_auth_google_completing),
         )
     }
 
@@ -342,7 +345,7 @@ class AntigravityAuthController(
         val previousEmail = mutableState.value.accountEmail
         mutableState.value = AntigravityAuthState(
             status = AntigravityAuthStatus.STARTING,
-            message = "Signing out…",
+            message = UiText.res(R.string.rt_auth_signing_out),
             accountEmail = previousEmail,
         )
         try {
@@ -363,12 +366,12 @@ class AntigravityAuthController(
             onSignedInChanged(false, null)
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.SIGNED_OUT,
-                message = "Signed out of Antigravity.",
+                message = UiText.res(R.string.rt_auth_agy_signed_out),
             )
         } catch (error: Throwable) {
             mutableState.value = AntigravityAuthState(
                 status = AntigravityAuthStatus.SIGNED_IN,
-                message = error.message?.take(240) ?: "Could not sign out of Antigravity.",
+                message = error.message?.take(240).orRes(R.string.rt_auth_agy_signout_failed),
                 accountEmail = previousEmail,
             )
             throw error
@@ -394,7 +397,7 @@ class AntigravityAuthController(
         mutableState.value = stateBeforeLogin ?: AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT)
     }
 
-    fun invalidateSession(message: String) {
+    fun invalidateSession(message: UiText) {
         onSignedInChanged(false, null)
         mutableState.value = AntigravityAuthState(AntigravityAuthStatus.ERROR, message = message)
     }

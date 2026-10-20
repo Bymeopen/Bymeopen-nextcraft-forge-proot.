@@ -79,7 +79,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 fontWeight = FontWeight.SemiBold,
             )
             auth.message?.let {
-                Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(it.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (inFlight) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 

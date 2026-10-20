@@ -701,4 +701,41 @@
     <string name="agent_effort_low">Low</string>
     <string name="agent_effort_medium">Medium</string>
     <string name="agent_effort_high">High</string>
+
+    <!-- Runtime messages (auth, snapshots, CI/CD) -->
+    <string name="rt_auth_prev_closing">Previous sign-in is still closing. Try again.</string>
+    <string name="rt_auth_claude_install_first">Install Claude Code first.</string>
+    <string name="rt_auth_email_invalid">Enter a valid email address.</string>
+    <string name="rt_auth_claude_starting">Starting Claude sign-in…</string>
+    <string name="rt_auth_claude_start_failed">Could not start Claude sign-in.</string>
+    <string name="rt_auth_claude_open_page">Open the sign-in page. It finishes by itself; if it shows a code instead, paste it here.</string>
+    <string name="rt_auth_claude_connected">Claude account connected</string>
+    <string name="rt_auth_claude_failed">Claude sign-in failed.</string>
+    <string name="rt_auth_code_submit_failed">Could not submit the code.</string>
+    <string name="rt_auth_claude_completing">Completing Claude sign-in…</string>
+    <string name="rt_auth_signing_out">Signing out…</string>
+    <string name="rt_auth_claude_signed_out">Signed out of Claude.</string>
+    <string name="rt_auth_claude_signout_failed">Could not sign out of Claude.</string>
+    <string name="rt_auth_agy_install_first">Install Antigravity CLI first in Settings.</string>
+    <string name="rt_auth_agy_starting">Starting Antigravity sign-in…</string>
+    <string name="rt_auth_agy_start_failed">Could not start Antigravity sign-in.</string>
+    <string name="rt_auth_agy_generating">Google OAuth selected. Generating sign-in link…</string>
+    <string name="rt_auth_agy_open_link">Open the Google link in your browser, sign in, and paste the verification code.</string>
+    <string name="rt_auth_google_connected">Google account connected</string>
+    <string name="rt_auth_agy_finishing">Finishing Antigravity setup…</string>
+    <string name="rt_auth_agy_failed">Antigravity sign-in failed.</string>
+    <string name="rt_auth_agy_code_failed">Could not submit the verification code.</string>
+    <string name="rt_auth_google_completing">Completing Google sign-in…</string>
+    <string name="rt_auth_agy_signed_out">Signed out of Antigravity.</string>
+    <string name="rt_auth_agy_signout_failed">Could not sign out of Antigravity.</string>
+    <string name="rt_open_project_first">Open a project first.</string>
+    <string name="rt_snap_wait_running">Wait for the running agent, build or terminal command first.</string>
+    <string name="rt_snap_saved">Snapshot saved.</string>
+    <string name="rt_snap_deleted">Snapshot deleted.</string>
+    <string name="rt_snap_failed">Operation failed.</string>
+    <string name="rt_cicd_load_failed">Could not load the pipeline.</string>
+    <string name="rt_cicd_start_failed">Could not start the workflow.</string>
+    <string name="rt_auth_connected_as">Connected as %1$s</string>
+    <string name="rt_snap_restored">Restored \"%1$s\". The state before the restore was saved as a snapshot.</string>
+    <string name="rt_cicd_started">Started %1$s on %2$s. Refresh in a few seconds.</string>
 </resources>

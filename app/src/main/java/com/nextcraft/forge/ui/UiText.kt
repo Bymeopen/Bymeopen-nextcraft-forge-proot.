@@ -31,6 +31,9 @@ fun UiText.asString(): String = when (this) {
     is UiText.Raw -> text
 }
 
+/** An error's own text when it has one, else the translated fallback. */
+fun String?.orRes(@StringRes id: Int, vararg args: Any): UiText = this?.let(UiText::Raw) ?: UiText.res(id, *args)
+
 /** Plural-aware string for Compose: "1 file" vs "2 files" (and one form only in languages without plurals). */
 @androidx.compose.runtime.Composable
 fun quantityStringResource(@androidx.annotation.PluralsRes id: Int, quantity: Int, vararg args: Any): String {

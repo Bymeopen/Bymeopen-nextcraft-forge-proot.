@@ -1,5 +1,8 @@
 package com.nextcraft.forge.runtime
 
+import com.nextcraft.forge.ui.orRes
+import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.AgentKind
 import java.io.File
@@ -30,7 +33,7 @@ data class ClaudeAuthState(
     val authorizationUrl: String? = null,
     /** Fallback link whose page shows a code to paste when the automatic redirect cannot reach the CLI. */
     val manualUrl: String? = null,
-    val message: String? = null,
+    val message: UiText? = null,
     val accountEmail: String? = null,
 )
 
@@ -88,21 +91,21 @@ class ClaudeAuthController(
             val giveUp = android.os.SystemClock.elapsedRealtime() + RESTART_WAIT_MS
             while (process != null && android.os.SystemClock.elapsedRealtime() < giveUp) delay(50)
             if (process?.isAlive == true) {
-                mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Previous sign-in is still closing. Try again.")
+                mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = UiText.res(R.string.rt_auth_prev_closing))
                 return
             }
             process = null
         }
         if (!installer.isAgentInstalled(AgentKind.CLAUDE_CODE)) {
-            mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Install Claude Code first.")
+            mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = UiText.res(R.string.rt_auth_claude_install_first))
             return
         }
         if (email.isNotEmpty() && !EMAIL_PATTERN.matches(email)) {
-            mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Enter a valid email address.")
+            mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = UiText.res(R.string.rt_auth_email_invalid))
             return
         }
         stateBeforeLogin = mutableState.value.takeIf { it.status == ClaudeAuthStatus.SIGNED_IN }
-        mutableState.value = ClaudeAuthState(ClaudeAuthStatus.STARTING, message = "Starting Claude sign-in…")
+        mutableState.value = ClaudeAuthState(ClaudeAuthStatus.STARTING, message = UiText.res(R.string.rt_auth_claude_starting))
         authOutput.delete()
         urlFile.delete()
         val running = try {
@@ -145,7 +148,7 @@ class ClaudeAuthController(
         } catch (error: Throwable) {
             mutableState.value = ClaudeAuthState(
                 ClaudeAuthStatus.ERROR,
-                message = error.message?.take(240) ?: "Could not start Claude sign-in.",
+                message = error.message?.take(240).orRes(R.string.rt_auth_claude_start_failed),
             )
             return
         }
@@ -186,7 +189,7 @@ class ClaudeAuthController(
                             ClaudeAuthStatus.AWAITING_BROWSER,
                             authorizationUrl = link,
                             manualUrl = manual,
-                            message = "Open the sign-in page. It finishes by itself; if it shows a code instead, paste it here.",
+                            message = UiText.res(R.string.rt_auth_claude_open_page),
                         )
                     }
                     if (clean.contains("authentication failed", true) || clean.contains("login failed", true) ||
@@ -203,7 +206,7 @@ class ClaudeAuthController(
                             val account = readAccountEmail()
                             mutableState.value = ClaudeAuthState(
                                 ClaudeAuthStatus.SIGNED_IN,
-                                message = account?.let { "Connected as $it" } ?: "Claude account connected",
+                                message = account?.let { UiText.res(R.string.rt_auth_connected_as, it) } ?: UiText.res(R.string.rt_auth_claude_connected),
                                 accountEmail = account,
                             )
                             onSignedInChanged(true)
@@ -225,7 +228,7 @@ class ClaudeAuthController(
             if (generation == loginGeneration.get() && mutableState.value.status != ClaudeAuthStatus.SIGNED_IN) {
                 mutableState.value = ClaudeAuthState(
                     ClaudeAuthStatus.ERROR,
-                    message = error.message?.take(240) ?: "Claude sign-in failed.",
+                    message = error.message?.take(240).orRes(R.string.rt_auth_claude_failed),
                 )
             }
         } finally {
@@ -268,13 +271,13 @@ class ClaudeAuthController(
         } catch (error: Throwable) {
             mutableState.value = ClaudeAuthState(
                 ClaudeAuthStatus.ERROR,
-                message = error.message?.take(240) ?: "Could not submit the code.",
+                message = error.message?.take(240).orRes(R.string.rt_auth_code_submit_failed),
             )
             throw error
         }
         mutableState.value = mutableState.value.copy(
             status = ClaudeAuthStatus.COMPLETING,
-            message = "Completing Claude sign-in…",
+            message = UiText.res(R.string.rt_auth_claude_completing),
         )
     }
 
@@ -285,7 +288,7 @@ class ClaudeAuthController(
             runCatching { if (running.isAlive) running.destroyForcibly() }
         }
         val previous = mutableState.value
-        mutableState.value = previous.copy(status = ClaudeAuthStatus.STARTING, message = "Signing out…")
+        mutableState.value = previous.copy(status = ClaudeAuthStatus.STARTING, message = UiText.res(R.string.rt_auth_signing_out))
         try {
             val runtime = installer.installedRuntime()
             val workspace = File(context.filesDir, "workspaces/claude-auth").apply { mkdirs() }
@@ -305,9 +308,9 @@ class ClaudeAuthController(
             output.delete()
             check(!hasCredential()) { "Claude sign-out is incomplete." }
             onSignedInChanged(false)
-            mutableState.value = ClaudeAuthState(message = "Signed out of Claude.")
+            mutableState.value = ClaudeAuthState(message = UiText.res(R.string.rt_auth_claude_signed_out))
         } catch (error: Throwable) {
-            mutableState.value = previous.copy(message = error.message?.take(240) ?: "Could not sign out of Claude.")
+            mutableState.value = previous.copy(message = error.message?.take(240).orRes(R.string.rt_auth_claude_signout_failed))
             throw error
         }
     }
