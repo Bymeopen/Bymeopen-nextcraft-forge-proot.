@@ -378,7 +378,9 @@ class RuntimeInstaller(private val context: Context) {
         return when (agent) {
             AgentKind.CLAUDE_CODE -> {
                 migrateLegacyClaudeMarker()
-                isInstalled() && File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")).canExecute() &&
+                // /usr/local/bin/claude is an absolute symlink into the guest (npm install); resolved from the host it
+                // points outside the rootfs, so check the npm entry point itself instead of following the link.
+                isInstalled() && File(rootfs, CLAUDE_NPM_CLI_GUEST_PATH.removePrefix("/")).isFile &&
                     !claudeMarker.readTextOrNull().isNullOrBlank()
             }
             AgentKind.DEEPSEEK_HARNESS -> isInstalled() &&
@@ -2677,6 +2679,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         /** Where the npm package lands under PRoot; CLAUDE_GUEST_PATH becomes a symlink into it. */
         private const val CLAUDE_NPM_GUEST_DIR = "/usr/local/lib/claude-code"
+        private const val CLAUDE_NPM_CLI_GUEST_PATH = "$CLAUDE_NPM_GUEST_DIR/node_modules/@anthropic-ai/claude-code/cli.js"
         /** Last @anthropic-ai/claude-code release shipping cli.js (2.1.113+ only download the Bun binary). */
         private const val CLAUDE_NPM_VERSION = "2.1.112"
         private val CLAUDE_BUNDLE = RuntimeBundle(
