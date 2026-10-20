@@ -53,10 +53,11 @@ import com.nextcraft.forge.R
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 
+/** General-purpose shortcuts: the terminal is not tied to a project. "claude" opens the Claude Code interface. */
 private val quickCommands = listOf(
-    "uname -a",
-    "git status",
+    "claude",
     "ls -la",
+    "uname -a",
     "node -v && npm -v",
     "python3 --version",
     "gradle -v",
@@ -83,11 +84,10 @@ fun TerminalScreen(
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
-    val projectId = state.activeProjectId
 
-    LaunchedEffect(projectId) { viewModel.ensureTerminalSession() }
-    val session = remember(projectId, state.terminalRevision) { viewModel.currentTerminalSession() }
-    val finished = remember(projectId, state.terminalRevision) { viewModel.isTerminalFinished() }
+    LaunchedEffect(Unit) { viewModel.ensureTerminalSession() }
+    val session = remember(state.terminalRevision) { viewModel.currentTerminalSession() }
+    val finished = remember(state.terminalRevision) { viewModel.isTerminalFinished() }
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
     val viewClient = remember {
@@ -113,7 +113,7 @@ fun TerminalScreen(
         val inProject = state.activeTab == ForgeTab.PROJECTS
         ForgeProjectHeader(
             title = stringResource(R.string.terminal_project_terminal),
-            subtitle = "/workspace/${state.activeProject?.slug ?: "sandbox"} · ${stringResource(R.string.terminal_env_root_chroot)}",
+            subtitle = stringResource(R.string.terminal_general_subtitle),
             onBack = if (inProject) ({ viewModel.projectBack() }) else null,
             actions = {
                 ForgePillIcon(
@@ -200,6 +200,15 @@ fun TerminalScreen(
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // The shell starts in the home folder; this jumps into the open project's folder.
+            state.activeProject?.let { project ->
+                AssistChip(
+                    onClick = { viewModel.terminalProjectDir()?.let { dir -> viewModel.runTerminalCommand("cd " + com.nextcraft.forge.runtime.shellSingleQuote(dir)) } },
+                    enabled = ready,
+                    shape = RoundedCornerShape(100),
+                    label = { Text(stringResource(R.string.terminal_go_to_project, project.name), fontSize = ForgeType.caption, maxLines = 1) },
+                )
+            }
             quickCommands.forEach { cmd ->
                 AssistChip(
                     onClick = { viewModel.runTerminalCommand(cmd) },

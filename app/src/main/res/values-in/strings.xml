@@ -140,7 +140,7 @@
     <string name="tools_tools">Alat</string>
     <string name="tools_files">File</string>
     <string name="tools_files_desc">Telusuri file proyek dan tinjau perubahan</string>
-    <string name="tools_terminal_desc">Terminal Linux di workspace privat</string>
+    <string name="tools_terminal_desc">Terminal Linux untuk perintah apa pun, termasuk program layar penuh</string>
     <string name="tools_web_preview">Pratinjau web</string>
     <string name="tools_web_preview_desc">Pratinjau server dev lokal</string>
     <string name="tools_android_builder">Android Builder</string>
@@ -626,7 +626,7 @@
     <string name="agent_current_chat">Obrolan saat ini</string>
     <string name="agent_close">Tutup</string>
     <string name="agent_worked_for">Bekerja selama %1$s</string>
-    <string name="terminal_project_terminal">Terminal proyek</string>
+    <string name="terminal_project_terminal">Terminal</string>
     <string name="terminal_env_root_chroot">Ubuntu root chroot</string>
     <string name="terminal_key_previous">Perintah sebelumnya</string>
     <string name="terminal_key_next">Perintah berikutnya</string>
@@ -732,4 +732,6 @@
     <string name="rt_auth_agy_code_empty">Tempel kode verifikasi dari Google lebih dulu.</string>
     <string name="rt_auth_agy_signout_incomplete">Proses keluar dari Antigravity belum tuntas.</string>
     <string name="rt_cicd_connect_github">Hubungkan GitHub di Pengaturan lebih dulu.</string>
+    <string name="terminal_general_subtitle">Folder home · Ubuntu root chroot</string>
+    <string name="terminal_go_to_project">Ke %1$s</string>
 </resources>

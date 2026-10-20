@@ -140,7 +140,7 @@
     <string name="tools_tools">Tools</string>
     <string name="tools_files">Files</string>
     <string name="tools_files_desc">Browse project files and review changes</string>
-    <string name="tools_terminal_desc">Linux terminal inside the private workspace</string>
+    <string name="tools_terminal_desc">Linux terminal for any command, with full-screen programs</string>
     <string name="tools_web_preview">Web Preview</string>
     <string name="tools_web_preview_desc">Preview local dev servers</string>
     <string name="tools_android_builder">Android Builder</string>
@@ -638,7 +638,7 @@
     <string name="agent_current_chat">Current chat</string>
     <string name="agent_close">Close</string>
     <string name="agent_worked_for">Worked for %1$s</string>
-    <string name="terminal_project_terminal">Project terminal</string>
+    <string name="terminal_project_terminal">Terminal</string>
     <string name="terminal_env_root_chroot">Ubuntu root chroot</string>
     <string name="terminal_key_previous">Previous command</string>
     <string name="terminal_key_next">Next command</string>
@@ -744,4 +744,6 @@
     <string name="rt_auth_agy_code_empty">Paste the verification code from Google first.</string>
     <string name="rt_auth_agy_signout_incomplete">Antigravity sign-out is incomplete.</string>
     <string name="rt_cicd_connect_github">Connect GitHub in Settings first.</string>
+    <string name="terminal_general_subtitle">Home folder · Ubuntu root chroot</string>
+    <string name="terminal_go_to_project">Go to %1$s</string>
 </resources>

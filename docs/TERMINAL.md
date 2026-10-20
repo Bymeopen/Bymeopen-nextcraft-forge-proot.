@@ -4,10 +4,12 @@ The Terminal screen is a full VT100/xterm terminal, so editors, pagers and TUIs 
 `mc`, `lazygit`…) run in it.
 
 ## How it works
-- **One persistent shell per project.** With the root chroot installed and root granted it is
-  `su -mm -c <chroot-exec.sh … /bin/bash -l>` (built by `RuntimeInstaller.prepareChrootShellCommand`, so the
-  environment, workspace mount and secrets handling are the same as every other chroot launch). Without them it is
-  the Android shell (`/system/bin/sh`) in the project workspace.
+- **One general shell for the whole app, not tied to a project.** With the root chroot installed and root granted it is
+  `su -mm -c <chroot-exec.sh … /bin/bash -l>` started in `/root` (built by `RuntimeInstaller.prepareChrootShellCommand`,
+  so the environment and secrets handling are the same as every other chroot launch). Without them it is the Android
+  shell (`/system/bin/sh`) in the app's files directory. Projects are at `/workspace/<name>`: the "Go to <project>"
+  chip does a `cd`, and "Run in terminal" from chat changes into the project first. `claude` starts the Claude Code
+  interface (a full-screen TUI) in this terminal.
 - **PTY + emulator:** the Termux `terminal-emulator` library spawns the process on its own PTY and parses its output
   into a character grid; `terminal-view` draws it. `TerminalView` resizes the PTY to the view (and to the soft
   keyboard), so full-screen programs reflow.
