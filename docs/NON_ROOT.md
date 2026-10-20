@@ -19,7 +19,9 @@ Aplikasi ini hanya punya satu mesin: `proot` statis dari APK. Tidak ada `su`, ti
   `adb shell device_config put activity_manager max_phantom_processes 2147483647` dan
   `adb shell settings put global settings_enable_monitor_phantom_procs false`.
 - Bila `proot` gagal dengan pesan seccomp/ptrace, set `PROOT_NO_SECCOMP=1` di environment agen (Pengaturan → Agent).
-- `apt-get` berjalan sebagai root palsu (`-0`); paket yang memakai hard link ditangani `--link2symlink`.
+- `apt-get` berjalan sebagai root palsu (`-0`) tanpa sandbox seccomp apt; paket yang memakai hard link ditangani `--link2symlink`.
+- Seccomp aplikasi Android membunuh proses yang memanggil `io_uring_setup` (SIGSYS, exit 159). libuv di Node 20+ memakainya
+  secara default, jadi `UV_USE_IO_URING=0` dan `GLIBC_TUNABLES=glibc.pthread.rseq=0` selalu diekspor ke guest.
 - Claude Code dipasang dan diperbarui hanya dari npm `2.1.112`; cek pembaruan tidak pernah menawarkan rilis Bun yang lebih baru.
 - Semua berkas rootfs milik UID aplikasi, jadi *Disconnect GitHub*, *Sign out*, dan perbaikan rootfs tidak butuh eskalasi.
 

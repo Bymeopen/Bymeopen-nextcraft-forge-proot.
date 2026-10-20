@@ -80,6 +80,9 @@ export TERM="${TERM:-xterm-256color}"
 export LANG="${LANG:-C.UTF-8}"
 export TMPDIR="/tmp"
 export GLIBC_TUNABLES="glibc.pthread.rseq=0"
+# Android's app seccomp policy kills a process on io_uring_setup (SIGSYS, exit 159). libuv (Node 20+) opens
+# an io_uring by default, which took down every npm/node run; this makes it use epoll instead.
+export UV_USE_IO_URING=0
 
 BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 if [ -d "$ROOTFS/root/android-sdk" ]; then
