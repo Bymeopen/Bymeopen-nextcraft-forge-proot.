@@ -38,6 +38,8 @@ import com.nextcraft.forge.R
 import com.nextcraft.forge.model.DiffLine
 import com.nextcraft.forge.model.DiffLineType
 
+private const val MAX_SHOWN_LINES = 1500
+
 /** Colours of the code tokens: the theme's own accent/status text colours, so every theme keeps its contrast. */
 internal fun codeSpanStyle(kind: CodeTokenKind, tokens: ForgeThemeTokens): SpanStyle = when (kind) {
     CodeTokenKind.KEYWORD -> SpanStyle(color = tokens.accentText, fontWeight = FontWeight.SemiBold)
@@ -76,7 +78,8 @@ internal fun DiffCodeView(
     val tokens = LocalForgeThemeTokens.current
     val language = remember(path) { CodeLanguage.forPath(path) }
     var showAll by remember(lines) { mutableStateOf(false) }
-    val shown = if (showAll) lines else lines.take(previewLines)
+    // Rows are composed eagerly, so even "show all" stops at MAX_SHOWN_LINES (a 256 KB file is thousands of lines).
+    val shown = lines.take(if (showAll) MAX_SHOWN_LINES else previewLines)
     val hidden = lines.size - shown.size
     val digits = remember(lines) { (lines.maxOfOrNull { maxOf(it.newLine ?: 0, it.oldLine ?: 0) } ?: 0).toString().length.coerceAtLeast(2) }
     Column(modifier = modifier.fillMaxWidth()) {
@@ -90,11 +93,19 @@ internal fun DiffCodeView(
         ) {
             shown.forEach { line -> DiffRow(line, language, digits, textStyle, tokens) }
         }
-        if (hidden > 0) {
+        if (hidden > 0 && !showAll) {
             TextButton(onClick = { showAll = true }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch)) {
-                Text(stringResource(R.string.diff_show_all, lines.size))
+                Text(stringResource(R.string.diff_show_all, minOf(lines.size, MAX_SHOWN_LINES)))
             }
-        } else if (showAll && lines.size > previewLines) {
+        } else if (hidden > 0) {
+            Text(
+                stringResource(R.string.diff_truncated, MAX_SHOWN_LINES),
+                fontSize = ForgeType.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp, top = 6.dp),
+            )
+        }
+        if (showAll && lines.size > previewLines) {
             TextButton(onClick = { showAll = false }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch)) {
                 Text(stringResource(R.string.diff_show_less))
             }

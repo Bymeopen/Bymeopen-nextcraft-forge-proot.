@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nextcraft.forge.R
+import com.termux.terminal.KeyHandler
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 
@@ -281,12 +282,21 @@ private fun TerminalKeyRow(
     holder: TerminalViewHolder,
     enabled: Boolean,
 ) {
+    // TerminalView dereferences the emulator without a null check, so keys wait until it exists.
+    fun liveView(): TerminalView? = holder.view?.takeIf { it.currentSession?.emulator != null }
+
     fun press(keyCode: Int) {
-        holder.view?.handleKeyCode(keyCode, 0)
+        val view = liveView() ?: return
+        // An armed Ctrl/Alt belongs to the next key, whether it is typed or tapped here (Ctrl+arrow, Alt+Esc).
+        var mod = 0
+        if (modifiers.consumeCtrl()) mod = mod or KeyHandler.KEYMOD_CTRL
+        if (modifiers.consumeAlt()) mod = mod or KeyHandler.KEYMOD_ALT
+        view.handleKeyCode(keyCode, mod)
     }
 
     fun type(char: Char) {
-        holder.view?.inputCodePoint(char.code, false, false)
+        val view = liveView() ?: return
+        view.inputCodePoint(char.code, modifiers.consumeCtrl(), modifiers.consumeAlt())
     }
 
     Row(
@@ -309,7 +319,7 @@ private fun TerminalKeyRow(
         TerminalKey("PgUp", stringResource(R.string.terminal_key_pgup), enabled) { press(KeyEvent.KEYCODE_PAGE_UP) }
         TerminalKey("PgDn", stringResource(R.string.terminal_key_pgdn), enabled) { press(KeyEvent.KEYCODE_PAGE_DOWN) }
         TerminalKey("^C", stringResource(R.string.terminal_key_interrupt), enabled) {
-            holder.view?.inputCodePoint('c'.code, true, false)
+            liveView()?.inputCodePoint('c'.code, true, false)
         }
         listOf('-', '/', '|', '~').forEach { symbol ->
             TerminalKey(symbol.toString(), symbol.toString(), enabled) { type(symbol) }

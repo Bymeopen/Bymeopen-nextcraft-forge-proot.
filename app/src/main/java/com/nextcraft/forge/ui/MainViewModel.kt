@@ -1891,6 +1891,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun queueTerminalInput(command: String, inProject: Boolean) {
         val clean = command.trim()
         if (clean.isEmpty()) return
+        // Asking for a command on an ended shell means "run it": start a fresh shell rather than dropping the request.
+        if (terminalIsFinished) restartTerminalSession()
         pendingTerminalInput += TerminalInput(clean, inProject)
         ensureTerminalSession()
         flushTerminalInput()

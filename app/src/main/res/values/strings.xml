@@ -875,4 +875,6 @@
     <string name="rt_msg_removed">Removed %1$s</string>
     <string name="rt_msg_stack_ready">%1$s stack is ready</string>
     <string name="rt_msg_is_ready">%1$s is ready</string>
+    <string name="diff_truncated">Showing the first %1$d lines. Open the file to read the rest.</string>
+    <string name="code_viewer_files_capped">Showing %1$d of %2$d files (generated folders are hidden).</string>
 </resources>

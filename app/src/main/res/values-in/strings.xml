@@ -859,4 +859,6 @@
     <string name="rt_msg_removed">%1$s dicopot</string>
     <string name="rt_msg_stack_ready">Stack %1$s siap</string>
     <string name="rt_msg_is_ready">%1$s siap</string>
+    <string name="diff_truncated">Menampilkan %1$d baris pertama. Buka file untuk membaca sisanya.</string>
+    <string name="code_viewer_files_capped">Menampilkan %1$d dari %2$d file (folder hasil build disembunyikan).</string>
 </resources>
