@@ -669,7 +669,7 @@ private fun AntigravityOAuthBanner(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.agent_google_account), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
                     Text(
-                        text = authState.message ?: stringResource(R.string.agent_required_for_antigravity),
+                        text = authState.message?.asString() ?: stringResource(R.string.agent_required_for_antigravity),
                         fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                     )
