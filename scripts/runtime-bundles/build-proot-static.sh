@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build a static ARM64 `proot` for the NextCraft Forge non-root (PRoot) engine, as app/src/main/jniLibs/arm64-v8a/libproot.so.
+# Build a static ARM64 `proot` for the NextCraft Forge PRoot engine, as app/src/main/jniLibs/arm64-v8a/libproot.so.
+#
+# The source is the Termux fork (termux/proot), not upstream proot-me: Android's app seccomp filter answers every
+# syscall outside bionic's allowlist with SIGSYS (exit 159). The Termux fork catches that SIGSYS in the tracee,
+# emulates the common ones (statx, set_robust_list, chown, symlink, link, utimes, mount, ...) and turns the rest into
+# ENOSYS so glibc/libuv take their fallback paths. Upstream proot forwards the SIGSYS and the guest process dies.
 #
 # Android forbids executing files from the app data directory, so the binary ships inside the APK as a "native
 # library"; the app runs it from its nativeLibraryDir. It is linked statically against glibc and talloc inside a
 # chroot copy of the Core rootfs (Ubuntu 24.04 arm64), so it has no runtime dependencies on the device.
 #
 # Sources (verified against the pinned checksums):
-#   proot  v5.5.0   https://github.com/proot-me/proot (git tag, commit pinned below)
+#   proot  termux/proot master, commit pinned below (https://github.com/termux/proot)
 #   talloc 2.4.3    https://www.samba.org/ftp/talloc/talloc-2.4.3.tar.gz
 #
 # Needs root (chroot and mount). On an ARM64 host it runs natively; on x86_64 it needs qemu-user-static with an
@@ -19,8 +24,8 @@ set -euo pipefail
 # Environment: NEXTCRAFT_OUT_DIR (default dist/runtime-bundles), NEXTCRAFT_WORK_DIR, NEXTCRAFT_KEEP_WORK,
 # NEXTCRAFT_DNS, NEXTCRAFT_EXTRA_CA_FILE (TLS-intercepting proxy CA, used for git/curl inside the chroot only).
 CORE_ROOTFS="${NEXTCRAFT_CORE_ROOTFS:?Set NEXTCRAFT_CORE_ROOTFS to an extracted Core bundle rootfs}"
-PROOT_TAG="v5.5.0"
-PROOT_COMMIT="${NEXTCRAFT_PROOT_COMMIT:-25dc6a3134891f98a79f57ce1c2c1b23ff15cad1}"   # commit behind the tag
+PROOT_REPO="${NEXTCRAFT_PROOT_REPO:-https://github.com/termux/proot}"
+PROOT_COMMIT="${NEXTCRAFT_PROOT_COMMIT:-e2d843ee6dab076ea0ed1ffd5d0ea12232185499}"
 TALLOC_VERSION="2.4.3"
 TALLOC_URL="https://www.samba.org/ftp/talloc/talloc-${TALLOC_VERSION}.tar.gz"
 TALLOC_SHA256="dc46c40b9f46bb34dd97fe41f548b0e8b247b77a918576733c528e83abd854dd"
@@ -76,16 +81,15 @@ guest() {
     /bin/bash -lc "$1"
 }
 
-guest "printf 'nameserver $DNS_SERVER\\n' > /etc/resolv.conf; apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential pkg-config python3 git ca-certificates curl"
+guest "printf 'nameserver $DNS_SERVER\\n' > /etc/resolv.conf; apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential pkg-config python3 git ca-certificates curl gawk"
+# gawk: loader-info.awk uses strtonum, which mawk lacks.
 
 echo "Fetching sources"
 guest "mkdir -p /build && cd /build && curl -fsSL -o talloc.tar.gz '$TALLOC_URL' && echo '$TALLOC_SHA256  talloc.tar.gz' | sha256sum -c --status"
-guest "cd /build && git clone -q --depth 1 --branch '$PROOT_TAG' https://github.com/proot-me/proot proot"
+guest "cd /build && git clone -q '$PROOT_REPO' proot && git -C proot checkout -q '$PROOT_COMMIT'"
 actual_commit="$(guest "git -C /build/proot rev-parse HEAD" | tail -1 | tr -d '\r')"
-if [[ -n "$PROOT_COMMIT" && "$actual_commit" != "$PROOT_COMMIT" ]]; then
-  echo "proot $PROOT_TAG resolved to $actual_commit, expected $PROOT_COMMIT" >&2; exit 1
-fi
-echo "proot $PROOT_TAG = $actual_commit"
+[[ "$actual_commit" == "$PROOT_COMMIT" ]] || { echo "proot checkout is $actual_commit, expected $PROOT_COMMIT" >&2; exit 1; }
+echo "proot = $actual_commit ($PROOT_REPO)"
 
 echo "Building talloc (static)"
 guest "cd /build && tar -xzf talloc.tar.gz && cd talloc-$TALLOC_VERSION && \
@@ -98,10 +102,11 @@ echo "Building proot (static)"
 # LDFLAGS/CFLAGS go through the environment, not make arguments: the GNUmakefile appends `pkg-config --libs talloc`
 # with `+=`, and a command-line LDFLAGS would override that and drop -ltalloc.
 # --build-id=none and a fixed SOURCE_DATE_EPOCH keep the binary byte-identical across builds.
+# HAS_LOADER_32BIT= skips the 32-bit (-m32) loader, which the arm64 gcc cannot build and which the app never needs.
 guest "cd /build/proot/src && \
   PKG_CONFIG_PATH=/build/talloc-prefix/lib/pkgconfig LDFLAGS='-static -L/build/talloc-prefix/lib -Wl,--build-id=none' \
   CFLAGS='-O2 -I/build/talloc-prefix/include -ffile-prefix-map=/build=.' SOURCE_DATE_EPOCH=1757116800 \
-  make -j\$(nproc) >/dev/null && \
+  make -j\$(nproc) HAS_LOADER_32BIT= >/dev/null && \
   strip --strip-all --remove-section=.comment --remove-section=.note proot && ./proot --version | head -1"
 
 mkdir -p "$OUT_DIR"
@@ -117,5 +122,5 @@ for f in libproot.so libproot_loader.so; do
 done
 sha256sum "$OUT_DIR/libproot.so" "$OUT_DIR/libproot_loader.so"
 wc -c "$OUT_DIR/libproot.so" "$OUT_DIR/libproot_loader.so"
-echo "proot $PROOT_TAG ($actual_commit) built: $OUT_DIR/libproot.so + libproot_loader.so"
+echo "proot $actual_commit built: $OUT_DIR/libproot.so + libproot_loader.so"
 echo "Copy both to app/src/main/jniLibs/arm64-v8a/ and record the SHA-256 values in docs/RUNTIME_KNOWN_ISSUES.md"
