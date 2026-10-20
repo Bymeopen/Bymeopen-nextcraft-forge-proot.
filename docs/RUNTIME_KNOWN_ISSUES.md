@@ -101,8 +101,9 @@ tidak berubah; `aapt2` statis membuat build Android tidak lagi bergantung pada `
 activity_manager max_phantom_processes 2147483647` bisa dilakukan manual), `chroot-health.sh` bagian *Mount* (ERR wajar).
 Bila `proot` gagal dengan `seccomp`/`ptrace` di kernel tertentu, coba `PROOT_NO_SECCOMP=1` lewat environment agen.
 
-**Diuji di perangkat tanpa root** (Core, Node, Python, Android, PHP, C++ berjalan setelah `PROOT_LOADER` ditambahkan). Claude Code: rilis
-Bun resmi mati `SIGSYS` (exit 159, `rseq` diblokir seccomp aplikasi), sehingga dipasang dari npm `2.1.112`. `agy` (Go): status belum dipastikan.
+**Diverifikasi di perangkat tanpa root (2026-10-20)** dengan biner `termux/proot` `e2d843ee`: pemasangan Core, stack, dan agen
+berhasil semua. Dengan `proot-me` 5.5.0 sebelumnya, `npm install`, Claude, dan semua program multi-thread mati SIGSYS (exit 159)
+karena `clone3`/`statx`/`io_uring` ditolak seccomp aplikasi; lihat `docs/NON_ROOT.md`. Claude Code tetap dari npm `2.1.112`.
 
 ## Belum terverifikasi
 
