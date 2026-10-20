@@ -692,4 +692,45 @@
     <string name="msg_claude_cli_verified">✓ Claude Code verified: %1$s</string>
     <string name="msg_claude_cli_unverified">✕ Claude Code check failed: %1$s</string>
     <string name="msg_runtime_not_installed">The Linux runtime is not installed yet.</string>
+    <plurals name="chat_steps">
+        <item quantity="one">%d step</item>
+        <item quantity="other">%d steps</item>
+    </plurals>
+    <plurals name="chat_files_changed">
+        <item quantity="one">%d file changed</item>
+        <item quantity="other">%d files changed</item>
+    </plurals>
+    <plurals name="chat_new_messages">
+        <item quantity="one">%d new</item>
+        <item quantity="other">%d new</item>
+    </plurals>
+    <plurals name="chip_review_changes">
+        <item quantity="one">Review %d change</item>
+        <item quantity="other">Review %d changes</item>
+    </plurals>
+    <string name="chat_keep_all">Keep all</string>
+    <string name="chat_revert_all">Revert all</string>
+    <string name="chat_keep">Keep</string>
+    <string name="chat_revert">Revert</string>
+    <string name="chat_open_in_files">Open in Files</string>
+    <string name="chat_diff_more">%d more lines</string>
+    <string name="chat_diff_binary">Binary file, no preview.</string>
+    <string name="chat_diff_none">No line changes to show.</string>
+    <string name="approval_risk_high">High risk</string>
+    <string name="approval_risk_review">Needs review</string>
+    <string name="approval_risk_safe">Low risk</string>
+    <string name="approval_paths">Affects</string>
+    <string name="approval_waiting_hint">The agent is waiting. Choose Deny or Approve to continue.</string>
+    <string name="chip_explain_changes">Explain the changes</string>
+    <string name="chip_open_preview">Open preview</string>
+    <string name="chip_build_run">Build and run</string>
+    <string name="chip_run_tests">Run the tests</string>
+    <string name="prompt_explain_changes">Explain what you just changed and why.</string>
+    <string name="prompt_run_tests">Run this project\'s tests and report the result.</string>
+    <string name="starter_explain">Explain this project\'s structure</string>
+    <string name="starter_fix">Find and fix build errors</string>
+    <string name="starter_feature">Add a new feature: </string>
+    <string name="starter_tests">Write tests for the main code</string>
+    <string name="diff_added">+%1$d</string>
+    <string name="diff_removed">−%1$d</string>
 </resources>
