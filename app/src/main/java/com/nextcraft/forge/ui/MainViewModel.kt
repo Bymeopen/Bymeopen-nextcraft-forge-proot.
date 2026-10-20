@@ -226,6 +226,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val logLineIdCounter = AtomicLong(1L)
     /** Session whose events may touch the active chat; late events from older sessions are dropped. */
     private val activeRuntimeSessionId = AtomicReference<String?>(null)
+    /** The session that just finished: its FilesChanged event (Claude sends it after the result) is still wanted. */
+    private val finishedRuntimeSessionId = AtomicReference<String?>(null)
 
     init {
         RuntimeSetupController.restore(application)
@@ -564,6 +566,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun repairRootfs() {
+        // Repair force-unmounts the chroot; under a running agent its /workspace and /proc would vanish mid-turn.
+        if (_state.value.sessionRunning || activeAgentJob?.isActive == true) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repair_busy)) }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repairing_chroot)) }
             val result = withContext(Dispatchers.IO) {
@@ -932,11 +939,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
-        if (_state.value.sessionRunning) {
+        // Also queue while the finished turn's bridge call is still unwinding, so two turns never overlap.
+        if (_state.value.sessionRunning || activeAgentJob?.isActive == true) {
             // The agent keeps working; this message is sent automatically when its turn completes.
             _state.update {
                 it.copy(
-                    queuedPrompts = it.queuedPrompts + QueuedPrompt(text = cleanPrompt, attachments = attachments),
+                    queuedPrompts = it.queuedPrompts + QueuedPrompt(
+                        text = cleanPrompt,
+                        attachments = attachments,
+                        projectId = it.activeProject?.id,
+                        chatId = it.activeChatId,
+                    ),
                     pendingAttachments = emptyList(),
                 )
             }
@@ -1011,6 +1024,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         activeAgentJob = viewModelScope.launch {
             try {
+                // A GitHub sync writes the token into the rootfs while it runs; never let an agent (root in the
+                // same chroot) start before that sync has removed it again.
+                withContext(Dispatchers.IO) { githubOperationLock.withLock { } }
                 bridge.startSession(
                     projectId = project.id,
                     projectSlug = project.slug,
@@ -1069,6 +1085,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun dispatchQueuedPrompts() {
         val queued = _state.value.queuedPrompts
         if (queued.isEmpty() || _state.value.sessionRunning) return
+        val here = _state.value
+        if (queued.any { it.projectId != here.activeProject?.id || it.chatId != here.activeChatId }) {
+            // The user moved to another chat or project before the turn finished unwinding.
+            discardQueuedPrompts()
+            return
+        }
         val text = queued.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
         _state.update {
             it.copy(
@@ -1116,14 +1138,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val bridge = activeRuntimeBridge ?: claudeRuntime
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            bridge.respondToApproval(req, approved)
+            // An unwritable response file must not crash the app; the request then expires on the agent side.
+            runCatching { bridge.respondToApproval(req, approved) }.onFailure { err ->
+                if (err is CancellationException) throw err
+                Log.w("MainViewModel", "Could not answer tool approval", err)
+                _state.update { it.copy(bannerMessage = UiText.Raw(err.message ?: err.javaClass.simpleName)) }
+            }
         }
     }
 
     private fun onRuntimeEvent(event: RuntimeEvent) {
         if (event is RuntimeEvent.SessionStarted) {
             activeRuntimeSessionId.set(event.sessionId)
-        } else if (event.sessionId != activeRuntimeSessionId.get()) {
+        } else if (event.sessionId != activeRuntimeSessionId.get() &&
+            !(event is RuntimeEvent.FilesChanged && event.sessionId == finishedRuntimeSessionId.get())
+        ) {
             return
         }
         when (event) {
@@ -1236,6 +1265,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
         if (!_state.value.sessionRunning) return
         activeRuntimeBridge = null
+        // Late events of this session must not touch the next chat the user opens.
+        finishedRuntimeSessionId.set(activeRuntimeSessionId.getAndSet(null))
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->

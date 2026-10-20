@@ -184,6 +184,10 @@ class ClaudeRuntimeBridge(
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
+            // Requests left by a run that was killed before its watcher saw them would be shown as this session's.
+            File(context.filesDir, "runtime-bridge")
+                .listFiles { f -> f.name.endsWith(".request") }.orEmpty()
+                .forEach { runCatching { it.delete() } }
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
@@ -250,6 +254,13 @@ class ClaudeRuntimeBridge(
                     ProviderRuntimeErrorDetector.detect(line)?.let { reason ->
                         process.destroyForcibly()
                         throw ProviderSessionException(reason)
+                    }
+                    // The result frame repeats the whole answer; past the reader's line cap it is cut and no longer
+                    // parses, which would leave the turn running until the CLI exits on its own.
+                    if (line.endsWith("... [truncated]") && line.take(200).contains("\"type\":\"result\"")) {
+                        if (!line.take(400).contains("\"is_error\":true")) turnCompletedFromStream = true
+                        terminateActiveProcessGracefully()
+                        return
                     }
                     if (!consumeClaudeEvent(sessionId, line)) {
                         lastDiagnostic = sanitizeForDisplay(line.takeLast(500))

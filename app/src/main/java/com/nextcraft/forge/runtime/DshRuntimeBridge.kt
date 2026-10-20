@@ -332,7 +332,8 @@ class DshRuntimeBridge(
                     // A large tool output is not a protocol failure; the agent continues with it.
                     Log.d("DshBridge", "Dropped oversized tool/result frame (${line.length} chars)")
                 } else if (!duplicate) {
-                    handle(DshSdkProtocolEvent.Failed("DeepSeek Harness sent an oversized response"))
+                    // Our own reader cut this frame; that says nothing about the turn's outcome, so don't fail it.
+                    Log.w("DshBridge", "Dropped oversized frame (${line.length} chars): ${head.take(120)}")
                 }
                 return
             }
