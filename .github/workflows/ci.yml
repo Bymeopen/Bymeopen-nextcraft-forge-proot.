@@ -29,11 +29,14 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest
       - name: Assemble debug APK
         run: gradle --no-daemon :app:assembleDebug
+      # Private repos count artifacts against the account storage quota; a full quota must not turn a green build red.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 3
 
   scripts:
     name: Shell scripts
