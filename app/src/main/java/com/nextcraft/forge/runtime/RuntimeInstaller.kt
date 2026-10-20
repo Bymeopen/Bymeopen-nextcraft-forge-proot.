@@ -1821,6 +1821,16 @@ class RuntimeInstaller(private val context: Context) {
                     groupText += "aid_net_raw:x:3004:root,_apt\n"
                     changed = true
                 }
+                // Under PRoot every guest process keeps the app's supplementary GIDs (everybody, the app's cache and
+                // "all" groups, ...). Name them so `groups`, `id` and login shells stop printing
+                // "cannot find name for group ID".
+                val knownGids = groupText.lineSequence().mapNotNull { it.split(':').getOrNull(2)?.toIntOrNull() }.toSet()
+                for ((gid, name) in androidSupplementaryGroups()) {
+                    if (gid in knownGids) continue
+                    if (!groupText.endsWith("\n")) groupText += "\n"
+                    groupText += "$name:x:$gid:root\n"
+                    changed = true
+                }
                 if (changed) groupFile.writeText(groupText)
             }
             val aptConf = File(targetRootfs, "etc/apt/apt.conf.d/99android-chroot")
@@ -1830,6 +1840,26 @@ class RuntimeInstaller(private val context: Context) {
             val expectedAptConf = "APT::Sandbox::User \"root\";\nAPT::Sandbox::Seccomp \"false\";\nAcquire::Retries \"3\";\n"
             if (aptConf.readTextOrNull() != expectedAptConf.trim()) {
                 aptConf.writeText(expectedAptConf)
+            }
+        }
+    }
+
+    /** The process's supplementary GIDs from /proc/self/status, with the names Android gives them. */
+    private fun androidSupplementaryGroups(): List<Pair<Int, String>> {
+        val groups = runCatching {
+            File("/proc/self/status").readLines().firstOrNull { it.startsWith("Groups:") }
+                ?.removePrefix("Groups:")?.trim()?.split(Regex("\\s+"))?.mapNotNull { it.toIntOrNull() }
+        }.getOrNull().orEmpty()
+        val appId = AndroidProcess.myUid() % 100_000
+        return groups.map { gid ->
+            gid to when {
+                gid == 3003 -> "aid_inet"
+                gid == 3004 -> "aid_net_raw"
+                gid == 9997 -> "aid_everybody"
+                gid == 20_000 + appId -> "aid_cache"
+                gid == 50_000 + appId -> "aid_all"
+                gid >= 99_900_000 -> "aid_shared"
+                else -> "aid_$gid"
             }
         }
     }
@@ -2916,6 +2946,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             [ -r /sys/fs/selinux ] && [ ! -r /sys/fs/selinux/enforce ] && BINDS="${'$'}BINDS -b ${'$'}SYSDATA/sys_empty:/sys/fs/selinux"
             for bionic_dir in /system /apex /vendor /product; do
                 [ -d "${'$'}bionic_dir" ] && BINDS="${'$'}BINDS -b ${'$'}bionic_dir"
+            done
+            # Shared storage as proot-distro binds it; readable only when Android granted the app storage access.
+            for storage_dir in /storage /sdcard /mnt/sdcard; do
+                [ -d "${'$'}storage_dir" ] && [ -r "${'$'}storage_dir" ] && BINDS="${'$'}BINDS -b ${'$'}storage_dir"
             done
             if [ "${'$'}HOST_WORKSPACE" != "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" ]; then
                 BINDS="${'$'}BINDS -b ${'$'}HOST_WORKSPACE:${'$'}GUEST_WORKSPACE"

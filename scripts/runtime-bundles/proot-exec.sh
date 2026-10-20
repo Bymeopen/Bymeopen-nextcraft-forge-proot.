@@ -141,6 +141,10 @@ fake /proc/sys/kernel/overflowgid overflowgid "65534"
 for bionic_dir in /system /apex /vendor /product; do
     [ -d "$bionic_dir" ] && BINDS="$BINDS -b $bionic_dir"
 done
+# Shared storage as proot-distro binds it; readable only when Android granted the app storage access.
+for storage_dir in /storage /sdcard /mnt/sdcard; do
+    [ -d "$storage_dir" ] && [ -r "$storage_dir" ] && BINDS="$BINDS -b $storage_dir"
+done
 if [ "$HOST_WORKSPACE" != "$ROOTFS$GUEST_WORKSPACE" ]; then
     BINDS="$BINDS -b $HOST_WORKSPACE:$GUEST_WORKSPACE"
 fi
