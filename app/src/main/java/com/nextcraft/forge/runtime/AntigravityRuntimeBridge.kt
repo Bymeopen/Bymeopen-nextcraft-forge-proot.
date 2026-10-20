@@ -477,8 +477,22 @@ class AntigravityRuntimeBridge(
                 stopAfterTerminalResult(process)
             } else {
                 val exit = process.waitFor()
-                check(exit == 0 && resultSeen) {
-                    friendlyError(lastDiagnostic.ifBlank { "Antigravity exited with code $exit" })
+                if (assistantTextSeen) {
+                    // agy already streamed its answer; a missing terminal "result" event (or a non-zero exit after it
+                    // finished, e.g. the sandbox trapping a syscall during process teardown) must not turn a complete
+                    // answer into a failure. Keep the reason visible in the runtime log instead.
+                    eventBus.emit(
+                        RuntimeEvent.RuntimeLog(
+                            sessionId,
+                            "Antigravity",
+                            "Antigravity ended without a result event (exit $exit); the answer above is complete.",
+                        ),
+                    )
+                } else {
+                    check(exit == 0) {
+                        friendlyError(lastDiagnostic.ifBlank { "Antigravity exited with code $exit" })
+                    }
+                    error(friendlyError(lastDiagnostic.ifBlank { "Antigravity exited without answering" }))
                 }
             }
             val paths = checkpoints.changedFiles(workspace, before)
