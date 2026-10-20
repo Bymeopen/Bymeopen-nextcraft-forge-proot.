@@ -132,6 +132,8 @@
     <string name="terminal_stop_command">Hentikan perintah</string>
     <string name="terminal_text_smaller">Perkecil teks</string>
     <string name="terminal_text_larger">Perbesar teks</string>
+    <string name="terminal_input_hint">Ketik perintah</string>
+    <string name="terminal_send">Kirim</string>
     <string name="terminal_clear_terminal">Bersihkan terminal</string>
     <string name="terminal_run_command_in_the">Jalankan perintah di workspace</string>
     <string name="terminal_run">Jalankan</string>

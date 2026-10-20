@@ -132,6 +132,8 @@
     <string name="terminal_stop_command">Stop command</string>
     <string name="terminal_text_smaller">Smaller text</string>
     <string name="terminal_text_larger">Larger text</string>
+    <string name="terminal_input_hint">Type a command</string>
+    <string name="terminal_send">Send</string>
     <string name="terminal_clear_terminal">Clear terminal</string>
     <string name="terminal_run_command_in_the">Run command in the workspace</string>
     <string name="terminal_run">Run</string>
