@@ -144,7 +144,7 @@ internal val fullWidthTabs = setOf(ForgeTab.TERMINAL, ForgeTab.FILES, ForgeTab.P
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
 private val toolsGroup = setOf(
     ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
-    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS, ForgeTab.CODE_VIEWER,
 )
 
 private fun ForgeTab.navIndex(): Int {

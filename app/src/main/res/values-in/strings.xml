@@ -793,4 +793,11 @@
     <string name="diff_row_added">Baris %1$s ditambahkan: %2$s</string>
     <string name="diff_row_removed">Baris %1$s dihapus: %2$s</string>
     <string name="diff_row_context">Baris %1$s: %2$s</string>
+    <string name="tools_code_viewer">Pembaca kode</string>
+    <string name="tools_code_viewer_desc">Baca perubahan sebagai diff, atau buka file dengan nomor baris</string>
+    <string name="code_viewer_no_project">Buka proyek untuk membaca kodenya.</string>
+    <string name="code_viewer_edit">Edit</string>
+    <string name="code_viewer_changes">Perubahan (%1$d)</string>
+    <string name="code_viewer_files">File (%1$d)</string>
+    <string name="code_viewer_no_files">Proyek ini belum punya file.</string>
 </resources>

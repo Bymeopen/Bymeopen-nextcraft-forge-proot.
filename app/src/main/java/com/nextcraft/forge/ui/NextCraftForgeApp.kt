@@ -395,6 +395,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
                     ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
                     ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.CODE_VIEWER -> CodeViewerScreen(state = state, viewModel = viewModel)
                 }
             }
             }
