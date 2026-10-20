@@ -1,5 +1,8 @@
 package com.nextcraft.forge.runtime
 
+import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.ui.toUiText
+import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.Project
 import java.io.File
@@ -17,7 +20,7 @@ data class SnapshotsState(
     val projectName: String = "",
     val snapshots: List<WorkspaceSnapshot> = emptyList(),
     val busy: Boolean = false,
-    val message: String? = null,
+    val message: UiText? = null,
 )
 
 /** Checkpoint manager: manual project snapshots with restore (see [SnapshotManager]). */
@@ -35,7 +38,7 @@ class SnapshotsController(
 
     fun refresh() {
         val project = activeProject() ?: run {
-            mutable.update { SnapshotsState(message = "Open a project first.") }
+            mutable.update { SnapshotsState(message = UiText.res(R.string.rt_open_project_first)) }
             return
         }
         scope.launch {
@@ -44,23 +47,23 @@ class SnapshotsController(
         }
     }
 
-    fun create(label: String) = task("Snapshot saved.") { project ->
+    fun create(label: String) = task(UiText.res(R.string.rt_snap_saved)) { project ->
         manager.create(project.id, workspaceFor(project.id), label)
     }
 
     fun restore(snapshot: WorkspaceSnapshot) {
         if (projectBusy()) {
-            mutable.update { it.copy(message = "Wait for the running agent, build or terminal command first.") }
+            mutable.update { it.copy(message = UiText.res(R.string.rt_snap_wait_running)) }
             return
         }
-        task("Restored \"${snapshot.label}\". The state before the restore was saved as a snapshot.") { project ->
+        task(UiText.res(R.string.rt_snap_restored, snapshot.label)) { project ->
             manager.restore(project.id, workspaceFor(project.id), snapshot)
         }
     }
 
-    fun delete(snapshot: WorkspaceSnapshot) = task("Snapshot deleted.") { manager.delete(snapshot) }
+    fun delete(snapshot: WorkspaceSnapshot) = task(UiText.res(R.string.rt_snap_deleted)) { manager.delete(snapshot) }
 
-    private fun task(success: String, block: (Project) -> Unit) {
+    private fun task(success: UiText, block: (Project) -> Unit) {
         val project = activeProject() ?: return
         if (mutable.value.busy) return
         mutable.update { it.copy(busy = true, message = null) }
@@ -72,7 +75,7 @@ class SnapshotsController(
                     busy = false,
                     snapshots = list,
                     projectName = project.name,
-                    message = result.fold({ success }, { e -> e.message ?: "Operation failed." }),
+                    message = result.fold({ success }, { e -> e.toUiText(R.string.rt_snap_failed) }),
                 )
             }
         }

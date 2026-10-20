@@ -254,7 +254,7 @@ fun CiCdScreen(viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         if (ci.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        ci.message?.let { Text(it, fontSize = ForgeType.control, color = scheme.onSurfaceVariant) }
+        ci.message?.let { Text(it.asString(), fontSize = ForgeType.control, color = scheme.onSurfaceVariant) }
         OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel.cicd::refresh, enabled = !ci.loading, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.tool_refresh))
         }

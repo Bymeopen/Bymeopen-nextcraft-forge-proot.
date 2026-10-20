@@ -410,7 +410,7 @@ internal fun AntigravityAccountCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = agyAuth.message ?: stringResource(R.string.settings_google_required),
+                        text = agyAuth.message?.asString() ?: stringResource(R.string.settings_google_required),
                         fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                         maxLines = 2,

@@ -177,7 +177,7 @@
     <string name="nav_projects">Proyek</string>
     <string name="nav_agent">Atur AI</string>
     <string name="nav_tools">Alat</string>
-    <string name="nav_settings">Pengaturan</string>
+    <string name="nav_settings">Setelan</string>
     <string name="status_done">Selesai</string>
     <string name="status_running">Berjalan</string>
     <string name="status_failed">Gagal</string>
@@ -717,4 +717,47 @@
     <string name="starter_tests">Tulis tes untuk kode utama</string>
     <string name="diff_added">+%1$d</string>
     <string name="diff_removed">−%1$d</string>
+
+    <!-- Runtime messages (auth, snapshots, CI/CD) -->
+    <string name="rt_auth_prev_closing">Proses masuk sebelumnya masih ditutup. Coba lagi.</string>
+    <string name="rt_auth_claude_install_first">Pasang Claude Code lebih dulu.</string>
+    <string name="rt_auth_email_invalid">Masukkan alamat email yang valid.</string>
+    <string name="rt_auth_claude_starting">Memulai proses masuk Claude…</string>
+    <string name="rt_auth_claude_start_failed">Tidak dapat memulai proses masuk Claude.</string>
+    <string name="rt_auth_claude_open_page">Buka halaman masuk. Prosesnya selesai sendiri; jika yang muncul adalah kode, tempel di sini.</string>
+    <string name="rt_auth_claude_connected">Akun Claude terhubung</string>
+    <string name="rt_auth_claude_failed">Proses masuk Claude gagal.</string>
+    <string name="rt_auth_code_submit_failed">Tidak dapat mengirim kode.</string>
+    <string name="rt_auth_claude_completing">Menyelesaikan proses masuk Claude…</string>
+    <string name="rt_auth_signing_out">Sedang keluar…</string>
+    <string name="rt_auth_claude_signed_out">Sudah keluar dari Claude.</string>
+    <string name="rt_auth_claude_signout_failed">Tidak dapat keluar dari Claude.</string>
+    <string name="rt_auth_agy_install_first">Pasang Antigravity CLI lebih dulu di Pengaturan.</string>
+    <string name="rt_auth_agy_starting">Memulai proses masuk Antigravity…</string>
+    <string name="rt_auth_agy_start_failed">Tidak dapat memulai proses masuk Antigravity.</string>
+    <string name="rt_auth_agy_generating">Google OAuth dipilih. Membuat tautan masuk…</string>
+    <string name="rt_auth_agy_open_link">Buka tautan Google di browser, masuk, lalu tempel kode verifikasi.</string>
+    <string name="rt_auth_google_connected">Akun Google terhubung</string>
+    <string name="rt_auth_agy_finishing">Menyelesaikan penyiapan Antigravity…</string>
+    <string name="rt_auth_agy_failed">Proses masuk Antigravity gagal.</string>
+    <string name="rt_auth_agy_code_failed">Tidak dapat mengirim kode verifikasi.</string>
+    <string name="rt_auth_google_completing">Menyelesaikan proses masuk Google…</string>
+    <string name="rt_auth_agy_signed_out">Sudah keluar dari Antigravity.</string>
+    <string name="rt_auth_agy_signout_failed">Tidak dapat keluar dari Antigravity.</string>
+    <string name="rt_open_project_first">Buka proyek lebih dulu.</string>
+    <string name="rt_snap_wait_running">Tunggu agen, build, atau perintah terminal yang sedang berjalan selesai dulu.</string>
+    <string name="rt_snap_saved">Snapshot disimpan.</string>
+    <string name="rt_snap_deleted">Snapshot dihapus.</string>
+    <string name="rt_snap_failed">Operasi gagal.</string>
+    <string name="rt_cicd_load_failed">Tidak dapat memuat pipeline.</string>
+    <string name="rt_cicd_start_failed">Tidak dapat memulai workflow.</string>
+    <string name="rt_auth_connected_as">Terhubung sebagai %1$s</string>
+    <string name="rt_snap_restored">\"%1$s\" dipulihkan. Kondisi sebelum pemulihan disimpan sebagai snapshot.</string>
+    <string name="rt_cicd_started">%1$s dimulai di %2$s. Segarkan dalam beberapa detik.</string>
+    <string name="rt_auth_claude_code_empty">Tempel kode dari halaman masuk lebih dulu.</string>
+    <string name="rt_auth_session_expired">Sesi masuk berakhir. Mulai proses masuk lagi.</string>
+    <string name="rt_auth_claude_signout_incomplete">Proses keluar dari Claude belum tuntas.</string>
+    <string name="rt_auth_agy_code_empty">Tempel kode verifikasi dari Google lebih dulu.</string>
+    <string name="rt_auth_agy_signout_incomplete">Proses keluar dari Antigravity belum tuntas.</string>
+    <string name="rt_cicd_connect_github">Hubungkan GitHub di Pengaturan lebih dulu.</string>
 </resources>

@@ -227,7 +227,7 @@ fun CheckpointsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 enabled = !snaps.busy && state.activeProjectId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            snaps.message?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant) }
+            snaps.message?.let { Text(it.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant) }
         }
         if (snaps.snapshots.isEmpty()) {
             Text(stringResource(R.string.tool_no_snapshots), fontSize = ForgeType.control, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
