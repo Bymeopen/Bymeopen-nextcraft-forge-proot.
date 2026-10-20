@@ -339,7 +339,7 @@ fun ForgePillIcon(
             .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 44.dp, height = 38.dp)
             .clip(RoundedCornerShape(100))
-            .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.ripple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

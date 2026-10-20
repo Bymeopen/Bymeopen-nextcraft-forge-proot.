@@ -257,8 +257,11 @@ fun TerminalScreen(
                     // Commands are exact strings (no autocorrect or capitals), and the keyboard's Send key runs them.
                     keyboardOptions = ForgeFieldKind.IDENTIFIER.keyboardOptions(ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { if (commandInput.isNotBlank() && !state.terminalRunning) runCommand() }),
-                    colors = TextFieldDefaults.textFieldColors(
-                        containerColor = Color.Transparent,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        errorContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
                         disabledIndicatorColor = Color.Transparent,
