@@ -68,9 +68,22 @@ has_submounts() {
     awk -v prefix="$1/" 'index($2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
 }
 
+# On failure MAKE_SLAVE_ERR holds what each attempt printed, so the warning below can say why.
 make_slave() {
-    mount --make-rslave "$1" 2>/dev/null || mount -o rslave "$1" 2>/dev/null ||
-        mount --make-slave "$1" 2>/dev/null || mount -o slave "$1" 2>/dev/null
+    local e1 e2 e3 e4
+    e1=$(mount --make-rslave "$1" 2>&1) && return 0
+    e2=$(mount -o rslave "$1" 2>&1) && return 0
+    e3=$(mount --make-slave "$1" 2>&1) && return 0
+    e4=$(mount -o slave "$1" 2>&1) && return 0
+    # Android's toybox mount reads "--make-rslave DIR" as "mount DIR" (fstab lookup), so also try a busybox mount.
+    local bb eb
+    for bb in busybox /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
+        command -v "$bb" >/dev/null 2>&1 || continue
+        "$bb" mount --make-rslave "$1" >/dev/null 2>&1 && return 0
+        eb="$eb | $bb: $("$bb" mount --make-rslave "$1" 2>&1)"
+    done
+    MAKE_SLAVE_ERR="--make-rslave: $e1 | -o rslave: $e2 | --make-slave: $e3 | -o slave: $e4$eb"
+    return 1
 }
 
 mount_bionic() {
@@ -84,7 +97,7 @@ mount_bionic() {
     is_mounted "$dst" && return 0
     mount -o bind "$src" "$dst" || return 1
     if ! make_slave "$dst"; then
-        echo "Warning: mount propagation cannot be changed; $dst is bound without its submounts" >&2
+        echo "Warning: mount propagation cannot be changed; $dst is bound without its submounts (${MAKE_SLAVE_ERR:-no error output})" >&2
         mount -o remount,bind,ro "$dst" 2>/dev/null || true
         return 0
     fi

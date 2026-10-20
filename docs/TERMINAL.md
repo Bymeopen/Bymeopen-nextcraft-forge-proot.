@@ -24,11 +24,18 @@ The Terminal screen is a full VT100/xterm terminal, so editors, pagers and TUIs 
 `com.github.termux.termux-app:terminal-emulator` and `:terminal-view`, pinned to `v0.118.0`, resolved from JitPack
 (the repository is restricted to that one group in `settings.gradle.kts`).
 
-**Licence needs confirming before this ships in a public release.** The `termux/termux-app` repository is GPLv3-only
-with an exception for code derived from Jack Palevich's Android-Terminal-Emulator (Apache 2.0); its LICENSE points
-at the `terminal-view` and `terminal-emulator` libraries without a licence file of their own, and the published POM
-says "Other". Decide with the licence in hand whether linking them is acceptable for this app's distribution; if not,
-swap the emulator (JediTerm, or a Compose-native one) behind `ForgeTerminalClients.kt` / `TerminalScreen.kt`.
+**Licence (decision recorded 2026-10-20: use the Termux libraries, treat them as GPLv3).** The `termux/termux-app`
+repository is GPLv3-only with an exception for code derived from Jack Palevich's Android-Terminal-Emulator
+(Apache 2.0). Its LICENSE points at the `terminal-view` and `terminal-emulator` libraries but they carry no licence file
+or per-file header of their own, and the published POM says "Other", so the boundary between the Apache and the Termux
+parts is not stated. The safe reading is GPLv3.
+
+What that means in practice:
+- **Using the app yourself or inside one organisation, without handing the APK to anyone else:** no obligation.
+- **Giving the APK to other people (public release, Play Store, clients):** the whole app must be released under GPLv3
+  with its source, the licence text and these notices (see `THIRD_PARTY_NOTICES.md`). If that is not acceptable, swap
+  the emulator (JediTerm, or a Compose-native one) behind `ForgeTerminalClients.kt` / `TerminalScreen.kt`, or ask the
+  Termux maintainers to confirm the two libraries are Apache-2.0 only.
 
 ## Known limits
 - Closing a session kills its `su` process; children inside the chroot normally get SIGHUP from the closed PTY, but

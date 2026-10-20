@@ -385,6 +385,8 @@ class AntigravityRuntimeBridge(
             var activeToolDetail = ""
             var activeToolStartedAtMillis = 0L
             var lastToolProgressAtMillis = 0L
+            var lastRetryCheckAtMillis = 0L
+            var lastRetryStatus: String? = null
             suspend fun handleLine(rawLine: String) {
                 val line = rawLine.trimEnd('\r')
                 if (line.isBlank()) return
@@ -431,6 +433,17 @@ class AntigravityRuntimeBridge(
                             activeToolName?.let { name -> "Running $name: $activeToolDetail" }
                                 ?: "Antigravity is working…",
                         )
+                        // agy retries failed requests silently; surface them so a long wait has a visible reason.
+                        if (now - lastRetryCheckAtMillis >= RETRY_CHECK_INTERVAL_MS) {
+                            lastRetryCheckAtMillis = now
+                            antigravityRetryStatus(recentAntigravityDiagnostic(sessionStartedAtMillis))
+                                ?.takeIf { it != lastRetryStatus }
+                                ?.let { status ->
+                                    lastRetryStatus = status
+                                    pushForegroundProgress(status)
+                                    eventBus.emit(RuntimeEvent.RuntimeLog(sessionId, "Antigravity", status))
+                                }
+                        }
                         if (activeToolName == "Bash" && activeToolDetail.contains("gradle", ignoreCase = true) &&
                             now - activeToolStartedAtMillis >= 10_000L && now - lastToolProgressAtMillis >= 10_000L
                         ) {
@@ -585,6 +598,10 @@ internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): Str
 private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
     ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
         "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
+    ANTIGRAVITY_SERVER_ERRORS.any { value.contains(it, ignoreCase = true) } ->
+        "Google's Antigravity server returned an error. Wait a moment and try again; your files were kept."
+    value.contains("stream was interrupted", true) ->
+        "The connection to Google dropped mid-answer. Send the message again to continue."
     value.contains("authentication required", true) ||
         value.contains("authentication failed", true) ||
         value.contains("not signed in", true) ||
@@ -601,6 +618,10 @@ private fun classifyAntigravityError(value: String, allowTimeout: Boolean): Stri
 
 private val ANTIGRAVITY_NETWORK_ERRORS = listOf(
     "dial tcp",
+    "read tcp",
+    "connection timed out",
+    "connection reset",
+    "tls handshake timeout",
     "i/o timeout",
     "network is unreachable",
     "no address associated with hostname",
@@ -609,6 +630,33 @@ private val ANTIGRAVITY_NETWORK_ERRORS = listOf(
     "failed to fetch user info",
     "userinfo request failed",
 )
+
+private val ANTIGRAVITY_SERVER_ERRORS = listOf(
+    "code 500",
+    "code 502",
+    "code 503",
+    "internal error encountered",
+    "unavailable (code",
+)
+
+private const val RETRY_CHECK_INTERVAL_MS = 5_000L
+
+private val ANTIGRAVITY_RETRY_LINE = Regex("""Run: attempt (\d+) failed \((.*)\), retrying in (\w+)""")
+
+/**
+ * The newest "Run: attempt N failed (…), retrying in Xs" line in an agy log tail, as a short status for the
+ * user (agy only writes these retries to its log, never to the stream), or null when there is none.
+ */
+internal fun antigravityRetryStatus(logTail: String): String? {
+    val match = ANTIGRAVITY_RETRY_LINE.findAll(logTail).lastOrNull() ?: return null
+    val (attempt, reason, delay) = match.destructured
+    val cause = when {
+        ANTIGRAVITY_SERVER_ERRORS.any { reason.contains(it, ignoreCase = true) } -> "Google server error"
+        ANTIGRAVITY_NETWORK_ERRORS.any { reason.contains(it, ignoreCase = true) } -> "Connection to Google failed"
+        else -> "Request failed"
+    }
+    return "$cause, retrying in $delay (attempt $attempt)"
+}
 
 private class AntigravitySessionException(message: String) : IllegalStateException(message)
 

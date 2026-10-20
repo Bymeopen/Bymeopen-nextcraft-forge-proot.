@@ -172,7 +172,7 @@ internal fun RuntimeOnboardingScreen(
         StatusCheckRow(
             label = stringResource(R.string.shell_check_rootfs),
             ok = state.runtimeInstalled,
-            detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else snap.message,
+            detail = if (state.runtimeInstalled) stringResource(R.string.shell_installed_ready) else runtimeText(snap.message),
             inProgress = !state.runtimeInstalled && snap.status == RuntimeSetupStatus.RUNNING,
         )
 
@@ -223,7 +223,7 @@ internal fun RuntimeOnboardingScreen(
                         ForgeStatusIcon(status = progressStatus, iconSize = 20.dp)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(snap.message, fontSize = ForgeType.body, fontWeight = FontWeight.Medium, maxLines = 2)
+                            Text(runtimeText(snap.message), fontSize = ForgeType.body, fontWeight = FontWeight.Medium, maxLines = 2)
                             Text(
                                 text = snap.errorMessage ?: stringResource(progressStatus.labelRes),
                                 fontSize = ForgeType.secondary,
