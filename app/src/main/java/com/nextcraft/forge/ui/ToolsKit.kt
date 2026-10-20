@@ -73,9 +73,9 @@ internal fun LogBox(text: String, placeholder: String, modifier: Modifier = Modi
     val scroll = rememberScrollState()
     LaunchedEffect(text.length) { scroll.scrollTo(scroll.maxValue) }
     Surface(
-        modifier = // The text scrolls inside this box and the box sits in a scrolling screen, so its height must always be bounded:
-        // an unbounded max height makes the inner verticalScroll throw (crash when opening System Diagnostics).
-        modifier.fillMaxWidth().then(if (text.isEmpty()) Modifier.heightIn(min = 72.dp, max = 260.dp) else Modifier.height(260.dp)),
+        // Always a bounded height: the text inside scrolls vertically and every caller sits in a vertically scrolling
+        // screen, so a height with no upper limit (heightIn(min = ...)) crashes with "infinity maximum height".
+        modifier = modifier.fillMaxWidth().height(if (text.isEmpty()) 72.dp else 260.dp),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
     ) {
