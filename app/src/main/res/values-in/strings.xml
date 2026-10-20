@@ -621,6 +621,9 @@
     <string name="settings_installed_agents">Agen terpasang</string>
     <string name="settings_clear_terminal_history">Bersihkan riwayat terminal</string>
     <string name="settings_danger_zone">Zona berbahaya</string>
+    <string name="settings_storage_access">Akses penyimpanan untuk /sdcard</string>
+    <string name="settings_storage_access_sub">Beri izin \"Akses semua file\" agar guest bisa membaca dan menulis /sdcard</string>
+    <string name="settings_storage_access_granted">Diizinkan · /sdcard tersedia di guest</string>
     <string name="settings_repair_rootfs">Perbaiki rootfs</string>
     <string name="settings_repair_rootfs_sub">Perbaiki symlink dan skrip runtime yang rusak.</string>
     <string name="settings_version">Versi</string>

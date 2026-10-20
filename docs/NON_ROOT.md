@@ -25,6 +25,8 @@ Aplikasi ini hanya punya satu mesin: `proot` statis dari APK. Tidak ada `su`, ti
 - Claude Code dipasang dan diperbarui hanya dari npm `2.1.112`; cek pembaruan tidak pernah menawarkan rilis Bun yang lebih baru.
 - Hook izin didaftarkan sebagai `PreToolUse` (dengan `permissionDecision`) selain `PermissionRequest`: di 2.1.112 mode headless
   (`-p`) tidak memanggil `PermissionRequest`, sehingga setiap perintah berakhir "This command requires approval".
+- `/sdcard` di guest butuh izin Android "Akses semua file" (Pengaturan → Akses penyimpanan untuk /sdcard); tanpa itu `/storage`
+  tidak di-bind.
 - Semua berkas rootfs milik UID aplikasi, jadi *Disconnect GitHub*, *Sign out*, dan perbaikan rootfs tidak butuh eskalasi.
 
 ## Asal biner

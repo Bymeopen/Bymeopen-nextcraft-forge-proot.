@@ -633,6 +633,9 @@
     <string name="settings_installed_agents">Installed agents</string>
     <string name="settings_clear_terminal_history">Clear terminal history</string>
     <string name="settings_danger_zone">Danger zone</string>
+    <string name="settings_storage_access">Storage access for /sdcard</string>
+    <string name="settings_storage_access_sub">Grant \"All files access\" so the guest can read and write /sdcard</string>
+    <string name="settings_storage_access_granted">Granted · /sdcard is available in the guest</string>
     <string name="settings_repair_rootfs">Repair rootfs</string>
     <string name="settings_repair_rootfs_sub">Fix broken symlinks and runtime scripts.</string>
     <string name="settings_version">Version</string>

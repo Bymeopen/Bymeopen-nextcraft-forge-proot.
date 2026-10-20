@@ -316,6 +316,28 @@ fun SettingsScreenModern(
             }
         }
 
+        // Shared storage for the guest (/sdcard): Android 11+ "All files access", granted in system settings.
+        var storageGranted by remember { mutableStateOf(hasAllFilesAccess()) }
+        val storageLifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current
+        androidx.compose.runtime.DisposableEffect(storageLifecycle) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) storageGranted = hasAllFilesAccess()
+            }
+            storageLifecycle.lifecycle.addObserver(observer)
+            onDispose { storageLifecycle.lifecycle.removeObserver(observer) }
+        }
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            SettingsRow(
+                icon = ForgeGlyph.FOLDER,
+                title = stringResource(R.string.settings_storage_access),
+                subtitle = stringResource(if (storageGranted) R.string.settings_storage_access_granted else R.string.settings_storage_access_sub),
+                onClick = { openAllFilesAccessSettings(context) },
+                trailing = {
+                    if (storageGranted) ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp) else Text("›", color = scheme.onSurfaceVariant)
+                },
+            )
+        }
+
         // ───────────────────────── Danger zone ─────────────────────────
         ForgeSectionLabel(stringResource(R.string.settings_danger_zone), horizontalPadding = 6.dp)
         ForgeThemedCard(
@@ -754,3 +776,28 @@ internal fun SetupProgress(state: ForgeUiState, scope: SetupScope? = null) {
         RuntimeProgressPanel(state.setupSnapshot)
     }
 }
+
+/** Android 11+ "All files access" (MANAGE_EXTERNAL_STORAGE); older versions only need the legacy storage permission. */
+private fun hasAllFilesAccess(): Boolean =
+    android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || android.os.Environment.isExternalStorageManager()
+
+private fun openAllFilesAccessSettings(context: android.content.Context) {
+    val intents = buildList {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            add(
+                android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    .setData(android.net.Uri.parse("package:${context.packageName}")),
+            )
+            add(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
+        add(
+            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(android.net.Uri.parse("package:${context.packageName}")),
+        )
+    }
+    for (intent in intents) {
+        val ok = runCatching { context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); true }.getOrDefault(false)
+        if (ok) return
+    }
+}
+

@@ -2951,6 +2951,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             for storage_dir in /storage /sdcard /mnt/sdcard; do
                 [ -d "${'$'}storage_dir" ] && [ -r "${'$'}storage_dir" ] && BINDS="${'$'}BINDS -b ${'$'}storage_dir"
             done
+            # /sdcard is a symlink chain the app may not traverse; the real directory is readable with All files access.
+            if [ ! -r /sdcard ] && [ -d /storage/emulated/0 ] && [ -r /storage/emulated/0 ]; then
+                BINDS="${'$'}BINDS -b /storage/emulated/0:/sdcard"
+            fi
             if [ "${'$'}HOST_WORKSPACE" != "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" ]; then
                 BINDS="${'$'}BINDS -b ${'$'}HOST_WORKSPACE:${'$'}GUEST_WORKSPACE"
             fi
