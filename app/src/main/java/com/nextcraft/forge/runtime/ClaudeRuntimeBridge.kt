@@ -346,7 +346,8 @@ class ClaudeRuntimeBridge(
     suspend fun hello(provider: ProviderProfile, timeoutMillis: Long = 90_000L): String = withContext(Dispatchers.IO) {
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val storedLogin = usesStoredClaudeLogin(provider)
-        val secret = if (storedLogin) "" else secretFor(provider).orEmpty()
+        // Same fallback as startSession: local servers (LM Studio, Ollama) have no key, so test them with the placeholder.
+        val secret = if (storedLogin) "" else secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         check(secret.isNotBlank() || storedLogin) { "Not signed in to Claude." }
         val installed = installer.installedRuntime()
         val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
@@ -771,7 +772,9 @@ class ClaudeRuntimeBridge(
     private fun sanitizeForDisplay(value: String): String {
         return value
             .replace(Regex("sk-[A-Za-z0-9_-]{8,}"), "sk-••••")
-            .replace(Regex("(?i)(authorization|api[_-]?key)\\s*[:=]\\s*[^\\s,}]+"), "${'$'}1: ••••")
+            .replace(Regex("(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"), "gh_••••")
+            // Also covers JSON ("api_key":"x") and "Authorization: Bearer <token>", where the token follows the scheme word.
+            .replace(Regex("(?i)(authorization|api[_-]?key|(?:access|refresh|auth)[_-]?token|secret|password)[\"']?\\s*[:=]\\s*[\"']?(?:(?:bearer|basic|token)\\s+)?[^\\s,}\"']+"), "${'$'}1: ••••")
             .replace(Regex("\\s+"), " ")
             .trim()
             .take(600)
@@ -919,6 +922,7 @@ private val SAFE_BASH_COMMANDS = setOf(
     "basename", "dirname", "realpath", "readlink", "cut", "tr", "awk", "sed", "find", "xargs", "jq", "du", "df",
     "env", "md5sum", "sha256sum", "cp", "mv", "gradle", "javac", "kotlinc",
 )
+private val UNSAFE_TOOL_FLAG_REGEX = Regex("""--pre(?:=.*)?|--hostname-bin(?:=.*)?|--compress-program(?:=.*)?|--output(?:=.*)?|-fprint0?|-fprintf|-fls""")
 private val ENV_ASSIGNMENT_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")
 
 // awk and sed are safe for plain text processing, but their scripts can run commands or write files.
@@ -1017,6 +1021,11 @@ private fun isSafeBashSegment(segment: String): Boolean {
         if (wrapped.isEmpty()) return first == "xargs"
         return isSafeBashSegment(wrapped.joinToString(" "))
     }
+    // Allowlisted tools that can still run a program (rg --pre, sort --compress-program) or write a file
+    // (find -fprint, git diff --output, sort/tree -o): never auto-approved.
+    val args = words.drop(1).map { it.trim('\'', '"') }
+    if (args.any { UNSAFE_TOOL_FLAG_REGEX.matches(it) }) return false
+    if ((first == "sort" || first == "tree") && args.any { it == "-o" || (first == "tree" && it.startsWith("-o") && it.length > 2) }) return false
     if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false

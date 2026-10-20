@@ -8,6 +8,8 @@
 
 ---
 
+> **Pembaruan 2026-10-19 (audit UX ulang):** tabel baseline di §0 sudah usang. Kondisi terukur sekarang: 557 string (id & en lengkap), 627 pemakaian `stringResource`, 13 literal `Text`, 56 `semantics`/`Role`, 6 file guard test. Yang masih terbuka: locale ar/es/hi/ru/zh-CN hanya stub (disembunyikan dari pemilih lewat `AppLanguage.translated`), screenshot test (Paparazzi/Roborazzi) belum ada, dan `MainViewModel` masih ±3.100 baris.
+
 ## 0. Audit baseline (diukur dari repo, bukan asumsi)
 
 | Temuan | Nilai terukur | Dampak | Prioritas |
@@ -357,3 +359,12 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Files dalam proyek: header kartu (+ file/folder/unggah, pilih → Unduh ZIP, refresh), pohon buka-tutup, kebab per baris (new file/folder/upload here, rename, delete). Chat: tool-call per jenis (Think aksen, Write kuning, Bash/Read redup), lampiran foto/file semua ekstensi via attachments/. Inset: imePadding/statusBars/navigationBars (edge-to-edge targetSdk 35).
 - Motion batch 1 (ForgeMotion.kt): push/pop slide+fade antar kedalaman proyek, cross-fade tab/pane, pressed scale pada tombol/pill, tool-call expand + chevron putar, tombol kirim spring + warna animasi, caret streaming berkedip, dialog pop-in, animateItemPlacement. Semua snap saat reduce-motion.
 - Batch 2: ForgeType (24/17/16/15/13/12, label seksi uppercase tracking 0.6) dan ForgeSpace (20/14/16/56/24/8) dipakai komponen bersama; ukuran font ganjil disapu; tepi kartu Linear 1px putih 6%.
+- Batch 3: ForgeIcons (21 glyph stroke 1.8dp) dipakai baris Settings/Agent config, menu Files, pohon file, jenis tool-call, riwayat dan lampir di chat; divider pohon dihapus (hanya dalam kartu); placeholder 60%; haptic tick tab dan kirim.
+
+- Batch A (reset): shared ForgeProjectHeader / ForgeListRow / ForgeEmptyState (ForgeShared.kt); project header on Chats, Files, Terminal, Preview and tool screens; Tools launcher single-accent stroke tiles; uniform empty states (Projects, Chats, Preview); diff review buttons 48dp.
+
+- UX audit fixes: removed doubled status-bar inset, compact user bubbles (long-press copy), Agent endpoint/credentials subtitles, localised model/auth/project strings, borderless GitHub dialog, auto-approve warning, aligned settings toggles, Android-only run button, active chat marked by weight, Editor duplicate removed from Tools, nav pill fits Pengaturan.
+
+- Phone sizes 6.1-6.9in: real Compose renders at 360/393/412/440dp (opt-in harness: gradle :app:testDebugUnitTest -PforgeScreenshots -PforgeRoboDir=<dir with android-all-instrumented-14-robolectric-10818077-i6.jar>, output app/build/screenshots). Fixed: two-line list subtitles, project card meta line + compact tile under 400dp, chat copy button no longer overlaps text, 10.5sp nav labels when 5 tabs share <76dp slots.
+
+- Batch B (chat): grouped tool steps (3+ fold into one row, live step shown), inline diff card with keep/revert under the last finished reply, approval as non-dismissable bottom sheet with risk label and affected files, contextual quick-action chips plus starter ideas, "N new" pill. Components in ChatExtras.kt; renders in the phone-size harness (chatB, approval).

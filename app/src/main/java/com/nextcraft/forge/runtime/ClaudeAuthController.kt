@@ -47,6 +47,7 @@ class ClaudeAuthController(
     private val installer = RuntimeInstaller(context)
     private val mutableState = MutableStateFlow(ClaudeAuthState())
     val state: StateFlow<ClaudeAuthState> = mutableState.asStateFlow()
+    private val loginGeneration = java.util.concurrent.atomic.AtomicInteger()
     private val authOutput = File(context.cacheDir, "claude-auth-output.log")
     private val urlFile = File(RuntimeInstaller.bridgeRootDir(context), "claude-login-url")
     @Volatile private var process: Process? = null
@@ -80,7 +81,18 @@ class ClaudeAuthController(
     }
 
     private suspend fun beginLoginLocked(mode: ClaudeLoginMode, email: String) {
-        if (process?.isAlive == true) return
+        // Tapping "Sign in with SSO" while the account flow is still waiting must restart with the new mode; silently
+        // keeping the old process made the SSO button look dead. cancel() ends the old reader loop, which nulls `process`.
+        if (process?.isAlive == true) {
+            cancel()
+            val giveUp = android.os.SystemClock.elapsedRealtime() + RESTART_WAIT_MS
+            while (process != null && android.os.SystemClock.elapsedRealtime() < giveUp) delay(50)
+            if (process?.isAlive == true) {
+                mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Previous sign-in is still closing. Try again.")
+                return
+            }
+            process = null
+        }
         if (!installer.isAgentInstalled(AgentKind.CLAUDE_CODE)) {
             mutableState.value = ClaudeAuthState(ClaudeAuthStatus.ERROR, message = "Install Claude Code first.")
             return
@@ -138,6 +150,8 @@ class ClaudeAuthController(
             return
         }
         process = running
+        // cancel()/logout() bump this so a loop that is still winding down cannot overwrite their state.
+        val generation = loginGeneration.get()
         var offset = 0L
         val output = StringBuilder()
         val deadline = android.os.SystemClock.elapsedRealtime() + LOGIN_TIMEOUT_MS
@@ -145,6 +159,7 @@ class ClaudeAuthController(
         try {
             RandomAccessFile(running.outputFile, "r").use { file ->
                 while (true) {
+                    if (generation != loginGeneration.get()) break
                     if (android.os.SystemClock.elapsedRealtime() > deadline) error("Sign-in timed out. Start sign-in again.")
                     val available = running.outputFile.length() - offset
                     if (available > 0) {
@@ -188,7 +203,7 @@ class ClaudeAuthController(
                             val account = readAccountEmail()
                             mutableState.value = ClaudeAuthState(
                                 ClaudeAuthStatus.SIGNED_IN,
-                                message = account?.let { "Connected as $it" } ?: "Claude account connected",
+                                message = account?.let { context.getString(com.nextcraft.forge.R.string.auth_connected_as, it) } ?: context.getString(com.nextcraft.forge.R.string.auth_claude_connected),
                                 accountEmail = account,
                             )
                             onSignedInChanged(true)
@@ -207,7 +222,7 @@ class ClaudeAuthController(
             }
             throw cancelled
         } catch (error: Throwable) {
-            if (mutableState.value.status != ClaudeAuthStatus.SIGNED_IN) {
+            if (generation == loginGeneration.get() && mutableState.value.status != ClaudeAuthStatus.SIGNED_IN) {
                 mutableState.value = ClaudeAuthState(
                     ClaudeAuthStatus.ERROR,
                     message = error.message?.take(240) ?: "Claude sign-in failed.",
@@ -228,8 +243,17 @@ class ClaudeAuthController(
 
     /** URL the CLI handed to its BROWSER helper: the one whose redirect is the CLI's own localhost listener. */
     private fun readAutomaticUrl(): String? = runCatching {
-        urlFile.takeIf(File::isFile)?.readText()?.trim()?.takeIf { it.startsWith("https://") && it.length < 4_096 }
+        urlFile.takeIf(File::isFile)?.readText()?.trim()?.takeIf { it.length < 4_096 && isTrustedSignInUrl(it) }
     }.getOrNull()
+
+    /**
+     * The URL file is writable by any process in the chroot (including a prompt-injected agent), so only offer links
+     * to Anthropic's own sign-in hosts instead of whatever https:// string is found there.
+     */
+    private fun isTrustedSignInUrl(url: String): Boolean {
+        val host = runCatching { java.net.URI(url) }.getOrNull()?.takeIf { it.scheme == "https" }?.host?.lowercase() ?: return false
+        return TRUSTED_SIGN_IN_HOSTS.any { host == it || host.endsWith(".$it") }
+    }
 
     /** Sends the code shown on the sign-in page (used when the automatic redirect did not reach the CLI). */
     @Synchronized
@@ -255,6 +279,7 @@ class ClaudeAuthController(
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {
+        loginGeneration.incrementAndGet()
         process?.let { running ->
             runCatching { running.destroy() }
             runCatching { if (running.isAlive) running.destroyForcibly() }
@@ -288,6 +313,7 @@ class ClaudeAuthController(
     }
 
     fun cancel() {
+        loginGeneration.incrementAndGet()
         val running = process
         if (running != null) {
             Thread {
@@ -328,7 +354,9 @@ class ClaudeAuthController(
 
     private companion object {
         const val CLAUDE_BINARY = "/usr/local/bin/claude"
+        val TRUSTED_SIGN_IN_HOSTS = listOf("claude.ai", "claude.com", "anthropic.com")
         const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
+        const val RESTART_WAIT_MS = 5_000L
         const val CREDENTIAL_POLL_MS = 2_000L
         const val MAX_OUTPUT_CHARS = 100_000
         val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")

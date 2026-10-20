@@ -54,6 +54,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -90,7 +91,8 @@ fun FilesAndDiffScreen(
     var newFolderBaseDir by rememberSaveable { mutableStateOf<String?>(null) }
     var renameTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingDeletePath by rememberSaveable { mutableStateOf<String?>(null) }
-    var selecting by rememberSaveable { mutableStateOf(false) }
+    // Not saveable, like selectedPaths: restoring `selecting` without its list made "export selection" export everything.
+    var selecting by remember { mutableStateOf(false) }
     val selectedPaths = remember { mutableStateListOf<String>() }
     var uploadDir by rememberSaveable { mutableStateOf("") }
     val uploadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -116,7 +118,13 @@ fun FilesAndDiffScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (!inProject) {
+        if (inProject) {
+            ForgeProjectHeader(
+                title = state.activeProject?.name ?: stringResource(R.string.files_files),
+                subtitle = stringResource(R.string.files_files),
+                onBack = { viewModel.projectBack() },
+            )
+        } else {
             ForgeLargeTitle(
                 title = stringResource(R.string.files_files),
                 subtitle = state.activeProject?.name,
@@ -259,7 +267,7 @@ fun FilesAndDiffScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeletePath = null }) {
+                ForgeTextButton(onClick = { pendingDeletePath = null }) {
                     Text(stringResource(R.string.agent_cancel))
                 }
             },
@@ -311,17 +319,17 @@ private fun FilesHeaderCard(
                 DropdownMenu(expanded = addOpen, onDismissRequest = { addOpen = false }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_new_file)) },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) },
                         onClick = { addOpen = false; onNewFile() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_new_folder)) },
-                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) },
                         onClick = { addOpen = false; onNewFolder() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_upload_here)) },
-                        leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) },
                         onClick = { addOpen = false; onUpload() },
                     )
                 }
@@ -427,17 +435,16 @@ private fun WorkspaceTreeList(
                         Spacer(modifier = Modifier.width(18.dp))
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    // Folder tile vs file sheet: shape says which, the accent only marks folders.
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp, 18.dp)
-                            .clip(RoundedCornerShape(if (entry.isDirectory) 4.dp else 3.dp))
-                            .background(if (entry.isDirectory) scheme.primary.copy(alpha = 0.85f) else scheme.onSurfaceVariant.copy(alpha = 0.55f)),
+                    // Stroke glyphs at the same weight as the nav bar; the accent only marks folders.
+                    ForgeIcon(
+                        glyph = if (entry.isDirectory) ForgeGlyph.FOLDER else ForgeGlyph.FILE,
+                        tint = if (entry.isDirectory) scheme.primary else scheme.onSurfaceVariant,
+                        size = 20.dp,
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = if (entry.isDirectory) "${entry.name} (${childCounts[entry.path] ?: 0})" else entry.name,
-                        fontSize = 15.sp,
+                        fontSize = ForgeType.body,
                         color = if (entry.isDirectory) scheme.onSurface else tokens.accentText,
                         fontWeight = if (entry.isDirectory || isSelected) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 2,
@@ -447,7 +454,7 @@ private fun WorkspaceTreeList(
                     if (!entry.isDirectory) {
                         Text(
                             text = formatBytes(entry.sizeBytes),
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             color = scheme.onSurfaceVariant,
                         )
                     }
@@ -457,25 +464,22 @@ private fun WorkspaceTreeList(
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             if (entry.isDirectory) {
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
                                 Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
                             }
                             if (!entry.isDirectory) {
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
                             }
-                            DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }, onClick = { menuOpen = false; onRename(entry.path) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.files_delete), color = tokens.dangerText) },
-                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = tokens.dangerText) },
+                                leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, tokens.dangerText) },
                                 onClick = { menuOpen = false; onDelete(entry.path) },
                             )
                         }
                     }
-                }
-                if (!entry.isDirectory) {
-                    Divider(color = scheme.outlineVariant, thickness = 0.5.dp, modifier = Modifier.padding(start = (56 + entry.depth * 14).dp, end = 12.dp))
                 }
             }
         }
@@ -504,12 +508,11 @@ private fun NameDialog(
         shape = RoundedCornerShape(24.dp),
         title = { Text(title, fontWeight = FontWeight.SemiBold) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                 value = value,
                 onValueChange = { value = it },
                 label = { Text(label) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -520,7 +523,7 @@ private fun NameDialog(
                 shape = RoundedCornerShape(100),
             ) { Text(stringResource(R.string.files_ok), fontWeight = FontWeight.SemiBold) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) } },
+        dismissButton = { ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) } },
     )
 }
 
@@ -550,7 +553,7 @@ private fun WorkspaceFileEditor(
         ) {
             Text(
                 text = stringResource(R.string.files_select_a_file_from),
-                fontSize = 14.sp,
+                fontSize = ForgeType.control,
                 color = scheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(14.dp))
@@ -573,7 +576,7 @@ private fun WorkspaceFileEditor(
             Text(
                 text = if (dirty) "$selectedPath *" else selectedPath,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -582,7 +585,7 @@ private fun WorkspaceFileEditor(
             if (!editable) {
                 Text(
                     text = stringResource(R.string.files_read_only_badge),
-                    fontSize = 12.sp,
+                    fontSize = ForgeType.caption,
                     fontWeight = FontWeight.SemiBold,
                     color = tokens.warningText,
                     modifier = Modifier.padding(end = 8.dp),
@@ -621,6 +624,7 @@ private fun WorkspaceFileEditor(
                 value = content,
                 onValueChange = { if (editable) onContentChange(it) },
                 readOnly = !editable,
+                keyboardOptions = ForgeFieldKind.IDENTIFIER.keyboardOptions(ImeAction.Default),
                 textStyle = ForgeCodeTextStyle.copy(color = tokens.terminalText),
                 colors = TextFieldDefaults.textFieldColors(
                     containerColor = Color.Transparent,
@@ -714,7 +718,7 @@ private fun WorkspaceDiffReviewList(
                                 color = tokens.successText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = ForgeType.caption,
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -722,13 +726,13 @@ private fun WorkspaceDiffReviewList(
                                 color = tokens.dangerText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = ForgeType.caption,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
                                 onClick = { onKeepFile(item.path) },
                                 enabled = !sessionRunning,
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(48.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
@@ -740,7 +744,7 @@ private fun WorkspaceDiffReviewList(
                             IconButton(
                                 onClick = { onRevertFile(item.path) },
                                 enabled = !sessionRunning,
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(48.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -813,13 +817,12 @@ private fun NewWorkspaceFileDialog(
         shape = RoundedCornerShape(24.dp),
         title = { Text(stringResource(R.string.files_create_new_file), fontWeight = FontWeight.SemiBold) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                 value = path,
                 onValueChange = { path = it },
                 label = { Text(stringResource(R.string.files_relative_file_path)) },
                 placeholder = { Text("src/main.py or index.html") },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
                 textStyle = ForgeCodeTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -832,7 +835,7 @@ private fun NewWorkspaceFileDialog(
             ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_cancel)) }
         },
     )
 }

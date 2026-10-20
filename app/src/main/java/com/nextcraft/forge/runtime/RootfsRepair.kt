@@ -119,6 +119,9 @@ internal object RootfsRepair {
             "su",
             "-c",
             "rm -rf --one-file-system -- $quotedPath 2>/dev/null || rm -rf -- $quotedPath",
+            // A multi-GB tree with root-owned apt/npm files takes far longer than the 15 s default; a timeout here
+            // used to make activate() roll back a rootfs that had already validated.
+            timeoutSeconds = 30 * 60L,
         )
         return exit == 0 && !targetDir.exists()
     }
@@ -175,9 +178,9 @@ internal object RootfsRepair {
             check(moveDirectory(staging, rootfs)) { "Could not activate the rebuilt Linux environment" }
             if (hadRootfs) restoreHome(backup, rootfs)
             check(validate(rootfs)) { "Rebuilt Linux environment failed validation after activation" }
-            if (hadRootfs) {
-                check(safeDeleteRecursively(backup)) { "Could not remove the previous Linux environment" }
-            }
+            // The new rootfs is validated and active. Failing to delete the old copy must not roll it back: a leftover
+            // backup is cleaned up by reconcileInterruptedSwap on the next start.
+            if (hadRootfs) safeDeleteRecursively(backup)
         } catch (error: Throwable) {
             if (hadRootfs && backup.exists()) {
                 runCatching { rollback(rootfs, staging, backup) }

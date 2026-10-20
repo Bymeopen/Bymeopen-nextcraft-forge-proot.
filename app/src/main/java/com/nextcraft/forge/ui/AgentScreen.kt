@@ -53,6 +53,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.snap
@@ -76,6 +78,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -108,9 +111,12 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
@@ -203,7 +209,7 @@ fun AgentScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = statusLine,
+                            text = statusLine.asString(),
                             style = MaterialTheme.typography.labelMedium,
                             color = tokens.accentText,
                             fontWeight = FontWeight.SemiBold,
@@ -214,8 +220,8 @@ fun AgentScreen(
                         if (state.sessionRunning) {
                             OutlinedButton(
                                 onClick = viewModel::stopActiveTask,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.heightIn(min = ForgeSpace.minTouch),
                             ) {
                                 Text(stringResource(R.string.agent_stop), fontSize = ForgeType.caption)
                             }
@@ -227,7 +233,7 @@ fun AgentScreen(
         }
 
         state.pendingToolRequest?.let { req ->
-            ToolApprovalCard(
+            ToolApprovalSheet(
                 request = req,
                 onApprove = { viewModel.respondToToolRequest(true) },
                 onReject = { viewModel.respondToToolRequest(false) },
@@ -246,12 +252,14 @@ fun AgentScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.agent_greeting),
-                        fontSize = 16.sp,
+                        fontSize = ForgeType.rowTitle,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     )
                 }
             }
         } else {
+            val pendingChanges = state.changedItems.filter { it.accepted == null }
+            val lastAssistantId = state.messages.lastOrNull { !it.fromUser }?.id
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     state = listState,
@@ -260,21 +268,39 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        Box(modifier = Modifier.animateItemPlacement()) {
-                        ChatMessageCard(
-                            message = message,
-                            agentName = state.agentKind.displayTitle(),
-                            onRunSnippet = { cmd ->
-                                viewModel.runTerminalCommand(cmd)
-                                viewModel.selectTab(ForgeTab.TERMINAL)
-                            },
-                        )
+                        Column(modifier = Modifier.animateItemPlacement(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChatMessageCard(
+                                message = message,
+                                agentName = state.agentKind.displayTitle(),
+                                onRunSnippet = { cmd ->
+                                    viewModel.runTerminalCommand(cmd)
+                                    viewModel.selectTab(ForgeTab.TERMINAL)
+                                },
+                            )
+                            // Review right where the agent said it was done; the Files tab keeps the full diff view.
+                            if (message.id == lastAssistantId && pendingChanges.isNotEmpty() && !state.sessionRunning) {
+                                ChangedFilesCard(
+                                    changes = pendingChanges,
+                                    enabled = !state.sessionRunning,
+                                    onOpenFile = { path ->
+                                        viewModel.openWorkspaceFile(path)
+                                        viewModel.selectProjectPane(ProjectPane.FILES)
+                                    },
+                                    onKeepFile = viewModel::keepSingleFile,
+                                    onRevertFile = viewModel::revertSingleFile,
+                                    onKeepAll = viewModel::keepAllChanges,
+                                    onRevertAll = viewModel::revertAllChanges,
+                                )
+                            }
                         }
                     }
                 }
                 // "Latest" pill: shown once the reader has scrolled up from the newest message.
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                 val awayFromEnd = state.messages.size > 1 && lastVisible < state.messages.lastIndex
+                // Count only what arrived after the reader scrolled away; remember(awayFromEnd) snapshots the size at that moment.
+                val sizeWhenAway = remember(awayFromEnd) { state.messages.size }
+                val newCount = (state.messages.size - sizeWhenAway).coerceAtLeast(0)
                 if (awayFromEnd) {
                     Surface(
                         shape = RoundedCornerShape(100),
@@ -293,7 +319,12 @@ fun AgentScreen(
                         ) {
                             Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.agent_latest), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text(
+                                text = if (newCount > 0) quantityStringResource(R.plurals.chat_new_messages, newCount, newCount) else stringResource(R.string.agent_latest),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = ForgeType.control,
+                                modifier = Modifier.forgeLive(),
+                            )
                         }
                     }
                 }
@@ -328,6 +359,21 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
+        val retry = state.retryPrompt?.takeIf { it.chatId == state.activeChatId && !state.sessionRunning }
+        if (retry != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.agent_turn_failed),
+                    fontSize = ForgeType.secondary,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeTextButton(onClick = viewModel::retryLastPrompt) { Text(stringResource(R.string.action_retry)) }
+            }
+        }
         if (state.queuedPrompts.isNotEmpty()) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
@@ -335,7 +381,7 @@ fun AgentScreen(
             ) {
                 Text(
                     stringResource(R.string.agent_queued_title, state.queuedPrompts.size),
-                    fontSize = 12.sp,
+                    fontSize = ForgeType.caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 state.queuedPrompts.forEach { queued ->
@@ -357,6 +403,32 @@ fun AgentScreen(
                 }
             }
         }
+        if (!running && state.pendingToolRequest == null) {
+            val chips = buildList {
+                if (state.messages.isEmpty()) {
+                    // Starter ideas fill the composer instead of sending, so the user can edit first.
+                    add(QuickChip(stringResource(R.string.starter_explain), ForgeGlyph.SPARK) { promptInput = stringOf(R.string.starter_explain, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_fix), ForgeGlyph.BUILD) { promptInput = stringOf(R.string.starter_fix, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_feature), ForgeGlyph.PLUS) { promptInput = stringOf(R.string.starter_feature, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_tests), ForgeGlyph.CODE) { promptInput = stringOf(R.string.starter_tests, cameraContext) })
+                } else {
+                    val changed = state.changedItems.count { it.accepted == null }
+                    if (changed > 0) {
+                        add(QuickChip(quantityStringResource(R.plurals.chip_review_changes, changed, changed), ForgeGlyph.FILE) { viewModel.selectProjectPane(ProjectPane.FILES) })
+                        add(QuickChip(stringResource(R.string.chip_explain_changes), ForgeGlyph.SPARK) { viewModel.sendPrompt(stringOf(R.string.prompt_explain_changes, cameraContext)) })
+                    }
+                    if (state.activeLocalPorts.isNotEmpty()) {
+                        add(QuickChip(stringResource(R.string.chip_open_preview), ForgeGlyph.GLOBE) { viewModel.selectProjectPane(ProjectPane.PREVIEW) })
+                    }
+                    if (state.activeProject?.type == com.nextcraft.forge.model.ProjectType.ANDROID) {
+                        add(QuickChip(stringResource(R.string.chip_build_run), ForgeGlyph.BUILD) { viewModel.selectTab(ForgeTab.ANDROID) })
+                    } else {
+                        add(QuickChip(stringResource(R.string.chip_run_tests), ForgeGlyph.CODE) { viewModel.sendPrompt(stringOf(R.string.prompt_run_tests, cameraContext)) })
+                    }
+                }
+            }
+            QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
+        }
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = tokens.cardContainerColor,
@@ -373,7 +445,7 @@ fun AgentScreen(
                 // Attach: photos or any file; it lands in attachments/ inside the workspace.
                 Box {
                     IconButton(onClick = { attachMenuOpen = true }) {
-                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.agent_attach), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ForgeIcon(glyph = ForgeGlyph.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 22.dp, description = stringResource(R.string.agent_attach))
                     }
                     DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
                         DropdownMenuItem(
@@ -392,12 +464,15 @@ fun AgentScreen(
                     placeholder = {
                         Text(
                             stringResource(R.string.agent_message_placeholder, state.agentKind.displayTitle()),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
                     modifier = Modifier.weight(1f),
                     maxLines = 5,
+                    // Enter stays a newline (messages are multi-line); send is the round button.
+                    keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
                     colors = TextFieldDefaults.textFieldColors(
                         containerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
@@ -405,6 +480,7 @@ fun AgentScreen(
                         disabledIndicatorColor = Color.Transparent,
                     ),
                 )
+                val haptics = LocalHapticFeedback.current
                 val reduceMotion = rememberReduceMotion()
                 val sendScale by animateFloatAsState(
                     targetValue = if (running || canSend) 1f else 0.86f,
@@ -422,6 +498,7 @@ fun AgentScreen(
                 )
                 Box(
                     modifier = Modifier
+                        .forgeMinTouch()
                         .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
                         .size(40.dp)
                         .clip(CircleShape)
@@ -431,6 +508,7 @@ fun AgentScreen(
                             role = Role.Button,
                             onClickLabel = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
                         ) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             // While the agent works, sending queues the message; stop is available when nothing is typed.
                             if (canSend) {
                                 val text = promptInput.trim()
@@ -487,21 +565,22 @@ private fun AgentHeader(
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
                 text = state.activeProject?.name ?: stringResource(R.string.agent_title),
-                fontSize = 24.sp,
+                modifier = Modifier.forgeHeading(),
+                fontSize = ForgeType.screenTitle,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = listOfNotNull(state.agentKind.displayTitle(), activeChat?.displayTitle()).joinToString(" · "),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         IconButton(onClick = { chatsOpen = true }) {
-            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.agent_project_chats), tint = scheme.onSurface)
+            ForgeIcon(glyph = ForgeGlyph.HISTORY, tint = scheme.onSurface, size = 22.dp, description = stringResource(R.string.agent_project_chats))
         }
     }
 
@@ -561,7 +640,7 @@ private fun ProjectChatsDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(chat.displayTitle(), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (current) {
-                                Text(stringResource(R.string.agent_current_chat), fontSize = 12.sp, color = scheme.onSurfaceVariant)
+                                Text(stringResource(R.string.agent_current_chat), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
                             }
                         }
                         if (current) {
@@ -576,7 +655,7 @@ private fun ProjectChatsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
         },
     )
 }
@@ -614,10 +693,10 @@ private fun AntigravityOAuthBanner(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.agent_google_account), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.agent_google_account), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
                     Text(
                         text = authState.message ?: stringResource(R.string.agent_required_for_antigravity),
-                        fontSize = 13.sp,
+                        fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                     )
                 }
@@ -637,12 +716,11 @@ private fun AntigravityOAuthBanner(
                     ) { Text(stringResource(R.string.agent_copy_link)) }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    ForgeTextField(
+                        kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done,
                         value = verificationCode,
                         onValueChange = { verificationCode = it },
-                        placeholder = { Text(stringResource(R.string.agent_paste_google_verification_code), fontSize = 13.sp) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
+                        placeholder = { Text(stringResource(R.string.agent_paste_google_verification_code), fontSize = ForgeType.secondary) },
                         modifier = Modifier.weight(1f),
                     )
                     ForgePrimaryButton(
@@ -673,80 +751,7 @@ private fun AntigravityOAuthBanner(
 }
 
 @Composable
-private fun ToolApprovalCard(
-    request: ToolRequest,
-    onApprove: () -> Unit,
-    onReject: () -> Unit,
-) {
-    val tokens = LocalForgeThemeTokens.current
-    val scheme = MaterialTheme.colorScheme
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = tokens.cardContainerColor,
-        contentColor = scheme.onSurface,
-        border = tokens.cardBorderStroke,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-    ) {
-        Row {
-            // Thin red rule carries the warning so the card itself stays calm.
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .background(scheme.error),
-            )
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ForgeStatusIcon(ForgeStatus.FAILED, iconSize = 20.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.agent_approval_title), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                        Text(
-                            text = stringResource(R.string.agent_approval_sub, request.toolName, request.risk.name.lowercase()),
-                            fontSize = 13.sp,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Text(text = request.explanation, fontSize = 14.sp, color = scheme.onSurfaceVariant)
-                request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
-                    Text(
-                        text = cmd,
-                        style = ForgeCodeTextStyle,
-                        color = tokens.terminalText,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(tokens.terminalBackground)
-                            .padding(10.dp),
-                    )
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onReject,
-                        shape = RoundedCornerShape(100),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.agent_deny)) }
-                    Button(
-                        onClick = onApprove,
-                        shape = RoundedCornerShape(100),
-                        colors = ButtonDefaults.buttonColors(containerColor = scheme.error, contentColor = scheme.onError),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChatMessageCard(
+internal fun ChatMessageCard(
     message: ChatMessage,
     agentName: String,
     onRunSnippet: (String) -> Unit,
@@ -755,11 +760,22 @@ private fun ChatMessageCard(
     val textColor = scheme.onSurface
 
     if (message.fromUser) {
-        MessageContainer(fromUser = true, contentColor = textColor) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // User bubbles hug their text: no permanent copy button (it forced a 48dp minimum height); a long-press copies.
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val copiedLabel = stringResource(R.string.tool_copy)
+        MessageContainer(
+            fromUser = true,
+            contentColor = textColor,
+            onLongClick = {
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text))
+            },
+            longClickLabel = copiedLabel,
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (message.text.isNotBlank()) {
                     MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
-                    CopyMessageButton(message.text)
                 }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -773,11 +789,15 @@ private fun ChatMessageCard(
 
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         // Each tool call is one collapsed row ("Bash · command ⌄"); tap to read its detail.
-        message.workItems.forEach { item -> ToolCallRow(item) }
+        if (message.workItems.size >= STEP_GROUP_MIN) {
+            ToolStepGroup(message.workItems)
+        } else {
+            message.workItems.forEach { item -> ToolCallRow(item) }
+        }
         if (message.workedMillis > 0L) {
             Text(
                 text = stringResource(R.string.agent_worked_for, formatWorked(message.workedMillis)),
-                fontSize = 13.sp,
+                fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
             )
@@ -785,21 +805,23 @@ private fun ChatMessageCard(
         val streaming = message.id == "streaming-assistant"
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
-                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
-                    if (streaming) {
-                        // Blinking caret says "still arriving" without a spinner.
-                        val blink = rememberBlink()
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .size(width = 8.dp, height = 16.dp)
-                                .graphicsLayer { alpha = blink }
-                                .background(scheme.primary, RoundedCornerShape(2.dp)),
-                        )
-                    } else {
-                        CopyMessageButton(message.text)
+                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    // 44dp: the copy button is a 48dp touch box; 32dp let it cover the end of the first lines.
+                    Column(modifier = Modifier.padding(end = 44.dp)) {
+                        MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
+                        if (streaming) {
+                            // Blinking caret says "still arriving" without a spinner.
+                            val blink = rememberBlink()
+                            Box(
+                                modifier = Modifier
+                                    .padding(top = 2.dp)
+                                    .size(width = 8.dp, height = 16.dp)
+                                    .graphicsLayer { alpha = blink }
+                                    .background(scheme.primary, RoundedCornerShape(2.dp)),
+                            )
+                        }
                     }
+                    if (!streaming) CopyMessageButton(message.text, Modifier.align(Alignment.TopEnd))
                 }
             }
         } else if (message.workItems.isEmpty()) {
@@ -816,6 +838,7 @@ private fun ChatMessageCard(
                     text = stringResource(R.string.agent_thinking),
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
+                    modifier = Modifier.forgeLive(),
                 )
             }
         }
@@ -827,27 +850,39 @@ private fun ChatMessageCard(
  * but it is easy to miss and can be lost while the list updates, so copying must not depend on it.
  */
 @Composable
-private fun CopyMessageButton(text: String) {
+private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
-    androidx.compose.material3.TextButton(
-        onClick = {
-            clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-            copied = true
-            scope.launch {
-                kotlinx.coroutines.delay(1_500)
-                copied = false
-            }
-        },
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        modifier = Modifier.heightIn(min = 32.dp),
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    val label = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy)
+    Box(
+        modifier = modifier
+            .forgeMinTouch()
+            .size(36.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.Button, onClickLabel = label) {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                copied = true
+                scope.launch {
+                    kotlinx.coroutines.delay(1_500)
+                    copied = false
+                }
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = stringResource(if (copied) R.string.tool_copied else R.string.tool_copy),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (copied) {
+            Icon(Icons.Default.Check, contentDescription = label, tint = tint, modifier = Modifier.size(16.dp))
+        } else {
+            // Copy glyph (two overlapping rounded sheets); the core icon set has no ContentCopy.
+            androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp).semantics { contentDescription = label }) {
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx())
+                val sheet = androidx.compose.ui.geometry.Size(size.width * 0.62f, size.height * 0.68f)
+                val radius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                drawRoundRect(tint, topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.34f, 0f), size = sheet, cornerRadius = radius, style = stroke)
+                drawRoundRect(tint, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height * 0.30f), size = sheet, cornerRadius = radius, style = stroke)
+            }
+        }
     }
 }
 
@@ -860,7 +895,7 @@ private fun formatWorked(millis: Long): String {
 
 /** One collapsed tool call: status glyph, "Title · detail" on one line, chevron; expands to the full detail. */
 @Composable
-private fun ToolCallRow(item: ActivityItem) {
+internal fun ToolCallRow(item: ActivityItem) {
     var open by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
@@ -875,12 +910,7 @@ private fun ToolCallRow(item: ActivityItem) {
         val kind = toolKind(item)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box {
-                Icon(
-                    imageVector = kind.icon,
-                    contentDescription = null,
-                    tint = kind.tint(scheme, tokens),
-                    modifier = Modifier.size(18.dp),
-                )
+                ForgeIcon(glyph = kind.glyph, tint = kind.tint(scheme, tokens), size = 18.dp)
                 if (!item.isComplete) {
                     Box(
                         modifier = Modifier
@@ -894,7 +924,7 @@ private fun ToolCallRow(item: ActivityItem) {
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = if (item.detail.isBlank()) item.title else "${item.title} · ${item.detail.lineSequence().first()}",
-                fontSize = 14.sp,
+                fontSize = ForgeType.control,
                 color = if (kind == ToolKind.THINK) scheme.onSurface else scheme.onSurfaceVariant,
                 fontFamily = if (item.isCommand) FontFamily.Monospace else FontFamily.Default,
                 maxLines = 1,
@@ -938,9 +968,12 @@ private fun ToolCallRow(item: ActivityItem) {
 
 /** User messages sit in a soft rounded surface; agent replies flow on the canvas without a card. */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun MessageContainer(
     fromUser: Boolean,
     contentColor: Color,
+    onLongClick: (() -> Unit)? = null,
+    longClickLabel: String? = null,
     content: @Composable () -> Unit,
 ) {
     if (fromUser) {
@@ -948,7 +981,14 @@ private fun MessageContainer(
             shape = RoundedCornerShape(16.dp),
             color = LocalForgeThemeTokens.current.cardElevatedColor,
             contentColor = contentColor,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .then(
+                    if (onLongClick != null) {
+                        Modifier.combinedClickable(onLongClickLabel = longClickLabel, onLongClick = onLongClick, onClick = {})
+                    } else Modifier,
+                ),
         ) { content() }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
@@ -956,8 +996,8 @@ private fun MessageContainer(
 }
 
 /** Tool-call kinds, derived from the activity title, each with its own glyph and tint. */
-private enum class ToolKind(val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    THINK(Icons.Default.Star), BASH(Icons.Default.List), READ(Icons.Default.Info), WRITE(Icons.Default.Edit), OTHER(Icons.Default.Build);
+internal enum class ToolKind(val glyph: ForgeGlyph) {
+    THINK(ForgeGlyph.SPARK), BASH(ForgeGlyph.TERMINAL), READ(ForgeGlyph.FILE), WRITE(ForgeGlyph.EDIT), OTHER(ForgeGlyph.BUILD);
 
     fun tint(scheme: androidx.compose.material3.ColorScheme, tokens: ForgeThemeTokens): Color = when (this) {
         THINK -> scheme.primary
@@ -966,7 +1006,7 @@ private enum class ToolKind(val icon: androidx.compose.ui.graphics.vector.ImageV
     }
 }
 
-private fun toolKind(item: ActivityItem): ToolKind {
+internal fun toolKind(item: ActivityItem): ToolKind {
     val t = item.title.lowercase()
     return when {
         "think" in t || "reason" in t -> ToolKind.THINK
@@ -989,17 +1029,20 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, sh
             .padding(start = 12.dp, end = if (onRemove == null) 12.dp else 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+        Text(name, fontSize = ForgeType.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
         if (showSize) Spacer(modifier = Modifier.width(6.dp))
         if (showSize) Text(
             text = if (size < 1024 * 1024) "${(size / 1024).coerceAtLeast(1)} KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", size / (1024.0 * 1024.0)),
-            fontSize = 12.sp,
+            fontSize = ForgeType.caption,
             color = scheme.onSurfaceVariant,
         )
         if (onRemove != null) {
-            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(ForgeSpace.minTouch)) {
                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_remove_attachment), tint = scheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
             }
         }
     }
 }
+
+/** String lookup for click handlers, which run outside composition and cannot call stringResource. */
+private fun stringOf(@androidx.annotation.StringRes id: Int, context: android.content.Context): String = context.getString(id)

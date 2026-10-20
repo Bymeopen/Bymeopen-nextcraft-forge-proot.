@@ -24,7 +24,7 @@ class UiTextTest {
     @Test
     fun viewModel_statusFields_useUiText() {
         val src = File("src/main/java/com/nextcraft/forge/ui/MainViewModel.kt").readText()
-        val bare = Regex("""(bannerMessage|githubStatusMessage|apiStatusMessage)\s*=\s*"[^"\n]*"""")
+        val bare = Regex("""(bannerMessage|githubStatusMessage|apiStatusMessage|activeStatusLine)\s*=\s*"[^"\n]*"""")
             .findAll(src).map { it.value }.toList()
         assertTrue("bare String literals assigned to UiText fields:\n" + bare.joinToString("\n"), bare.isEmpty())
     }

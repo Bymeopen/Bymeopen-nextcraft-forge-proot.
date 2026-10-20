@@ -35,7 +35,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.R
 
 /**
@@ -52,44 +51,29 @@ fun ProjectChatsScreen(
     val chats = state.chats.sortedByDescending { it.updatedAtMillis }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 14.dp, top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { viewModel.projectBack() }) {
-                Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.a11y_back), tint = scheme.onSurface)
-            }
-            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(
-                    text = project?.name ?: stringResource(R.string.shell_nextcraft_forge),
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = listOfNotNull(project?.let { stringResource(if (it.type == com.nextcraft.forge.model.ProjectType.ANDROID) R.string.projects_android else R.string.projects_general) }, stringResource(R.string.chats_subtitle, chats.size)).joinToString(" · "),
-                    fontSize = 13.sp,
-                    color = scheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            ForgeActionPill {
-                ForgePillIcon(
-                    icon = Icons.Default.PlayArrow,
-                    description = stringResource(R.string.launch_build_and_install_apk),
-                    onClick = { viewModel.selectTab(ForgeTab.ANDROID) },
-                )
-                ForgePillIcon(
-                    icon = Icons.Default.Build,
+        ForgeProjectHeader(
+            title = project?.name ?: stringResource(R.string.shell_nextcraft_forge),
+            subtitle = listOfNotNull(
+                project?.let { stringResource(if (it.type == com.nextcraft.forge.model.ProjectType.ANDROID) R.string.projects_android else R.string.projects_general) },
+                quantityStringResource(R.plurals.chats_subtitle, chats.size, chats.size),
+            ).joinToString(" · "),
+            onBack = { viewModel.projectBack() },
+            actions = {
+                // Build & install only means something for Android projects.
+                if (project?.type == com.nextcraft.forge.model.ProjectType.ANDROID) {
+                    ForgePillIcon(
+                        icon = Icons.Default.PlayArrow,
+                        description = stringResource(R.string.launch_build_and_install_apk),
+                        onClick = { viewModel.selectTab(ForgeTab.ANDROID) },
+                    )
+                }
+                ForgeGlyphPillIcon(
+                    glyph = ForgeGlyph.BUILD,
                     description = stringResource(R.string.chats_open_project_tools),
                     onClick = { viewModel.selectTab(ForgeTab.TOOLS) },
                 )
-            }
-        }
+            },
+        )
 
         ForgePrimaryButton(
             text = "+ " + stringResource(R.string.chats_new_chat),
@@ -101,11 +85,10 @@ fun ProjectChatsScreen(
         )
 
         if (chats.isEmpty()) {
-            Text(
-                text = stringResource(R.string.chats_empty),
-                fontSize = 14.sp,
-                color = scheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            ForgeEmptyState(
+                glyph = ForgeGlyph.SPARK,
+                title = stringResource(R.string.chats_empty_title),
+                message = stringResource(R.string.chats_empty),
             )
             return
         }
@@ -123,21 +106,23 @@ fun ProjectChatsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ForgeStatusIcon(
-                        status = if (active && state.sessionRunning) ForgeStatus.RUNNING else if (active) ForgeStatus.DONE else ForgeStatus.TODO,
+                        status = if (active && state.sessionRunning) ForgeStatus.RUNNING else ForgeStatus.TODO,
                         iconSize = 16.dp,
                     )
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = chat.displayTitle(),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontSize = ForgeType.rowTitle,
+                            // The open chat is marked by weight and colour, not by a "done" check.
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (active) scheme.primary else scheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = formatRelativeTime(chat.updatedAtMillis),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }

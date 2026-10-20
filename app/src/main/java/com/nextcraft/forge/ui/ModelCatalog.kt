@@ -58,11 +58,11 @@ internal fun antigravityModelOptions(liveModels: List<String>, current: String):
  */
 internal fun providerPresetModels(kind: ProviderKind): List<ModelOption> = when (kind) {
     ProviderKind.CLAUDE -> listOf(
-        ModelOption("default", "Default (recommended for your plan)"),
+        ModelOption("default", "Default (recommended for your plan)", labelRes = com.nextcraft.forge.R.string.model_default_recommended),
         ModelOption("sonnet", "Claude Sonnet", "latest"),
         ModelOption("opus", "Claude Opus", "latest"),
         ModelOption("haiku", "Claude Haiku", "fast"),
-        ModelOption("opusplan", "Opus plans, Sonnet builds"),
+        ModelOption("opusplan", "Opus plans, Sonnet builds", labelRes = com.nextcraft.forge.R.string.model_opusplan),
     )
     ProviderKind.LLM_ROUTER -> listOf(
         ModelOption(kind.defaultModel, "Claude Sonnet (latest)"),

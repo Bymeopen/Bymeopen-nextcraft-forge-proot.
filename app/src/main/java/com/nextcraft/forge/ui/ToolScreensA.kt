@@ -17,6 +17,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -33,7 +34,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.CrashReporter
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
@@ -55,7 +55,7 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         if (!state.runtimeInstalled) {
-            Text(stringResource(R.string.tool_runtime_missing), fontSize = 14.sp, color = scheme.error)
+            Text(stringResource(R.string.tool_runtime_missing), fontSize = ForgeType.control, color = scheme.error)
         }
         SetupProgress(state)
         ToolSectionLabel(stringResource(R.string.tool_stacks))
@@ -64,11 +64,11 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
             ToolCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(stack.displayLabel(), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(stack.displayDescription(), fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                        Text(stack.displayLabel(), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
+                        Text(stack.displayDescription(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
                     }
                     when {
-                        stack == DevStack.WEB -> Text(stringResource(R.string.tool_core), fontSize = 13.sp, color = scheme.primary)
+                        stack == DevStack.WEB -> Text(stringResource(R.string.tool_core), fontSize = ForgeType.secondary, color = LocalForgeThemeTokens.current.accentText)
                         installed -> OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.removeStack(stack) }, enabled = !busy) {
                             Text(stringResource(R.string.tool_remove))
                         }
@@ -82,7 +82,7 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ToolSectionLabel(stringResource(R.string.tool_agents))
             Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = viewModel::checkAgentUpdates, enabled = !state.checkingAgentUpdates && state.runtimeInstalled) {
+                ForgeTextButton(onClick = viewModel::checkAgentUpdates, enabled = !state.checkingAgentUpdates && state.runtimeInstalled) {
                     Text(stringResource(R.string.settings_agent_check_updates))
                 }
             }
@@ -93,10 +93,10 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
             ToolCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(agent.displayTitle(), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(agent.displayTitle(), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
                         Text(
                             text = if (installed) stringResource(R.string.settings_agent_installed) else stringResource(R.string.tool_download_size, agent.downloadNote),
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }
@@ -110,7 +110,7 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                                 Text(stringResource(R.string.settings_agent_update, update.latestVersion))
                             }
                         }
-                        TextButton(onClick = { viewModel.removeAgent(agent) }, enabled = !busy) { Text(stringResource(R.string.tool_remove)) }
+                        ForgeTextButton(onClick = { viewModel.removeAgent(agent) }, enabled = !busy) { Text(stringResource(R.string.tool_remove)) }
                     }
                 }
             }
@@ -150,7 +150,7 @@ fun DiagnosticsScreen(viewModel: MainViewModel) {
                 )
             }
         }
-        diag.healthSummary?.let { Text(it, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = scheme.primary) }
+        diag.healthSummary?.let { Text(it, fontSize = ForgeType.control, fontWeight = FontWeight.Medium, color = LocalForgeThemeTokens.current.accentText) }
         LogBox(text = diag.healthOutput, placeholder = stringResource(R.string.tool_health_placeholder))
 
         // The full stack trace of the last crash, readable and copyable without adb.
@@ -197,8 +197,8 @@ fun CheckpointsScreen(state: ForgeUiState, viewModel: MainViewModel) {
         ToolCard {
             Text(
                 text = if (state.changedItems.isEmpty()) stringResource(R.string.tool_no_pending_changes)
-                else stringResource(R.string.tool_pending_changes, state.changedItems.size),
-                fontSize = 14.sp,
+                else quantityStringResource(R.plurals.tool_pending_changes, state.changedItems.size, state.changedItems.size),
+                fontSize = ForgeType.control,
             )
             if (state.changedItems.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -211,12 +211,11 @@ fun CheckpointsScreen(state: ForgeUiState, viewModel: MainViewModel) {
         }
         ToolSectionLabel(stringResource(R.string.tool_snapshots))
         ToolCard {
-            OutlinedTextField(
-                shape = RoundedCornerShape(14.dp),
+            ForgeTextField(
+                kind = ForgeFieldKind.NAME, imeAction = ImeAction.Done,
                 value = label,
                 onValueChange = { label = it.take(40) },
                 label = { Text(stringResource(R.string.tool_snapshot_name)) },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             ForgePrimaryButton(
@@ -228,28 +227,28 @@ fun CheckpointsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 enabled = !snaps.busy && state.activeProjectId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            snaps.message?.let { Text(it, fontSize = 13.sp, color = scheme.onSurfaceVariant) }
+            snaps.message?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant) }
         }
         if (snaps.snapshots.isEmpty()) {
-            Text(stringResource(R.string.tool_no_snapshots), fontSize = 14.sp, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+            Text(stringResource(R.string.tool_no_snapshots), fontSize = ForgeType.control, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
         }
         snaps.snapshots.forEach { snapshot ->
             ToolCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(snapshot.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(snapshot.label, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val when_ = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(snapshot.createdAtMillis))
                         val detail = "$when_ · ${snapshot.sizeBytes / 1024} KB"
                         Text(
                             text = detail,
-                            fontSize = 13.sp,
+                            fontSize = ForgeType.secondary,
                             color = scheme.onSurfaceVariant,
                         )
                     }
                     OutlinedButton(shape = RoundedCornerShape(100), onClick = { pendingRestore = snapshot }, enabled = !snaps.busy && !busy) {
                         Text(stringResource(R.string.tool_restore))
                     }
-                    TextButton(onClick = { viewModel.snapshots.delete(snapshot) }, enabled = !snaps.busy) { Text(stringResource(R.string.tool_delete)) }
+                    ForgeTextButton(onClick = { viewModel.snapshots.delete(snapshot) }, enabled = !snaps.busy) { Text(stringResource(R.string.tool_delete)) }
                 }
             }
         }
@@ -265,7 +264,7 @@ fun CheckpointsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                     pendingRestore = null
                 })
             },
-            dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text(stringResource(R.string.projects_cancel)) } },
+            dismissButton = { ForgeTextButton(onClick = { pendingRestore = null }) { Text(stringResource(R.string.projects_cancel)) } },
         )
     }
 }

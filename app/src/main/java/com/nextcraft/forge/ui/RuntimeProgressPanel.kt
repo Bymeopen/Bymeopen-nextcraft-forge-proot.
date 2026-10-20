@@ -118,6 +118,7 @@ internal fun RuntimeProgressPanel(snapshot: RuntimeSetupSnapshot, modifier: Modi
                     text = snapshot.errorMessage.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.forgeLive(),
                 )
             }
             val recentLines = snapshot.logs.takeLast(3).filter { it.isNotBlank() }

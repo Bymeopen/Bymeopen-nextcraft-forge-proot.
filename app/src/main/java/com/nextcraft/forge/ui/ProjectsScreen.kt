@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -194,11 +195,11 @@ fun ProjectsScreen(
             onDismissRequest = { pendingRenameProject = null },
             title = { Text(stringResource(R.string.projects_rename_title)) },
             text = {
-                OutlinedTextField(
+                ForgeTextField(
+                    kind = ForgeFieldKind.NAME, imeAction = ImeAction.Done, error = if (name.isBlank()) stringResource(R.string.field_error_required) else null,
                     value = name,
                     onValueChange = { name = it.take(MAX_PROJECT_NAME) },
                     label = { Text(stringResource(R.string.projects_rename_label)) },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -213,7 +214,7 @@ fun ProjectsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+                ForgeTextButton(onClick = { pendingRenameProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -233,7 +234,7 @@ fun ProjectsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
+                ForgeTextButton(onClick = { pendingDeleteProject = null }) { Text(stringResource(R.string.projects_cancel)) }
             },
         )
     }
@@ -246,7 +247,7 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
     Column(modifier = Modifier.padding(horizontal = 20.dp)) {
         Text(
             text = stringResource(R.string.shell_nextcraft_forge),
-            fontSize = 14.sp,
+            fontSize = ForgeType.control,
             color = scheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 10.dp),
         )
@@ -259,7 +260,7 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
         )
         Text(
             text = stringResource(R.string.projects_tagline),
-            fontSize = 14.sp,
+            fontSize = ForgeType.control,
             color = scheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
         )
@@ -321,14 +322,14 @@ private fun BringExistingProjectCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.projects_bring_existing),
-                        fontSize = 16.sp,
+                        fontSize = ForgeType.rowTitle,
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
                         text = stringResource(
                             if (expanded) R.string.projects_bring_existing_expanded else R.string.projects_bring_existing_collapsed,
                         ),
-                        fontSize = 14.sp,
+                        fontSize = ForgeType.control,
                         color = scheme.onSurfaceVariant,
                     )
                 }
@@ -381,7 +382,7 @@ private fun BringExistingProjectCard(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = stringResource(R.string.projects_connect_github),
-                                fontSize = 15.sp,
+                                fontSize = ForgeType.body,
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
@@ -390,7 +391,7 @@ private fun BringExistingProjectCard(
                                 } else {
                                     stringResource(R.string.projects_github_connected, githubLogin)
                                 },
-                                fontSize = 13.sp,
+                                fontSize = ForgeType.secondary,
                                 color = scheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -435,7 +436,7 @@ private fun ImportTile(
             modifier = Modifier.size(18.dp),
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(text = label, fontSize = ForgeType.body, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -446,11 +447,11 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.projects_clone_title)) },
         text = {
-            OutlinedTextField(
+            ForgeTextField(
+                kind = ForgeFieldKind.URL, imeAction = ImeAction.Done, error = url.takeIf { it.isNotBlank() && !FieldValidation.isHttpUrl(it) }?.let { stringResource(R.string.field_error_url) },
                 value = url,
                 onValueChange = { url = it },
                 placeholder = { Text(stringResource(R.string.projects_clone_hint)) },
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -460,7 +461,7 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
+            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.projects_cancel)) }
         },
     )
 }
@@ -469,10 +470,10 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        fontSize = 12.sp,
+        fontSize = ForgeType.caption,
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp).forgeHeading(),
     )
 }
 
@@ -481,7 +482,7 @@ private const val MAX_PROJECT_NAME = 80
 /** Project card: folder tile, name, description, guest path, language and age, plus a rename/delete menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProjectRow(
+internal fun ProjectRow(
     project: Project,
     active: Boolean,
     locked: Boolean,
@@ -493,6 +494,8 @@ private fun ProjectRow(
     var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val muted = scheme.onSurfaceVariant
+    // Phones up to ~6.3in report <= 400dp wide: a smaller tile and gaps give the text column 16dp more.
+    val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 400
 
     ForgeThemedCard(
         modifier = Modifier
@@ -505,25 +508,27 @@ private fun ProjectRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(enabled = !locked, role = Role.Button, onClick = onOpen, onLongClick = { menuOpen = true })
-                .padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+                .padding(start = if (narrow) 12.dp else 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(scheme.primary.copy(alpha = 0.12f)),
+                modifier = Modifier.size(if (narrow) 44.dp else 52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
-            ) { FolderGlyph(tint = scheme.primary) }
-            Spacer(modifier = Modifier.width(16.dp))
+            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = if (narrow) 22.dp else 26.dp) }
+            Spacer(modifier = Modifier.width(if (narrow) 12.dp else 16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = project.name,
-                    fontSize = ForgeType.cardTitle,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = if (locked) stringResource(R.string.projects_agent_running) else project.description.ifBlank { project.subtitle() },
-                    fontSize = 14.sp,
+                    text = if (locked) stringResource(R.string.projects_agent_running) else project.localizedDescription().ifBlank { project.subtitle() },
+                    fontSize = ForgeType.body,
                     color = muted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -531,17 +536,19 @@ private fun ProjectRow(
                 val guestPath = "/workspace/${project.slug}"
                 Text(
                     text = guestPath,
-                    fontSize = 13.sp,
+                    fontSize = ForgeType.secondary,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     color = muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = listOf(project.language, project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
-                    fontSize = 13.sp,
+                    text = listOf(project.localizedLanguage(), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
+                    fontSize = ForgeType.secondary,
                     color = muted,
-                    maxLines = 1,
+                    // Two lines: one line clipped "Kotlin / TypeScript / Python · 39" before the unit on 360-412dp phones.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Box {
@@ -551,7 +558,7 @@ private fun ProjectRow(
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.projects_rename)) },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, muted) },
                         onClick = {
                             menuOpen = false
                             onRename()
@@ -559,7 +566,7 @@ private fun ProjectRow(
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.shell_delete_project)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, LocalForgeThemeTokens.current.dangerText) },
                         enabled = canDelete,
                         onClick = {
                             menuOpen = false
@@ -615,35 +622,11 @@ private fun StatusDot(active: Boolean) {
 
 @Composable
 private fun ProjectsEmptyState() {
-    val tokens = LocalForgeThemeTokens.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(tokens.cardContainerColor)
-            .padding(horizontal = 28.dp, vertical = 36.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            imageVector = Icons.Default.Home,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(34.dp),
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = stringResource(R.string.projects_no_projects_yet),
-            fontSize = ForgeType.cardTitle,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.projects_empty_hint),
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+    ForgeThemedCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+        ForgeEmptyState(
+            glyph = ForgeGlyph.FOLDER,
+            title = stringResource(R.string.projects_no_projects_yet),
+            message = stringResource(R.string.projects_empty_hint),
         )
     }
 }
@@ -654,3 +637,14 @@ private fun Project.subtitle(): String = when {
     type == ProjectType.ANDROID -> stringResource(R.string.projects_android) + (androidTemplate?.let { " · ${it.label}" } ?: "")
     else -> stringResource(R.string.projects_general)
 }
+
+/** Projects saved by older builds store English defaults; show them in the current language. */
+@Composable
+private fun Project.localizedDescription(): String = when (description) {
+    "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
+    "General coding workspace" -> stringResource(R.string.project_general_desc)
+    else -> description
+}
+
+@Composable
+private fun Project.localizedLanguage(): String = if (language == "Multi-language") stringResource(R.string.project_lang_multi) else language

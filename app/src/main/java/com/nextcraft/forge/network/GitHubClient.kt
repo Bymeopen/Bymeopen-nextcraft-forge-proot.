@@ -30,7 +30,9 @@ data class GitHubRepository(
 sealed interface GitHubTokenPoll {
     data class Success(val accessToken: String) : GitHubTokenPoll
     data class Pending(val slowDown: Boolean = false) : GitHubTokenPoll
-    data class Failure(val message: String) : GitHubTokenPoll
+    data class Failure(val message: String, val reason: Reason = Reason.OTHER) : GitHubTokenPoll {
+        enum class Reason { EXPIRED, DENIED, OTHER }
+    }
 }
 
 data class GitHubWorkflow(val id: Long, val name: String, val path: String, val state: String)
@@ -84,8 +86,8 @@ class GitHubClient(@Suppress("UNUSED_PARAMETER") private val context: Context? =
         return when (val error = json.stringOrEmpty("error")) {
             "authorization_pending" -> GitHubTokenPoll.Pending()
             "slow_down" -> GitHubTokenPoll.Pending(slowDown = true)
-            "access_denied" -> GitHubTokenPoll.Failure("GitHub authorization was cancelled")
-            "expired_token" -> GitHubTokenPoll.Failure("The GitHub sign-in code expired. Try again.")
+            "access_denied" -> GitHubTokenPoll.Failure("GitHub authorization was cancelled", GitHubTokenPoll.Failure.Reason.DENIED)
+            "expired_token" -> GitHubTokenPoll.Failure("The GitHub sign-in code expired. Try again.", GitHubTokenPoll.Failure.Reason.EXPIRED)
             else -> GitHubTokenPoll.Failure(
                 json.stringOrEmpty("error_description").ifBlank {
                     error.ifBlank { "GitHub sign-in failed" }

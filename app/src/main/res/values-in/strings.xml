@@ -105,7 +105,7 @@
     <string name="settings_one_time_device_code">Kode perangkat sekali pakai: %1$s</string>
     <string name="settings_copy_code_open_github">Salin kode &amp; buka GitHub</string>
     <string name="settings_copy_code">Salin kode</string>
-    <string name="settings_sign_in_with_github">Masuk dengan GitHub (OAuth Device Flow)</string>
+    <string name="settings_sign_in_with_github">Masuk dengan GitHub</string>
     <string name="settings_or_paste_github_personal">Atau tempel GitHub Personal Access Token</string>
     <string name="settings_connect">Hubungkan</string>
     <string name="settings_connected_as">Terhubung sebagai @%1$s</string>
@@ -173,10 +173,9 @@
     <string name="launch_tab_issues_count">Masalah (%1$d)</string>
     <string name="launch_tab_log">Log</string>
     <string name="launch_tab_logcat">Logcat</string>
-    <string name="launch_errors_warnings">%1$d error · %2$d peringatan</string>
     <string name="launch_no_build_output">Belum ada output build. Ketuk putar untuk mengompilasi.</string>
     <string name="nav_projects">Proyek</string>
-    <string name="nav_agent">Agent</string>
+    <string name="nav_agent">Atur AI</string>
     <string name="nav_tools">Alat</string>
     <string name="nav_settings">Pengaturan</string>
     <string name="status_done">Selesai</string>
@@ -251,7 +250,6 @@
     <string name="tool_no_snapshots">Belum ada snapshot. Buat satu sebelum perubahan berisiko.</string>
     <string name="tool_no_targets">Target build tidak ditemukan. Tambahkan perintah sendiri di bawah.</string>
     <string name="tool_open">Buka</string>
-    <string name="tool_pending_changes">%1$d berkas yang diubah agen menunggu Simpan atau Batalkan.</string>
     <string name="tool_refresh">Muat ulang</string>
     <string name="tool_remove">Hapus</string>
     <string name="tool_restore">Pulihkan</string>
@@ -409,6 +407,34 @@
     <string name="theme_glass_sub">Permukaan tembus pandang di atas kanvas berwarna</string>
     <string name="theme_white_title">White</string>
     <string name="theme_white_sub">Putih bersih bergaya editorial siang hari</string>
+    <plurals name="tool_pending_changes">
+        <item quantity="other">%d berkas yang diubah agen menunggu Simpan atau Batalkan.</item>
+    </plurals>
+    <plurals name="nav_badge_files_changed">
+        <item quantity="other">%d file berubah</item>
+    </plurals>
+    <plurals name="chats_subtitle">
+        <item quantity="other">%d obrolan</item>
+    </plurals>
+    <plurals name="msg_files_uploaded">
+        <item quantity="other">%d file diunggah</item>
+    </plurals>
+    <plurals name="msg_zip_saved">
+        <item quantity="other">ZIP tersimpan · %d file</item>
+    </plurals>
+    <plurals name="launch_errors">
+        <item quantity="other">%d error</item>
+    </plurals>
+    <plurals name="launch_warnings">
+        <item quantity="other">%d peringatan</item>
+    </plurals>
+    <plurals name="settings_models_found">
+        <item quantity="other">%d model ditemukan · ketuk untuk memakai</item>
+    </plurals>
+    <plurals name="settings_core_plus_optional">
+        <item quantity="other">Perkakas inti + %d toolchain opsional</item>
+    </plurals>
+    <string name="launch_errors_warnings_join">%1$s · %2$s</string>
     <plurals name="time_minutes_ago">
         <item quantity="other">%d menit lalu</item>
     </plurals>
@@ -420,7 +446,6 @@
     </plurals>
     <string name="nav_terminal">Terminal</string>
     <string name="nav_badge_agent_running">Agen berjalan</string>
-    <string name="nav_badge_files_changed">%1$d file berubah</string>
     <string name="nav_badge_terminal_busy">Proses berjalan di terminal</string>
     <string name="agent_title">Agent</string>
     <string name="agent_switch_agent">Ganti agen</string>
@@ -439,6 +464,7 @@
     <string name="onb_checks">Pemeriksaan perangkat</string>
     <string name="onb_stacks">Stack yang dipasang</string>
     <string name="onb_progress_pct">%1$d%% · %2$s</string>
+    <string name="onb_root_help">Forge menjalankan agen di dalam chroot Ubuntu yang membutuhkan root. Berikan akses root di Magisk, KernelSU, atau APatch, lalu ketuk Periksa ulang. Anda tetap bisa menjelajah aplikasi lewat Lanjut tanpa runtime.</string>
     <string name="onb_continue_anyway">Lanjut tanpa runtime</string>
     <string name="onb_repair">Perbaiki mount</string>
     <string name="onb_recheck">Periksa ulang</string>
@@ -464,6 +490,62 @@
     <string name="files_unsaved_save">Simpan</string>
     <string name="files_unsaved_discard">Buang</string>
     <string name="msg_busy_before_quick_project">Selesaikan atau hentikan tugas aktif sebelum memulai Quick project.</string>
+    <string name="field_error_url">Masukkan alamat lengkap yang diawali http:// atau https://</string>
+    <string name="field_error_required">Kolom ini wajib diisi</string>
+    <string name="field_error_port">Masukkan port 1 sampai 65535</string>
+    <string name="md_run_in_terminal">Jalankan di terminal</string>
+    <string name="md_copy_code">Salin kode</string>
+    <string name="action_retry">Coba lagi</string>
+    <string name="banner_action_setup">Siapkan</string>
+    <string name="agent_turn_error">Kesalahan: %1$s</string>
+    <string name="agent_turn_error_unknown">Sesi gagal</string>
+    <string name="agent_turn_failed">Pesan terakhir tidak selesai.</string>
+    <string name="agent_status_starting">Memulai %1$s…</string>
+    <string name="agent_status_stopping">Menghentikan…</string>
+    <string name="agent_status_stopped">Dihentikan pengguna</string>
+    <string name="agent_status_started">Sesi dimulai…</string>
+    <string name="agent_status_reasoning">Bernalar (%1$d token)…</string>
+    <string name="agent_task_finished">Tugas selesai.</string>
+    <string name="msg_file_readonly">%1$s hanya-baca di sini</string>
+    <string name="msg_file_deleted">%1$s dihapus</string>
+    <string name="msg_file_saved_path">%1$s tersimpan</string>
+    <string name="msg_file_save_failed_path">Gagal menyimpan %1$s</string>
+    <string name="upd_checking">Memeriksa pembaruan…</string>
+    <string name="upd_downloading">Mengunduh v%1$s…</string>
+    <string name="upd_installing">Pembaruan v%1$s terverifikasi dan sedang dipasang…</string>
+    <string name="upd_install_failed">Pemasangan pembaruan gagal: %1$s</string>
+    <string name="upd_no_release">Belum ada rilis aplikasi yang dipublikasikan. Anda memakai build terbaru.</string>
+    <string name="upd_no_internet">Pemeriksaan pembaruan gagal: tidak ada koneksi internet.</string>
+    <string name="upd_check_failed">Pemeriksaan pembaruan gagal: %1$s</string>
+    <string name="upd_network_error">kesalahan jaringan</string>
+    <string name="upd_available">Pembaruan tersedia: v%1$s (%2$d)</string>
+    <string name="upd_up_to_date">NextCraft Forge sudah yang terbaru.</string>
+    <string name="upd_progress_total">Mengunduh v%1$s: %2$s / %3$s MB</string>
+    <string name="upd_progress">Mengunduh v%1$s: %2$s MB</string>
+    <string name="msg_install_antigravity_first">Pasang Antigravity CLI terlebih dahulu.</string>
+    <string name="build_existing_apk">APK yang sudah ada: %1$s (%2$d KB)</string>
+    <string name="build_running_gradle">Menjalankan Gradle %1$s…</string>
+    <string name="build_installing_apk">Memasang %1$s…</string>
+    <string name="build_apk_install_failed">Pemasangan APK gagal</string>
+    <string name="logcat_permission_required">Logcat langsung membutuhkan izin root (su) atau READ_LOGS.</string>
+    <string name="logcat_streaming">Menampilkan logcat untuk %1$s…</string>
+    <string name="logcat_ended">Aliran logcat untuk %1$s berakhir.</string>
+    <string name="logcat_paused">Logcat dijeda</string>
+    <string name="build_stage_idle">Siaga</string>
+    <string name="build_stage_preparing">Menyiapkan workspace dan mount chroot…</string>
+    <string name="build_stage_resolving">Menyelesaikan dependensi Maven…</string>
+    <string name="build_stage_resources">Mengompilasi resource Android (aapt2)…</string>
+    <string name="build_stage_compiling">Mengompilasi sumber Kotlin dan Java…</string>
+    <string name="build_stage_packaging">Mengemas dan menandatangani APK debug…</string>
+    <string name="build_stage_finding_apk">Mencari APK debug hasil build…</string>
+    <string name="build_stage_installing">Memasang APK di perangkat…</string>
+    <string name="build_stage_launching">Menjalankan aplikasi yang terpasang…</string>
+    <string name="build_stage_complete">Build selesai</string>
+    <string name="build_stage_failed">Build gagal</string>
+    <string name="build_stage_cancelling">Membatalkan build…</string>
+    <string name="build_stage_cancelled">Build dibatalkan</string>
+    <string name="msg_project_deleted">\"%1$s\" dihapus</string>
+    <string name="action_undo">Urungkan</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>
     <string name="msg_agy_probing">Memeriksa Antigravity CLI di dalam chroot…</string>
     <string name="msg_agy_verified">Antigravity CLI terverifikasi: %1$s</string>
@@ -500,7 +582,6 @@
     <string name="settings_runtime_updates">Pembaruan runtime</string>
     <string name="settings_installed_agents_current">Agen terpasang tetap mutakhir</string>
     <string name="settings_developer_tools">Perkakas pengembang</string>
-    <string name="settings_core_plus_optional">Perkakas inti + %1$d toolchain opsional</string>
     <string name="settings_included">Termasuk</string>
     <string name="settings_add">Tambah</string>
     <string name="settings_remove">Hapus</string>
@@ -515,7 +596,6 @@
     <string name="settings_repair_rootfs_sub">Perbaiki mount, symlink, dan skrip runtime yang rusak.</string>
     <string name="settings_version">Versi</string>
     <string name="settings_check_updates_sub">Mencari APK yang lebih baru</string>
-    <string name="settings_models_found">%1$d model ditemukan · ketuk untuk memakai</string>
     <string name="a11y_back">Kembali</string>
     <string name="agent_latest">Terbaru</string>
     <string name="agent_project_chats">Obrolan proyek</string>
@@ -532,9 +612,9 @@
     <string name="launch_preview_not_running_hint">Masukkan URL localhost di atas, atau jalankan server web lokal di terminal proyek.</string>
     <string name="launch_force_rebuild">Build ulang paksa</string>
     <string name="launch_copy_apk_path">Salin path APK</string>
-    <string name="agent_config_title">Agen AI</string>
-    <string name="chats_subtitle">%1$d obrolan</string>
+    <string name="agent_config_title">Atur AI</string>
     <string name="chats_empty">Belum ada obrolan. Mulai satu untuk membahas proyek ini dengan agen.</string>
+    <string name="chats_empty_title">Belum ada obrolan</string>
     <string name="chats_open_project_tools">Perkakas proyek</string>
     <string name="chats_new_chat">Obrolan baru</string>
     <string name="nav_chat">Chat</string>
@@ -542,8 +622,6 @@
     <string name="nav_preview">Pratinjau</string>
     <string name="agent_greeting">Hai! Ceritakan apa yang ingin kamu bangun atau ubah.</string>
     <string name="agent_message_placeholder">Pesan untuk %1$s…</string>
-    <string name="msg_files_uploaded">%1$d file diunggah</string>
-    <string name="msg_zip_saved">ZIP tersimpan · %1$d file</string>
     <string name="msg_zip_failed">ZIP tidak bisa ditulis</string>
     <string name="files_download_zip">Unduh ZIP</string>
     <string name="files_save_copy">Simpan salinan</string>
@@ -565,4 +643,78 @@
     <string name="agent_attach_camera">Ambil foto</string>
     <string name="agent_attach_file">Foto atau file</string>
     <string name="agent_remove_attachment">Hapus lampiran</string>
+    <string name="settings_agent_wait_runtime">Instalasi runtime atau alat sedang berjalan (lihat Pengaturan). Agen bisa dipasang setelah selesai.</string>
+    <string name="model_picker_select">Pilih model</string>
+    <string name="model_picker_available">%1$d tersedia untuk %2$s</string>
+    <string name="agent_ai_provider">Penyedia AI</string>
+    <string name="agent_ai_model">Model AI</string>
+    <string name="agent_credentials">Kredensial</string>
+    <string name="agent_no_key_saved">Belum ada kunci API</string>
+    <string name="agent_keys_saved">%1$d tersimpan · aktif: %2$s</string>
+    <string name="agent_status_online">Online</string>
+    <string name="agent_status_not_tested">Belum diuji</string>
+    <string name="agent_status_failed">Pengujian gagal</string>
+    <string name="agent_footer_security">Kunci API dienkripsi di penyimpanan aman Android · Terminal bisa diakses dari proyek mana pun</string>
+    <string name="agent_active_model">Model kecerdasan aktif</string>
+    <string name="agent_sync">Sinkron</string>
+    <string name="agent_reasoning_depth">Kedalaman penalaran</string>
+    <string name="agent_reasoning_low_hint">Respons tercepat</string>
+    <string name="agent_reasoning_medium_hint">Seimbang</string>
+    <string name="agent_reasoning_high_hint">Penalaran paling dalam</string>
+    <string name="agent_test_connection">Uji koneksi</string>
+    <string name="agent_effort_low">Rendah</string>
+    <string name="agent_effort_medium">Sedang</string>
+    <string name="agent_effort_high">Tinggi</string>
+    <string name="model_default_recommended">Default (disarankan untuk paket Anda)</string>
+    <string name="model_opusplan">Opus merencanakan, Sonnet membangun</string>
+    <string name="auth_connected_as">Terhubung sebagai %1$s</string>
+    <string name="auth_claude_connected">Akun Claude terhubung</string>
+    <string name="auth_google_connected">Akun Google terhubung</string>
+    <string name="agent_key_not_needed">Tidak perlu kunci API, memakai login Claude</string>
+    <string name="msg_gh_denied">Otorisasi GitHub dibatalkan.</string>
+    <string name="project_default_sandbox_desc">Ruang kerja bawaan di dalam Ubuntu ARM64 Root Chroot</string>
+    <string name="project_general_desc">Ruang kerja pemrograman umum</string>
+    <string name="project_lang_multi">Multibahasa</string>
+    <string name="settings_auto_approve_warning">Semua alat berjalan tanpa konfirmasi. Matikan agar perintah ditinjau dulu.</string>
+    <string name="msg_subscription_models">Login langganan: model berasal dari Claude Code, tanpa permintaan katalog.</string>
+    <string name="msg_claude_cli_verified">✓ Claude Code terverifikasi: %1$s</string>
+    <string name="msg_claude_cli_unverified">✕ Pemeriksaan Claude Code gagal: %1$s</string>
+    <string name="msg_runtime_not_installed">Runtime Linux belum terpasang.</string>
+    <plurals name="chat_steps">
+        <item quantity="other">%d langkah</item>
+    </plurals>
+    <plurals name="chat_files_changed">
+        <item quantity="other">%d berkas diubah</item>
+    </plurals>
+    <plurals name="chat_new_messages">
+        <item quantity="other">%d baru</item>
+    </plurals>
+    <plurals name="chip_review_changes">
+        <item quantity="other">Tinjau %d perubahan</item>
+    </plurals>
+    <string name="chat_keep_all">Simpan semua</string>
+    <string name="chat_revert_all">Batalkan semua</string>
+    <string name="chat_keep">Simpan</string>
+    <string name="chat_revert">Batalkan</string>
+    <string name="chat_open_in_files">Buka di File</string>
+    <string name="chat_diff_more">%d baris lagi</string>
+    <string name="chat_diff_binary">Berkas biner, tanpa pratinjau.</string>
+    <string name="chat_diff_none">Tidak ada perubahan baris untuk ditampilkan.</string>
+    <string name="approval_risk_high">Risiko tinggi</string>
+    <string name="approval_risk_review">Perlu ditinjau</string>
+    <string name="approval_risk_safe">Risiko rendah</string>
+    <string name="approval_paths">Memengaruhi</string>
+    <string name="approval_waiting_hint">Agen sedang menunggu. Pilih Tolak atau Setujui untuk melanjutkan.</string>
+    <string name="chip_explain_changes">Jelaskan perubahan</string>
+    <string name="chip_open_preview">Buka pratinjau</string>
+    <string name="chip_build_run">Build dan jalankan</string>
+    <string name="chip_run_tests">Jalankan tes</string>
+    <string name="prompt_explain_changes">Jelaskan apa yang baru saja kamu ubah dan alasannya.</string>
+    <string name="prompt_run_tests">Jalankan tes proyek ini dan laporkan hasilnya.</string>
+    <string name="starter_explain">Jelaskan struktur proyek ini</string>
+    <string name="starter_fix">Cari dan perbaiki error build</string>
+    <string name="starter_feature">Tambahkan fitur baru: </string>
+    <string name="starter_tests">Tulis tes untuk kode utama</string>
+    <string name="diff_added">+%1$d</string>
+    <string name="diff_removed">−%1$d</string>
 </resources>

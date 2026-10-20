@@ -276,8 +276,12 @@ class RuntimeSetupService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            installJob?.cancel(CancellationException("Stopped by user"))
-            RuntimeSetupController.cancelled(this)
+            // A stale Pause tap (after the setup finished or failed) must not overwrite that result with "cancelled".
+            val running = installJob?.takeIf { it.isActive }
+            if (running != null) {
+                running.cancel(CancellationException("Stopped by user"))
+                RuntimeSetupController.cancelled(this)
+            }
             releaseWakeLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -321,7 +325,8 @@ class RuntimeSetupService : Service() {
                     RuntimeSetupController.complete(this@RuntimeSetupService)
                     showFinishedNotification(success = true)
                 } catch (_: CancellationException) {
-                    RuntimeSetupController.cancelled(this@RuntimeSetupService)
+                    // Stop followed by an immediate restart: the old job unwinding must not mark the new run as paused.
+                    if (installJob === coroutineContext[Job]) RuntimeSetupController.cancelled(this@RuntimeSetupService)
                 } catch (error: Throwable) {
                     RuntimeSetupController.fail(this@RuntimeSetupService, error)
                     showFinishedNotification(success = false)

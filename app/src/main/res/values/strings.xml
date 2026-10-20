@@ -105,7 +105,7 @@
     <string name="settings_one_time_device_code">One-Time Device Code: %1$s</string>
     <string name="settings_copy_code_open_github">Copy Code &amp; Open GitHub</string>
     <string name="settings_copy_code">Copy Code</string>
-    <string name="settings_sign_in_with_github">Sign In with GitHub (OAuth Device Flow)</string>
+    <string name="settings_sign_in_with_github">Sign in with GitHub</string>
     <string name="settings_or_paste_github_personal">Or Paste GitHub Personal Access Token</string>
     <string name="settings_connect">Connect</string>
     <string name="settings_connected_as">Connected as @%1$s</string>
@@ -173,10 +173,9 @@
     <string name="launch_tab_issues_count">Issues (%1$d)</string>
     <string name="launch_tab_log">Log</string>
     <string name="launch_tab_logcat">Logcat</string>
-    <string name="launch_errors_warnings">%1$d errors · %2$d warnings</string>
     <string name="launch_no_build_output">No build output yet. Tap play to compile.</string>
     <string name="nav_projects">Projects</string>
-    <string name="nav_agent">Agent</string>
+    <string name="nav_agent">AI setup</string>
     <string name="nav_tools">Tools</string>
     <string name="nav_settings">Settings</string>
     <string name="status_done">Done</string>
@@ -251,7 +250,6 @@
     <string name="tool_no_snapshots">No snapshots yet. Create one before risky changes.</string>
     <string name="tool_no_targets">No build targets found. Add your own command below.</string>
     <string name="tool_open">Open</string>
-    <string name="tool_pending_changes">%1$d files changed by the agent are waiting for Keep or Undo.</string>
     <string name="tool_refresh">Refresh</string>
     <string name="tool_remove">Remove</string>
     <string name="tool_restore">Restore</string>
@@ -409,6 +407,43 @@
     <string name="theme_glass_sub">Translucent surfaces over a tinted canvas</string>
     <string name="theme_white_title">White</string>
     <string name="theme_white_sub">Clean pure white, editorial daylight look</string>
+    <plurals name="tool_pending_changes">
+        <item quantity="one">%d file changed by the agent is waiting for Keep or Undo.</item>
+        <item quantity="other">%d files changed by the agent are waiting for Keep or Undo.</item>
+    </plurals>
+    <plurals name="nav_badge_files_changed">
+        <item quantity="one">%d file changed</item>
+        <item quantity="other">%d files changed</item>
+    </plurals>
+    <plurals name="chats_subtitle">
+        <item quantity="one">%d chat</item>
+        <item quantity="other">%d chats</item>
+    </plurals>
+    <plurals name="msg_files_uploaded">
+        <item quantity="one">%d file uploaded</item>
+        <item quantity="other">%d files uploaded</item>
+    </plurals>
+    <plurals name="msg_zip_saved">
+        <item quantity="one">ZIP saved · %d file</item>
+        <item quantity="other">ZIP saved · %d files</item>
+    </plurals>
+    <plurals name="launch_errors">
+        <item quantity="one">%d error</item>
+        <item quantity="other">%d errors</item>
+    </plurals>
+    <plurals name="launch_warnings">
+        <item quantity="one">%d warning</item>
+        <item quantity="other">%d warnings</item>
+    </plurals>
+    <plurals name="settings_models_found">
+        <item quantity="one">%d model found · tap to use</item>
+        <item quantity="other">%d models found · tap to use</item>
+    </plurals>
+    <plurals name="settings_core_plus_optional">
+        <item quantity="one">Core tools + %d optional toolchain</item>
+        <item quantity="other">Core tools + %d optional toolchains</item>
+    </plurals>
+    <string name="launch_errors_warnings_join">%1$s · %2$s</string>
     <plurals name="time_minutes_ago">
         <item quantity="one">%d minute ago</item>
         <item quantity="other">%d minutes ago</item>
@@ -423,7 +458,6 @@
     </plurals>
     <string name="nav_terminal">Terminal</string>
     <string name="nav_badge_agent_running">Agent is running</string>
-    <string name="nav_badge_files_changed">%1$d files changed</string>
     <string name="nav_badge_terminal_busy">Process running in terminal</string>
     <string name="agent_title">Agent</string>
     <string name="agent_switch_agent">Switch agent</string>
@@ -442,6 +476,7 @@
     <string name="onb_checks">Device checks</string>
     <string name="onb_stacks">Dev stacks to install</string>
     <string name="onb_progress_pct">%1$d%% · %2$s</string>
+    <string name="onb_root_help">Forge runs agents inside an Ubuntu chroot, which needs root. Grant root in Magisk, KernelSU or APatch, then tap Re-check. You can still browse the app with Continue without runtime.</string>
     <string name="onb_continue_anyway">Continue without runtime</string>
     <string name="onb_repair">Repair mounts</string>
     <string name="onb_recheck">Re-check</string>
@@ -467,6 +502,62 @@
     <string name="files_unsaved_save">Save</string>
     <string name="files_unsaved_discard">Discard</string>
     <string name="msg_busy_before_quick_project">Finish or stop the active task before starting a Quick project.</string>
+    <string name="field_error_url">Enter a full address starting with http:// or https://</string>
+    <string name="field_error_required">This field is required</string>
+    <string name="field_error_port">Enter a port from 1 to 65535</string>
+    <string name="md_run_in_terminal">Run in terminal</string>
+    <string name="md_copy_code">Copy code</string>
+    <string name="action_retry">Try again</string>
+    <string name="banner_action_setup">Set up</string>
+    <string name="agent_turn_error">Error: %1$s</string>
+    <string name="agent_turn_error_unknown">Session failed</string>
+    <string name="agent_turn_failed">The last message did not finish.</string>
+    <string name="agent_status_starting">Starting %1$s…</string>
+    <string name="agent_status_stopping">Stopping…</string>
+    <string name="agent_status_stopped">Stopped by user</string>
+    <string name="agent_status_started">Session started…</string>
+    <string name="agent_status_reasoning">Reasoning (%1$d tokens)…</string>
+    <string name="agent_task_finished">Task finished.</string>
+    <string name="msg_file_readonly">%1$s is read-only here</string>
+    <string name="msg_file_deleted">Deleted %1$s</string>
+    <string name="msg_file_saved_path">Saved %1$s</string>
+    <string name="msg_file_save_failed_path">Failed to save %1$s</string>
+    <string name="upd_checking">Checking for updates…</string>
+    <string name="upd_downloading">Downloading v%1$s…</string>
+    <string name="upd_installing">Update v%1$s verified and installing…</string>
+    <string name="upd_install_failed">Update install failed: %1$s</string>
+    <string name="upd_no_release">No app release has been published yet. You are on the latest build.</string>
+    <string name="upd_no_internet">Update check failed: no internet connection.</string>
+    <string name="upd_check_failed">Update check failed: %1$s</string>
+    <string name="upd_network_error">network error</string>
+    <string name="upd_available">Update available: v%1$s (%2$d)</string>
+    <string name="upd_up_to_date">NextCraft Forge is up to date.</string>
+    <string name="upd_progress_total">Downloading v%1$s: %2$s / %3$s MB</string>
+    <string name="upd_progress">Downloading v%1$s: %2$s MB</string>
+    <string name="msg_install_antigravity_first">Install Antigravity CLI first.</string>
+    <string name="build_existing_apk">Existing APK: %1$s (%2$d KB)</string>
+    <string name="build_running_gradle">Running Gradle %1$s…</string>
+    <string name="build_installing_apk">Installing %1$s…</string>
+    <string name="build_apk_install_failed">APK installation failed</string>
+    <string name="logcat_permission_required">Root (su) or READ_LOGS permission is required for live logcat.</string>
+    <string name="logcat_streaming">Streaming logcat for %1$s…</string>
+    <string name="logcat_ended">Logcat stream ended for %1$s.</string>
+    <string name="logcat_paused">Logcat paused</string>
+    <string name="build_stage_idle">Idle</string>
+    <string name="build_stage_preparing">Preparing workspace and chroot mounts…</string>
+    <string name="build_stage_resolving">Resolving Maven dependencies…</string>
+    <string name="build_stage_resources">Compiling Android resources (aapt2)…</string>
+    <string name="build_stage_compiling">Compiling Kotlin and Java sources…</string>
+    <string name="build_stage_packaging">Packaging and signing debug APK…</string>
+    <string name="build_stage_finding_apk">Locating output debug APK…</string>
+    <string name="build_stage_installing">Installing APK on device…</string>
+    <string name="build_stage_launching">Launching installed application…</string>
+    <string name="build_stage_complete">Build complete</string>
+    <string name="build_stage_failed">Build failed</string>
+    <string name="build_stage_cancelling">Cancelling build…</string>
+    <string name="build_stage_cancelled">Build cancelled</string>
+    <string name="msg_project_deleted">Deleted \"%1$s\"</string>
+    <string name="action_undo">Undo</string>
     <string name="msg_busy_before_delete">Cannot delete a project while an agent session, build, or terminal command is running.</string>
     <string name="msg_agy_probing">Probing Antigravity CLI inside chroot…</string>
     <string name="msg_agy_verified">Antigravity CLI verified: %1$s</string>
@@ -503,7 +594,6 @@
     <string name="settings_runtime_updates">Runtime updates</string>
     <string name="settings_installed_agents_current">Installed agents stay current</string>
     <string name="settings_developer_tools">Developer tools</string>
-    <string name="settings_core_plus_optional">Core tools + %1$d optional toolchains</string>
     <string name="settings_included">Included</string>
     <string name="settings_add">Add</string>
     <string name="settings_remove">Remove</string>
@@ -518,7 +608,6 @@
     <string name="settings_repair_rootfs_sub">Fix broken mounts, symlinks and runtime scripts.</string>
     <string name="settings_version">Version</string>
     <string name="settings_check_updates_sub">Looks for a newer APK</string>
-    <string name="settings_models_found">%1$d models found · tap to use</string>
     <string name="a11y_back">Back</string>
     <string name="agent_latest">Latest</string>
     <string name="agent_project_chats">Project chats</string>
@@ -535,9 +624,9 @@
     <string name="launch_preview_not_running_hint">Enter a localhost URL above, or start a local web server in the project terminal.</string>
     <string name="launch_force_rebuild">Force rebuild</string>
     <string name="launch_copy_apk_path">Copy APK path</string>
-    <string name="agent_config_title">AI agent</string>
-    <string name="chats_subtitle">%1$d chats</string>
+    <string name="agent_config_title">AI setup</string>
     <string name="chats_empty">No chats yet. Start one to talk to the agent about this project.</string>
+    <string name="chats_empty_title">No chats yet</string>
     <string name="chats_open_project_tools">Project tools</string>
     <string name="chats_new_chat">New chat</string>
     <string name="nav_chat">Chat</string>
@@ -545,8 +634,6 @@
     <string name="nav_preview">Preview</string>
     <string name="agent_greeting">Hi! Tell me what you want to build or change.</string>
     <string name="agent_message_placeholder">Message %1$s…</string>
-    <string name="msg_files_uploaded">%1$d files uploaded</string>
-    <string name="msg_zip_saved">ZIP saved · %1$d files</string>
     <string name="msg_zip_failed">Could not write the ZIP</string>
     <string name="files_download_zip">Download ZIP</string>
     <string name="files_save_copy">Save a copy</string>
@@ -568,4 +655,82 @@
     <string name="agent_attach_camera">Take photo</string>
     <string name="agent_attach_file">Photo or file</string>
     <string name="agent_remove_attachment">Remove attachment</string>
+    <string name="settings_agent_wait_runtime">A runtime or tool install is running (see Settings). The agent can be installed after it finishes.</string>
+    <string name="model_picker_select">Select model</string>
+    <string name="model_picker_available">%1$d available for %2$s</string>
+    <string name="agent_ai_provider">AI provider</string>
+    <string name="agent_ai_model">AI model</string>
+    <string name="agent_credentials">Credentials</string>
+    <string name="agent_no_key_saved">No API key saved</string>
+    <string name="agent_keys_saved">%1$d saved · active: %2$s</string>
+    <string name="agent_status_online">Online</string>
+    <string name="agent_status_not_tested">Not tested</string>
+    <string name="agent_status_failed">Check failed</string>
+    <string name="agent_footer_security">API keys are encrypted in Android secure storage · Terminal is accessible from any project</string>
+    <string name="agent_active_model">Active intelligence model</string>
+    <string name="agent_sync">Sync</string>
+    <string name="agent_reasoning_depth">Reasoning depth</string>
+    <string name="agent_reasoning_low_hint">Fastest responses</string>
+    <string name="agent_reasoning_medium_hint">Balanced</string>
+    <string name="agent_reasoning_high_hint">Maximum reasoning depth</string>
+    <string name="agent_test_connection">Test connection</string>
+    <string name="agent_effort_low">Low</string>
+    <string name="agent_effort_medium">Medium</string>
+    <string name="agent_effort_high">High</string>
+    <string name="model_default_recommended">Default (recommended for your plan)</string>
+    <string name="model_opusplan">Opus plans, Sonnet builds</string>
+    <string name="auth_connected_as">Connected as %1$s</string>
+    <string name="auth_claude_connected">Claude account connected</string>
+    <string name="auth_google_connected">Google account connected</string>
+    <string name="agent_key_not_needed">No API key needed with your Claude login</string>
+    <string name="msg_gh_denied">GitHub authorization was cancelled.</string>
+    <string name="project_default_sandbox_desc">Default workspace inside Ubuntu ARM64 Root Chroot</string>
+    <string name="project_general_desc">General coding workspace</string>
+    <string name="project_lang_multi">Multi-language</string>
+    <string name="settings_auto_approve_warning">Every tool runs without confirmation. Turn this off to review commands first.</string>
+    <string name="msg_subscription_models">Subscription login: models come from Claude Code, no catalog request needed.</string>
+    <string name="msg_claude_cli_verified">✓ Claude Code verified: %1$s</string>
+    <string name="msg_claude_cli_unverified">✕ Claude Code check failed: %1$s</string>
+    <string name="msg_runtime_not_installed">The Linux runtime is not installed yet.</string>
+    <plurals name="chat_steps">
+        <item quantity="one">%d step</item>
+        <item quantity="other">%d steps</item>
+    </plurals>
+    <plurals name="chat_files_changed">
+        <item quantity="one">%d file changed</item>
+        <item quantity="other">%d files changed</item>
+    </plurals>
+    <plurals name="chat_new_messages">
+        <item quantity="one">%d new</item>
+        <item quantity="other">%d new</item>
+    </plurals>
+    <plurals name="chip_review_changes">
+        <item quantity="one">Review %d change</item>
+        <item quantity="other">Review %d changes</item>
+    </plurals>
+    <string name="chat_keep_all">Keep all</string>
+    <string name="chat_revert_all">Revert all</string>
+    <string name="chat_keep">Keep</string>
+    <string name="chat_revert">Revert</string>
+    <string name="chat_open_in_files">Open in Files</string>
+    <string name="chat_diff_more">%d more lines</string>
+    <string name="chat_diff_binary">Binary file, no preview.</string>
+    <string name="chat_diff_none">No line changes to show.</string>
+    <string name="approval_risk_high">High risk</string>
+    <string name="approval_risk_review">Needs review</string>
+    <string name="approval_risk_safe">Low risk</string>
+    <string name="approval_paths">Affects</string>
+    <string name="approval_waiting_hint">The agent is waiting. Choose Deny or Approve to continue.</string>
+    <string name="chip_explain_changes">Explain the changes</string>
+    <string name="chip_open_preview">Open preview</string>
+    <string name="chip_build_run">Build and run</string>
+    <string name="chip_run_tests">Run the tests</string>
+    <string name="prompt_explain_changes">Explain what you just changed and why.</string>
+    <string name="prompt_run_tests">Run this project\'s tests and report the result.</string>
+    <string name="starter_explain">Explain this project\'s structure</string>
+    <string name="starter_fix">Find and fix build errors</string>
+    <string name="starter_feature">Add a new feature: </string>
+    <string name="starter_tests">Write tests for the main code</string>
+    <string name="diff_added">+%1$d</string>
+    <string name="diff_removed">−%1$d</string>
 </resources>

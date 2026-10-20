@@ -49,6 +49,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -167,9 +169,10 @@ fun AndroidBuildScreen(
                 .padding(end = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Launch is reached from a project's header, so it reads as a project page: name first, "Launch" under it.
             ForgeLargeTitle(
-                title = stringResource(R.string.launch_launch),
-                subtitle = state.activeProject?.name,
+                title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
+                subtitle = stringResource(R.string.launch_launch),
                 modifier = Modifier.weight(1f),
             )
             ForgeActionPill {
@@ -258,11 +261,15 @@ fun AndroidBuildScreen(
                 Text(stringResource(build.phase.headline()), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = if (build.phase == AndroidBuildPhase.FAILED && build.issues.isNotEmpty()) {
-                        stringResource(R.string.launch_errors_warnings, errorCount, warningCount)
+                        stringResource(
+                            R.string.launch_errors_warnings_join,
+                            quantityStringResource(R.plurals.launch_errors, errorCount, errorCount),
+                            quantityStringResource(R.plurals.launch_warnings, warningCount, warningCount),
+                        )
                     } else {
                         build.message ?: build.stage.displayLabel()
                     },
-                    fontSize = 14.sp,
+                    fontSize = ForgeType.control,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -333,7 +340,7 @@ fun AndroidBuildScreen(
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
                             text = stringResource(row.title),
-                            fontSize = 16.sp,
+                            fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.Medium,
                             color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         )
@@ -377,7 +384,7 @@ fun AndroidBuildScreen(
                             text = build.log.ifBlank { stringResource(R.string.launch_no_build_output) },
                             color = tokens.terminalText,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             lineHeight = 17.sp,
                         )
                     }
@@ -451,7 +458,7 @@ private fun BuildIssuesList(
                                 issue.line?.let { append(":").append(it) }
                             },
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = ForgeType.caption,
                             fontWeight = FontWeight.SemiBold,
                             color = tokens.accentText,
                         )
@@ -552,11 +559,11 @@ private fun LogcatPanel(
             }
         }
 
-        OutlinedTextField(
+        ForgeTextField(
+            kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Search,
             value = logcat.query,
             onValueChange = onSetQuery,
             placeholder = { Text(stringResource(R.string.launch_filter_logcat)) },
-            singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -640,16 +647,16 @@ fun WebPreviewScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        if (state.activeTab == ForgeTab.PROJECTS) {
+            ForgeProjectHeader(
+                title = state.activeProject?.name ?: stringResource(R.string.launch_preview),
+                subtitle = stringResource(R.string.launch_preview) + " · " + stringResource(R.string.launch_local_dev_server),
+                onBack = { viewModel.projectBack() },
+            )
+        } else {
             ForgeLargeTitle(
                 title = stringResource(R.string.launch_preview),
                 subtitle = stringResource(R.string.launch_local_dev_server),
-                modifier = Modifier.weight(1f),
             )
         }
 
@@ -683,7 +690,9 @@ fun WebPreviewScreen(
                         value = urlInput,
                         onValueChange = { urlInput = it },
                         singleLine = true,
-                        placeholder = { Text(stringResource(R.string.launch_preview_url)) },
+                        keyboardOptions = ForgeFieldKind.URL.keyboardOptions(ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { opened = true; openUrl(urlInput) }),
+                        placeholder = { Text(stringResource(R.string.launch_preview_url), color = colors.onSurfaceVariant.copy(alpha = 0.6f)) },
                         colors = TextFieldDefaults.textFieldColors(
                             containerColor = Color.Transparent,
                             focusedIndicatorColor = Color.Transparent,
@@ -738,20 +747,11 @@ fun WebPreviewScreen(
         if (!serverUp) {
             // Nothing is listening yet: say so instead of showing a blank WebView. (if/else, not an early return: a
             // `return@Column` inside this composable lambda is a suspected cause of the Compose Stack.pop crash.)
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(56.dp))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(stringResource(R.string.launch_preview_not_running), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = stringResource(R.string.launch_preview_not_running_hint),
-                    fontSize = 14.sp,
-                    color = colors.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.GLOBE,
+                    title = stringResource(R.string.launch_preview_not_running),
+                    message = stringResource(R.string.launch_preview_not_running_hint),
                 )
             }
         } else {
