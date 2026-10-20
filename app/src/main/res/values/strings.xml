@@ -251,7 +251,7 @@
     <string name="tool_no_targets">No build targets found. Add your own command below.</string>
     <string name="tool_open">Open</string>
     <string name="tool_refresh">Refresh</string>
-    <string name="tool_remove">Remove</string>
+    <string name="tool_remove">Uninstall</string>
     <string name="tool_restore">Restore</string>
     <string name="tool_restore_message">Replace the project files with \"%1$s\"? The current state is saved as a snapshot first.</string>
     <string name="tool_restore_title">Restore snapshot</string>
@@ -596,7 +596,7 @@
     <string name="settings_developer_tools">Developer tools</string>
     <string name="settings_included">Included</string>
     <string name="settings_add">Add</string>
-    <string name="settings_remove">Remove</string>
+    <string name="settings_remove">Uninstall</string>
     <string name="settings_linux_runtime">Linux runtime</string>
     <string name="settings_architecture">Architecture</string>
     <string name="settings_environment">Environment</string>
@@ -816,4 +816,7 @@
     <string name="code_viewer_changes">Changes (%1$d)</string>
     <string name="code_viewer_files">Files (%1$d)</string>
     <string name="code_viewer_no_files">This project has no files yet.</string>
+    <string name="confirm_uninstall_title">Uninstall %1$s?</string>
+    <string name="confirm_uninstall_message">It is removed from the Linux runtime. You can install it again later.</string>
+    <string name="agent_status_not_installed">Not installed</string>
 </resources>
