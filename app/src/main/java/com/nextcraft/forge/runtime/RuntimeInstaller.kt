@@ -554,11 +554,11 @@ class RuntimeInstaller(private val context: Context) {
     suspend fun checkAgentUpdates(): Map<AgentKind, AgentUpdateInfo> {
         val installed = installedAgentVersions()
         return buildMap {
+            // Claude Code is pinned to CLAUDE_NPM_VERSION on PRoot (newer releases are Bun binaries that die with
+            // SIGSYS in the app sandbox), so a newer npm version is never offered: updateClaude would only refuse it.
             installed[AgentKind.CLAUDE_CODE]?.let { current ->
-                runCatching {
-                    JSONObject(fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest")).getString("version")
-                }.getOrNull()?.takeIf { isVersionNewer(it, current) }?.let { latest ->
-                    put(AgentKind.CLAUDE_CODE, AgentUpdateInfo(current, latest))
+                if (isVersionNewer(CLAUDE_NPM_VERSION, current)) {
+                    put(AgentKind.CLAUDE_CODE, AgentUpdateInfo(current, CLAUDE_NPM_VERSION))
                 }
             }
             installed[AgentKind.DEEPSEEK_HARNESS]?.let { current ->
@@ -626,42 +626,11 @@ class RuntimeInstaller(private val context: Context) {
         expectedVersion: String,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        check(RuntimeEngines.current() != RuntimeEngine.PROOT) {
-            "Claude Code stays at $CLAUDE_NPM_VERSION on the PRoot engine: newer releases are Bun binaries that Android's app sandbox cannot run without root."
+        // Only the pinned npm release is ever offered (see checkAgentUpdates); anything else cannot run under PRoot.
+        check(expectedVersion == CLAUDE_NPM_VERSION) {
+            "Claude Code stays at $CLAUDE_NPM_VERSION on the PRoot engine: newer releases are Bun binaries that Android's app sandbox cannot run."
         }
-        val latest = JSONObject(fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest")).getString("version")
-        check(latest == expectedVersion) { "A newer Claude Code release is available. Refresh updates and try again." }
-        val base = "https://downloads.claude.ai/claude-code-releases/$latest"
-        val manifest = JSONObject(fetchText("$base/manifest.json"))
-        val checksum = manifest.getJSONObject("platforms").getJSONObject("linux-arm64").getString("checksum")
-        val downloaded = File(downloads, "claude-$latest")
-        val claudeDownloadLabel = "Downloading Claude Code $latest…"
-        downloadVerified("$base/linux-arm64/claude", downloaded, checksum) { bytes, total ->
-            val ratio = if (total > 0L) bytes.toFloat() / total else 0f
-            onProgress(RuntimeInstallProgress(claudeDownloadLabel, ratio * 0.9f, bytes, total.takeIf { it > 0L }, event = RuntimeInstallEvent.DOWNLOAD))
-        }
-        val claude = File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/"))
-        claude.parentFile?.mkdirs()
-        val staged = File(claude.parentFile, ".claude-$latest.installing")
-        try {
-            replaceBinaryWithRollback(
-                target = claude,
-                install = {
-                    try {
-                        downloaded.copyTo(staged, overwrite = true)
-                        Os.chmod(staged.absolutePath, 0b111101101)
-                        Os.rename(staged.absolutePath, claude.absolutePath)
-                    } catch (e: Throwable) {
-                        staged.delete()
-                        throw e
-                    }
-                },
-                verify = { verifyGuest(runtime.chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify updated Claude Code") },
-            )
-        } finally {
-            downloaded.delete()
-        }
-        claudeMarker.writeText(latest)
+        installClaudeViaNpm(runtime.chrootExec, 0.05f, onProgress)
     }
 
     private suspend fun updateAgy(
@@ -850,22 +819,8 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         migrateLegacyClaudeMarker()
         if (isAgentInstalled(AgentKind.CLAUDE_CODE)) return
-        if (RuntimeEngines.current() == RuntimeEngine.PROOT) {
-            installClaudeViaNpm(chrootExec, fraction, onProgress)
-            return
-        }
-        installRuntimeOverlay(
-            bundle = CLAUDE_BUNDLE,
-            message = "Installing Claude Code $CLAUDE_BUNDLED_VERSION…",
-            from = fraction,
-            to = 0.995f,
-            onProgress = onProgress,
-        )
-        verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
-        migrateLegacyClaudeMarker()
-        require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
-            "The Claude Code runtime bundle is incomplete"
-        }
+        // The official Claude bundle is a Bun binary that Android's app sandbox kills (SIGSYS); PRoot always uses npm.
+        installClaudeViaNpm(chrootExec, fraction, onProgress)
     }
 
     /**
