@@ -804,4 +804,9 @@
     <string name="settings_api_keys_optional">Backup API keys (optional)</string>
     <string name="settings_key_label_hint">Primary</string>
     <string name="files_project_folder">Project folder</string>
+    <string name="diff_show_all">Show all %1$d lines</string>
+    <string name="diff_show_less">Show fewer lines</string>
+    <string name="diff_row_added">Line %1$s added: %2$s</string>
+    <string name="diff_row_removed">Line %1$s removed: %2$s</string>
+    <string name="diff_row_context">Line %1$s: %2$s</string>
 </resources>

@@ -757,48 +757,7 @@ private fun WorkspaceDiffReviewList(
                             }
                         }
 
-                        val diffShape = RoundedCornerShape(12.dp)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(diffShape)
-                                .background(tokens.terminalBackground)
-                                .horizontalScroll(rememberScrollState())
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            item.diffLines.take(80).forEach { line ->
-                                val prefix = when (line.type) {
-                                    DiffLineType.ADDITION -> "+ "
-                                    DiffLineType.DELETION -> "- "
-                                    DiffLineType.INFO -> "  "
-                                    DiffLineType.CONTEXT -> "  "
-                                }
-                                val lineBg = when (line.type) {
-                                    DiffLineType.ADDITION -> tokens.diffAddedBackground
-                                    DiffLineType.DELETION -> tokens.diffRemovedBackground
-                                    else -> Color.Transparent
-                                }
-                                val lineColor = when (line.type) {
-                                    DiffLineType.ADDITION -> tokens.diffAddedText
-                                    DiffLineType.DELETION -> tokens.diffRemovedText
-                                    DiffLineType.INFO -> tokens.accentText
-                                    DiffLineType.CONTEXT -> tokens.terminalText.copy(alpha = 0.85f)
-                                }
-                                Text(
-                                    text = prefix + line.text,
-                                    color = lineColor,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = ForgeType.caption,
-                                    lineHeight = 16.sp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(lineBg)
-                                        .padding(horizontal = 4.dp, vertical = 1.dp),
-                                )
-                            }
-                        }
+                        DiffCodeView(lines = item.diffLines, path = item.path, previewLines = 200)
                     }
                 }
             }

@@ -788,4 +788,9 @@
     <string name="settings_api_keys_optional">Kunci API cadangan (opsional)</string>
     <string name="settings_key_label_hint">Utama</string>
     <string name="files_project_folder">Folder proyek</string>
+    <string name="diff_show_all">Tampilkan semua %1$d baris</string>
+    <string name="diff_show_less">Tampilkan lebih sedikit</string>
+    <string name="diff_row_added">Baris %1$s ditambahkan: %2$s</string>
+    <string name="diff_row_removed">Baris %1$s dihapus: %2$s</string>
+    <string name="diff_row_context">Baris %1$s: %2$s</string>
 </resources>
