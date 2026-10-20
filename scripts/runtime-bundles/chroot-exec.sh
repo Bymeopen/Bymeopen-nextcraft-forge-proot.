@@ -134,6 +134,11 @@ mount_dynamic_bind() {
     fi
 }
 
+# Two launches at once (an agent plus a diagnostic) would both see a mount point as free and stack the
+# mounts; the second /apex then has no modules. Serialize the mount phase; fd 9 is closed before the chroot.
+exec 9>"$ROOTFS/.nextcraft-mount.lock"
+flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true
+
 # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
 if ! is_mounted "$ROOTFS"; then
     mount -o bind "$ROOTFS" "$ROOTFS" 2>/dev/null || true
@@ -244,6 +249,7 @@ forward_signal() {
     kill "-$1" "$child" 2>/dev/null || true
 }
 
+exec 9>&-
 $CHROOT_BIN "$ROOTFS" /usr/bin/env \
     GUEST_WORKSPACE="$GUEST_WORKSPACE" \
     /bin/sh -c 'cd "$GUEST_WORKSPACE" && exec "$@"' -- "$@" <&3 3<&- &

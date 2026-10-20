@@ -41,14 +41,19 @@ fun NavGlyph(
     size: Dp = 24.dp,
 ) {
     val animate = live && !reduceMotion
-    val transition = rememberInfiniteTransition()
-    // One shared 0..1 clock; each glyph reads it differently (blink vs orbit).
-    val clock by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
-    )
-    val t = if (animate) clock else 0f
+    // One shared 0..1 clock; each glyph reads it differently (blink vs orbit). It only exists while the glyph is
+    // live: an infinite transition requests a frame on every vsync, so an idle bottom bar kept the app busy.
+    val t = if (animate) {
+        val transition = rememberInfiniteTransition()
+        val clock by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
+        )
+        clock
+    } else {
+        0f
+    }
     Canvas(modifier = modifier.size(size)) {
         val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         when (tab) {

@@ -344,6 +344,7 @@
     <string name="projects_cancel">Cancel</string>
     <string name="projects_expand">Expand</string>
     <string name="projects_collapse">Collapse</string>
+    <string name="msg_repair_busy">Stop the running agent before repairing the chroot.</string>
     <string name="msg_repairing_chroot">Repairing chroot mounts &amp; runtime scripts…</string>
     <string name="msg_api_key_saved">API key saved securely in Android Keystore.</string>
     <string name="msg_api_key_save_failed">Could not save the API key.</string>

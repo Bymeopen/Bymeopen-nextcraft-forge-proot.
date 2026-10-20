@@ -295,11 +295,14 @@ class AntigravityRuntimeBridge(
                 }
             }
         } catch (e: TimeoutCancellationException) {
+            // The probe's own timeout ("Timed out waiting for 45000 ms") is not the 60-minute task limit: classify
+            // only what agy logged (network, server error, sign-in) and otherwise say the probe got no answer.
             val diagnostic = recentAntigravityDiagnostic(startedAtMillis)
+            val noAnswer = "Antigravity did not answer within ${timeoutMillis / 1000} s. Check the connection and try again."
             val message = if (diagnostic.isBlank()) {
-                "Antigravity did not answer. Try again."
+                noAnswer
             } else {
-                antigravityFriendlyError(e.message.orEmpty(), diagnostic)
+                antigravityFriendlyError("", diagnostic).takeUnless { it == ANTIGRAVITY_GENERIC_FAILURE } ?: noAnswer
             }
             throw AntigravitySessionException(message)
         } catch (e: CancellationException) {
@@ -593,7 +596,7 @@ internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): Str
     // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
     return classifyAntigravityError(rawValue, allowTimeout = true)
         ?: classifyAntigravityError("$rawValue ${antigravityDiagnosticSignal(diagnostic)}", allowTimeout = false)
-        ?: rawValue.ifBlank { "Antigravity could not complete the task." }.take(500)
+        ?: rawValue.ifBlank { ANTIGRAVITY_GENERIC_FAILURE }.take(500)
 }
 
 /**
@@ -655,6 +658,8 @@ private val ANTIGRAVITY_SERVER_ERRORS = listOf(
 )
 
 private const val RETRY_CHECK_INTERVAL_MS = 5_000L
+
+private const val ANTIGRAVITY_GENERIC_FAILURE = "Antigravity could not complete the task."
 
 private val ANTIGRAVITY_RETRY_LINE = Regex("""Run: attempt (\d+) failed \((.*)\), retrying in (\w+)""")
 

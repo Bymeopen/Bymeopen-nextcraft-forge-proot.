@@ -235,6 +235,9 @@ data class QueuedPrompt(
     val id: String = UUID.randomUUID().toString(),
     val text: String,
     val attachments: List<ChatAttachment> = emptyList(),
+    /** Where the message was typed; it is only sent there, never into a chat the user switched to. */
+    val projectId: String? = null,
+    val chatId: String? = null,
 )
 
 /** A project removed from the list whose files are kept until the undo window (UNDO_WINDOW_MS) passes. */

@@ -1064,6 +1064,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePythonStack() {
+        val dpkgOwned = dpkgOwnedPaths()
         // The overlay is unmanaged by dpkg, so it is removed by path. Covers the current Ubuntu 24.04 bundle
         // (Python 3.12) and the legacy 20.04 bundle (Python 3.8). Shared libraries the overlay also ships
         // (libsqlite3, libreadline, libhistory) and tzdata files are left in place: other tools may use them.
@@ -1100,8 +1101,17 @@ class RuntimeInstaller(private val context: Context) {
             "usr/share/python3",
             "usr/share/python-wheels",
             "root/.cache/pip",
-        ).forEach { removePath(File(rootfs, it)) }
+        )
+            // gdb (C/C++ stack) pulls in dpkg's libpython3.12 at these same paths; deleting them breaks gdb and
+            // leaves dpkg believing the packages are installed. Only remove what dpkg does not own.
+            .filterNot { "/$it" in dpkgOwned }
+            .forEach { removePath(File(rootfs, it)) }
     }
+
+    private fun dpkgOwnedPaths(): Set<String> = runCatching {
+        File(rootfs, "var/lib/dpkg/info").listFiles { f -> f.name.endsWith(".list") }.orEmpty()
+            .flatMapTo(HashSet()) { it.readLines() }
+    }.getOrDefault(emptySet())
 
     /** Removes the current overlay layout and every previous one, so an upgrade does not leave an old JDK behind. */
     private fun removeAndroidStack() {
@@ -1123,7 +1133,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun removePath(file: File) {
         val isLink = java.nio.file.Files.isSymbolicLink(file.toPath())
         if (!file.exists() && !isLink) return
-        val removed = if (file.isDirectory && !isLink) file.deleteRecursively() else file.delete()
+        val removed = if (file.isDirectory && !isLink) file.deleteRecursivelyNoFollow() else file.delete()
         // Caches and packages created inside the chroot (Gradle, pip, Composer) are root-owned, so the app UID
         // cannot delete them; fall back to a root rm, which first checks that nothing is mounted below the path.
         if (!removed) {
@@ -1289,7 +1299,8 @@ class RuntimeInstaller(private val context: Context) {
             extractZstdTar(archive, rootfs) { done, total ->
                 onProgress(unpackProgress(message, to * 0.8f + from * 0.2f, to, done, total))
             }
-            stripMacosMetadataArtifacts(rootfs)
+            // The rootfs may be mounted by a running session: never walk into /proc, /dev or a project bind.
+            stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         } finally {
             if (archive.parentFile == downloads) archive.delete()
         }
@@ -2630,7 +2641,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
 
         /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
-        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
@@ -2912,6 +2923,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 fi
             }
 
+            # Two launches at once (an agent plus a diagnostic) would both see a mount point as free and stack the
+            # mounts; the second /apex then has no modules. Serialize the mount phase; fd 9 is closed before the chroot.
+            exec 9>"${'$'}ROOTFS/.nextcraft-mount.lock"
+            flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true
+
             # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
             if ! is_mounted "${'$'}ROOTFS"; then
                 mount -o bind "${'$'}ROOTFS" "${'$'}ROOTFS" 2>/dev/null || true
@@ -3022,6 +3038,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
             }
 
+            exec 9>&-
             ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
                 GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
                 /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &

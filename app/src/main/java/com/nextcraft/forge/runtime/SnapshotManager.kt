@@ -82,7 +82,7 @@ class SnapshotManager(private val filesDir: File) {
         }
         val safety = create(projectId, workspace, "Before restore")
         root.listFiles().orEmpty().filter { it.name !in EXCLUDED_DIRS }.forEach { entry ->
-            check(entry.deleteRecursively()) { "Could not clear ${entry.name}; a build or terminal may still be using it." }
+            check(entry.deleteRecursivelyNoFollow()) { "Could not clear ${entry.name}; a build or terminal may still be using it." }
         }
         ZipInputStream(snapshot.file.inputStream().buffered()).use { zip ->
             var entry = zip.nextEntry
