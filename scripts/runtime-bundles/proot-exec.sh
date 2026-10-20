@@ -3,6 +3,9 @@
 # static proot shipped in the APK (NEXTCRAFT_PROOT) instead of kernel mounts and chroot. Always run as
 # `/system/bin/sh proot-exec.sh …`: the app UID may not exec files from its data directory.
 set -e
+# The env file sourced before this script replaces PATH with the guest PATH; the host-side commands below
+# (mkdir, …) live in /system/bin. The guest PATH is set again further down, before proot starts.
+export PATH="/system/bin:/system/xbin${PATH:+:$PATH}"
 
 if [ "$#" -lt 6 ]; then
     echo "Usage: proot-exec.sh <rootfs> <host_workspace> <guest_workspace> <host_bridge> <app_uid> <cmd...>" >&2

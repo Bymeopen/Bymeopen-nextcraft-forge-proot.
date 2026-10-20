@@ -140,7 +140,7 @@ class SshController(context: Context) {
     fun stopTunnel(id: String) {
         val process = tunnelProcesses.remove(id) ?: return
         process.destroyForcibly()
-        // Killing the su wrapper does not always reach the ssh client inside the chroot; stop it there as well.
+        // Killing the host-side proot does not always reach the ssh client inside the guest; stop it there as well.
         val forward = mutable.value.hosts.firstOrNull { it.id == id }?.forward.orEmpty()
         if (forward.isNotEmpty()) {
             scope.launch {
