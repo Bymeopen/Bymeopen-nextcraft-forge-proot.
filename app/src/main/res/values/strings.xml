@@ -891,4 +891,5 @@
     <string name="capture_start">Start</string>
     <string name="capture_done">%1$d screen pictures attached</string>
     <string name="capture_failed">Could not capture the screens</string>
+    <string name="projects_status_working">Agent working</string>
 </resources>

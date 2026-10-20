@@ -153,6 +153,8 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
+                        changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
+                        running = state.sessionRunning && project.id == state.activeProjectId,
                         // MainViewModel.selectProject ignores switches while active tasks run.
                         locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
@@ -168,6 +170,8 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
+                        changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
+                        running = state.sessionRunning && project.id == state.activeProjectId,
                         locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
                         onOpen = { onOpenProject(project.id) },
@@ -490,6 +494,8 @@ internal fun ProjectRow(
     onOpen: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
+    changedCount: Int = 0,
+    running: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
@@ -550,6 +556,22 @@ internal fun ProjectRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Live state for the open project: the agent is working, or edits wait for review.
+                if (running || changedCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (running) {
+                            ProjectStatusPill(stringResource(R.string.projects_status_working), ForgeGlyph.SPARK, LocalForgeThemeTokens.current.warningText)
+                        }
+                        if (changedCount > 0) {
+                            ProjectStatusPill(quantityStringResource(R.plurals.chat_files_changed, changedCount, changedCount), ForgeGlyph.FILE, scheme.primary)
+                        }
+                    }
+                }
             }
             Box {
                 IconButton(onClick = { menuOpen = true }, enabled = !locked) {
@@ -648,3 +670,19 @@ private fun Project.localizedDescription(): String = when (description) {
 
 @Composable
 private fun Project.localizedLanguage(): String = if (language == "Multi-language") stringResource(R.string.project_lang_multi) else language
+
+/** Small status capsule on a project card: glyph plus words, so colour is never the only signal. */
+@Composable
+private fun ProjectStatusPill(text: String, glyph: ForgeGlyph, tint: androidx.compose.ui.graphics.Color) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100))
+            .background(tint.copy(alpha = 0.12f))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ForgeIcon(glyph, tint = tint, size = 12.dp)
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(text, fontSize = ForgeType.caption, color = tint, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}

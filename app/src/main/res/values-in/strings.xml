@@ -875,4 +875,5 @@
     <string name="capture_start">Mulai</string>
     <string name="capture_done">%1$d gambar layar dilampirkan</string>
     <string name="capture_failed">Tidak dapat menangkap layar</string>
+    <string name="projects_status_working">Agen bekerja</string>
 </resources>
