@@ -92,10 +92,6 @@ fun DevStack.displayDescription(): String = when (this) {
     else -> stringResource(descriptionRes())
 }
 
-@StringRes
-
-@StringRes
-
 /** "3m ago" style text for list rows; plurals come from resources so each locale decides the form. */
 @Composable
 fun Project.relativeUpdatedAt(nowMillis: Long = System.currentTimeMillis()): String =
