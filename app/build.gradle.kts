@@ -41,8 +41,20 @@ android {
         }
     }
 
+    signingConfigs {
+        // A fixed, public debug key: CI runners otherwise sign each debug APK with a fresh random key, so a newer
+        // build cannot be installed over an older one and the app (rootfs, chats, root grant) must be uninstalled.
+        create("sharedDebug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
+            signingConfig = signingConfigs.getByName("sharedDebug")
             isMinifyEnabled = false
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
         }
