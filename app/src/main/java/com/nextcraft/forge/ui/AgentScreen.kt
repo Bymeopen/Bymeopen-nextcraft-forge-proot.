@@ -110,6 +110,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -131,7 +132,9 @@ fun AgentScreen(
     viewModel: MainViewModel,
 ) {
     var promptInput by rememberSaveable { mutableStateOf("") }
-    val listState = rememberLazyListState()
+    // Coming back to a chat (leaving the app, another tab) recreates the list; open it at the newest message,
+    // not at the first one.
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = state.messages.lastIndex.coerceAtLeast(0))
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
     val tokens = LocalForgeThemeTokens.current
@@ -155,8 +158,10 @@ fun AgentScreen(
         if (state.messages.isNotEmpty()) {
             val lastIdx = state.messages.lastIndex
             if (state.messages.size != previousMessageCount) {
+                // A chat that just loaded jumps straight to its end; only new messages animate.
+                val firstLoad = previousMessageCount == 0
                 previousMessageCount = state.messages.size
-                listState.animateScrollToItem(lastIdx)
+                if (firstLoad) listState.scrollToItem(lastIdx) else listState.animateScrollToItem(lastIdx)
             } else {
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                 if (lastVisible >= lastIdx - 1) {
@@ -233,7 +238,7 @@ fun AgentScreen(
         }
 
         state.pendingToolRequest?.let { req ->
-            ToolApprovalCard(
+            ToolApprovalSheet(
                 request = req,
                 onApprove = { viewModel.respondToToolRequest(true) },
                 onReject = { viewModel.respondToToolRequest(false) },
@@ -258,6 +263,8 @@ fun AgentScreen(
                 }
             }
         } else {
+            val pendingChanges = state.changedItems.filter { it.accepted == null }
+            val lastAssistantId = state.messages.lastOrNull { !it.fromUser }?.id
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     state = listState,
@@ -266,27 +273,49 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        Box(modifier = Modifier.animateItemPlacement()) {
-                        ChatMessageCard(
-                            message = message,
-                            agentName = state.agentKind.displayTitle(),
-                            onRunSnippet = { cmd ->
-                                viewModel.runTerminalCommand(cmd)
-                                viewModel.selectTab(ForgeTab.TERMINAL)
-                            },
-                        )
+                        Column(modifier = Modifier.animateItemPlacement(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChatMessageCard(
+                                message = message,
+                                agentName = state.agentKind.displayTitle(),
+                                onRunSnippet = { cmd ->
+                                    viewModel.runTerminalCommandInProject(cmd)
+                                    viewModel.selectTab(ForgeTab.TERMINAL)
+                                },
+                            )
+                            // Review right where the agent said it was done; the Files tab keeps the full diff view.
+                            if (message.id == lastAssistantId && pendingChanges.isNotEmpty() && !state.sessionRunning) {
+                                ChangedFilesCard(
+                                    changes = pendingChanges,
+                                    enabled = !state.sessionRunning,
+                                    onOpenFile = { path ->
+                                        viewModel.openWorkspaceFile(path)
+                                        viewModel.selectProjectPane(ProjectPane.FILES)
+                                    },
+                                    onKeepFile = viewModel::keepSingleFile,
+                                    onRevertFile = viewModel::revertSingleFile,
+                                    onKeepAll = viewModel::keepAllChanges,
+                                    onRevertAll = viewModel::revertAllChanges,
+                                    onEditInTerminal = viewModel::editInTerminal,
+                                )
+                            }
                         }
                     }
                 }
                 // "Latest" pill: shown once the reader has scrolled up from the newest message.
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                 val awayFromEnd = state.messages.size > 1 && lastVisible < state.messages.lastIndex
+                // Count only what arrived after the reader scrolled away; remember(awayFromEnd) snapshots the size at that moment.
+                val sizeWhenAway = remember(awayFromEnd) { state.messages.size }
+                val newCount = (state.messages.size - sizeWhenAway).coerceAtLeast(0)
                 if (awayFromEnd) {
                     Surface(
                         shape = RoundedCornerShape(100),
-                        color = tokens.cardElevatedColor,
+                        // Opaque (composited over the page) and raised: the glass card colour is translucent and let the
+                        // last message show through the pill.
+                        color = tokens.cardElevatedColor.compositeOver(MaterialTheme.colorScheme.surface),
                         contentColor = tokens.accentText,
                         border = tokens.cardBorderStroke,
+                        shadowElevation = 4.dp,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 10.dp)
@@ -299,7 +328,12 @@ fun AgentScreen(
                         ) {
                             Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.agent_latest), fontWeight = FontWeight.SemiBold, fontSize = ForgeType.control)
+                            Text(
+                                text = if (newCount > 0) quantityStringResource(R.plurals.chat_new_messages, newCount, newCount) else stringResource(R.string.agent_latest),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = ForgeType.control,
+                                modifier = Modifier.forgeLive(),
+                            )
                         }
                     }
                 }
@@ -316,6 +350,21 @@ fun AgentScreen(
         val cameraContext = LocalContext.current
         var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
         var attachMenuOpen by remember { mutableStateOf(false) }
+        var confirmCapture by remember { mutableStateOf(false) }
+        if (confirmCapture) {
+            val captureTarget = cameraContext.findWindow()
+            AlertDialog(
+                onDismissRequest = { confirmCapture = false },
+                title = { Text(stringResource(R.string.capture_confirm_title)) },
+                text = { Text(stringResource(R.string.capture_confirm_message)) },
+                confirmButton = {
+                    TextButton(onClick = { confirmCapture = false; captureTarget?.let(viewModel::captureAppScreens) }) {
+                        Text(stringResource(R.string.capture_start))
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmCapture = false }) { Text(stringResource(R.string.agent_cancel)) } },
+            )
+        }
         val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
             val uri = cameraUri?.let(android.net.Uri::parse)
             if (saved && uri != null) viewModel.attachFilesToPrompt(listOf(uri))
@@ -378,6 +427,32 @@ fun AgentScreen(
                 }
             }
         }
+        if (!running && state.pendingToolRequest == null) {
+            val chips = buildList {
+                if (state.messages.isEmpty()) {
+                    // Starter ideas fill the composer instead of sending, so the user can edit first.
+                    add(QuickChip(stringResource(R.string.starter_explain), ForgeGlyph.SPARK) { promptInput = stringOf(R.string.starter_explain, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_fix), ForgeGlyph.BUILD) { promptInput = stringOf(R.string.starter_fix, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_feature), ForgeGlyph.PLUS) { promptInput = stringOf(R.string.starter_feature, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_tests), ForgeGlyph.CODE) { promptInput = stringOf(R.string.starter_tests, cameraContext) })
+                } else {
+                    val changed = state.changedItems.count { it.accepted == null }
+                    if (changed > 0) {
+                        add(QuickChip(quantityStringResource(R.plurals.chip_review_changes, changed, changed), ForgeGlyph.FILE) { viewModel.selectProjectPane(ProjectPane.FILES) })
+                        add(QuickChip(stringResource(R.string.chip_explain_changes), ForgeGlyph.SPARK) { viewModel.sendPrompt(stringOf(R.string.prompt_explain_changes, cameraContext)) })
+                    }
+                    if (state.activeLocalPorts.isNotEmpty()) {
+                        add(QuickChip(stringResource(R.string.chip_open_preview), ForgeGlyph.GLOBE) { viewModel.selectProjectPane(ProjectPane.PREVIEW) })
+                    }
+                    if (state.activeProject?.type == com.nextcraft.forge.model.ProjectType.ANDROID) {
+                        add(QuickChip(stringResource(R.string.chip_build_run), ForgeGlyph.BUILD) { viewModel.selectTab(ForgeTab.ANDROID) })
+                    } else {
+                        add(QuickChip(stringResource(R.string.chip_run_tests), ForgeGlyph.CODE) { viewModel.sendPrompt(stringOf(R.string.prompt_run_tests, cameraContext)) })
+                    }
+                }
+            }
+            QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
+        }
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = tokens.cardContainerColor,
@@ -404,6 +479,11 @@ fun AgentScreen(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.agent_attach_file)) },
                             onClick = { attachMenuOpen = false; attachPicker.launch(arrayOf("*/*")) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.capture_menu)) },
+                            enabled = !state.capturingScreens,
+                            onClick = { attachMenuOpen = false; confirmCapture = true },
                         )
                     }
                 }
@@ -644,7 +724,7 @@ private fun AntigravityOAuthBanner(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.agent_google_account), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
                     Text(
-                        text = authState.message ?: stringResource(R.string.agent_required_for_antigravity),
+                        text = authState.message?.asString() ?: stringResource(R.string.agent_required_for_antigravity),
                         fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                     )
@@ -700,80 +780,7 @@ private fun AntigravityOAuthBanner(
 }
 
 @Composable
-private fun ToolApprovalCard(
-    request: ToolRequest,
-    onApprove: () -> Unit,
-    onReject: () -> Unit,
-) {
-    val tokens = LocalForgeThemeTokens.current
-    val scheme = MaterialTheme.colorScheme
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = tokens.cardContainerColor,
-        contentColor = scheme.onSurface,
-        border = tokens.cardBorderStroke,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-    ) {
-        Row {
-            // Thin red rule carries the warning so the card itself stays calm.
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .background(scheme.error),
-            )
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ForgeStatusIcon(ForgeStatus.FAILED, iconSize = 20.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.agent_approval_title), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
-                        Text(
-                            text = stringResource(R.string.agent_approval_sub, request.toolName, request.risk.name.lowercase()),
-                            fontSize = ForgeType.secondary,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Text(text = request.explanation, fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
-                request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
-                    Text(
-                        text = cmd,
-                        style = ForgeCodeTextStyle,
-                        color = tokens.terminalText,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(tokens.terminalBackground)
-                            .padding(10.dp),
-                    )
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onReject,
-                        shape = RoundedCornerShape(100),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.agent_deny)) }
-                    Button(
-                        onClick = onApprove,
-                        shape = RoundedCornerShape(100),
-                        colors = ButtonDefaults.buttonColors(containerColor = scheme.error, contentColor = scheme.onError),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChatMessageCard(
+internal fun ChatMessageCard(
     message: ChatMessage,
     agentName: String,
     onRunSnippet: (String) -> Unit,
@@ -811,7 +818,11 @@ private fun ChatMessageCard(
 
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         // Each tool call is one collapsed row ("Bash · command ⌄"); tap to read its detail.
-        message.workItems.forEach { item -> ToolCallRow(item) }
+        if (message.workItems.size >= STEP_GROUP_MIN) {
+            ToolStepGroup(message.workItems)
+        } else {
+            message.workItems.forEach { item -> ToolCallRow(item) }
+        }
         if (message.workedMillis > 0L) {
             Text(
                 text = stringResource(R.string.agent_worked_for, formatWorked(message.workedMillis)),
@@ -824,7 +835,8 @@ private fun ChatMessageCard(
         if (message.text.isNotBlank()) {
             MessageContainer(fromUser = false, contentColor = textColor) {
                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    Column(modifier = Modifier.padding(end = 32.dp)) {
+                    // 44dp: the copy button is a 48dp touch box; 32dp let it cover the end of the first lines.
+                    Column(modifier = Modifier.padding(end = 44.dp)) {
                         MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
                         if (streaming) {
                             // Blinking caret says "still arriving" without a spinner.
@@ -912,7 +924,7 @@ private fun formatWorked(millis: Long): String {
 
 /** One collapsed tool call: status glyph, "Title · detail" on one line, chevron; expands to the full detail. */
 @Composable
-private fun ToolCallRow(item: ActivityItem) {
+internal fun ToolCallRow(item: ActivityItem) {
     var open by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
@@ -994,26 +1006,28 @@ private fun MessageContainer(
     content: @Composable () -> Unit,
 ) {
     if (fromUser) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = LocalForgeThemeTokens.current.cardElevatedColor,
-            contentColor = contentColor,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .then(
-                    if (onLongClick != null) {
-                        Modifier.combinedClickable(onLongClickLabel = longClickLabel, onLongClick = onLongClick, onClick = {})
-                    } else Modifier,
-                ),
-        ) { content() }
+        // Wraps its text and sits at the end: a short message must not get a full-width bubble of empty space.
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = LocalForgeThemeTokens.current.cardElevatedColor,
+                contentColor = contentColor,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .then(
+                        if (onLongClick != null) {
+                            Modifier.combinedClickable(onLongClickLabel = longClickLabel, onLongClick = onLongClick, onClick = {})
+                        } else Modifier,
+                    ),
+            ) { content() }
+        }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
     }
 }
 
 /** Tool-call kinds, derived from the activity title, each with its own glyph and tint. */
-private enum class ToolKind(val glyph: ForgeGlyph) {
+internal enum class ToolKind(val glyph: ForgeGlyph) {
     THINK(ForgeGlyph.SPARK), BASH(ForgeGlyph.TERMINAL), READ(ForgeGlyph.FILE), WRITE(ForgeGlyph.EDIT), OTHER(ForgeGlyph.BUILD);
 
     fun tint(scheme: androidx.compose.material3.ColorScheme, tokens: ForgeThemeTokens): Color = when (this) {
@@ -1023,7 +1037,7 @@ private enum class ToolKind(val glyph: ForgeGlyph) {
     }
 }
 
-private fun toolKind(item: ActivityItem): ToolKind {
+internal fun toolKind(item: ActivityItem): ToolKind {
     val t = item.title.lowercase()
     return when {
         "think" in t || "reason" in t -> ToolKind.THINK
@@ -1060,3 +1074,6 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, sh
         }
     }
 }
+
+/** String lookup for click handlers, which run outside composition and cannot call stringResource. */
+private fun stringOf(@androidx.annotation.StringRes id: Int, context: android.content.Context): String = context.getString(id)

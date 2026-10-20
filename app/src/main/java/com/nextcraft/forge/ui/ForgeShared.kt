@@ -148,7 +148,8 @@ fun ForgeListRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(title, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Two lines: on 360dp phones one line cut the descriptions mid-word ("paket bah…").
+                Text(subtitle, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         if (!badge.isNullOrBlank()) {

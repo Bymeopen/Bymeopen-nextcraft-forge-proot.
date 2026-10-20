@@ -41,10 +41,10 @@ android {
         }
     }
 
-    // A fixed debug key (committed; debug keys are not secrets) so every CI debug build has the same signature and
-    // can be installed over the previous one. A fresh runner would otherwise generate a new random debug key per build.
     signingConfigs {
-        getByName("debug") {
+        // A fixed, public debug key: CI runners otherwise sign each debug APK with a fresh random key, so a newer
+        // build cannot be installed over an older one and the app (rootfs, chats, root grant) must be uninstalled.
+        create("sharedDebug") {
             storeFile = file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
@@ -54,8 +54,8 @@ android {
 
     buildTypes {
         debug {
+            signingConfig = signingConfigs.getByName("sharedDebug")
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
         }
         release {
@@ -109,6 +109,25 @@ android {
         }
     }
 
+    // Opt-in layout screenshots across phone sizes: ./gradlew :app:testDebugUnitTest -PforgeScreenshots
+    // (needs the Robolectric SDK download; default builds are unaffected).
+    if (project.hasProperty("forgeScreenshots")) {
+        testOptions {
+            unitTests {
+                isIncludeAndroidResources = true
+                all {
+                    // -PforgeRoboDir=<dir with android-all-instrumented-*.jar> runs Robolectric without network access.
+                    (project.findProperty("forgeRoboDir") as String?)?.let { dir ->
+                        it.systemProperty("robolectric.offline", "true")
+                        it.systemProperty("robolectric.dependency.dir", dir)
+                    }
+                    it.maxHeapSize = "2g"
+                }
+            }
+        }
+        sourceSets.getByName("test").java.srcDir("src/screenshotTest/java")
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -137,10 +156,17 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // Interactive terminal: VT100/xterm emulator and its Android view. Pinned; see docs/TERMINAL.md for licensing.
+    implementation("com.github.termux.termux-app:terminal-emulator:v0.118.0")
+    implementation("com.github.termux.termux-app:terminal-view:v0.118.0")
     implementation("org.apache.commons:commons-compress:1.26.2")
     // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
     implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     testImplementation("junit:junit:4.13.2")
+    if (project.hasProperty("forgeScreenshots")) {
+        testImplementation("org.robolectric:robolectric:4.12.2")
+        testImplementation("androidx.compose.ui:ui-test-junit4")
+    }
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

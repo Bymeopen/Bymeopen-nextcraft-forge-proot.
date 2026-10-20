@@ -140,6 +140,8 @@ object ForgeType {
     val body = 15.sp            // prose, Normal
     val control = 14.sp         // buttons, inline status and helper text
     val secondary = 13.sp       // subtitles and metadata, muted
+    /** Bottom-bar label when five tabs share a 360dp phone: "Pengaturan" must stay inside its pill. */
+    val navCompact = 10.5.sp
     val caption = 12.sp         // section labels (uppercase, tracked) and badges
     val sectionTracking = 0.6.sp
 }

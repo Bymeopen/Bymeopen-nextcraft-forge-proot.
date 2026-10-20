@@ -69,6 +69,7 @@ import com.nextcraft.forge.runtime.RuntimeSetupService
 import com.nextcraft.forge.runtime.RuntimeSetupSnapshot
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import com.nextcraft.forge.runtime.RuntimeTaskController
+import com.termux.terminal.TerminalSession
 import com.nextcraft.forge.runtime.WorkspaceCheckpoints
 import org.json.JSONObject
 import com.nextcraft.forge.runtime.androidGradleCommand
@@ -123,6 +124,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.antigravityAccountEmail = email.orEmpty()
         },
     )
+
+    /** True when Claude runs on the user's subscription login (no key, or the OAuth token read from the credentials file). */
+    private fun isClaudeSubscriptionLogin(profile: ProviderProfile, apiKey: String): Boolean =
+        profile.kind == ProviderKind.CLAUDE && (apiKey.isBlank() || apiKey.startsWith("sk-ant-oat"))
 
     private fun resolveProviderSecret(profile: ProviderProfile): String? {
         vault.get(profile.kind.name)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
@@ -211,7 +216,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeAgentJob: Job? = null
     private var activeBuildJob: Job? = null
     private var activeBuildProcess: Process? = null
-    private var activeTerminalJob: Job? = null
     @Volatile private var activeTerminalProcess: Process? = null
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
@@ -222,6 +226,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val logLineIdCounter = AtomicLong(1L)
     /** Session whose events may touch the active chat; late events from older sessions are dropped. */
     private val activeRuntimeSessionId = AtomicReference<String?>(null)
+    /** The session that just finished: its FilesChanged event (Claude sends it after the result) is still wanted. */
+    private val finishedRuntimeSessionId = AtomicReference<String?>(null)
 
     init {
         RuntimeSetupController.restore(application)
@@ -560,6 +566,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun repairRootfs() {
+        // Repair force-unmounts the chroot; under a running agent its /workspace and /proc would vanish mid-turn.
+        if (_state.value.sessionRunning || activeAgentJob?.isActive == true) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repair_busy)) }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repairing_chroot)) }
             val result = withContext(Dispatchers.IO) {
@@ -924,11 +935,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
-        if (_state.value.sessionRunning) {
+        // Also queue while the finished turn's bridge call is still unwinding, so two turns never overlap.
+        if (_state.value.sessionRunning || activeAgentJob?.isActive == true) {
             // The agent keeps working; this message is sent automatically when its turn completes.
             _state.update {
                 it.copy(
-                    queuedPrompts = it.queuedPrompts + QueuedPrompt(text = cleanPrompt, attachments = attachments),
+                    queuedPrompts = it.queuedPrompts + QueuedPrompt(
+                        text = cleanPrompt,
+                        attachments = attachments,
+                        projectId = it.activeProject?.id,
+                        chatId = it.activeChatId,
+                    ),
                     pendingAttachments = emptyList(),
                 )
             }
@@ -1003,6 +1020,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         activeAgentJob = viewModelScope.launch {
             try {
+                // A GitHub sync writes the token into the rootfs while it runs; never let an agent (root in the
+                // same chroot) start before that sync has removed it again.
+                withContext(Dispatchers.IO) { githubOperationLock.withLock { } }
                 bridge.startSession(
                     projectId = project.id,
                     projectSlug = project.slug,
@@ -1061,6 +1081,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun dispatchQueuedPrompts() {
         val queued = _state.value.queuedPrompts
         if (queued.isEmpty() || _state.value.sessionRunning) return
+        val here = _state.value
+        if (queued.any { it.projectId != here.activeProject?.id || it.chatId != here.activeChatId }) {
+            // The user moved to another chat or project before the turn finished unwinding.
+            discardQueuedPrompts()
+            return
+        }
         val text = queued.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
         _state.update {
             it.copy(
@@ -1108,14 +1134,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val bridge = activeRuntimeBridge ?: claudeRuntime
         _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
-            bridge.respondToApproval(req, approved)
+            // An unwritable response file must not crash the app; the request then expires on the agent side.
+            runCatching { bridge.respondToApproval(req, approved) }.onFailure { err ->
+                if (err is CancellationException) throw err
+                Log.w("MainViewModel", "Could not answer tool approval", err)
+                _state.update { it.copy(bannerMessage = UiText.Raw(err.message ?: err.javaClass.simpleName)) }
+            }
         }
     }
 
     private fun onRuntimeEvent(event: RuntimeEvent) {
         if (event is RuntimeEvent.SessionStarted) {
             activeRuntimeSessionId.set(event.sessionId)
-        } else if (event.sessionId != activeRuntimeSessionId.get()) {
+        } else if (event.sessionId != activeRuntimeSessionId.get() &&
+            !(event is RuntimeEvent.FilesChanged && event.sessionId == finishedRuntimeSessionId.get())
+        ) {
             return
         }
         when (event) {
@@ -1177,7 +1210,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             is RuntimeEvent.SessionFailed -> {
-                appendAssistantText("\n\n[${event.reason}]")
+                // The bridges report a user stop in English; show it in the app language.
+                val reason = if (event.reason == "Stopped by user") getApplication<Application>().getString(R.string.agent_stopped_by_user) else event.reason
+                appendAssistantText("\n\n[$reason]")
                 offerRetry()
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
                 discardQueuedPrompts()
@@ -1228,6 +1263,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
         if (!_state.value.sessionRunning) return
         activeRuntimeBridge = null
+        // Late events of this session must not touch the next chat the user opens.
+        finishedRuntimeSessionId.set(activeRuntimeSessionId.getAndSet(null))
         val chatId = _state.value.activeChatId
         val now = System.currentTimeMillis()
         val finalizedMessages = _state.value.messages.map { msg ->
@@ -1274,6 +1311,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var workspaceRefreshRequest = 0
 
+    /**
+     * `build` is hidden from the file tree, but the way down to `build/outputs/apk` stays open
+     * so a freshly built APK can be found (and installed from the row menu).
+     */
+    private fun isApkOutputPath(ws: File, dir: File): Boolean {
+        val parts = dir.relativeTo(ws).invariantSeparatorsPath.split('/')
+        val at = parts.indexOf("build")
+        if (at < 0) return false
+        if (parts.take(at).any { it in setOf(".git", ".gradle", "node_modules", "__pycache__") }) return false
+        val below = parts.drop(at + 1)
+        return below.isEmpty() || (below.size <= 3 && below[0] == "outputs" && (below.size == 1 || below[1] == "apk"))
+    }
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {
@@ -1287,7 +1337,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ws.walkTopDown()
                         .onEnter { dir ->
                             dir == ws || (
-                                dir.name !in ignored &&
+                                (dir.name !in ignored || isApkOutputPath(ws, dir)) &&
                                     !Files.isSymbolicLink(dir.toPath()) &&
                                     runCatching { dir.canonicalFile.toPath().startsWith(rootCanonical) }.getOrDefault(false)
                                 )
@@ -1434,6 +1484,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _state.update { it.copy(projectView = next) }
         return true
+    }
+
+    /** Opens [relativePath] in the Files editor (from the read-only code viewer's Edit action). */
+    fun openFilesTabForEditing(relativePath: String) {
+        openWorkspaceFile(relativePath)
+        selectTab(ForgeTab.FILES)
     }
 
     fun openWorkspaceFile(relativePath: String) {
@@ -1620,6 +1676,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Walks through the app's main screens, saves a picture of each in the project's attachments folder and adds them
+     * to the message being written, so the agent can look at the UI. The screen the person was on is restored.
+     */
+    fun captureAppScreens(window: android.view.Window) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.capturingScreens) return
+        val before = _state.value
+        val originalTab = before.activeTab
+        val originalView = before.projectView
+        val originalPane = before.projectPane
+        _state.update { it.copy(capturingScreens = true) }
+        viewModelScope.launch {
+            val folder = "attachments/app-screens-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            val added = mutableListOf<ChatAttachment>()
+            try {
+                appCaptureSteps().forEachIndexed { index, step ->
+                    if (step.pane != null) {
+                        _state.update { it.copy(projectView = ProjectView.CONVERSATION) }
+                        selectProjectPane(step.pane)
+                    } else {
+                        if (step.tab == ForgeTab.PROJECTS) _state.update { it.copy(projectView = ProjectView.LIST) }
+                        selectTab(step.tab)
+                    }
+                    delay(CAPTURE_SETTLE_MS)
+                    val bitmap = captureWindow(window) ?: return@forEachIndexed
+                    val name = "%02d-%s.png".format(index + 1, step.name)
+                    withContext(Dispatchers.IO) { savePng(project.id, "$folder/$name", name, bitmap) }?.let { added += it }
+                }
+            } finally {
+                _state.update {
+                    it.copy(
+                        activeTab = originalTab,
+                        projectView = originalView,
+                        projectPane = originalPane,
+                        capturingScreens = false,
+                        pendingAttachments = it.pendingAttachments + added,
+                        bannerMessage = if (added.isEmpty()) UiText.res(R.string.capture_failed) else UiText.res(R.string.capture_done, added.size),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun savePng(projectId: String, relativePath: String, displayName: String, bitmap: android.graphics.Bitmap): ChatAttachment? =
+        runCatching {
+            val target = checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(projectId), relativePath)
+            target.parentFile?.mkdirs()
+            target.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            ChatAttachment(displayName = displayName, relativePath = relativePath, mimeType = "image/png", sizeBytes = target.length())
+        }.onFailure { Log.w("MainViewModel", "Could not save $relativePath", it) }.getOrNull()
+
     fun removePendingAttachment(id: String) {
         _state.update { st -> st.copy(pendingAttachments = st.pendingAttachments.filterNot { it.id == id }) }
     }
@@ -1802,54 +1910,160 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun runTerminalCommand(command: String) {
-        val cleanCmd = command.trim()
-        if (cleanCmd.isEmpty() || _state.value.terminalRunning) return
-        val project = _state.value.activeProject ?: return
-        _state.update {
-            it.copy(
-                terminalRunning = true,
-                terminalOutput = (it.terminalOutput + "\n$ $cleanCmd\n").takeLast(MAX_TERMINAL_CHARS),
-            )
-        }
-        activeTerminalJob = viewModelScope.launch {
-            var streamedAny = false
-            var output = ""
+    // --- Interactive terminal ---------------------------------------------------------------------------------
+    // One general-purpose shell for the whole app (not tied to a project): the root chroot's home (/root) when the
+    // runtime is installed and root is granted, otherwise the Android shell. It is run by the Termux terminal emulator
+    // on its own PTY, so editors, pagers and TUIs (vim, htop, tmux, Claude Code) work. The UI (TerminalScreen)
+    // attaches a TerminalView to the session; the shell starts when the view is first laid out. Projects live under
+    // /workspace/<name>: use "cd" or the project chip, or "Run in terminal" from chat, which changes into the project.
+
+    private var terminalSession: TerminalSession? = null
+    private var terminalIsFinished = false
+    private var terminalStarting = false
+    private var terminalInChroot = false
+
+    /** A line to type: [inProject] lines first change into the active project's folder (resolved when typed). */
+    private class TerminalInput(val text: String, val inProject: Boolean)
+
+    /** Commands sent before the shell exists (e.g. "Run in terminal" from chat). */
+    private val pendingTerminalInput = mutableListOf<TerminalInput>()
+
+    val terminalSessionClient = ForgeTerminalSessionClient(application) { session -> onTerminalSessionEnded(session) }
+
+    fun currentTerminalSession(): TerminalSession? = terminalSession
+
+    fun isTerminalFinished(): Boolean = terminalIsFinished
+
+    /** Where the active project lives as seen from the terminal's shell, or null when no project is open. */
+    fun terminalProjectDir(): String? {
+        val project = _state.value.activeProject ?: return null
+        // Known once the shell exists (commands are only typed then): the chroot mounts projects at /workspace/<name>.
+        return if (terminalInChroot) "/workspace/${project.slug}" else checkpoints.ensureWorkspace(project.id).absolutePath
+    }
+
+    /** Starts the shell if there is none. An ended shell is replaced only by [restartTerminalSession]. */
+    fun ensureTerminalSession() {
+        if (terminalSession != null || terminalStarting) return
+        terminalStarting = true
+        viewModelScope.launch {
             try {
-                output = withContext(Dispatchers.IO) {
-                    val ws = checkpoints.ensureWorkspace(project.id)
-                    runCommandInChrootOrHost(project.slug, ws, cleanCmd) { chunkText ->
-                        streamedAny = true
-                        _state.update { current ->
-                            current.copy(
-                                terminalOutput = (current.terminalOutput + chunkText).takeLast(MAX_TERMINAL_CHARS),
-                            )
-                        }
-                    }
-                }
+                val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec() }
+                terminalInChroot = spec.inChroot
+                terminalSession = TerminalSession(
+                    spec.shell,
+                    spec.cwd,
+                    spec.args,
+                    spec.env,
+                    TERMINAL_TRANSCRIPT_ROWS,
+                    terminalSessionClient,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w("MainViewModel", "terminal session failed to start", e)
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.terminal_start_failed, e.message.orEmpty())) }
             } finally {
-                activeTerminalProcess = null
-                _state.update {
-                    val tail = if (streamedAny) "\n" else (output + "\n")
-                    it.copy(
-                        terminalRunning = false,
-                        terminalOutput = (it.terminalOutput + tail).takeLast(MAX_TERMINAL_CHARS),
-                    )
-                }
-                refreshWorkspaceFilesAndChanges(project.id)
+                terminalStarting = false
+                _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
             }
         }
     }
 
-    fun stopTerminal() {
-        // Killing the process unblocks the reader thread; the job then ends normally and resets state.
-        activeTerminalProcess?.destroyForcibly()
-        activeTerminalJob?.cancel()
+    /** "Restart" after the shell ended: discards the dead session and starts a fresh one. */
+    fun restartTerminalSession() {
+        terminalSession?.finishIfRunning()
+        terminalSession = null
+        terminalIsFinished = false
+        pendingTerminalInput.clear()
+        _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
+        ensureTerminalSession()
+    }
+
+    /** Types [command] and Enter into the shell. Queued (and the shell started) when it is not up yet. */
+    fun runTerminalCommand(command: String) = queueTerminalInput(command, inProject = false)
+
+    private fun queueTerminalInput(command: String, inProject: Boolean) {
+        val clean = command.trim()
+        if (clean.isEmpty()) return
+        // Asking for a command on an ended shell means "run it": start a fresh shell rather than dropping the request.
+        if (terminalIsFinished) restartTerminalSession()
+        pendingTerminalInput += TerminalInput(clean, inProject)
+        ensureTerminalSession()
+        flushTerminalInput()
+    }
+
+    /**
+     * Opens [relativePath] (relative to the active project) in a terminal editor: nano when installed, else vi.
+     * The Termux terminal draws it, so arrows, Ctrl and Esc work through the key row.
+     */
+    fun editInTerminal(relativePath: String) {
+        val file = shellSingleQuote(relativePath)
+        runTerminalCommandInProject("if command -v nano >/dev/null 2>&1; then nano -- $file; else vi -- $file; fi")
+        selectTab(ForgeTab.TERMINAL)
+    }
+
+    /** Runs [command] in the active project's folder (from chat: the snippet belongs to that project). */
+    fun runTerminalCommandInProject(command: String) = queueTerminalInput(command, inProject = true)
+
+    /** Sends queued input once the emulator behind the session exists (it is created on first layout). */
+    fun flushTerminalInput() {
+        val session = terminalSession ?: return
+        if (session.emulator == null || terminalIsFinished) return
+        val queued = pendingTerminalInput.toList()
+        pendingTerminalInput.clear()
+        queued.forEach { input ->
+            val dir = if (input.inProject) terminalProjectDir() else null
+            session.write((if (dir == null) input.text else "cd ${shellSingleQuote(dir)} && ${input.text}") + "\r")
+        }
     }
 
     fun clearTerminal() {
-        _state.update { it.copy(terminalOutput = "") }
+        // reset() clears the screen and attributes; the shell redraws its prompt on the next key.
+        terminalSession?.reset()
     }
+
+    private fun onTerminalSessionEnded(session: TerminalSession) {
+        if (session !== terminalSession) return
+        terminalIsFinished = true
+        pendingTerminalInput.clear()
+        _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
+    }
+
+    private class TerminalLaunchSpec(
+        val shell: String,
+        val cwd: String,
+        val args: Array<String>,
+        val env: Array<String>,
+        val inChroot: Boolean,
+    )
+
+    /** Blocking (file IO, engine probe): call off the main thread. */
+    private fun buildTerminalLaunchSpec(): TerminalLaunchSpec {
+        val app = getApplication<Application>()
+        val env = System.getenv().toMutableMap().apply {
+            put("TERM", "xterm-256color")
+            put("COLORTERM", "truecolor")
+            put("LANG", "C.UTF-8")
+        }
+        val guest = installer.isInstalled() && installer.isRuntimeAccessAvailable() && installer.installedRuntime().chrootExec.isFile
+        return if (guest) {
+            // The guest environment (PATH, HOME, TERM, provider keys) travels in a one-shot env file sourced by the
+            // system shell, which then execs proot. /root is the guest home, so the shell is not tied to any project.
+            val (_, launchCommand) = installer.prepareChrootShellCommand(
+                workspace = File(RuntimeInstaller.rootfsDir(app), "root"),
+                guestWorkspacePath = "/root",
+                environment = activeChrootEnvironment(),
+                guestCommand = listOf("/bin/bash", "-l"),
+            )
+            val argv = installer.launchArgv(launchCommand)
+            TerminalLaunchSpec(argv.first(), app.filesDir.absolutePath, argv.toTypedArray(), env.toEnvArray(), inChroot = true)
+        } else {
+            env["HOME"] = app.filesDir.absolutePath
+            TerminalLaunchSpec("/system/bin/sh", app.filesDir.absolutePath, arrayOf("sh"), env.toEnvArray(), inChroot = false)
+        }
+    }
+
+    private fun Map<String, String>.toEnvArray(): Array<String> = map { "${it.key}=${it.value}" }.toTypedArray()
 
     private fun activeChrootEnvironment(): Map<String, String> {
         val profile = _state.value.providerProfile
@@ -2137,6 +2351,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
+        }
+    }
+
+    /** Installs an APK that lives in the active project (e.g. one the agent built or copied), from the Files list. */
+    fun installWorkspaceApk(relativePath: String) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val apk = withContext(Dispatchers.IO) {
+                runCatching { checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(project.id), relativePath) }.getOrNull()
+            }
+            if (apk != null && apk.isFile) installBuiltApk(apk.absolutePath)
         }
     }
 
@@ -2444,6 +2669,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val profile = _state.value.providerProfile
         val apiKey = resolveProviderSecret(profile).orEmpty()
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
+        // A Claude subscription login is an OAuth token: Anthropic's /v1/models rejects it, so the catalog is Claude
+        // Code's own model list (shown in the picker) and no API call is made.
+        if (isClaudeSubscriptionLogin(profile, apiKey)) {
+            _state.update { it.copy(apiBusy = false, apiStatusMessage = UiText.res(R.string.msg_subscription_models)) }
+            return
+        }
         _state.update { it.copy(apiBusy = true, apiStatusMessage = UiText.res(R.string.msg_fetching_models)) }
         viewModelScope.launch {
             when (val res = providerApi.discoverModels(profile.resolvedBaseUrl, apiKey, protocol)) {
@@ -2474,6 +2705,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val protocol = providerProtocolForAgent(profile, _state.value.agentKind)
         _state.update { it.copy(apiBusy = true, apiStatusMessage = UiText.res(R.string.msg_validating)) }
         viewModelScope.launch {
+            // Subscription login: verify through Claude Code itself; the Messages API would reject the OAuth token.
+            if (_state.value.agentKind == AgentKind.CLAUDE_CODE && isClaudeSubscriptionLogin(profile, apiKey)) {
+                // Keep the real reason: swallowing it left "Rejected" on screen with no way to see what failed.
+                val probe = if (_state.value.runtimeInstalled) {
+                    runCatching { claudeRuntime.hello(profile, 45_000L) }
+                } else {
+                    Result.failure(IllegalStateException(getApplication<Application>().getString(R.string.msg_runtime_not_installed)))
+                }
+                val text = probe.fold(
+                    onSuccess = { UiText.res(R.string.msg_claude_cli_verified, it.take(80)) },
+                    onFailure = { UiText.res(R.string.msg_claude_cli_unverified, (it.message ?: it.javaClass.simpleName).take(200)) },
+                )
+                _state.update { it.copy(apiBusy = false, apiStatusMessage = text) }
+                return@launch
+            }
             var res = providerApi.validate(
                 baseUrl = profile.resolvedBaseUrl,
                 model = profile.model,
@@ -3109,7 +3355,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun releaseMemoryCaches() {
         _state.update {
             it.copy(
-                terminalOutput = it.terminalOutput.takeLast(16 * 1024),
                 androidLogcat = it.androidLogcat.copy(lines = it.androidLogcat.lines.takeLast(100)),
             )
         }
@@ -3215,6 +3460,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
         activeTerminalProcess?.destroyForcibly()
+        terminalSession?.finishIfRunning()
         super.onCleared()
     }
 
@@ -3225,6 +3471,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_IMPORT_ENTRIES = 50_000
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024
+        const val TERMINAL_TRANSCRIPT_ROWS = 4000
+
+        /** Time for a screen to compose and draw before it is photographed. */
+        const val CAPTURE_SETTLE_MS = 900L
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
         const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }

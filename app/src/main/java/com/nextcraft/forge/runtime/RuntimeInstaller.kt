@@ -1038,6 +1038,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePythonStack() {
+        val dpkgOwned = dpkgOwnedPaths()
         // The overlay is unmanaged by dpkg, so it is removed by path. Covers the current Ubuntu 24.04 bundle
         // (Python 3.12) and the legacy 20.04 bundle (Python 3.8). Shared libraries the overlay also ships
         // (libsqlite3, libreadline, libhistory) and tzdata files are left in place: other tools may use them.
@@ -1074,8 +1075,17 @@ class RuntimeInstaller(private val context: Context) {
             "usr/share/python3",
             "usr/share/python-wheels",
             "root/.cache/pip",
-        ).forEach { removePath(File(rootfs, it)) }
+        )
+            // gdb (C/C++ stack) pulls in dpkg's libpython3.12 at these same paths; deleting them breaks gdb and
+            // leaves dpkg believing the packages are installed. Only remove what dpkg does not own.
+            .filterNot { "/$it" in dpkgOwned }
+            .forEach { removePath(File(rootfs, it)) }
     }
+
+    private fun dpkgOwnedPaths(): Set<String> = runCatching {
+        File(rootfs, "var/lib/dpkg/info").listFiles { f -> f.name.endsWith(".list") }.orEmpty()
+            .flatMapTo(HashSet()) { it.readLines() }
+    }.getOrDefault(emptySet())
 
     /** Removes the current overlay layout and every previous one, so an upgrade does not leave an old JDK behind. */
     private fun removeAndroidStack() {
@@ -1097,7 +1107,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun removePath(file: File) {
         val isLink = java.nio.file.Files.isSymbolicLink(file.toPath())
         if (!file.exists() && !isLink) return
-        val removed = if (file.isDirectory && !isLink) file.deleteRecursively() else file.delete()
+        val removed = if (file.isDirectory && !isLink) file.deleteRecursivelyNoFollow() else file.delete()
         if (!removed) {
             check(RootfsRepair.safeDeleteRecursively(file)) { "Could not remove ${file.name}" }
         }
@@ -1261,7 +1271,8 @@ class RuntimeInstaller(private val context: Context) {
             extractZstdTar(archive, rootfs) { done, total ->
                 onProgress(unpackProgress(message, to * 0.8f + from * 0.2f, to, done, total))
             }
-            stripMacosMetadataArtifacts(rootfs)
+            // The rootfs may be mounted by a running session: never walk into /proc, /dev or a project bind.
+            stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         } finally {
             if (archive.parentFile == downloads) archive.delete()
         }
@@ -1370,6 +1381,12 @@ class RuntimeInstaller(private val context: Context) {
         script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
     }
 
+    private fun deviceTotalMemoryMb(): Long {
+        val info = android.app.ActivityManager.MemoryInfo()
+        context.getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(info)
+        return if (info.totalMem > 0) info.totalMem / (1024 * 1024) else 4096L
+    }
+
     @Synchronized
     private fun writeAndroidGradleConfiguration(runtimeRootfs: File) {
         val aapt2 = File(runtimeRootfs, ANDROID_AAPT2_HOST_PATH)
@@ -1381,7 +1398,7 @@ class RuntimeInstaller(private val context: Context) {
         val existingLines = properties.readTextOrNull()?.lineSequence()?.toList().orEmpty()
         val managedLines = listOf(
             "$ANDROID_AAPT2_PROPERTY=$ANDROID_AAPT2_GUEST_PATH",
-            "$GRADLE_JVMARGS_PROPERTY=-Xmx512m -XX:MaxMetaspaceSize=256m -Dfile.encoding=UTF-8",
+            "$GRADLE_JVMARGS_PROPERTY=${gradleJvmArgs(deviceTotalMemoryMb())}",
             "$GRADLE_WORKERS_PROPERTY=2",
             "$GRADLE_PARALLEL_PROPERTY=false",
             "$KOTLIN_EXECUTION_PROPERTY=in-process",
@@ -1422,7 +1439,8 @@ class RuntimeInstaller(private val context: Context) {
 
     private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
         val file = File(rootfs, relativePath.removePrefix("/"))
-        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+        // lstat first: following a toolchain symlink (gcc, php) from the app is denied by SELinux and logs an AVC.
+        return java.nio.file.Files.isSymbolicLink(file.toPath()) || file.exists()
     }
 
     fun isStackInstalled(stack: DevStack): Boolean {
@@ -2582,8 +2600,18 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /**
+         * Gradle JVM options for builds inside the chroot, sized to the device. A fixed 512 MB heap / 256 MB metaspace
+         * made Android builds die with OutOfMemoryError (Metaspace) or get killed (exit 137): about an eighth of RAM
+         * for the heap (768 MB to 2 GB, in 128 MB steps) and 512 MB of metaspace.
+         */
+        internal fun gradleJvmArgs(totalMemoryMb: Long): String {
+            val heapMb = ((totalMemoryMb / 8).coerceIn(768L, 2048L) / 128) * 128
+            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+        }
+
         /** Top-level rootfs directories that proot-exec.sh binds from Android or the app on every launch. */
-        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 

@@ -127,6 +127,7 @@ enum class ForgeTab(val title: String) {
     CICD("CI/CD"),
     ROM("ROM Studio"),
     CHECKPOINTS("Checkpoints"),
+    CODE_VIEWER("Code viewer"),
 }
 
 enum class SetupScope { RUNTIME, AGENT }
@@ -168,9 +169,13 @@ data class ForgeUiState(
     val fileSavedBanner: String? = null,
     /** Files picked for the next prompt; copied into the workspace's attachments/ folder. */
     val pendingAttachments: List<ChatAttachment> = emptyList(),
+    /** True while the app walks through its screens taking pictures for the agent. */
+    val capturingScreens: Boolean = false,
     /** Messages sent while the agent was busy; delivered as the next turn once the current one completes. */
     val queuedPrompts: List<QueuedPrompt> = emptyList(),
-    val terminalOutput: String = "NextCraft Forge PRoot Terminal Ready.\n",
+    /** Bumped when a terminal session is created, ends or is restarted, so the screen re-reads it. */
+    val terminalRevision: Int = 0,
+    /** Legacy one-shot runner flag, kept for the "busy" guards. The interactive shell is persistent, so it stays false. */
     val terminalRunning: Boolean = false,
     val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
     val androidLogcat: AndroidLogcatState = AndroidLogcatState(),
@@ -230,6 +235,9 @@ data class QueuedPrompt(
     val id: String = UUID.randomUUID().toString(),
     val text: String,
     val attachments: List<ChatAttachment> = emptyList(),
+    /** Where the message was typed; it is only sent there, never into a chat the user switched to. */
+    val projectId: String? = null,
+    val chatId: String? = null,
 )
 
 /** A project removed from the list whose files are kept until the undo window (UNDO_WINDOW_MS) passes. */

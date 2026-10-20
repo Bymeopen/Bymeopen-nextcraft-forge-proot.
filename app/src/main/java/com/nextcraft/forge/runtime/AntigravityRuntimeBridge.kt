@@ -1,5 +1,7 @@
 package com.nextcraft.forge.runtime
 
+import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.AgentKind
@@ -29,7 +31,7 @@ enum class AntigravityAuthStatus { SIGNED_OUT, STARTING, AWAITING_CODE, COMPLETI
 data class AntigravityAuthState(
     val status: AntigravityAuthStatus = AntigravityAuthStatus.SIGNED_OUT,
     val authorizationUrl: String? = null,
-    val message: String? = null,
+    val message: UiText? = null,
     val accountEmail: String? = null,
 )
 
@@ -293,11 +295,14 @@ class AntigravityRuntimeBridge(
                 }
             }
         } catch (e: TimeoutCancellationException) {
+            // The probe's own timeout ("Timed out waiting for 45000 ms") is not the 60-minute task limit: classify
+            // only what agy logged (network, server error, sign-in) and otherwise say the probe got no answer.
             val diagnostic = recentAntigravityDiagnostic(startedAtMillis)
+            val noAnswer = "Antigravity did not answer within ${timeoutMillis / 1000} s. Check the connection and try again."
             val message = if (diagnostic.isBlank()) {
-                "Antigravity did not answer. Try again."
+                noAnswer
             } else {
-                antigravityFriendlyError(e.message.orEmpty(), diagnostic)
+                antigravityFriendlyError("", diagnostic).takeUnless { it == ANTIGRAVITY_GENERIC_FAILURE } ?: noAnswer
             }
             throw AntigravitySessionException(message)
         } catch (e: CancellationException) {
@@ -383,6 +388,8 @@ class AntigravityRuntimeBridge(
             var activeToolDetail = ""
             var activeToolStartedAtMillis = 0L
             var lastToolProgressAtMillis = 0L
+            var lastRetryCheckAtMillis = 0L
+            var lastRetryStatus: String? = null
             suspend fun handleLine(rawLine: String) {
                 val line = rawLine.trimEnd('\r')
                 if (line.isBlank()) return
@@ -429,6 +436,17 @@ class AntigravityRuntimeBridge(
                             activeToolName?.let { name -> "Running $name: $activeToolDetail" }
                                 ?: "Antigravity is working…",
                         )
+                        // agy retries failed requests silently; surface them so a long wait has a visible reason.
+                        if (now - lastRetryCheckAtMillis >= RETRY_CHECK_INTERVAL_MS) {
+                            lastRetryCheckAtMillis = now
+                            antigravityRetryStatus(recentAntigravityDiagnostic(sessionStartedAtMillis))
+                                ?.takeIf { it != lastRetryStatus }
+                                ?.let { status ->
+                                    lastRetryStatus = status
+                                    pushForegroundProgress(status)
+                                    eventBus.emit(RuntimeEvent.RuntimeLog(sessionId, "Antigravity", status))
+                                }
+                        }
                         if (activeToolName == "Bash" && activeToolDetail.contains("gradle", ignoreCase = true) &&
                             now - activeToolStartedAtMillis >= 10_000L && now - lastToolProgressAtMillis >= 10_000L
                         ) {
@@ -477,10 +495,11 @@ class AntigravityRuntimeBridge(
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
             // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
             activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
-            val message = if (userStopRequested) {
-                "Stopped by user"
-            } else {
-                antigravityFriendlyError(it.message.orEmpty(), diagnostic)
+            val message = when {
+                userStopRequested -> "Stopped by user"
+                // Already classified when it was thrown; classifying the friendly text again could pick up log noise.
+                it is AntigravitySessionException -> it.message.orEmpty()
+                else -> antigravityFriendlyError(it.message.orEmpty(), diagnostic)
             }
             emitFailure(sessionId, message)
             if (userStopRequested) cancelForegroundRuntime()
@@ -576,13 +595,31 @@ internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): Str
     // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
     // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
     return classifyAntigravityError(rawValue, allowTimeout = true)
-        ?: classifyAntigravityError("$rawValue ${diagnostic.replace(Regex("\\s+"), " ").trim()}", allowTimeout = false)
-        ?: rawValue.ifBlank { "Antigravity could not complete the task." }.take(500)
+        ?: classifyAntigravityError("$rawValue ${antigravityDiagnosticSignal(diagnostic)}", allowTimeout = false)
+        ?: rawValue.ifBlank { ANTIGRAVITY_GENERIC_FAILURE }.take(500)
+}
+
+/**
+ * The agy log tail without startup noise: every agy start logs "You are not logged into Antigravity" until its
+ * silent auth finishes, so those lines only mean "not signed in" when the log never reports a successful auth.
+ */
+private fun antigravityDiagnosticSignal(diagnostic: String): String {
+    val lines = diagnostic.lineSequence()
+    val authenticated = diagnostic.contains("silent auth succeeded", ignoreCase = true)
+    return lines
+        .filterNot { authenticated && it.contains("not logged in", ignoreCase = true) }
+        .joinToString(" ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 }
 
 private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
     ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
         "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
+    ANTIGRAVITY_SERVER_ERRORS.any { value.contains(it, ignoreCase = true) } ->
+        "Google's Antigravity server returned an error. Wait a moment and try again; your files were kept."
+    value.contains("stream was interrupted", true) ->
+        "The connection to Google dropped mid-answer. Send the message again to continue."
     value.contains("authentication required", true) ||
         value.contains("authentication failed", true) ||
         value.contains("not signed in", true) ||
@@ -599,6 +636,10 @@ private fun classifyAntigravityError(value: String, allowTimeout: Boolean): Stri
 
 private val ANTIGRAVITY_NETWORK_ERRORS = listOf(
     "dial tcp",
+    "read tcp",
+    "connection timed out",
+    "connection reset",
+    "tls handshake timeout",
     "i/o timeout",
     "network is unreachable",
     "no address associated with hostname",
@@ -607,6 +648,35 @@ private val ANTIGRAVITY_NETWORK_ERRORS = listOf(
     "failed to fetch user info",
     "userinfo request failed",
 )
+
+private val ANTIGRAVITY_SERVER_ERRORS = listOf(
+    "code 500",
+    "code 502",
+    "code 503",
+    "internal error encountered",
+    "unavailable (code",
+)
+
+private const val RETRY_CHECK_INTERVAL_MS = 5_000L
+
+private const val ANTIGRAVITY_GENERIC_FAILURE = "Antigravity could not complete the task."
+
+private val ANTIGRAVITY_RETRY_LINE = Regex("""Run: attempt (\d+) failed \((.*)\), retrying in (\w+)""")
+
+/**
+ * The newest "Run: attempt N failed (…), retrying in Xs" line in an agy log tail, as a short status for the
+ * user (agy only writes these retries to its log, never to the stream), or null when there is none.
+ */
+internal fun antigravityRetryStatus(logTail: String): String? {
+    val match = ANTIGRAVITY_RETRY_LINE.findAll(logTail).lastOrNull() ?: return null
+    val (attempt, reason, delay) = match.destructured
+    val cause = when {
+        ANTIGRAVITY_SERVER_ERRORS.any { reason.contains(it, ignoreCase = true) } -> "Google server error"
+        ANTIGRAVITY_NETWORK_ERRORS.any { reason.contains(it, ignoreCase = true) } -> "Connection to Google failed"
+        else -> "Request failed"
+    }
+    return "$cause, retrying in $delay (attempt $attempt)"
+}
 
 private class AntigravitySessionException(message: String) : IllegalStateException(message)
 

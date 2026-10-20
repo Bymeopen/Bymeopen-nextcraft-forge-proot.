@@ -100,6 +100,8 @@ fun AgentConfigScreen(
             trailing = {
                 AgentStatusPill(
                     when {
+                        // A connection test means nothing before the agent is installed.
+                        state.agentKind !in state.installedAgents -> AgentStatus.NOT_INSTALLED
                         statusText.startsWith("✓") -> AgentStatus.ONLINE
                         statusText.startsWith("✕") -> AgentStatus.FAILED
                         else -> AgentStatus.NOT_TESTED
@@ -196,7 +198,7 @@ fun AgentConfigScreen(
                 AgentDisclosureRow(
                     icon = ForgeGlyph.INFO,
                     title = stringResource(R.string.settings_endpoint_protocol),
-                    subtitle = state.providerProfile.baseUrl.ifBlank { provider.displaySubtitle() },
+                    subtitle = state.providerProfile.baseUrl.ifBlank { stringResource(R.string.settings_endpoint_default) },
                     expanded = endpointOpen,
                     onToggle = { endpointOpen = !endpointOpen },
                 ) {
@@ -322,7 +324,9 @@ fun AgentConfigScreen(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
+                            // Claude sign-in needs no key, so the form is a backup, not a requirement.
+                            text = if (provider == ProviderKind.CLAUDE) stringResource(R.string.settings_api_keys_optional)
+                            else stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
                             fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -356,7 +360,7 @@ fun AgentConfigScreen(
                             value = keyLabelInput,
                             onValueChange = { keyLabelInput = it },
                             label = { Text(stringResource(R.string.settings_label)) },
-                            placeholder = { Text("Primary") },
+                            placeholder = { Text(stringResource(R.string.settings_key_label_hint)) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         ForgeTextField(
@@ -419,8 +423,10 @@ fun AgentConfigScreen(
                                     Text(stringResource(R.string.settings_agent_update, info.latestVersion))
                                 }
                             }
-                            ForgeTextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
-                                Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                            UninstallConfirmed(name = kind.displayTitle(), onConfirm = { viewModel.removeAgent(kind) }) { ask ->
+                                ForgeTextButton(onClick = ask, enabled = !runtimeBusy) {
+                                    Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                                }
                             }
                         }
                     }
@@ -430,7 +436,8 @@ fun AgentConfigScreen(
                         enabled = !state.checkingAgentUpdates,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     ) { Text(stringResource(R.string.settings_agent_check_updates)) }
-                    SetupProgress(state, SetupScope.AGENT)
+                    // The "not installed" card above already shows this progress; showing it twice looked like two installs.
+                    if (agentInstalled) SetupProgress(state, SetupScope.AGENT)
                 }
             }
         }
@@ -445,7 +452,7 @@ fun AgentConfigScreen(
     }
 }
 
-private enum class AgentStatus { ONLINE, NOT_TESTED, FAILED }
+private enum class AgentStatus { ONLINE, NOT_TESTED, FAILED, NOT_INSTALLED }
 
 /** Connection state chip at the end of the screen header: Online after a passing test, Failed after a failing one. */
 @Composable
@@ -456,12 +463,13 @@ private fun AgentStatusPill(status: AgentStatus) {
         AgentStatus.ONLINE -> stringResource(R.string.agent_status_online) to tokens.successText
         AgentStatus.FAILED -> stringResource(R.string.agent_status_failed) to tokens.dangerText
         AgentStatus.NOT_TESTED -> stringResource(R.string.agent_status_not_tested) to scheme.onSurfaceVariant
+        AgentStatus.NOT_INSTALLED -> stringResource(R.string.agent_status_not_installed) to scheme.onSurfaceVariant
     }
     Surface(shape = RoundedCornerShape(100), color = tokens.cardElevatedColor, border = tokens.cardBorderStroke) {
         Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(dot))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(label, fontSize = ForgeType.secondary, fontWeight = FontWeight.Medium, color = if (status == AgentStatus.NOT_TESTED) scheme.onSurfaceVariant else dot)
+            Text(label, fontSize = ForgeType.secondary, fontWeight = FontWeight.Medium, color = if (status == AgentStatus.NOT_TESTED || status == AgentStatus.NOT_INSTALLED) scheme.onSurfaceVariant else dot)
         }
     }
 }

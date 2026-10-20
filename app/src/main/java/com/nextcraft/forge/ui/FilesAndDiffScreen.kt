@@ -125,9 +125,11 @@ fun FilesAndDiffScreen(
                 onBack = { viewModel.projectBack() },
             )
         } else {
-            ForgeLargeTitle(
+            // Opened from Tools: same header and Back as every other tool screen.
+            ForgeProjectHeader(
                 title = stringResource(R.string.files_files),
                 subtitle = state.activeProject?.name,
+                onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
             )
         }
         FilesHeaderCard(
@@ -171,6 +173,8 @@ fun FilesAndDiffScreen(
                     onUploadIn = { dir -> uploadDir = dir; uploadPicker.launch(arrayOf("*/*")) },
                     onRename = { path -> renameTarget = path },
                     onSaveCopy = { path -> saveCopyPath = path; fileSaver.launch(path.substringAfterLast('/')) },
+                    onEditInTerminal = viewModel::editInTerminal,
+                    onInstallApk = viewModel::installWorkspaceApk,
                     onDelete = { path -> pendingDeletePath = path },
                     modifier = Modifier.weight(1f),
                 )
@@ -304,7 +308,7 @@ private fun FilesHeaderCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else stringResource(R.string.files_files),
+                text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else stringResource(R.string.files_project_folder),
                 fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -362,6 +366,8 @@ private fun WorkspaceTreeList(
     onUploadIn: (String) -> Unit,
     onRename: (String) -> Unit,
     onSaveCopy: (String) -> Unit,
+    onEditInTerminal: (String) -> Unit,
+    onInstallApk: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -469,7 +475,11 @@ private fun WorkspaceTreeList(
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
                                 Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
                             }
+                            if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_install_apk)) }, leadingIcon = { ForgeIcon(ForgeGlyph.BUILD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onInstallApk(entry.path) })
+                            }
                             if (!entry.isDirectory) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.files_edit_in_terminal)) }, leadingIcon = { ForgeIcon(ForgeGlyph.TERMINAL, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onEditInTerminal(entry.path) })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
                             }
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })
@@ -755,48 +765,7 @@ private fun WorkspaceDiffReviewList(
                             }
                         }
 
-                        val diffShape = RoundedCornerShape(12.dp)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(diffShape)
-                                .background(tokens.terminalBackground)
-                                .horizontalScroll(rememberScrollState())
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            item.diffLines.take(80).forEach { line ->
-                                val prefix = when (line.type) {
-                                    DiffLineType.ADDITION -> "+ "
-                                    DiffLineType.DELETION -> "- "
-                                    DiffLineType.INFO -> "  "
-                                    DiffLineType.CONTEXT -> "  "
-                                }
-                                val lineBg = when (line.type) {
-                                    DiffLineType.ADDITION -> tokens.diffAddedBackground
-                                    DiffLineType.DELETION -> tokens.diffRemovedBackground
-                                    else -> Color.Transparent
-                                }
-                                val lineColor = when (line.type) {
-                                    DiffLineType.ADDITION -> tokens.diffAddedText
-                                    DiffLineType.DELETION -> tokens.diffRemovedText
-                                    DiffLineType.INFO -> tokens.accentText
-                                    DiffLineType.CONTEXT -> tokens.terminalText.copy(alpha = 0.85f)
-                                }
-                                Text(
-                                    text = prefix + line.text,
-                                    color = lineColor,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = ForgeType.caption,
-                                    lineHeight = 16.sp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(lineBg)
-                                        .padding(horizontal = 4.dp, vertical = 1.dp),
-                                )
-                            }
-                        }
+                        DiffCodeView(lines = item.diffLines, path = item.path, previewLines = 200)
                     }
                 }
             }

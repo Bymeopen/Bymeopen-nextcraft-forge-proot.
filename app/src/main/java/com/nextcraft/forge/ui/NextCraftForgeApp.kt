@@ -248,6 +248,16 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 // statusBarsPadding() here doubled the top gap.
                 .padding(innerPadding),
         ) {
+            // Plain confirmations ("all agents are up to date") clear themselves so they do not follow people from
+            // screen to screen. Errors and notices that offer an action stay until read, acted on or dismissed.
+            val bannerKey = state.bannerMessage
+            val bannerClears = state.bannerAction == null && (bannerKey as? UiText.Res)?.id in transientBanners
+            LaunchedEffect(bannerKey, bannerClears) {
+                if (bannerKey != null && bannerClears) {
+                    kotlinx.coroutines.delay(8_000)
+                    viewModel.dismissBanner()
+                }
+            }
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
@@ -385,6 +395,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
                     ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
                     ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.CODE_VIEWER -> CodeViewerScreen(state = state, viewModel = viewModel)
                 }
             }
             }
@@ -410,3 +421,6 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
         )
     }
 }
+
+/** Banners that only confirm something; everything else (errors, blocked actions, offers) stays on screen. */
+private val transientBanners = setOf(R.string.msg_agents_up_to_date, R.string.msg_imported, R.string.msg_queue_discarded)
