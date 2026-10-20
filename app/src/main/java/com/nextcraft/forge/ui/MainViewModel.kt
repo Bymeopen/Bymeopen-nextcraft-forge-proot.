@@ -1284,6 +1284,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var workspaceRefreshRequest = 0
 
+    /**
+     * `build` is hidden from the file tree, but the way down to `build/outputs/apk` stays open
+     * so a freshly built APK can be found (and installed from the row menu).
+     */
+    private fun isApkOutputPath(ws: File, dir: File): Boolean {
+        val parts = dir.relativeTo(ws).invariantSeparatorsPath.split('/')
+        val at = parts.indexOf("build")
+        if (at < 0) return false
+        if (parts.take(at).any { it in setOf(".git", ".gradle", "node_modules", "__pycache__") }) return false
+        val below = parts.drop(at + 1)
+        return below.isEmpty() || (below.size <= 3 && below[0] == "outputs" && (below.size == 1 || below[1] == "apk"))
+    }
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {
@@ -1297,7 +1310,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ws.walkTopDown()
                         .onEnter { dir ->
                             dir == ws || (
-                                dir.name !in ignored &&
+                                (dir.name !in ignored || isApkOutputPath(ws, dir)) &&
                                     !Files.isSymbolicLink(dir.toPath()) &&
                                     runCatching { dir.canonicalFile.toPath().startsWith(rootCanonical) }.getOrDefault(false)
                                 )

@@ -130,6 +130,8 @@
     <string name="settings_check_for_app_updates">Periksa pembaruan aplikasi</string>
     <string name="terminal_copy_terminal_output">Salin output terminal</string>
     <string name="terminal_stop_command">Hentikan perintah</string>
+    <string name="terminal_text_smaller">Perkecil teks</string>
+    <string name="terminal_text_larger">Perbesar teks</string>
     <string name="terminal_clear_terminal">Bersihkan terminal</string>
     <string name="terminal_run_command_in_the">Jalankan perintah di workspace</string>
     <string name="terminal_run">Jalankan</string>

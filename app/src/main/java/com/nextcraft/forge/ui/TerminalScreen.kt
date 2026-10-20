@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ButtonDefaults
@@ -91,10 +93,11 @@ fun TerminalScreen(
     val finished = remember(state.terminalRevision) { viewModel.isTerminalFinished() }
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
+    val prefs = remember { context.getSharedPreferences("forge_terminal", android.content.Context.MODE_PRIVATE) }
     val viewClient = remember {
         ForgeTerminalViewClient(
             modifiers = modifiers,
-            initialTextPx = with(density) { 14.sp.roundToPx() },
+            initialTextPx = prefs.getInt(TEXT_SIZE_KEY, with(density) { 14.sp.roundToPx() }),
             minTextPx = with(density) { 8.sp.roundToPx() },
             maxTextPx = with(density) { 28.sp.roundToPx() },
             stepPx = with(density) { 1.sp.roundToPx() }.coerceAtLeast(1),
@@ -105,7 +108,7 @@ fun TerminalScreen(
                 }
             },
             onEmulatorReady = viewModel::flushTerminalInput,
-        )
+        ).also { client -> client.onTextSizeChanged = { px -> prefs.edit().putInt(TEXT_SIZE_KEY, px).apply() } }
     }
     val terminalBackground = tokens.terminalBackground.compositeOver(scheme.background)
     val ready = session != null && !finished
@@ -117,6 +120,16 @@ fun TerminalScreen(
             subtitle = stringResource(R.string.terminal_general_subtitle),
             onBack = if (inProject) ({ viewModel.projectBack() }) else null,
             actions = {
+                ForgePillIcon(
+                    icon = Icons.Default.KeyboardArrowDown,
+                    description = stringResource(R.string.terminal_text_smaller),
+                    onClick = { viewClient.changeTextSize(-1) },
+                )
+                ForgePillIcon(
+                    icon = Icons.Default.Add,
+                    description = stringResource(R.string.terminal_text_larger),
+                    onClick = { viewClient.changeTextSize(1) },
+                )
                 ForgePillIcon(
                     icon = Icons.Default.Share,
                     description = stringResource(R.string.terminal_copy_terminal_output),
@@ -358,3 +371,5 @@ private fun TerminalKey(
         )
     }
 }
+
+private const val TEXT_SIZE_KEY = "text_size_px"
