@@ -14,6 +14,8 @@ jobs:
   android:
     name: Build debug APK and unit tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +39,24 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 3
+      # A public, login-free download: every green push to main refreshes the "debug-latest" pre-release. It is a
+      # pre-release so releases/latest (which the in-app updater reads) keeps pointing at signed releases.
+      - name: Publish debug APK to the debug-latest pre-release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          cp "$apk" nextcraft-forge-proot-debug.apk
+          sha256sum nextcraft-forge-proot-debug.apk > nextcraft-forge-proot-debug.apk.sha256
+          notes="Debug build of ${GITHUB_SHA} (unsigned debug key; not for the in-app updater)."
+          if gh release view debug-latest >/dev/null 2>&1; then
+            gh release upload debug-latest nextcraft-forge-proot-debug.apk nextcraft-forge-proot-debug.apk.sha256 --clobber
+            gh release edit debug-latest --notes "$notes" --prerelease
+          else
+            gh release create debug-latest nextcraft-forge-proot-debug.apk nextcraft-forge-proot-debug.apk.sha256 \
+              --title "Debug build (latest main)" --notes "$notes" --prerelease
+          fi
 
   scripts:
     name: Shell scripts
