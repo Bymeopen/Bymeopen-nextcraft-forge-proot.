@@ -1896,6 +1896,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         flushTerminalInput()
     }
 
+    /**
+     * Opens [relativePath] (relative to the active project) in a terminal editor: nano when installed, else vi.
+     * The Termux terminal draws it, so arrows, Ctrl and Esc work through the key row.
+     */
+    fun editInTerminal(relativePath: String) {
+        val file = shellSingleQuote(relativePath)
+        runTerminalCommandInProject("if command -v nano >/dev/null 2>&1; then nano -- $file; else vi -- $file; fi")
+        selectTab(ForgeTab.TERMINAL)
+    }
+
     /** Runs [command] in the active project's folder (from chat: the snippet belongs to that project). */
     fun runTerminalCommandInProject(command: String) = queueTerminalInput(command, inProject = true)
 

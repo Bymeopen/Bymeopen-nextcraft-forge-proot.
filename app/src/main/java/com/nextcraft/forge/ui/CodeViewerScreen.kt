@@ -78,6 +78,9 @@ fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 TextButton(onClick = { viewModel.openFilesTabForEditing(path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch)) {
                     Text(stringResource(R.string.code_viewer_edit))
                 }
+                TextButton(onClick = { viewModel.editInTerminal(path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch)) {
+                    Text(stringResource(R.string.files_edit_in_terminal))
+                }
             }
             if (state.selectedFilePath == path) {
                 DiffCodeView(lines = remember(state.selectedFileContent) { fileAsViewerLines(state.selectedFileContent) }, path = path, previewLines = 400)

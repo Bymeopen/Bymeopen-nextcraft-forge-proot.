@@ -826,4 +826,5 @@
     <string name="code_viewer_no_files">Proyek ini belum punya file.</string>
     <string name="terminal_general_subtitle">Folder home · Ubuntu root chroot</string>
     <string name="terminal_go_to_project">Ke %1$s</string>
+    <string name="files_edit_in_terminal">Edit di terminal</string>
 </resources>

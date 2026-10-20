@@ -842,4 +842,5 @@
     <string name="code_viewer_no_files">This project has no files yet.</string>
     <string name="terminal_general_subtitle">Home folder · Ubuntu root chroot</string>
     <string name="terminal_go_to_project">Go to %1$s</string>
+    <string name="files_edit_in_terminal">Edit in terminal</string>
 </resources>

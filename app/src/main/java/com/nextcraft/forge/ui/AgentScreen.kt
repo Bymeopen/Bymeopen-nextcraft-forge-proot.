@@ -291,6 +291,7 @@ fun AgentScreen(
                                     onRevertFile = viewModel::revertSingleFile,
                                     onKeepAll = viewModel::keepAllChanges,
                                     onRevertAll = viewModel::revertAllChanges,
+                                    onEditInTerminal = viewModel::editInTerminal,
                                 )
                             }
                         }
