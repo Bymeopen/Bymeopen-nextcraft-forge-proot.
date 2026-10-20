@@ -32,7 +32,7 @@ Yang berbeda hanya cara prosesnya diluncurkan.
 
 ## Asal biner
 
-`app/src/main/jniLibs/arm64-v8a/libproot.so` = `proot` v5.5.0 (`proot-me/proot`, commit `25dc6a31`) + `talloc` 2.4.3,
+`app/src/main/jniLibs/arm64-v8a/libproot.so` (+ `libproot_loader.so`, loader ELF yang dirujuk `PROOT_LOADER`) = `proot` v5.5.0 (`proot-me/proot`, commit `25dc6a31`) + `talloc` 2.4.3,
 dibangun statis (glibc) oleh `scripts/runtime-bundles/build-proot-static.sh` di chroot Core 24.04 ARM64. SHA-256 tercatat
 di `docs/RUNTIME_KNOWN_ISSUES.md`. Android hanya mengizinkan eksekusi dari `nativeLibraryDir`, karena itu biner dikemas
 sebagai native library (`jniLibs.useLegacyPackaging = true`).
