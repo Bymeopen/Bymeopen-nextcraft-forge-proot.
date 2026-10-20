@@ -248,6 +248,16 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 // statusBarsPadding() here doubled the top gap.
                 .padding(innerPadding),
         ) {
+            // A notice with no action is information, not a task: it clears itself so it does not follow people from
+            // screen to screen. Notices that offer an action stay until acted on or dismissed.
+            val bannerKey = state.bannerMessage
+            val bannerHasAction = state.bannerAction != null
+            LaunchedEffect(bannerKey, bannerHasAction) {
+                if (bannerKey != null && !bannerHasAction) {
+                    kotlinx.coroutines.delay(8_000)
+                    viewModel.dismissBanner()
+                }
+            }
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
@@ -385,6 +395,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
                     ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
                     ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.CODE_VIEWER -> CodeViewerScreen(state = state, viewModel = viewModel)
                 }
             }
             }

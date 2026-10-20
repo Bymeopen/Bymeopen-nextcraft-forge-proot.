@@ -1444,6 +1444,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
+    /** Opens [relativePath] in the Files editor (from the read-only code viewer's Edit action). */
+    fun openFilesTabForEditing(relativePath: String) {
+        openWorkspaceFile(relativePath)
+        selectTab(ForgeTab.FILES)
+    }
+
     fun openWorkspaceFile(relativePath: String) {
         if (relativePath == _state.value.selectedFilePath) {
             // Tapping the file that is already open keeps its unsaved edits; otherwise it is re-read from disk.

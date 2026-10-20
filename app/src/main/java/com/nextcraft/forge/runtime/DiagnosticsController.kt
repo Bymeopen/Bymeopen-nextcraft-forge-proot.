@@ -2,6 +2,8 @@ package com.nextcraft.forge.runtime
 
 import android.app.ActivityManager
 import android.content.Context
+import com.nextcraft.forge.R
+import com.nextcraft.forge.ui.UiText
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
@@ -20,8 +22,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class DiagnosticsState(
-    val device: List<Pair<String, String>> = emptyList(),
-    val runtime: List<Pair<String, String>> = emptyList(),
+    val device: List<Pair<UiText, UiText>> = emptyList(),
+    val runtime: List<Pair<UiText, UiText>> = emptyList(),
     val healthOutput: String = "",
     val healthRunning: Boolean = false,
     val healthSummary: String? = null,
@@ -65,7 +67,7 @@ class DiagnosticsController(private val context: Context) {
             mutable.update { current ->
                 result.fold(
                     onSuccess = { current.copy(healthRunning = false, healthSummary = current.healthOutput.lineSequence().lastOrNull { it.startsWith("Selesai") }) },
-                    onFailure = { current.copy(healthRunning = false, healthOutput = current.healthOutput + "\n" + (it.message ?: "Health check failed")) },
+                    onFailure = { current.copy(healthRunning = false, healthOutput = current.healthOutput + "\n" + (it.message ?: appContext.getString(R.string.diag_health_failed))) },
                 )
             }
         }
@@ -76,7 +78,7 @@ class DiagnosticsController(private val context: Context) {
         mutable.update { it.copy(healthRunning = false) }
     }
 
-    private fun collectDevice(): List<Pair<String, String>> {
+    private fun collectDevice(): List<Pair<UiText, UiText>> {
         val memory = ActivityManager.MemoryInfo()
         context.getSystemService(ActivityManager::class.java)?.getMemoryInfo(memory)
         val stat = runCatching { StatFs(appContext.filesDir.absolutePath) }.getOrNull()
@@ -86,31 +88,37 @@ class DiagnosticsController(private val context: Context) {
         val charging = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
             ?.let { it == BatteryManager.BATTERY_STATUS_CHARGING || it == BatteryManager.BATTERY_STATUS_FULL } == true
         return buildList {
-            add("Device" to "${Build.MANUFACTURER} ${Build.MODEL}")
-            add("Android" to "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            add("CPU" to "${Build.SUPPORTED_ABIS.firstOrNull().orEmpty()} · ${Runtime.getRuntime().availableProcessors()} cores")
-            add("RAM" to "${formatBytes(memory.availMem)} free of ${formatBytes(memory.totalMem)}")
-            if (stat != null) add("Storage" to "${formatBytes(stat.availableBytes)} free of ${formatBytes(stat.totalBytes)}")
-            if (level >= 0 && scale > 0) add("Battery" to "${level * 100 / scale}%" + if (charging) " · charging" else "")
-        }
-    }
-
-    private fun collectRuntime(): List<Pair<String, String>> {
-        val rootfs = RuntimeInstaller.rootfsDir(appContext)
-        val installed = runCatching { installer.isInstalled() }.getOrDefault(false)
-        return buildList {
-            add("Root access" to if (runCatching { isRootAccessAvailable() }.getOrDefault(false)) "granted" else "not available")
-            add("Linux runtime" to if (installed) "installed" else "not installed")
-            runCatching { File(rootfs, ".pocket-rootfs-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
-                ?.takeIf { it.isNotBlank() }?.let { add("Rootfs" to it) }
-            if (installed) {
-                val stacks = runCatching { installer.installedStacks().joinToString { it.label } }.getOrDefault("")
-                add("Stacks" to stacks.ifBlank { "none" })
-                val agents = runCatching { installer.installedAgentVersions().entries.joinToString { "${it.key.title} ${it.value}" } }.getOrDefault("")
-                add("Agents" to agents.ifBlank { "none" })
+            add(row(R.string.diag_device, UiText.Raw("${Build.MANUFACTURER} ${Build.MODEL}")))
+            add(row(R.string.diag_android, UiText.Raw("${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")))
+            add(row(R.string.diag_cpu, UiText.res(R.string.diag_cores, Build.SUPPORTED_ABIS.firstOrNull().orEmpty(), Runtime.getRuntime().availableProcessors())))
+            add(row(R.string.diag_ram, UiText.res(R.string.diag_free_of, formatBytes(memory.availMem), formatBytes(memory.totalMem))))
+            if (stat != null) add(row(R.string.diag_storage, UiText.res(R.string.diag_free_of, formatBytes(stat.availableBytes), formatBytes(stat.totalBytes))))
+            if (level >= 0 && scale > 0) {
+                val percent = UiText.Raw("${level * 100 / scale}%")
+                add(row(R.string.diag_battery, if (charging) UiText.res(R.string.diag_charging_value, "${level * 100 / scale}%") else percent))
             }
         }
     }
+
+    private fun collectRuntime(): List<Pair<UiText, UiText>> {
+        val rootfs = RuntimeInstaller.rootfsDir(appContext)
+        val installed = runCatching { installer.isInstalled() }.getOrDefault(false)
+        return buildList {
+            val root = runCatching { isRootAccessAvailable() }.getOrDefault(false)
+            add(row(R.string.diag_root, UiText.res(if (root) R.string.diag_granted else R.string.diag_unavailable)))
+            add(row(R.string.diag_linux, UiText.res(if (installed) R.string.diag_installed else R.string.diag_not_installed)))
+            runCatching { File(rootfs, ".pocket-rootfs-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
+                ?.takeIf { it.isNotBlank() }?.let { add(row(R.string.diag_rootfs, UiText.Raw(it))) }
+            if (installed) {
+                val stacks = runCatching { installer.installedStacks().joinToString { it.label } }.getOrDefault("")
+                add(row(R.string.diag_stacks, stacks.ifBlank { null }?.let(UiText::Raw) ?: UiText.res(R.string.diag_none)))
+                val agents = runCatching { installer.installedAgentVersions().entries.joinToString { "${it.key.title} ${it.value}" } }.getOrDefault("")
+                add(row(R.string.diag_agents, agents.ifBlank { null }?.let(UiText::Raw) ?: UiText.res(R.string.diag_none)))
+            }
+        }
+    }
+
+    private fun row(@androidx.annotation.StringRes label: Int, value: UiText): Pair<UiText, UiText> = UiText.res(label) to value
 
     private fun formatBytes(bytes: Long): String = when {
         bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())

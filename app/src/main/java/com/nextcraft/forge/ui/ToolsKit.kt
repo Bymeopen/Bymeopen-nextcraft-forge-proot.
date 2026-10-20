@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,7 +73,7 @@ internal fun LogBox(text: String, placeholder: String, modifier: Modifier = Modi
     val scroll = rememberScrollState()
     LaunchedEffect(text.length) { scroll.scrollTo(scroll.maxValue) }
     Surface(
-        modifier = modifier.fillMaxWidth().height(260.dp),
+        modifier = modifier.fillMaxWidth().then(if (text.isEmpty()) Modifier.heightIn(min = 72.dp) else Modifier.height(260.dp)),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
     ) {
