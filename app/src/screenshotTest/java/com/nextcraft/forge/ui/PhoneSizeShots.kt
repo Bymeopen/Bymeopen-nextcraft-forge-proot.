@@ -28,7 +28,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-abstract class PhoneSizeShots(private val label: String) {
+abstract class PhoneSizeShots(private val label: String, private val theme: String = "dark") {
     @get:Rule val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     private fun save(scenario: String) {
@@ -43,7 +43,7 @@ abstract class PhoneSizeShots(private val label: String) {
 
     @Composable
     private fun Frame(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-        NextCraftForgeTheme("dark") {
+        NextCraftForgeTheme(theme) {
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Spacer(modifier = Modifier.height(32.dp)) // status bar
@@ -302,6 +302,24 @@ abstract class PhoneSizeShots(private val label: String) {
         }
         save("code-viewer")
     }
+    @Test
+    fun tabsAndStatus() {
+        val now = System.currentTimeMillis()
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                ForgePillTabs(items = listOf("Explorer (4)", "nextcraft-forge-dmesg.txt", "Perubahan", "Riwayat"), selectedIndex = 1, onSelect = {})
+                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(horizontal = 14.dp).weight(1f)) {
+                    ProjectRow(
+                        project = com.nextcraft.forge.model.Project(name = "Aplikasi Batrei", description = "Ruang kerja pemrograman umum", language = "Multibahasa", slug = "aplikasi-batrei", updatedAtMillis = now - 120_000),
+                        active = true, locked = false, canDelete = true, onOpen = {}, onDelete = {}, onRename = {}, changedCount = 3, running = true,
+                    )
+                }
+                ForgeBottomBar(navEntries, ForgeTab.PROJECTS, changedCount = 3, agentRunning = true, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("tabsStatus")
+    }
 }
 
 @Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")
@@ -309,3 +327,7 @@ abstract class PhoneSizeShots(private val label: String) {
 @Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class Shots667 : PhoneSizeShots("6.67in-393x873")
 @Config(sdk = [34], qualifiers = "in-w412dp-h915dp-xxhdpi") class Shots68 : PhoneSizeShots("6.8in-412x915")
 @Config(sdk = [34], qualifiers = "in-w440dp-h956dp-xxhdpi") class Shots69 : PhoneSizeShots("6.9in-440x956")
+
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsWhite : PhoneSizeShots("white-393x873", "white")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsGlass : PhoneSizeShots("glass-393x873", "glass")
+@Config(sdk = [34], qualifiers = "in-w932dp-h430dp-land-xxhdpi") class ShotsLandscape : PhoneSizeShots("land-932x430")

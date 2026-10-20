@@ -55,10 +55,11 @@ fun ForgeProjectHeader(
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val compact = rememberCompactHeight()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = ForgeSpace.header)
+            .heightIn(min = if (compact) 48.dp else ForgeSpace.header)
             .padding(start = if (onBack != null) 4.dp else ForgeSpace.screen, end = 14.dp, top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -71,7 +72,7 @@ fun ForgeProjectHeader(
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
                 text = title,
-                fontSize = ForgeType.screenTitle,
+                fontSize = if (compact) ForgeType.cardTitle else ForgeType.screenTitle,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = (-0.2).sp,
                 maxLines = 1,
