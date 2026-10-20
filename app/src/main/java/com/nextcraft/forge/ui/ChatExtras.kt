@@ -248,37 +248,7 @@ private fun ChangedFileRow(
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                     )
                 } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(tokens.terminalBackground)
-                            .horizontalScroll(rememberScrollState())
-                            .padding(vertical = 6.dp),
-                    ) {
-                        change.diffLines.take(DIFF_PREVIEW_LINES).forEach { line ->
-                            val (bg, sign, fg) = when (line.type) {
-                                DiffLineType.ADDITION -> Triple(tokens.successText.copy(alpha = 0.14f), "+", tokens.successText)
-                                DiffLineType.DELETION -> Triple(tokens.dangerText.copy(alpha = 0.14f), "−", tokens.dangerText)
-                                DiffLineType.INFO -> Triple(Color.Transparent, "⋯", scheme.onSurfaceVariant)
-                                DiffLineType.CONTEXT -> Triple(Color.Transparent, " ", tokens.terminalText.copy(alpha = 0.7f))
-                            }
-                            Row(modifier = Modifier.background(bg).padding(horizontal = 8.dp)) {
-                                // The sign is the primary cue, colour only reinforces it.
-                                Text(sign, style = ForgeCodeTextStyle, color = fg, modifier = Modifier.width(14.dp))
-                                Text(line.text, style = ForgeCodeTextStyle, color = if (line.type == DiffLineType.CONTEXT) fg else tokens.terminalText, softWrap = false, maxLines = 1)
-                            }
-                        }
-                    }
-                    val more = change.diffLines.size - DIFF_PREVIEW_LINES
-                    if (more > 0) {
-                        Text(
-                            stringResource(R.string.chat_diff_more, more),
-                            fontSize = ForgeType.caption,
-                            color = scheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 6.dp, top = 6.dp),
-                        )
-                    }
+                    DiffCodeView(lines = change.diffLines, path = change.path, previewLines = DIFF_PREVIEW_LINES)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     TextButton(onClick = { onOpenFile(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_open_in_files)) }

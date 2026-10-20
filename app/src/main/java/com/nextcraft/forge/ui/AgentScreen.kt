@@ -110,6 +110,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -304,9 +305,12 @@ fun AgentScreen(
                 if (awayFromEnd) {
                     Surface(
                         shape = RoundedCornerShape(100),
-                        color = tokens.cardElevatedColor,
+                        // Opaque (composited over the page) and raised: the glass card colour is translucent and let the
+                        // last message show through the pill.
+                        color = tokens.cardElevatedColor.compositeOver(MaterialTheme.colorScheme.surface),
                         contentColor = tokens.accentText,
                         border = tokens.cardBorderStroke,
+                        shadowElevation = 4.dp,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 10.dp)
@@ -695,7 +699,7 @@ private fun AntigravityOAuthBanner(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.agent_google_account), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
                     Text(
-                        text = authState.message ?: stringResource(R.string.agent_required_for_antigravity),
+                        text = authState.message?.asString() ?: stringResource(R.string.agent_required_for_antigravity),
                         fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
                     )
@@ -977,19 +981,21 @@ private fun MessageContainer(
     content: @Composable () -> Unit,
 ) {
     if (fromUser) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = LocalForgeThemeTokens.current.cardElevatedColor,
-            contentColor = contentColor,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .then(
-                    if (onLongClick != null) {
-                        Modifier.combinedClickable(onLongClickLabel = longClickLabel, onLongClick = onLongClick, onClick = {})
-                    } else Modifier,
-                ),
-        ) { content() }
+        // Wraps its text and sits at the end: a short message must not get a full-width bubble of empty space.
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = LocalForgeThemeTokens.current.cardElevatedColor,
+                contentColor = contentColor,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .then(
+                        if (onLongClick != null) {
+                            Modifier.combinedClickable(onLongClickLabel = longClickLabel, onLongClick = onLongClick, onClick = {})
+                        } else Modifier,
+                    ),
+            ) { content() }
+        }
     } else {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { content() }
     }

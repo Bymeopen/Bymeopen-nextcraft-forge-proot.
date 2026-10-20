@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
@@ -169,6 +170,12 @@ fun AndroidBuildScreen(
                 .padding(end = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Opened from Tools there is no project header above: give it the same Back as the other tool screens.
+            if (state.activeTab != ForgeTab.PROJECTS) {
+                androidx.compose.material3.IconButton(onClick = { viewModel.selectTab(ForgeTab.TOOLS) }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.a11y_back))
+                }
+            }
             // Launch is reached from a project's header, so it reads as a project page: name first, "Launch" under it.
             ForgeLargeTitle(
                 title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
@@ -654,9 +661,11 @@ fun WebPreviewScreen(
                 onBack = { viewModel.projectBack() },
             )
         } else {
-            ForgeLargeTitle(
+            // Opened from Tools: same header and Back as every other tool screen.
+            ForgeProjectHeader(
                 title = stringResource(R.string.launch_preview),
                 subtitle = stringResource(R.string.launch_local_dev_server),
+                onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
             )
         }
 

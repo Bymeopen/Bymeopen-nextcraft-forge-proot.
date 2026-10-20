@@ -130,9 +130,9 @@ fun DiagnosticsScreen(viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         ToolSectionLabel(stringResource(R.string.tool_device))
-        ToolCard { diag.device.forEach { (key, value) -> KeyValueRow(key, value) } }
+        ToolCard { diag.device.forEach { (key, value) -> KeyValueRow(key.asString(), value.asString()) } }
         ToolSectionLabel(stringResource(R.string.tool_runtime))
-        ToolCard { diag.runtime.forEach { (key, value) -> KeyValueRow(key, value) } }
+        ToolCard { diag.runtime.forEach { (key, value) -> KeyValueRow(key.asString(), value.asString()) } }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel.diagnostics::refresh, modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.tool_refresh))
@@ -227,7 +227,7 @@ fun CheckpointsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 enabled = !snaps.busy && state.activeProjectId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            snaps.message?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant) }
+            snaps.message?.let { Text(it.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant) }
         }
         if (snaps.snapshots.isEmpty()) {
             Text(stringResource(R.string.tool_no_snapshots), fontSize = ForgeType.control, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
