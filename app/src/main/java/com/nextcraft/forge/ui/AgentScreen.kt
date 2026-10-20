@@ -274,7 +274,7 @@ fun AgentScreen(
                                 message = message,
                                 agentName = state.agentKind.displayTitle(),
                                 onRunSnippet = { cmd ->
-                                    viewModel.runTerminalCommand(cmd)
+                                    viewModel.runTerminalCommandInProject(cmd)
                                     viewModel.selectTab(ForgeTab.TERMINAL)
                                 },
                             )
