@@ -1,6 +1,5 @@
 package com.nextcraft.forge.runtime
 
-import com.nextcraft.forge.ui.orRes
 import com.nextcraft.forge.ui.UiText
 import com.nextcraft.forge.R
 import android.content.Context

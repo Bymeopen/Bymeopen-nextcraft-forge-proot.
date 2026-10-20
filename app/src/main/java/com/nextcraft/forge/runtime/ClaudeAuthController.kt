@@ -1,7 +1,8 @@
 package com.nextcraft.forge.runtime
 
-import com.nextcraft.forge.ui.orRes
 import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.ui.UiTextException
+import com.nextcraft.forge.ui.toUiText
 import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.AgentKind
@@ -148,7 +149,7 @@ class ClaudeAuthController(
         } catch (error: Throwable) {
             mutableState.value = ClaudeAuthState(
                 ClaudeAuthStatus.ERROR,
-                message = error.message?.take(240).orRes(R.string.rt_auth_claude_start_failed),
+                message = error.toUiText(R.string.rt_auth_claude_start_failed),
             )
             return
         }
@@ -228,7 +229,7 @@ class ClaudeAuthController(
             if (generation == loginGeneration.get() && mutableState.value.status != ClaudeAuthStatus.SIGNED_IN) {
                 mutableState.value = ClaudeAuthState(
                     ClaudeAuthStatus.ERROR,
-                    message = error.message?.take(240).orRes(R.string.rt_auth_claude_failed),
+                    message = error.toUiText(R.string.rt_auth_claude_failed),
                 )
             }
         } finally {
@@ -262,16 +263,16 @@ class ClaudeAuthController(
     @Synchronized
     fun submitCode(code: String) {
         val value = code.trim()
-        require(value.isNotBlank()) { "Paste the code from the sign-in page first." }
+        if (value.isBlank()) throw UiTextException(UiText.res(R.string.rt_auth_claude_code_empty))
         try {
             val running = process ?: error("Sign-in session is not active. Start sign-in again.")
-            check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
+            if (!running.isAlive) throw UiTextException(UiText.res(R.string.rt_auth_session_expired))
             running.outputStream.write((value + "\r").toByteArray())
             running.outputStream.flush()
         } catch (error: Throwable) {
             mutableState.value = ClaudeAuthState(
                 ClaudeAuthStatus.ERROR,
-                message = error.message?.take(240).orRes(R.string.rt_auth_code_submit_failed),
+                message = error.toUiText(R.string.rt_auth_code_submit_failed),
             )
             throw error
         }
@@ -306,11 +307,11 @@ class ClaudeAuthController(
             runCatching { logout.outputStream.close() }
             if (!logout.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) logout.destroyForcibly()
             output.delete()
-            check(!hasCredential()) { "Claude sign-out is incomplete." }
+            if (hasCredential()) throw UiTextException(UiText.res(R.string.rt_auth_claude_signout_incomplete))
             onSignedInChanged(false)
             mutableState.value = ClaudeAuthState(message = UiText.res(R.string.rt_auth_claude_signed_out))
         } catch (error: Throwable) {
-            mutableState.value = previous.copy(message = error.message?.take(240).orRes(R.string.rt_auth_claude_signout_failed))
+            mutableState.value = previous.copy(message = error.toUiText(R.string.rt_auth_claude_signout_failed))
             throw error
         }
     }

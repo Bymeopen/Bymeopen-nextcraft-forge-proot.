@@ -1,7 +1,8 @@
 package com.nextcraft.forge.runtime
 
-import com.nextcraft.forge.ui.orRes
 import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.ui.UiTextException
+import com.nextcraft.forge.ui.toUiText
 import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.AgentKind
@@ -123,7 +124,7 @@ class AntigravityAuthController(
         } catch (error: Throwable) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
-                message = error.message?.take(240).orRes(R.string.rt_auth_agy_start_failed),
+                message = error.toUiText(R.string.rt_auth_agy_start_failed),
             )
             return
         }
@@ -294,7 +295,7 @@ class AntigravityAuthController(
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
                 mutableState.value = AntigravityAuthState(
                     AntigravityAuthStatus.ERROR,
-                    message = error.message?.take(240).orRes(R.string.rt_auth_agy_failed),
+                    message = error.toUiText(R.string.rt_auth_agy_failed),
                 )
             }
         } finally {
@@ -315,17 +316,17 @@ class AntigravityAuthController(
     @Synchronized
     fun submitCode(code: String) {
         val value = code.trim()
-        require(value.isNotBlank()) { "Paste the verification code from Google first." }
+        if (value.isBlank()) throw UiTextException(UiText.res(R.string.rt_auth_agy_code_empty))
         try {
             val running = process ?: error("Sign-in session is not active. Start sign-in again.")
-            check(running.isAlive) { "Sign-in session expired. Start sign-in again." }
+            if (!running.isAlive) throw UiTextException(UiText.res(R.string.rt_auth_session_expired))
             running.outputStream.write((value + "\r\n").toByteArray())
             running.outputStream.flush()
         } catch (error: Throwable) {
             // Callers swallow this exception, so surface it through state or the user sees nothing happen.
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
-                message = error.message?.take(240).orRes(R.string.rt_auth_agy_code_failed),
+                message = error.toUiText(R.string.rt_auth_agy_code_failed),
             )
             throw error
         }
@@ -362,7 +363,7 @@ class AntigravityAuthController(
                     }
                 }
             }
-            check(!hasOfficialCredential()) { "Antigravity sign-out is incomplete." }
+            if (hasOfficialCredential()) throw UiTextException(UiText.res(R.string.rt_auth_agy_signout_incomplete))
             onSignedInChanged(false, null)
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.SIGNED_OUT,
@@ -371,7 +372,7 @@ class AntigravityAuthController(
         } catch (error: Throwable) {
             mutableState.value = AntigravityAuthState(
                 status = AntigravityAuthStatus.SIGNED_IN,
-                message = error.message?.take(240).orRes(R.string.rt_auth_agy_signout_failed),
+                message = error.toUiText(R.string.rt_auth_agy_signout_failed),
                 accountEmail = previousEmail,
             )
             throw error

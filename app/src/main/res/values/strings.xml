@@ -738,4 +738,10 @@
     <string name="rt_auth_connected_as">Connected as %1$s</string>
     <string name="rt_snap_restored">Restored \"%1$s\". The state before the restore was saved as a snapshot.</string>
     <string name="rt_cicd_started">Started %1$s on %2$s. Refresh in a few seconds.</string>
+    <string name="rt_auth_claude_code_empty">Paste the code from the sign-in page first.</string>
+    <string name="rt_auth_session_expired">Sign-in session expired. Start sign-in again.</string>
+    <string name="rt_auth_claude_signout_incomplete">Claude sign-out is incomplete.</string>
+    <string name="rt_auth_agy_code_empty">Paste the verification code from Google first.</string>
+    <string name="rt_auth_agy_signout_incomplete">Antigravity sign-out is incomplete.</string>
+    <string name="rt_cicd_connect_github">Connect GitHub in Settings first.</string>
 </resources>

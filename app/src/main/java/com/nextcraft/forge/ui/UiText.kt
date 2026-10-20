@@ -34,6 +34,13 @@ fun UiText.asString(): String = when (this) {
 /** An error's own text when it has one, else the translated fallback. */
 fun String?.orRes(@StringRes id: Int, vararg args: Any): UiText = this?.let(UiText::Raw) ?: UiText.res(id, *args)
 
+/** Failure whose message is meant for the person using the app: carries translatable text instead of English. */
+class UiTextException(val text: UiText) : Exception()
+
+/** Translated text of a [UiTextException]; for any other failure its own message (capped), else the fallback. */
+fun Throwable.toUiText(@StringRes fallback: Int): UiText =
+    (this as? UiTextException)?.text ?: message?.take(240).orRes(fallback)
+
 /** Plural-aware string for Compose: "1 file" vs "2 files" (and one form only in languages without plurals). */
 @androidx.compose.runtime.Composable
 fun quantityStringResource(@androidx.annotation.PluralsRes id: Int, quantity: Int, vararg args: Any): String {

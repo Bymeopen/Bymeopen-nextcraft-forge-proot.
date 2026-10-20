@@ -1,7 +1,7 @@
 package com.nextcraft.forge.runtime
 
-import com.nextcraft.forge.ui.orRes
 import com.nextcraft.forge.ui.UiText
+import com.nextcraft.forge.ui.toUiText
 import com.nextcraft.forge.R
 import android.content.Context
 import com.nextcraft.forge.model.Project
@@ -75,7 +75,7 @@ class SnapshotsController(
                     busy = false,
                     snapshots = list,
                     projectName = project.name,
-                    message = result.fold({ success }, { e -> e.message.orRes(R.string.rt_snap_failed) }),
+                    message = result.fold({ success }, { e -> e.toUiText(R.string.rt_snap_failed) }),
                 )
             }
         }
