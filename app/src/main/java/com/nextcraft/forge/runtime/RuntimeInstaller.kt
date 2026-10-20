@@ -660,6 +660,9 @@ class RuntimeInstaller(private val context: Context) {
         expectedVersion: String,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
+        check(RuntimeEngines.current() != RuntimeEngine.PROOT) {
+            "Claude Code stays at $CLAUDE_NPM_VERSION on the PRoot engine: newer releases are Bun binaries that Android's app sandbox cannot run without root."
+        }
         val latest = JSONObject(fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest")).getString("version")
         check(latest == expectedVersion) { "A newer Claude Code release is available. Refresh updates and try again." }
         val base = "https://downloads.claude.ai/claude-code-releases/$latest"
@@ -881,6 +884,10 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         migrateLegacyClaudeMarker()
         if (isAgentInstalled(AgentKind.CLAUDE_CODE)) return
+        if (RuntimeEngines.current() == RuntimeEngine.PROOT) {
+            installClaudeViaNpm(chrootExec, fraction, onProgress)
+            return
+        }
         installRuntimeOverlay(
             bundle = CLAUDE_BUNDLE,
             message = "Installing Claude Code $CLAUDE_BUNDLED_VERSION…",
@@ -893,6 +900,34 @@ class RuntimeInstaller(private val context: Context) {
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
+    }
+
+    /**
+     * Non-root devices (PRoot): Android's seccomp policy for apps kills the Bun-built `claude` binary with SIGSYS
+     * (Bun registers `rseq` itself, which the policy forbids; glibc programs survive via GLIBC_TUNABLES). The last
+     * npm release that still ships cli.js for plain Node is installed instead, at the same guest path and marker.
+     */
+    private suspend fun installClaudeViaNpm(
+        chrootExec: File,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        val version = CLAUDE_NPM_VERSION
+        check(CLAUDE_VERSION_PATTERN.matches(version)) { "Invalid Claude Code version" }
+        runGuestCommand(
+            chrootExec = chrootExec,
+            command = "set -e; dir=$CLAUDE_NPM_GUEST_DIR; rm -rf \"${'$'}dir\"; mkdir -p \"${'$'}dir\"; cd \"${'$'}dir\"; " +
+                "npm init -y >/dev/null; npm install --omit=dev --no-audit --no-fund @anthropic-ai/claude-code@$version; " +
+                "ln -sfn $CLAUDE_NPM_GUEST_DIR/node_modules/.bin/claude $CLAUDE_GUEST_PATH",
+            displayCommand = "npm install @anthropic-ai/claude-code@$version",
+            fraction = fraction,
+            timeoutMs = 20 * 60 * 1_000L,
+            onProgress = onProgress,
+            failureMessage = "Failed to install Claude Code from npm",
+        )
+        verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
+        claudeMarker.writeText(version)
+        onProgress(RuntimeInstallProgress("Installed Claude Code $version (npm, PRoot)", 0.995f))
     }
 
     private suspend fun ensureAgyInstalled(
@@ -2742,6 +2777,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
+        /** Where the npm package lands under PRoot; CLAUDE_GUEST_PATH becomes a symlink into it. */
+        private const val CLAUDE_NPM_GUEST_DIR = "/usr/local/lib/claude-code"
+        /** Last @anthropic-ai/claude-code release shipping cli.js (2.1.113+ only download the Bun binary). */
+        private const val CLAUDE_NPM_VERSION = "2.1.112"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
             fileName = "nextcraft-claude-arm64-2026.10.1.tar.zst",
