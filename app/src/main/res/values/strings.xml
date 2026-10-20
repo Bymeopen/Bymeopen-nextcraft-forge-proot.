@@ -390,7 +390,7 @@
     <string name="provider_custom_title">Custom Endpoint</string>
     <string name="provider_custom_sub">Self-hosted Ollama, vLLM, LiteLLM, or custom API server</string>
     <string name="agent_claude_sub">Official @anthropic-ai/claude-code CLI in Root Chroot</string>
-    <string name="agent_deepseek_sub">JSON-RPC 2.0 SDK harness with multi-provider routing</string>
+    <string name="agent_deepseek_sub">JSON-RPC 2.0 SDK with multi-provider routing</string>
     <string name="agent_antigravity_sub">Official Google Antigravity agentic coding CLI (agy)</string>
     <string name="stack_web">Web &amp; Node.js</string>
     <string name="stack_python">Python 3</string>

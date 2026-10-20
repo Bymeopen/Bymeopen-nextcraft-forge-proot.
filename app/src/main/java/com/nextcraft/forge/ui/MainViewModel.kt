@@ -372,7 +372,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "# Forge Sandbox\n\n" +
                     "Welcome to **NextCraft Forge**.\n" +
                     "- Pure Root Chroot (`su -mm`) execution\n" +
-                    "- Multi-agent coding (`Claude Code`, `Antigravity`, `DeepSeek Harness`)\n" +
+                    "- Multi-agent coding (`Claude Code`, `Antigravity`, `DeepSeek`)\n" +
                     "- 1-Tap Android Debug APK Build & Silent Root Install\n",
             )
         }
@@ -476,7 +476,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
+    /** Manually installs one agent bundle (Claude Code, DeepSeek or Antigravity) on top of the Core runtime. */
     fun installAgent(agent: AgentKind) {
         if (!_state.value.runtimeInstalled) return installCoreWith(emptySet(), agent)
         if (!canRunRuntimeOperation()) return

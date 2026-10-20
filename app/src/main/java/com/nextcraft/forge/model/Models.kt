@@ -69,7 +69,7 @@ enum class AgentKind(
     ),
     DEEPSEEK_HARNESS(
         "deepseek-harness",
-        "DeepSeek Harness",
+        "DeepSeek",
         "Official DeepSeek coding agent · API-key providers",
         "26.8 MB",
     ),
@@ -126,7 +126,7 @@ fun inferredDshApiForUrl(baseUrl: String): String {
     }
 }
 
-/** Resolves the protocol DeepSeek Harness will actually use for this saved profile. */
+/** Resolves the protocol DeepSeek will actually use for this saved profile. */
 fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): ProviderProtocol {
     if (agent != AgentKind.DEEPSEEK_HARNESS || profile.kind !in DSH_PROTOCOL_PROVIDERS) {
         return profile.kind.protocol

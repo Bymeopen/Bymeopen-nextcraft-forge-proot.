@@ -733,10 +733,10 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         check(isSupportedDshVersion(expectedVersion)) {
-            "DeepSeek Harness $expectedVersion is not compatible with this NextCraft Forge build"
+            "DeepSeek $expectedVersion is not compatible with this NextCraft Forge build"
         }
         val quotedVersion = expectedVersion.replace(Regex("[^0-9A-Za-z.+-]"), "")
-        check(quotedVersion == expectedVersion) { "Invalid DeepSeek Harness version" }
+        check(quotedVersion == expectedVersion) { "Invalid DeepSeek version" }
         runGuestCommand(
             chrootExec = runtime.chrootExec,
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
@@ -749,7 +749,7 @@ class RuntimeInstaller(private val context: Context) {
             fraction = 0.55f,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
-            failureMessage = "Failed to update DeepSeek Harness",
+            failureMessage = "Failed to update DeepSeek",
         )
         val staged = File(rootfs, "usr/local/lib/dsh.updating")
         applyDshAndroidCompatibility(staged, expectedVersion)
@@ -759,32 +759,32 @@ class RuntimeInstaller(private val context: Context) {
                 "mv /usr/local/lib/dsh \"${'$'}old\"; " +
                 "if mv /usr/local/lib/dsh.updating /usr/local/lib/dsh; then :; " +
                 "else mv \"${'$'}old\" /usr/local/lib/dsh; exit 1; fi",
-            displayCommand = "Activate DeepSeek Harness $quotedVersion",
+            displayCommand = "Activate DeepSeek $quotedVersion",
             fraction = 0.9f,
             timeoutMs = 60_000L,
             onProgress = onProgress,
-            failureMessage = "Failed to activate DeepSeek Harness update",
+            failureMessage = "Failed to activate DeepSeek update",
         )
         val verified = runCatching {
-            verifyGuest(runtime.chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify updated DeepSeek Harness")
+            verifyGuest(runtime.chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify updated DeepSeek")
         }
         if (verified.isFailure) {
             runCatching {
                 runGuestCommand(
                     chrootExec = runtime.chrootExec,
                     command = "set -e; rm -rf /usr/local/lib/dsh; mv /usr/local/lib/dsh.previous /usr/local/lib/dsh",
-                    displayCommand = "Restore previous DeepSeek Harness",
+                    displayCommand = "Restore previous DeepSeek",
                     fraction = 0.95f,
                     timeoutMs = 60_000L,
                     onProgress = onProgress,
-                    failureMessage = "Failed to restore previous DeepSeek Harness",
+                    failureMessage = "Failed to restore previous DeepSeek",
                 )
             }
             verified.getOrThrow()
         }
         val previous = File(rootfs, "usr/local/lib/dsh.previous")
         if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
-            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek Harness copy")
+            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek copy")
         }
         dshMarker.writeText(expectedVersion)
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
@@ -922,15 +922,15 @@ class RuntimeInstaller(private val context: Context) {
         try {
             installRuntimeOverlay(
                 bundle = DSH_BUNDLE,
-                message = "Installing DeepSeek Harness $DSH_VERSION…",
+                message = "Installing DeepSeek $DSH_VERSION…",
                 from = fraction,
                 to = 0.995f,
                 onProgress = onProgress,
             )
             ensureDshAndroidCompatibility()
-            verifyGuest(chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify DeepSeek Harness")
+            verifyGuest(chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify DeepSeek")
             require(isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
-                "The DeepSeek Harness runtime bundle is incomplete"
+                "The DeepSeek runtime bundle is incomplete"
             }
             dshBackup.deleteRecursively()
             dshMarkerBackup.delete()
@@ -962,7 +962,7 @@ class RuntimeInstaller(private val context: Context) {
 
     private fun applyDshAndroidCompatibility(dshRoot: File, version: String) {
         check(isSupportedDshVersion(version)) {
-            "DeepSeek Harness $version is not compatible with this NextCraft Forge build"
+            "DeepSeek $version is not compatible with this NextCraft Forge build"
         }
         val persistence = File(
             dshRoot,
@@ -995,11 +995,11 @@ class RuntimeInstaller(private val context: Context) {
         callBefore: String,
         callAfter: String,
     ) {
-        check(file.isFile) { "DeepSeek Harness compatibility file is missing: ${file.name}" }
+        check(file.isFile) { "DeepSeek compatibility file is missing: ${file.name}" }
         var source = file.readText()
         if (callAfter in source && importAfter in source) return
         check(callBefore in source && importBefore in source) {
-            "Installed DeepSeek Harness source is not compatible with this NextCraft Forge build"
+            "Installed DeepSeek source is not compatible with this NextCraft Forge build"
         }
         source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
         val staging = File(file.parentFile, "${file.name}.tmp")
@@ -2763,7 +2763,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
-            label = "DeepSeek Harness",
+            label = "DeepSeek",
             fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
             sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
             compressedBytes = 28_066_921L,
