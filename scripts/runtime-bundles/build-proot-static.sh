@@ -106,11 +106,16 @@ guest "cd /build/proot/src && \
 
 mkdir -p "$OUT_DIR"
 cp "$rootfs/build/proot/src/proot" "$OUT_DIR/libproot.so"
-chmod 755 "$OUT_DIR/libproot.so"
-desc="$(file -b "$OUT_DIR/libproot.so")"
-[[ "$desc" == *"ARM aarch64"* && "$desc" == *"statically linked"* ]] || { echo "Unexpected binary: $desc" >&2; exit 1; }
-[[ ! -e "$rootfs/extra-ca.pem" ]] || true
-sha256sum "$OUT_DIR/libproot.so"
-wc -c "$OUT_DIR/libproot.so"
-echo "proot $PROOT_TAG ($actual_commit) built: $OUT_DIR/libproot.so"
-echo "Copy it to app/src/main/jniLibs/arm64-v8a/libproot.so and record the SHA-256 in docs/RUNTIME_KNOWN_ISSUES.md"
+# proot runs every guest execve through this small static ELF loader. By default it extracts the loader into
+# PROOT_TMP_DIR at runtime, which Android refuses to exec from app data (SELinux, targetSdk >= 29); proot-exec.sh
+# therefore points PROOT_LOADER at a copy shipped in the APK next to proot.
+cp "$rootfs/build/proot/src/loader/loader" "$OUT_DIR/libproot_loader.so"
+chmod 755 "$OUT_DIR/libproot.so" "$OUT_DIR/libproot_loader.so"
+for f in libproot.so libproot_loader.so; do
+  desc="$(file -b "$OUT_DIR/$f")"
+  [[ "$desc" == *"ARM aarch64"* && "$desc" == *"statically linked"* ]] || { echo "Unexpected binary $f: $desc" >&2; exit 1; }
+done
+sha256sum "$OUT_DIR/libproot.so" "$OUT_DIR/libproot_loader.so"
+wc -c "$OUT_DIR/libproot.so" "$OUT_DIR/libproot_loader.so"
+echo "proot $PROOT_TAG ($actual_commit) built: $OUT_DIR/libproot.so + libproot_loader.so"
+echo "Copy both to app/src/main/jniLibs/arm64-v8a/ and record the SHA-256 values in docs/RUNTIME_KNOWN_ISSUES.md"
