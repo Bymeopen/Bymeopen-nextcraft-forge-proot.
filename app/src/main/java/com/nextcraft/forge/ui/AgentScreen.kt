@@ -233,7 +233,7 @@ fun AgentScreen(
         }
 
         state.pendingToolRequest?.let { req ->
-            ToolApprovalCard(
+            ToolApprovalSheet(
                 request = req,
                 onApprove = { viewModel.respondToToolRequest(true) },
                 onReject = { viewModel.respondToToolRequest(false) },
@@ -258,6 +258,8 @@ fun AgentScreen(
                 }
             }
         } else {
+            val pendingChanges = state.changedItems.filter { it.accepted == null }
+            val lastAssistantId = state.messages.lastOrNull { !it.fromUser }?.id
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     state = listState,
@@ -266,21 +268,39 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        Box(modifier = Modifier.animateItemPlacement()) {
-                        ChatMessageCard(
-                            message = message,
-                            agentName = state.agentKind.displayTitle(),
-                            onRunSnippet = { cmd ->
-                                viewModel.runTerminalCommand(cmd)
-                                viewModel.selectTab(ForgeTab.TERMINAL)
-                            },
-                        )
+                        Column(modifier = Modifier.animateItemPlacement(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChatMessageCard(
+                                message = message,
+                                agentName = state.agentKind.displayTitle(),
+                                onRunSnippet = { cmd ->
+                                    viewModel.runTerminalCommand(cmd)
+                                    viewModel.selectTab(ForgeTab.TERMINAL)
+                                },
+                            )
+                            // Review right where the agent said it was done; the Files tab keeps the full diff view.
+                            if (message.id == lastAssistantId && pendingChanges.isNotEmpty() && !state.sessionRunning) {
+                                ChangedFilesCard(
+                                    changes = pendingChanges,
+                                    enabled = !state.sessionRunning,
+                                    onOpenFile = { path ->
+                                        viewModel.openWorkspaceFile(path)
+                                        viewModel.selectProjectPane(ProjectPane.FILES)
+                                    },
+                                    onKeepFile = viewModel::keepSingleFile,
+                                    onRevertFile = viewModel::revertSingleFile,
+                                    onKeepAll = viewModel::keepAllChanges,
+                                    onRevertAll = viewModel::revertAllChanges,
+                                )
+                            }
                         }
                     }
                 }
                 // "Latest" pill: shown once the reader has scrolled up from the newest message.
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                 val awayFromEnd = state.messages.size > 1 && lastVisible < state.messages.lastIndex
+                // Count only what arrived after the reader scrolled away; remember(awayFromEnd) snapshots the size at that moment.
+                val sizeWhenAway = remember(awayFromEnd) { state.messages.size }
+                val newCount = (state.messages.size - sizeWhenAway).coerceAtLeast(0)
                 if (awayFromEnd) {
                     Surface(
                         shape = RoundedCornerShape(100),
@@ -299,7 +319,12 @@ fun AgentScreen(
                         ) {
                             Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.agent_latest), fontWeight = FontWeight.SemiBold, fontSize = ForgeType.control)
+                            Text(
+                                text = if (newCount > 0) quantityStringResource(R.plurals.chat_new_messages, newCount, newCount) else stringResource(R.string.agent_latest),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = ForgeType.control,
+                                modifier = Modifier.forgeLive(),
+                            )
                         }
                     }
                 }
@@ -377,6 +402,32 @@ fun AgentScreen(
                     AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = { viewModel.removePendingAttachment(att.id) })
                 }
             }
+        }
+        if (!running && state.pendingToolRequest == null) {
+            val chips = buildList {
+                if (state.messages.isEmpty()) {
+                    // Starter ideas fill the composer instead of sending, so the user can edit first.
+                    add(QuickChip(stringResource(R.string.starter_explain), ForgeGlyph.SPARK) { promptInput = stringOf(R.string.starter_explain, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_fix), ForgeGlyph.BUILD) { promptInput = stringOf(R.string.starter_fix, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_feature), ForgeGlyph.PLUS) { promptInput = stringOf(R.string.starter_feature, cameraContext) })
+                    add(QuickChip(stringResource(R.string.starter_tests), ForgeGlyph.CODE) { promptInput = stringOf(R.string.starter_tests, cameraContext) })
+                } else {
+                    val changed = state.changedItems.count { it.accepted == null }
+                    if (changed > 0) {
+                        add(QuickChip(quantityStringResource(R.plurals.chip_review_changes, changed, changed), ForgeGlyph.FILE) { viewModel.selectProjectPane(ProjectPane.FILES) })
+                        add(QuickChip(stringResource(R.string.chip_explain_changes), ForgeGlyph.SPARK) { viewModel.sendPrompt(stringOf(R.string.prompt_explain_changes, cameraContext)) })
+                    }
+                    if (state.activeLocalPorts.isNotEmpty()) {
+                        add(QuickChip(stringResource(R.string.chip_open_preview), ForgeGlyph.GLOBE) { viewModel.selectProjectPane(ProjectPane.PREVIEW) })
+                    }
+                    if (state.activeProject?.type == com.nextcraft.forge.model.ProjectType.ANDROID) {
+                        add(QuickChip(stringResource(R.string.chip_build_run), ForgeGlyph.BUILD) { viewModel.selectTab(ForgeTab.ANDROID) })
+                    } else {
+                        add(QuickChip(stringResource(R.string.chip_run_tests), ForgeGlyph.CODE) { viewModel.sendPrompt(stringOf(R.string.prompt_run_tests, cameraContext)) })
+                    }
+                }
+            }
+            QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
         }
         Surface(
             shape = RoundedCornerShape(28.dp),
@@ -700,79 +751,6 @@ private fun AntigravityOAuthBanner(
 }
 
 @Composable
-private fun ToolApprovalCard(
-    request: ToolRequest,
-    onApprove: () -> Unit,
-    onReject: () -> Unit,
-) {
-    val tokens = LocalForgeThemeTokens.current
-    val scheme = MaterialTheme.colorScheme
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = tokens.cardContainerColor,
-        contentColor = scheme.onSurface,
-        border = tokens.cardBorderStroke,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-    ) {
-        Row {
-            // Thin red rule carries the warning so the card itself stays calm.
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .background(scheme.error),
-            )
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ForgeStatusIcon(ForgeStatus.FAILED, iconSize = 20.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.agent_approval_title), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium)
-                        Text(
-                            text = stringResource(R.string.agent_approval_sub, request.toolName, request.risk.name.lowercase()),
-                            fontSize = ForgeType.secondary,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Text(text = request.explanation, fontSize = ForgeType.control, color = scheme.onSurfaceVariant)
-                request.commandPreview?.takeIf { it.isNotBlank() }?.let { cmd ->
-                    Text(
-                        text = cmd,
-                        style = ForgeCodeTextStyle,
-                        color = tokens.terminalText,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(tokens.terminalBackground)
-                            .padding(10.dp),
-                    )
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onReject,
-                        shape = RoundedCornerShape(100),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.agent_deny)) }
-                    Button(
-                        onClick = onApprove,
-                        shape = RoundedCornerShape(100),
-                        colors = ButtonDefaults.buttonColors(containerColor = scheme.error, contentColor = scheme.onError),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp),
-                    ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 internal fun ChatMessageCard(
     message: ChatMessage,
     agentName: String,
@@ -811,7 +789,11 @@ internal fun ChatMessageCard(
 
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         // Each tool call is one collapsed row ("Bash · command ⌄"); tap to read its detail.
-        message.workItems.forEach { item -> ToolCallRow(item) }
+        if (message.workItems.size >= STEP_GROUP_MIN) {
+            ToolStepGroup(message.workItems)
+        } else {
+            message.workItems.forEach { item -> ToolCallRow(item) }
+        }
         if (message.workedMillis > 0L) {
             Text(
                 text = stringResource(R.string.agent_worked_for, formatWorked(message.workedMillis)),
@@ -913,7 +895,7 @@ private fun formatWorked(millis: Long): String {
 
 /** One collapsed tool call: status glyph, "Title · detail" on one line, chevron; expands to the full detail. */
 @Composable
-private fun ToolCallRow(item: ActivityItem) {
+internal fun ToolCallRow(item: ActivityItem) {
     var open by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
@@ -1014,7 +996,7 @@ private fun MessageContainer(
 }
 
 /** Tool-call kinds, derived from the activity title, each with its own glyph and tint. */
-private enum class ToolKind(val glyph: ForgeGlyph) {
+internal enum class ToolKind(val glyph: ForgeGlyph) {
     THINK(ForgeGlyph.SPARK), BASH(ForgeGlyph.TERMINAL), READ(ForgeGlyph.FILE), WRITE(ForgeGlyph.EDIT), OTHER(ForgeGlyph.BUILD);
 
     fun tint(scheme: androidx.compose.material3.ColorScheme, tokens: ForgeThemeTokens): Color = when (this) {
@@ -1024,7 +1006,7 @@ private enum class ToolKind(val glyph: ForgeGlyph) {
     }
 }
 
-private fun toolKind(item: ActivityItem): ToolKind {
+internal fun toolKind(item: ActivityItem): ToolKind {
     val t = item.title.lowercase()
     return when {
         "think" in t || "reason" in t -> ToolKind.THINK
@@ -1061,3 +1043,6 @@ private fun AttachmentChip(name: String, size: Long, onRemove: (() -> Unit)?, sh
         }
     }
 }
+
+/** String lookup for click handlers, which run outside composition and cannot call stringResource. */
+private fun stringOf(@androidx.annotation.StringRes id: Int, context: android.content.Context): String = context.getString(id)

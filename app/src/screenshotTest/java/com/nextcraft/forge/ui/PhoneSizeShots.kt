@@ -13,6 +13,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import java.io.File
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -171,6 +173,82 @@ abstract class PhoneSizeShots(private val label: String) {
             }
         }
         save("settings")
+    }
+    @Test
+    fun chatBatchB() {
+        val items = listOf(
+            com.nextcraft.forge.model.ActivityItem("Think", "Perlu menambah tombol hapus di TodoList", true),
+            com.nextcraft.forge.model.ActivityItem("Bash", "git status --short", true, isCommand = true),
+            com.nextcraft.forge.model.ActivityItem("Read", "app/src/main/java/TodoList.kt", true),
+            com.nextcraft.forge.model.ActivityItem("Write", "app/src/main/java/TodoList.kt", true),
+            com.nextcraft.forge.model.ActivityItem("Bash", "./gradlew testDebugUnitTest", false, isCommand = true),
+        )
+        val diff = listOf(
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.CONTEXT, "fun TodoRow(todo: Todo) {", 10, 10),
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.DELETION, "    Text(todo.title)", 11, null),
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.ADDITION, "    Text(todo.title, modifier = Modifier.weight(1f))", null, 11),
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.ADDITION, "    IconButton(onClick = { onDelete(todo) }) {", null, 12),
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.ADDITION, "        Icon(Icons.Outlined.Delete, null)", null, 13),
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.ADDITION, "    }", null, 14),
+            com.nextcraft.forge.model.DiffLine(com.nextcraft.forge.model.DiffLineType.CONTEXT, "}", 12, 15),
+        )
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "Claude Code · Tambah tombol hapus", onBack = {}, actions = {
+                    ForgeGlyphPillIcon(ForgeGlyph.HISTORY, "history", onClick = {})
+                })
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.weight(1f).padding(12.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+                ) {
+                    ChatMessageCard(com.nextcraft.forge.model.ChatMessage(fromUser = true, text = "Tambahkan tombol hapus di daftar tugas lalu jalankan semua tes"), "Claude Code") {}
+                    ToolStepGroup(items)
+                    ChatMessageCard(
+                        com.nextcraft.forge.model.ChatMessage(fromUser = false, text = "Tombol hapus sudah ditambahkan. Tes sedang berjalan.", workedMillis = 102_000),
+                        "Claude Code",
+                    ) {}
+                    ChangedFilesCard(
+                        changes = listOf(
+                            com.nextcraft.forge.model.ChangeItem("app/src/main/java/com/example/todo/TodoList.kt", 4, 1, diff),
+                            com.nextcraft.forge.model.ChangeItem("app/src/main/java/com/example/todo/TodoItem.kt", 2, 0, emptyList()),
+                        ),
+                        enabled = true, onOpenFile = {}, onKeepFile = {}, onRevertFile = {}, onKeepAll = {}, onRevertAll = {},
+                    )
+                }
+                QuickActionRow(listOf(
+                    QuickChip("Tinjau 2 perubahan", ForgeGlyph.FILE) {},
+                    QuickChip("Jelaskan perubahan", ForgeGlyph.SPARK) {},
+                    QuickChip("Jalankan tes", ForgeGlyph.CODE) {},
+                ))
+                ForgeBottomBar(projectEntries, ForgeTab.AGENT, changedCount = 2, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        rule.onAllNodesWithText("TodoList.kt")[0].performClick()
+        save("chatB")
+    }
+
+    @Test
+    fun approval() {
+        rule.setContent {
+            Frame {
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {}
+                androidx.compose.material3.Surface(color = LocalForgeThemeTokens.current.cardContainerColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+                    androidx.compose.foundation.layout.Column(modifier = Modifier.padding(top = 20.dp)) {
+                        ToolApprovalContent(
+                            request = com.nextcraft.forge.model.ToolRequest(
+                                sessionId = "s", toolName = "Bash",
+                                explanation = "Menghapus folder build dan membangun ulang seluruh proyek dari awal.",
+                                affectedPaths = listOf("app/build", "app/src/main/java/com/example/todo/TodoList.kt"),
+                                commandPreview = "rm -rf app/build && ./gradlew clean assembleDebug",
+                                risk = com.nextcraft.forge.model.RiskLevel.HIGH,
+                            ),
+                            onApprove = {}, onReject = {},
+                        )
+                    }
+                }
+            }
+        }
+        save("approval")
     }
 }
 

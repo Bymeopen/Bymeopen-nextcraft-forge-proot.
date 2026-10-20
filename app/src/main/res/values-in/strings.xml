@@ -680,4 +680,41 @@
     <string name="msg_claude_cli_verified">✓ Claude Code terverifikasi: %1$s</string>
     <string name="msg_claude_cli_unverified">✕ Pemeriksaan Claude Code gagal: %1$s</string>
     <string name="msg_runtime_not_installed">Runtime Linux belum terpasang.</string>
+    <plurals name="chat_steps">
+        <item quantity="other">%d langkah</item>
+    </plurals>
+    <plurals name="chat_files_changed">
+        <item quantity="other">%d berkas diubah</item>
+    </plurals>
+    <plurals name="chat_new_messages">
+        <item quantity="other">%d baru</item>
+    </plurals>
+    <plurals name="chip_review_changes">
+        <item quantity="other">Tinjau %d perubahan</item>
+    </plurals>
+    <string name="chat_keep_all">Simpan semua</string>
+    <string name="chat_revert_all">Batalkan semua</string>
+    <string name="chat_keep">Simpan</string>
+    <string name="chat_revert">Batalkan</string>
+    <string name="chat_open_in_files">Buka di File</string>
+    <string name="chat_diff_more">%d baris lagi</string>
+    <string name="chat_diff_binary">Berkas biner, tanpa pratinjau.</string>
+    <string name="chat_diff_none">Tidak ada perubahan baris untuk ditampilkan.</string>
+    <string name="approval_risk_high">Risiko tinggi</string>
+    <string name="approval_risk_review">Perlu ditinjau</string>
+    <string name="approval_risk_safe">Risiko rendah</string>
+    <string name="approval_paths">Memengaruhi</string>
+    <string name="approval_waiting_hint">Agen sedang menunggu. Pilih Tolak atau Setujui untuk melanjutkan.</string>
+    <string name="chip_explain_changes">Jelaskan perubahan</string>
+    <string name="chip_open_preview">Buka pratinjau</string>
+    <string name="chip_build_run">Build dan jalankan</string>
+    <string name="chip_run_tests">Jalankan tes</string>
+    <string name="prompt_explain_changes">Jelaskan apa yang baru saja kamu ubah dan alasannya.</string>
+    <string name="prompt_run_tests">Jalankan tes proyek ini dan laporkan hasilnya.</string>
+    <string name="starter_explain">Jelaskan struktur proyek ini</string>
+    <string name="starter_fix">Cari dan perbaiki error build</string>
+    <string name="starter_feature">Tambahkan fitur baru: </string>
+    <string name="starter_tests">Tulis tes untuk kode utama</string>
+    <string name="diff_added">+%1$d</string>
+    <string name="diff_removed">−%1$d</string>
 </resources>
