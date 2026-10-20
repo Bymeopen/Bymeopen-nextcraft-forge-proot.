@@ -41,9 +41,21 @@ android {
         }
     }
 
+    // A fixed debug key (committed; debug keys are not secrets) so every CI debug build has the same signature and
+    // can be installed over the previous one. A fresh runner would otherwise generate a new random debug key per build.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
         }
         release {
