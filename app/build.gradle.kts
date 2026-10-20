@@ -23,6 +23,7 @@ android {
         }
 
         buildConfigField("String", "APP_VARIANT", "\"debug\"")
+        manifestPlaceholders["appLabel"] = "@string/app_name"
         // Manifest asset of the latest GitHub release; build with -PappUpdateManifestUrl=... to point elsewhere.
         val updateManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
             ?: "https://github.com/bymeopen/nextcraft-forge/releases/latest/download/update-manifest.json"
@@ -55,6 +56,9 @@ android {
 
     buildTypes {
         debug {
+            // Installs next to the real app (com.nextcraft.forge): separate data dir, rootfs and launcher entry.
+            applicationIdSuffix = "x"
+            manifestPlaceholders["appLabel"] = "NextCraft Forge X"
             signingConfig = signingConfigs.getByName("sharedDebug")
             isMinifyEnabled = false
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
