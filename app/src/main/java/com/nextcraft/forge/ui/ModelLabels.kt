@@ -14,7 +14,6 @@ import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.runtime.AndroidToolchain
-import com.nextcraft.forge.runtime.RuntimeEngineChoice
 
 // Product and brand names stay as written; only descriptive text goes through resources.
 
@@ -94,18 +93,8 @@ fun DevStack.displayDescription(): String = when (this) {
 }
 
 @StringRes
-fun RuntimeEngineChoice.titleRes(): Int = when (this) {
-    RuntimeEngineChoice.AUTO -> R.string.engine_auto
-    RuntimeEngineChoice.CHROOT -> R.string.engine_chroot
-    RuntimeEngineChoice.PROOT -> R.string.engine_proot
-}
 
 @StringRes
-fun RuntimeEngineChoice.subtitleRes(): Int = when (this) {
-    RuntimeEngineChoice.AUTO -> R.string.engine_auto_sub
-    RuntimeEngineChoice.CHROOT -> R.string.engine_chroot_sub
-    RuntimeEngineChoice.PROOT -> R.string.engine_proot_sub
-}
 
 /** "3m ago" style text for list rows; plurals come from resources so each locale decides the form. */
 @Composable

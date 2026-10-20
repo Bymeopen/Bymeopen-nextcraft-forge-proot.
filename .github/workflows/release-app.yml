@@ -62,9 +62,9 @@ jobs:
           # An unsigned APK would fail the signature check in the updater on every device.
           case "$apk" in *unsigned*) echo "Release APK is unsigned"; exit 1;; esac
           mkdir -p dist
-          cp "$apk" "dist/nextcraft-forge-$VERSION_NAME.apk"
+          cp "$apk" "dist/nextcraft-forge-proot-$VERSION_NAME.apk"
           NEXTCRAFT_OUT_DIR=dist scripts/make-update-manifest.sh \
-            "dist/nextcraft-forge-$VERSION_NAME.apk" "$VERSION_CODE" "$VERSION_NAME" "$TAG" release "$NOTES"
+            "dist/nextcraft-forge-proot-$VERSION_NAME.apk" "$VERSION_CODE" "$VERSION_NAME" "$TAG" release "$NOTES"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -73,4 +73,4 @@ jobs:
           NOTES: ${{ inputs.notes }}
         run: |
           gh release create "$TAG" dist/*.apk dist/update-manifest.json \
-            --title "NextCraft Forge $VERSION_NAME" --notes "$NOTES" --latest
+            --title "NextCraft Forge PRoot $VERSION_NAME" --notes "$NOTES" --latest

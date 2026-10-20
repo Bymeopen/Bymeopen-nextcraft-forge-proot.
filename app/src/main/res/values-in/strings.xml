@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">NextCraft Forge</string>
-    <string name="app_tagline">Studio Coding AI Root Chroot untuk Android</string>
+    <string name="app_name">NextCraft Forge PRoot</string>
+    <string name="app_tagline">Studio Coding AI tanpa root untuk Android (PRoot)</string>
     <!-- UI strings extracted from Compose screens -->
     <string name="agent_stop">Berhenti</string>
     <string name="agent_ask_to_build_refactor">Minta %1$s membangun, merombak, atau memperbaiki…</string>
@@ -63,7 +63,7 @@
     <string name="shell_nextcraft_forge">NextCraft Forge</string>
     <string name="shell_select_development_stacks_to">Pilih stack pengembangan yang akan dipasang</string>
     <string name="shell_repair_mounts_dpkg">Perbaiki mount / dpkg</string>
-    <string name="shell_re_check_root">Periksa ulang root</string>
+    <string name="shell_re_check_root">Periksa ulang mesin</string>
     <string name="shell_continue_to_ide_workspace">Lanjut ke workspace IDE (mode cadangan host)</string>
     <string name="shell_create_workspace_project">Buat proyek workspace</string>
     <string name="shell_project_name">Nama proyek</string>
@@ -124,7 +124,7 @@
     <string name="settings_runtime">Runtime</string>
     <string name="settings_dev_stacks">Stack pengembangan</string>
     <string name="settings_apply_provision_stacks">Terapkan / pasang stack</string>
-    <string name="settings_repair_chroot">Perbaiki chroot</string>
+    <string name="settings_repair_chroot">Perbaiki runtime</string>
     <string name="settings_about">Tentang</string>
     <string name="settings_app_updates">Pembaruan aplikasi</string>
     <string name="settings_check_for_app_updates">Periksa pembaruan aplikasi</string>
@@ -192,14 +192,13 @@
     <string name="shell_check_arm64">Arsitektur perangkat ARM64 (aarch64)</string>
     <string name="shell_supported">Didukung</string>
     <string name="shell_requires_arm64">Butuh perangkat ARMv8 64-bit</string>
-    <string name="shell_check_root">Akses root (mount namespace `su -mm`)</string>
-    <string name="shell_root_granted">Magisk / KernelSU / APatch diizinkan</string>
-    <string name="shell_root_required">Hak akses root diperlukan untuk chroot</string>
-    <string name="shell_proot_fallback">Tanpa root: memakai mesin PRoot bawaan (build lebih lambat)</string>
+    <string name="shell_check_root">Mesin PRoot (tanpa root)</string>
+    <string name="shell_root_required">libproot.so tidak ada di APK ini</string>
+    <string name="shell_proot_fallback">Mesin PRoot bawaan siap (build lebih lambat dari native)</string>
     <string name="shell_check_rootfs">Rootfs Ubuntu 24.04 &amp; toolchain Agent</string>
     <string name="shell_installed_ready">Terpasang &amp; siap</string>
     <string name="shell_resume_setup">Lanjutkan pemasangan</string>
-    <string name="shell_install_runtime">Pasang runtime chroot</string>
+    <string name="shell_install_runtime">Pasang Runtime PRoot</string>
     <string name="settings_agent_install">Pasang</string>
     <string name="settings_agent_installed">Terpasang</string>
     <string name="settings_agent_update">Perbarui ke %1$s</string>
@@ -243,7 +242,7 @@
     <string name="tool_delete">Hapus</string>
     <string name="tool_device">Perangkat</string>
     <string name="tool_download_size">Belum terpasang · unduhan %1$s</string>
-    <string name="tool_health_placeholder">Jalankan pemeriksaan kesehatan untuk menguji mount, jaringan, Node, agen, dan toolchain di chroot.</string>
+    <string name="tool_health_placeholder">Jalankan pemeriksaan kesehatan untuk menguji jaringan, Node, agen, dan toolchain di dalam runtime PRoot.</string>
     <string name="tool_install">Pasang</string>
     <string name="tool_keep_all">Simpan semua</string>
     <string name="tool_log_placeholder">Keluaran tampil di sini.</string>
@@ -275,7 +274,7 @@
     <string name="tool_ssh_add_host">Tambah host</string>
     <string name="tool_ssh_alias">Nama</string>
     <string name="tool_ssh_client">Klien OpenSSH</string>
-    <string name="tool_ssh_client_missing">Belum terpasang di chroot.</string>
+    <string name="tool_ssh_client_missing">Belum terpasang di runtime.</string>
     <string name="tool_ssh_client_ready">Terpasang.</string>
     <string name="tool_ssh_command">Perintah</string>
     <string name="tool_ssh_forward">Port forward (opsional, mis. 8080:localhost:80)</string>
@@ -341,7 +340,7 @@
     <string name="projects_cancel">Batal</string>
     <string name="projects_expand">Buka</string>
     <string name="projects_collapse">Tutup</string>
-    <string name="msg_repairing_chroot">Memperbaiki mount chroot &amp; skrip runtime…</string>
+    <string name="msg_repairing_chroot">Memperbaiki skrip runtime…</string>
     <string name="msg_api_key_saved">Kunci API tersimpan aman di Android Keystore.</string>
     <string name="msg_api_key_save_failed">Tidak dapat menyimpan kunci API.</string>
     <string name="msg_fetching_models">Mengambil katalog model…</string>
@@ -375,7 +374,7 @@
     <string name="msg_gh_pulled">Ditarik dari GitHub: %1$s</string>
     <string name="msg_gh_up_to_date">sudah terbaru</string>
     <string name="msg_gh_pull_failed">Pull GitHub gagal: %1$s</string>
-    <string name="provider_claude_sub">Masuk dengan akun Claude Pro / Max di dalam Ubuntu Chroot</string>
+    <string name="provider_claude_sub">Masuk dengan akun Claude Pro / Max di dalam Ubuntu (PRoot)</string>
     <string name="provider_anthropic_sub">Anthropic Messages API langsung (/v1/messages)</string>
     <string name="provider_router_sub">Gateway OpenRouter terpadu dengan urutan penyedia &amp; cadangan</string>
     <string name="provider_deepseek_sub">DeepSeek Reasoner &amp; Chat lewat jembatan Anthropic/OpenAI</string>
@@ -384,7 +383,7 @@
     <string name="provider_nim_sub">API inferensi NVIDIA NIM kompatibel OpenAI</string>
     <string name="provider_custom_title">Endpoint kustom</string>
     <string name="provider_custom_sub">Ollama, vLLM, LiteLLM self-hosted, atau server API kustom</string>
-    <string name="agent_claude_sub">CLI resmi @anthropic-ai/claude-code di Root Chroot</string>
+    <string name="agent_claude_sub">CLI resmi @anthropic-ai/claude-code (npm 2.1.112) di PRoot</string>
     <string name="agent_deepseek_sub">Harness SDK JSON-RPC 2.0 dengan routing multi-penyedia</string>
     <string name="agent_antigravity_sub">CLI coding agentik resmi Google Antigravity (agy)</string>
     <string name="stack_web">Web &amp; Node.js</string>
@@ -458,14 +457,14 @@
     <string name="agent_welcome_hint">Tanyakan apa saja tentang workspace ini, atau mulai dari saran.</string>
     <string name="agent_sugg_inspect">Periksa workspace ini dan ringkas arsitekturnya.</string>
     <string name="agent_sugg_compose">Buat layar Jetpack Compose responsif dengan manajemen state yang rapi.</string>
-    <string name="agent_sugg_tests">Jalankan test suite atau skrip verifikasi di dalam Ubuntu Root Chroot.</string>
+    <string name="agent_sugg_tests">Jalankan test suite atau skrip verifikasi di dalam runtime Ubuntu PRoot.</string>
     <string name="agent_sugg_audit">Audit kode untuk bug konkurensi, keamanan, dan kasus tepi.</string>
     <string name="onb_title">Siapkan runtime</string>
-    <string name="onb_subtitle">Chroot root Ubuntu 24.04 untuk agen dan toolchain</string>
+    <string name="onb_subtitle">Ubuntu 24.04 di PRoot untuk agen dan toolchain, tanpa root</string>
     <string name="onb_checks">Pemeriksaan perangkat</string>
     <string name="onb_stacks">Stack yang dipasang</string>
     <string name="onb_progress_pct">%1$d%% · %2$s</string>
-    <string name="onb_root_help">Forge menjalankan agen di dalam chroot Ubuntu yang membutuhkan root. Berikan akses root di Magisk, KernelSU, atau APatch, lalu ketuk Periksa ulang. Anda tetap bisa menjelajah aplikasi lewat Lanjut tanpa runtime.</string>
+    <string name="onb_root_help">APK ini kehilangan mesin PRoot (libproot.so). Pasang ulang NextCraft Forge PRoot dari rilis resmi, lalu ketuk Periksa ulang.</string>
     <string name="onb_continue_anyway">Lanjut tanpa runtime</string>
     <string name="onb_repair">Perbaiki mount</string>
     <string name="onb_recheck">Periksa ulang</string>
@@ -533,7 +532,7 @@
     <string name="logcat_ended">Aliran logcat untuk %1$s berakhir.</string>
     <string name="logcat_paused">Logcat dijeda</string>
     <string name="build_stage_idle">Siaga</string>
-    <string name="build_stage_preparing">Menyiapkan workspace dan mount chroot…</string>
+    <string name="build_stage_preparing">Menyiapkan workspace dan binding PRoot…</string>
     <string name="build_stage_resolving">Menyelesaikan dependensi Maven…</string>
     <string name="build_stage_resources">Mengompilasi resource Android (aapt2)…</string>
     <string name="build_stage_compiling">Mengompilasi sumber Kotlin dan Java…</string>
@@ -548,7 +547,7 @@
     <string name="msg_project_deleted">\"%1$s\" dihapus</string>
     <string name="action_undo">Urungkan</string>
     <string name="msg_busy_before_delete">Proyek tidak bisa dihapus saat sesi agen, build, atau perintah terminal sedang berjalan.</string>
-    <string name="msg_agy_probing">Memeriksa Antigravity CLI di dalam chroot…</string>
+    <string name="msg_agy_probing">Memeriksa CLI Antigravity di dalam runtime…</string>
     <string name="msg_agy_verified">Antigravity CLI terverifikasi: %1$s</string>
     <string name="msg_agy_probe_failed">Pemeriksaan Antigravity gagal: %1$s</string>
     <string name="msg_switch_blocked_agent">Hentikan sesi agen yang berjalan sebelum berpindah proyek.</string>
@@ -564,13 +563,6 @@
     <string name="msg_agents_up_to_date">Semua agen yang terpasang sudah terbaru.</string>
     <string name="settings_appearance">Tampilan</string>
     <string name="settings_language">Bahasa</string>
-    <string name="settings_runtime_engine">Mesin runtime</string>
-    <string name="engine_auto">Otomatis</string>
-    <string name="engine_auto_sub">Chroot root bila diizinkan, jika tidak PRoot</string>
-    <string name="engine_chroot">Chroot root</string>
-    <string name="engine_chroot_sub">Butuh Magisk / KernelSU / APatch; paling cepat</string>
-    <string name="engine_proot">PRoot (tanpa root)</string>
-    <string name="engine_proot_sub">Tidak pernah meminta root; build lebih lambat</string>
     <string name="settings_agent_not_installed">%1$s belum terpasang</string>
     <string name="settings_agent_install_hint">Pasang paket agen %1$s untuk memakainya di proyek yang sudah ada.</string>
     <string name="settings_agent_install_named">Pasang %1$s</string>
@@ -601,7 +593,7 @@
     <string name="settings_clear_terminal_history">Bersihkan riwayat terminal</string>
     <string name="settings_danger_zone">Zona berbahaya</string>
     <string name="settings_repair_rootfs">Perbaiki rootfs</string>
-    <string name="settings_repair_rootfs_sub">Perbaiki mount, symlink, dan skrip runtime yang rusak.</string>
+    <string name="settings_repair_rootfs_sub">Perbaiki symlink dan skrip runtime yang rusak.</string>
     <string name="settings_version">Versi</string>
     <string name="settings_check_updates_sub">Mencari APK yang lebih baru</string>
     <string name="a11y_back">Kembali</string>
@@ -611,7 +603,7 @@
     <string name="agent_close">Tutup</string>
     <string name="agent_worked_for">Bekerja selama %1$s</string>
     <string name="terminal_project_terminal">Terminal proyek</string>
-    <string name="terminal_env_root_chroot">Ubuntu root chroot</string>
+    <string name="terminal_env_root_chroot">Ubuntu PRoot</string>
     <string name="terminal_key_previous">Perintah sebelumnya</string>
     <string name="terminal_key_next">Perintah berikutnya</string>
     <string name="terminal_key_clear_input">Bersihkan input</string>
@@ -680,7 +672,7 @@
     <string name="auth_google_connected">Akun Google terhubung</string>
     <string name="agent_key_not_needed">Tidak perlu kunci API, memakai login Claude</string>
     <string name="msg_gh_denied">Otorisasi GitHub dibatalkan.</string>
-    <string name="project_default_sandbox_desc">Ruang kerja bawaan di dalam Ubuntu ARM64 Root Chroot</string>
+    <string name="project_default_sandbox_desc">Workspace bawaan di dalam Ubuntu ARM64 (PRoot)</string>
     <string name="project_general_desc">Ruang kerja pemrograman umum</string>
     <string name="project_lang_multi">Multibahasa</string>
     <string name="settings_auto_approve_warning">Semua alat berjalan tanpa konfirmasi. Matikan agar perintah ditinjau dulu.</string>

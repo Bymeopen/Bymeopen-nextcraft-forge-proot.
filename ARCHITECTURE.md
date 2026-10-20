@@ -1,3 +1,10 @@
+> **ADR-008 (repo ini): Fork PRoot-only.** `nextcraft-forge-proot` adalah fork `nextcraft-forge` yang **hanya** memakai mesin
+> PRoot (`libproot.so`, ADR-007). Semua jalur `su`, mount kernel, `chroot-exec.sh`, `unmount-chroot.sh`, `pm install` senyap,
+> logcat via root, dan eskalasi sinyal via `su` dihapus; `RuntimeEngine` hanya punya `PROOT`; `applicationId` menjadi
+> `com.nextcraft.forge.proot`. ADR-002 dan bagian "Pure Root Chroot" di bawah adalah **sejarah** dari repo asal dan tidak lagi
+> menggambarkan kode di repo ini. Alasan: dual-runtime di satu aplikasi terbukti sulit diuji dan dirawat; dua aplikasi terpisah
+> dengan bundle runtime yang sama lebih sederhana.
+
 # NextCraft Forge (`com.nextcraft.forge`) — Master Engineering Blueprint (Fase 1 s/d Fase 7)
 
 > **Identitas Proyek**: **NextCraft Forge** (`com.nextcraft.forge`) — Autonomous Mobile AI Coding IDE & Native Android Build System  

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fails when scripts/runtime-bundles/{chroot-exec,unmount-chroot}.sh differ from the copies embedded in RuntimeInstaller.kt.
+"""Fails when scripts/runtime-bundles/proot-exec.sh differs from the copy embedded in RuntimeInstaller.kt.
 
 The app installs the embedded strings, so those are the source of truth; regenerate the files with
 `python3 scripts/check-embedded-scripts.py --write` after changing them.
@@ -11,8 +11,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "app/src/main/java/com/nextcraft/forge/runtime/RuntimeInstaller.kt"
 PAIRS = {
-    "CHROOT_EXEC_SCRIPT": "chroot-exec.sh",
-    "UNMOUNT_CHROOT_SCRIPT": "unmount-chroot.sh",
     "PROOT_EXEC_SCRIPT": "proot-exec.sh",
 }
 

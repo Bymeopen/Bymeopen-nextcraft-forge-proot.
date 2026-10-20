@@ -1,11 +1,9 @@
-# NextCraft Forge Runtime Scripts & Bundle Builders (`Pure Root Chroot Edition`)
+# NextCraft Forge PRoot: Runtime Scripts & Bundle Builders
 
 Direktori ini berisi dua kelompok skrip untuk **NextCraft Forge (`com.nextcraft.forge`)**:
 
-1. **On-Device Root Chroot Supervisor Scripts** (dipasang ke `/data/data/com.nextcraft.forge/files/runtime/bin/`):
-   - `chroot-exec.sh`: Supervisor eksekusi `su -mm` yang mengelola *idempotent kernel mounts* (`/dev`, `/dev/pts`, `/proc`, `/sys`, `/tmp`, `/dev/shm`), *read-only bind mounts* partisi Android (`/system`, `/apex`, `/vendor`, `/product` untuk binary Bionic `aapt2`), *dynamic workspace & bridge bind mounts* (`/workspace/nextcraft`, `/nextcraft-bridge`), pembersihan variabel environment Bionic tanpa menghapus variabel AI/Gateway, kompatibilitas `GLIBC_TUNABLES=glibc.pthread.rseq=0`, dan *Exit Trap* `chown -R $APP_UID:$APP_UID`.
-   - `unmount-chroot.sh`: Guard pelepas seluruh mount kernel secara terbalik (`sort -r` pada `/proc/mounts`) dan memverifikasi 0 mount tersisa sebelum operasi `RootfsRepair` diizinkan menghapus atau mengganti direktori rootfs.
-   - `proot-exec.sh`: Supervisor fallback **tanpa root** (ADR-007) dengan argumen dan layout guest yang sama seperti `chroot-exec.sh`, tetapi masuk ke rootfs lewat `proot` statis dari APK (`NEXTCRAFT_PROOT`, `-b` untuk `/dev`, `/proc`, `/sys`, Bionic, workspace, bridge; `--link2symlink`, `-0`, `--kill-on-exit`). Selalu dijalankan sebagai `/system/bin/sh proot-exec.sh …`. Salinan identik ada di `RuntimeInstaller.PROOT_EXEC_SCRIPT`.
+1. **On-Device PRoot Supervisor Script** (dipasang ke `/data/data/com.nextcraft.forge.proot/files/runtime/bin/`; sumber kebenaran adalah `PROOT_EXEC_SCRIPT` di `RuntimeInstaller.kt`, disinkronkan `scripts/check-embedded-scripts.py`):
+   - `proot-exec.sh`: Supervisor **tanpa root** (satu-satunya mesin di repo ini); masuk ke rootfs lewat `proot` statis dari APK (`NEXTCRAFT_PROOT`, `-b` untuk `/dev`, `/proc`, `/sys`, Bionic, workspace, bridge; `--link2symlink`, `-0`, `--kill-on-exit`). Selalu dijalankan sebagai `/system/bin/sh proot-exec.sh …`. Salinan identik ada di `RuntimeInstaller.PROOT_EXEC_SCRIPT`.
 
 2. **Reproducible Runtime Bundle Builders** (untuk menghasilkan artefak `.tar.zst` deterministik):
    - `build-core-on-rooted-android.sh`: Membangun bundel `core` dari image resmi **Ubuntu 24.04.5 LTS (`noble`) ARM64** (`ubuntu-base-24.04.5-base-arm64.tar.gz`, SHA-256 terverifikasi), Node.js `v24.19.0`, `git`, `ripgrep`, `jq`, serta konfigurasi jaringan kernel Android (`aid_inet:x:3003:root,_apt` dan `99android-chroot`).

@@ -81,10 +81,8 @@ internal class NativeSpawnProcess private constructor(
         if (hasExited()) return
         if (delegateProcess != null) {
             delegateProcess.destroy()
-            killViaRootIfNeeded(pid, 15)
             return
         }
-        // NativeSpawn.kill in forge_spawn.c automatically escalates via `su -c` if kill(-pid, 15) returns EPERM
         NativeSpawn.kill(pid, 15)
     }
 
@@ -92,7 +90,7 @@ internal class NativeSpawnProcess private constructor(
     internal fun interrupt() {
         if (hasExited()) return
         if (delegateProcess != null) {
-            killViaRootIfNeeded(pid, 2)
+            runCatching { android.os.Process.sendSignal(pid, 2) }
             return
         }
         NativeSpawn.kill(pid, 2)
@@ -105,24 +103,12 @@ internal class NativeSpawnProcess private constructor(
         }
         if (delegateProcess != null) {
             delegateProcess.destroyForcibly()
-            killViaRootIfNeeded(pid, 9)
             runCatching { stdin.close() }
             return this
         }
         NativeSpawn.kill(pid, 9)
         runCatching { stdin.close() }
         return this
-    }
-
-    private fun killViaRootIfNeeded(targetPid: Int, sig: Int) {
-        // Guard against -1 (all processes), 0 (current process group), and 1 (init).
-        if (targetPid <= 1) return
-        runCatching {
-            val proc = ProcessBuilder("su", "-c", "kill -s $sig -$targetPid $targetPid 2>/dev/null || true").start()
-            if (!proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
-                proc.destroyForcibly()
-            }
-        }
     }
 
     /** Dynamically resize the pseudo-terminal window when soft-keyboard or orientation changes. */

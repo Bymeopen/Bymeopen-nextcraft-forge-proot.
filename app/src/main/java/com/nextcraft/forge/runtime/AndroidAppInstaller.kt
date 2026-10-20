@@ -16,7 +16,6 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
 data class AndroidInstallEvent(
     val operationId: String,
@@ -27,12 +26,8 @@ data class AndroidInstallEvent(
 )
 
 /**
- * Installs a locally-built APK on the device.
- *
- * On rooted devices (NextCraft Forge's primary target), attempts a 1-tap silent
- * `su -c "pm install -r -d -S <size>"` stream install first (excluding self-updates
- * of NextCraft Forge itself), and automatically falls back to Android's standard
- * [PackageInstaller.Session] + [AndroidAppInstallReceiver] flow if root install fails.
+ * Installs a locally-built APK on the device through Android's standard [PackageInstaller.Session] +
+ * [AndroidAppInstallReceiver] flow (the user confirms the install dialog; there is no root on this build).
  */
 object AndroidAppInstaller {
     private val _events = MutableSharedFlow<AndroidInstallEvent>(extraBufferCapacity = 8)
@@ -65,12 +60,6 @@ object AndroidAppInstaller {
 
         Thread({
             val apkHash = runCatching { fingerprint(apk) }.getOrNull()
-            if (!isSelfUpdate && pkgName != null && apkHash != null && installSilentlyViaRoot(apk)) {
-                rememberInstalled(appContext, pkgName, apkHash)
-                val launched = launchAfterInstall && launch(appContext, pkgName)
-                publish(AndroidInstallEvent(operationId, pkgName, success = true, launched = launched))
-                return@Thread
-            }
             runCatching {
                 installViaSessionOrIntent(appContext, apk, pkgName, apkHash ?: fingerprint(apk), launchAfterInstall, operationId)
             }.onFailure { error ->
@@ -88,33 +77,6 @@ object AndroidAppInstaller {
         return operationId
     }
 
-    /**
-     * Streams [apk] over stdin to `su -c "pm install -r -d -S <bytes>"` so `system_server`
-     * never needs direct SELinux filesystem access to the app's private data directory.
-     */
-    internal fun installSilentlyViaRoot(apk: File): Boolean = runCatching {
-        val sizeBytes = apk.length()
-        if (sizeBytes <= 0L) return@runCatching false
-        val proc = ProcessBuilder("su", "-c", "pm install -r -d -S $sizeBytes")
-            .redirectErrorStream(true)
-            .start()
-        try {
-            apk.inputStream().buffered().use { input ->
-                proc.outputStream.use { output ->
-                    input.copyTo(output)
-                    output.flush()
-                }
-            }
-            if (!proc.waitFor(60L, TimeUnit.SECONDS)) {
-                proc.destroyForcibly()
-                return@runCatching false
-            }
-            val out = proc.inputStream.bufferedReader().use { it.readText() }
-            proc.exitValue() == 0 && out.contains("Success", ignoreCase = true)
-        } finally {
-            if (proc.isAlive) proc.destroyForcibly()
-        }
-    }.getOrDefault(false)
 
     private fun installViaSessionOrIntent(
         context: Context,

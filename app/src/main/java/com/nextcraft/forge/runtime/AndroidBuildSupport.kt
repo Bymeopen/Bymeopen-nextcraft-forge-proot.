@@ -11,7 +11,6 @@ import java.nio.file.Files
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 enum class AndroidBuildPhase { IDLE, PREPARING, BUILDING, CANCELLING, SUCCEEDED, FAILED, CANCELLED }
 enum class AndroidAction { NONE, BUILD, FORCE_BUILD, INSTALL, RUN, BUILD_AND_RUN, CLEAN }
@@ -297,28 +296,13 @@ internal fun diagnoseAndroidBuildFailure(output: String, exitCode: Int): String 
 }
 
 /**
- * Checks whether the host has either `READ_LOGS` permission or working Root (`su`) access
+ * Checks whether the host holds `READ_LOGS` (granted once via `adb shell pm grant <app> android.permission.READ_LOGS`)
  * for streaming package-scoped `logcat`.
  */
-internal fun hasAndroidLogcatAccess(context: Context): Boolean {
-    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED) {
-        return true
-    }
-    return runCatching {
-        val process = ProcessBuilder("su", "-c", "id -u").redirectErrorStream(true).start()
-        val finished = process.waitFor(1_500L, TimeUnit.MILLISECONDS)
-        if (!finished) {
-            process.destroyForcibly()
-            return@runCatching false
-        }
-        process.exitValue() == 0
-    }.getOrDefault(false)
-}
+internal fun hasAndroidLogcatAccess(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
 
-/**
- * Starts a UID-scoped `logcat` process for [packageName] using Root (`su -c`) when
- * `READ_LOGS` is not held directly by the app.
- */
+/** Starts a UID-scoped `logcat` process for [packageName]; requires `READ_LOGS`. */
 internal fun startPackageLogcatProcess(
     context: Context,
     packageName: String,
@@ -333,14 +317,10 @@ internal fun startPackageLogcatProcess(
     val since = sinceMillis?.takeIf { it > 0L }?.let {
         SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date(it))
     } ?: "1"
-    val useRoot = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED
-    return if (useRoot) {
-        val safeSince = since.replace("'", "")
-        val logCommand = "/system/bin/logcat --uid=$uid -v threadtime -T '$safeSince'"
-        ProcessBuilder("su", "-c", logCommand).redirectErrorStream(true).start()
-    } else {
-        ProcessBuilder("/system/bin/logcat", "--uid=$uid", "-v", "threadtime", "-T", since)
-            .redirectErrorStream(true)
-            .start()
+    check(hasAndroidLogcatAccess(context)) {
+        "Reading logcat needs READ_LOGS: run `adb shell pm grant ${context.packageName} android.permission.READ_LOGS` once."
     }
+    return ProcessBuilder("/system/bin/logcat", "--uid=$uid", "-v", "threadtime", "-T", since)
+        .redirectErrorStream(true)
+        .start()
 }

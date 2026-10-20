@@ -30,11 +30,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class InstalledRuntime(
+    /** The PRoot supervisor script (`proot-exec.sh`); kept under its historical name for the many call sites. */
     val chrootExec: File,
     val rootfs: File,
 ) {
-    /** Compatibility alias for callers referencing the runtime launcher executable. */
-    val proot: File get() = chrootExec
     val binDir: File get() = chrootExec.parentFile ?: rootfs
 }
 
@@ -77,9 +76,10 @@ private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarv
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
     private val runtimeBinDir = File(runtimeDir, "bin")
-    private val chrootExecFile = File(runtimeBinDir, "chroot-exec.sh")
     private val prootExecFile = File(runtimeBinDir, "proot-exec.sh")
-    private val unmountChrootFile = File(runtimeBinDir, "unmount-chroot.sh")
+
+    /** Historical name of the supervisor script handle; it is the PRoot script in this build. */
+    private val chrootExecFile: File get() = prootExecFile
     private val rootfs = File(runtimeDir, "ubuntu")
     private val downloads = File(context.cacheDir, "runtime-downloads")
     private val coreReadyMarker = File(rootfs, ".pocket-runtime-ready")
@@ -103,7 +103,7 @@ class RuntimeInstaller(private val context: Context) {
         val legacyLanguageTools = languageToolsMarker.readTextOrNull() == LANGUAGE_TOOLS_VERSION
         val coreToolsReady = File(rootfs, "usr/bin/git").exists() && isSupportedCoreToolsVersion()
         val ready = chrootScriptsReady &&
-            chrootExecFile.canExecute() &&
+            prootExecFile.isFile &&
             rootfsLayoutReady &&
             File(rootfs, "usr/bin/bash").exists() &&
             isSupportedRootfsVersion(rootfsMarker.readTextOrNull()) &&
@@ -117,14 +117,14 @@ class RuntimeInstaller(private val context: Context) {
     private fun repairLegacyMacosMetadata() {
         if (macosMetadataRepairMarker.isFile) return
         if (!rootfs.isDirectory) return
-        // isInstalled() can run while a chroot session is mounted: stay out of the bind mounts (/proc, /system,
-        // /workspace, ...) so the walk is neither huge nor able to delete "._*" files from a user's project.
+        // Stay out of the directories PRoot binds (/proc, /system, /workspace, ...) so the walk is neither huge nor
+        // able to delete "._*" files from a user's project.
         stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         macosMetadataRepairMarker.parentFile?.mkdirs()
         macosMetadataRepairMarker.writeText("1")
     }
 
-    /** Returns the already verified Root Chroot runtime without performing network or update checks. */
+    /** Returns the already verified PRoot runtime without performing network or update checks. */
     fun installedRuntime(): InstalledRuntime {
         check(isInstalled()) { CORE_MISSING_MESSAGE }
         return InstalledRuntime(
@@ -133,34 +133,23 @@ class RuntimeInstaller(private val context: Context) {
         )
     }
 
-    /**
-     * Ensures `chroot-exec.sh` and `unmount-chroot.sh` are installed in `filesDir/runtime/bin`
-     * with executable permissions (`0755`).
-     */
+    /** Ensures `proot-exec.sh` is installed in `filesDir/runtime/bin`; stale copies from older builds are removed. */
     @Synchronized
     fun ensureChrootScripts(): File {
         runtimeBinDir.mkdirs()
-        if (!chrootExecFile.isFile || chrootExecFile.readTextOrNull() != CHROOT_EXEC_SCRIPT.trim()) {
-            writeScriptAtomically(chrootExecFile, CHROOT_EXEC_SCRIPT)
-        }
-        Os.chmod(chrootExecFile.absolutePath, 0b111101101)
-
-        if (!unmountChrootFile.isFile || unmountChrootFile.readTextOrNull() != UNMOUNT_CHROOT_SCRIPT.trim()) {
-            writeScriptAtomically(unmountChrootFile, UNMOUNT_CHROOT_SCRIPT)
-        }
-        Os.chmod(unmountChrootFile.absolutePath, 0b111101101)
+        listOf("chroot-exec.sh", "unmount-chroot.sh").forEach { File(runtimeBinDir, it).delete() }
         if (!prootExecFile.isFile || prootExecFile.readTextOrNull() != PROOT_EXEC_SCRIPT.trim()) {
             writeScriptAtomically(prootExecFile, PROOT_EXEC_SCRIPT)
         }
         // Never executed directly (app data is noexec for the app UID): it is always run as `/system/bin/sh script`.
         Os.chmod(prootExecFile.absolutePath, 0b110100100)
-        return chrootExecFile
+        return prootExecFile
     }
 
     /** Active engine for this process; see [RuntimeEngines]. */
     fun runtimeEngine(): RuntimeEngine? = RuntimeEngines.detect(context)
 
-    /** True when commands can run at all: root chroot, or the PRoot fallback. */
+    /** True when the PRoot binary and loader shipped in the APK are usable. */
     fun isRuntimeAccessAvailable(): Boolean = runtimeEngine() != null
 
     /** Arguments that launch a command line produced by [prepareChrootShellCommand] under the active engine. */
@@ -177,12 +166,6 @@ class RuntimeInstaller(private val context: Context) {
             staged.delete()
             throw e
         }
-    }
-
-    /** Unmounts all kernel mounts under [targetRootfs] before deleting or swapping rootfs directories. */
-    fun unmountChrootMounts(targetRootfs: File = rootfs): Boolean {
-        ensureChrootScripts()
-        return RootfsRepair.ensureUnmounted(targetRootfs)
     }
 
     /** Removes only scaffolding written automatically by earlier alpha builds. */
@@ -219,13 +202,11 @@ class RuntimeInstaller(private val context: Context) {
                 System.getProperty("os.arch"),
             ),
         ) { "NextCraft Forge requires an ARM64 (arm64-v8a / aarch64) Android device." }
-        // The first su call shows the Magisk/KernelSU/APatch grant dialog; the 8 s default kills su before the user can tap Allow.
-        // Without root the bundled PRoot engine (ADR-007) takes over; without either there is nothing to run on.
-        requireNotNull(RuntimeEngines.detect(context, ROOT_GRANT_TIMEOUT_SECONDS, refresh = true)) {
-            "Root access (su -mm) is required by NextCraft Forge's Ubuntu 24.04 LTS Chroot engine, and this build has no PRoot fallback. Grant root permission in Magisk, KernelSU, or APatch and try again."
+        requireNotNull(RuntimeEngines.detect(context, refresh = true)) {
+            "The PRoot engine (libproot.so) is missing from this APK; reinstall NextCraft Forge."
         }
         val chrootExec = ensureChrootScripts()
-        require(chrootExec.canExecute()) { "The Root Chroot supervisor script is unavailable" }
+        require(chrootExec.isFile) { "The PRoot supervisor script is unavailable" }
 
         val staging = File(runtimeDir, "ubuntu.installing")
         val repairBackup = File(runtimeDir, "ubuntu.repair-backup")
@@ -240,7 +221,7 @@ class RuntimeInstaller(private val context: Context) {
             !File(rootfs, "usr/bin/bash").exists() ||
             !isSupportedRootfsVersion(rootfsMarker.readTextOrNull())
         ) {
-            onProgress(RuntimeInstallProgress("Preparing Ubuntu Root Chroot runtime…", 0.03f))
+            onProgress(RuntimeInstallProgress("Preparing Ubuntu PRoot runtime…", 0.03f))
             val archive = obtainRuntimeBundle(
                 CORE_BUNDLE,
                 preferEmbedded = isAssetAvailable("runtime/${CORE_BUNDLE.fileName}"),
@@ -249,7 +230,6 @@ class RuntimeInstaller(private val context: Context) {
                 onProgress = onProgress,
             )
             onProgress(RuntimeInstallProgress("Unpacking Core Linux rootfs…", 0.28f))
-            check(RootfsRepair.ensureUnmounted(staging)) { "Staging rootfs still has active mounts" }
             staging.deleteRecursively()
             staging.mkdirs()
             extractZstdTar(archive, staging) { done, total ->
@@ -292,7 +272,7 @@ class RuntimeInstaller(private val context: Context) {
                 onProgress,
             )
             writeResolver()
-            verifyGuest(chrootExec, "git --version", "Failed to verify Git inside Root Chroot")
+            verifyGuest(chrootExec, "git --version", "Failed to verify Git inside the PRoot runtime")
             coreToolsMarker.writeText(CORE_TOOLS_VERSION)
         }
         if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
@@ -347,7 +327,7 @@ class RuntimeInstaller(private val context: Context) {
                 "${stack.label}: ${error.message?.take(200).orEmpty()}"
             }
         }
-        onProgress(RuntimeInstallProgress("NextCraft Forge Root Chroot setup complete", 1f))
+        onProgress(RuntimeInstallProgress("NextCraft Forge PRoot setup complete", 1f))
         return InstalledRuntime(chrootExec, rootfs)
     }
 
@@ -492,14 +472,12 @@ class RuntimeInstaller(private val context: Context) {
         val cleanLogin = login.trim().replace("\r", "").replace("\n", "").ifEmpty { "x-access-token" }
         val rootHome = File(rootfs, "root").apply { mkdirs() }
         val gitCredentials = File(rootHome, ".git-credentials")
-        // git/gh rewrite these as root inside the chroot; reclaim ownership instead of failing with EACCES.
         writeRootfsFileAtomically(gitCredentials, "https://$cleanLogin:$cleanToken@github.com\n")
         runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
 
         // Merge instead of replacing: the user's own name, email, aliases and editor settings must survive connecting
         // GitHub. Only the credential helper is forced; identity and default branch are filled in when missing.
         val gitConfig = File(rootHome, ".gitconfig")
-        if (gitConfig.exists() && !gitConfig.canRead()) RootfsRepair.reclaimOwnership(gitConfig, AndroidProcess.myUid())
         val existingConfig = if (gitConfig.isFile) {
             // An unreadable existing file must not be replaced by a template that drops the user's settings.
             checkNotNull(runCatching { gitConfig.readText() }.getOrNull()) { "Could not read ~/.gitconfig" }
@@ -540,29 +518,17 @@ class RuntimeInstaller(private val context: Context) {
     fun clearGitHubAccess() {
         val rootHome = File(rootfs, "root")
         listOf(File(rootHome, ".git-credentials"), File(rootHome, ".config/gh/hosts.yml")).forEach { file ->
-            if (!file.exists() || file.delete()) return@forEach
-            // Root-owned after git/gh rewrote it: take it back, otherwise "Disconnect" would leave the token on disk.
-            RootfsRepair.reclaimOwnership(file, AndroidProcess.myUid())
             if (!file.delete() && file.exists()) Log.w("RuntimeInstaller", "Could not remove ${file.name}")
         }
     }
 
     /**
-     * True when `claude auth login` left a usable login (access + refresh token) in the guest. The file is written by
-     * root inside the chroot, so the app UID usually cannot read it; ask root.
+     * True when `claude auth login` left a usable login (access + refresh token) in the guest. Under PRoot the file
+     * belongs to the app UID, so it can be read directly.
      */
     fun hasClaudeLoginCredential(): Boolean {
         val file = File(rootfs, "root/.claude/.credentials.json")
-        val quoted = "'${file.absolutePath.replace("'", "'\\''")}'"
-        return runCatching {
-            val process = ProcessBuilder("su", "-c", "grep -q '\"refreshToken\"' $quoted").start()
-            if (!process.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                false
-            } else {
-                process.exitValue() == 0
-            }
-        }.getOrDefault(false)
+        return runCatching { file.isFile && file.readText().contains("\"refreshToken\"") }.getOrDefault(false)
     }
 
     /** Versions recorded after each real agent binary has been installed and verified. */
@@ -1006,9 +972,7 @@ class RuntimeInstaller(private val context: Context) {
         try {
             applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
         } catch (e: java.io.IOException) {
-            // A tree installed by an earlier root npm is root-owned; take it back and retry once.
-            if (!RootfsRepair.reclaimOwnership(dshRoot, AndroidProcess.myUid())) throw e
-            applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
+            throw e
         }
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
@@ -1064,7 +1028,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
-     * Installs one optional development stack inside Ubuntu Root Chroot.
+     * Installs one optional development stack inside the Ubuntu PRoot runtime.
      */
     suspend fun ensureStackInstalled(
         stack: DevStack,
@@ -1177,8 +1141,6 @@ class RuntimeInstaller(private val context: Context) {
         val isLink = java.nio.file.Files.isSymbolicLink(file.toPath())
         if (!file.exists() && !isLink) return
         val removed = if (file.isDirectory && !isLink) file.deleteRecursively() else file.delete()
-        // Caches and packages created inside the chroot (Gradle, pip, Composer) are root-owned, so the app UID
-        // cannot delete them; fall back to a root rm, which first checks that nothing is mounted below the path.
         if (!removed) {
             check(RootfsRepair.safeDeleteRecursively(file)) { "Could not remove ${file.name}" }
         }
@@ -1607,7 +1569,7 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         onProgress(
             RuntimeInstallProgress(
-                message = "Updating Ubuntu packages inside Root Chroot…",
+                message = "Updating Ubuntu packages inside the PRoot runtime…",
                 fraction = 0.69f,
                 indeterminate = true,
             ),
@@ -1625,7 +1587,7 @@ class RuntimeInstaller(private val context: Context) {
             fraction = 0.69f,
             timeoutMs = 35 * 60 * 1_000L,
             onProgress = onProgress,
-            failureMessage = "Ubuntu system maintenance failed inside Root Chroot",
+            failureMessage = "Ubuntu system maintenance failed inside the PRoot runtime",
         )
     }
 
@@ -1923,24 +1885,20 @@ class RuntimeInstaller(private val context: Context) {
 
     suspend fun initializeExisting(onProgress: suspend (RuntimeInstallProgress) -> Unit): InstalledRuntime {
         val installed = installedRuntime()
-        onProgress(RuntimeInstallProgress("Checking Root Chroot runtime files…", 0.15f))
+        onProgress(RuntimeInstallProgress("Checking PRoot runtime files…", 0.15f))
         ensureChrootScripts()
         ensureAndroidSocketGroupConfiguration(rootfs)
         writeResolver()
         ensureSettingsAndHooks()
         File(context.filesDir, "runtime-bridge").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         onProgress(RuntimeInstallProgress("Preparing runtime IPC bridge…", 0.42f))
-        disablePhantomProcessKillerViaRoot()
         check(File(rootfs, "usr/local/bin/node").canExecute()) { "Core runtime is missing Node.js" }
         check(File(rootfs, "usr/bin/git").canExecute()) { "Core runtime is missing Git" }
-        onProgress(RuntimeInstallProgress("Root Chroot runtime ready", 1f))
+        onProgress(RuntimeInstallProgress("PRoot runtime ready", 1f))
         return installed
     }
 
-    /**
-     * Spawns a command inside the Ubuntu 24.04 Root Chroot via `su -mm` and `chroot-exec.sh`.
-     * No PRoot binary or ptrace translation is used.
-     */
+    /** Spawns a command inside the Ubuntu 24.04 rootfs via the static `proot` from the APK and `proot-exec.sh`. */
     @Suppress("UNUSED_PARAMETER")
     fun process(
         chrootExec: File,
@@ -1989,7 +1947,7 @@ class RuntimeInstaller(private val context: Context) {
 
     /**
      * Prepares a one-time mode-0600 environment script and returns `(envFile, suCommand)` for
-     * executing [guestCommand] inside the Root Chroot with all SDK, PATH, and provider variables
+     * executing [guestCommand] inside the PRoot runtime with all SDK, PATH, and provider variables
      * exported and immediately unlinked before `exec`.
      */
     fun prepareChrootShellCommand(
@@ -2082,18 +2040,12 @@ class RuntimeInstaller(private val context: Context) {
             bridge.absolutePath,
             appUid,
         ) + guestCommand
-        val launch = when (RuntimeEngines.current()) {
-            RuntimeEngine.CHROOT -> listOf(chrootExec.absolutePath) + supervisorArgs
-            // Same supervisor contract, but driven by proot from the APK; the app UID cannot exec the script itself.
-            RuntimeEngine.PROOT -> listOf("/system/bin/sh", prootExecFile.absolutePath) + supervisorArgs
-        }
-        val engineExports = if (RuntimeEngines.current() == RuntimeEngine.PROOT) {
+        // The app UID cannot exec the script itself, so it is always run through /system/bin/sh.
+        val launch = listOf("/system/bin/sh", chrootExec.absolutePath) + supervisorArgs
+        val engineExports =
             "export NEXTCRAFT_PROOT=${shellSingleQuote(RuntimeEngines.prootBinary(context).absolutePath)}; " +
                 "export NEXTCRAFT_PROOT_LOADER=${shellSingleQuote(RuntimeEngines.prootLoader(context).absolutePath)}; " +
                 "export NEXTCRAFT_PROOT_TMP=${shellSingleQuote(File(runtimeDir, "proot-tmp").apply { mkdirs() }.absolutePath)}; "
-        } else {
-            ""
-        }
         val suCommand = ". $quotedEnvFile; rm -f $quotedEnvFile; ${engineExports}exec " +
             launch.joinToString(" ") { shellSingleQuote(it) }
         return envFile to suCommand
@@ -2189,10 +2141,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         environment: Map<String, String> = emptyMap(),
     ) = synchronized(CLAUDE_STATE_LOCK) {
         val stateFile = File(rootfs, "root/.claude.json")
-        if (stateFile.exists() && !(stateFile.canRead() && stateFile.canWrite())) {
-            // Claude runs as root inside the chroot and may have rewritten the file as root-owned 0600.
-            RootfsRepair.reclaimOwnership(stateFile, AndroidProcess.myUid())
-        }
         val state = if (stateFile.exists()) {
             // Claude may be writing the file right now (another session); never replace a file that does not parse,
             // or the account, API-key approvals and project history in it would be lost.
@@ -2240,15 +2188,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
     /**
      * Writes [target] through a temp file in the same directory and an atomic rename, so a crash or a concurrent
-     * reader never sees a truncated file. A root-owned target (rewritten by a root process in the chroot) is
-     * reclaimed first.
+     * reader never sees a truncated file.
      */
     private fun writeRootfsFileAtomically(target: File, content: String, mode: Int? = null) {
         val parent = checkNotNull(target.parentFile) { "No parent directory for ${target.name}" }
         parent.mkdirs()
-        if (!parent.canWrite() || (target.exists() && !target.canWrite())) {
-            RootfsRepair.reclaimOwnership(if (parent.canWrite()) target else parent, AndroidProcess.myUid())
-        }
         val temp = File(parent, ".${target.name}.${AndroidProcess.myPid()}.${System.nanoTime()}.tmp")
         try {
             FileOutputStream(temp).use { out ->
@@ -2323,13 +2267,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             ZstdCompressorInputStream(rawStream)
         } catch (_: Throwable) {
             runCatching { rawStream.close() }
-            val process = runCatching {
-                ProcessBuilder("zstd", "-d", "-c", archive.absolutePath).start()
-            }.getOrElse {
-                val escapedPath = archive.absolutePath.replace("'", "'\"'\"'")
-                val pathExport = "export PATH=/system/bin:/system/xbin:/sbin:/vendor/bin:/data/adb/magisk:/data/adb/ksu/bin:/data/adb/ap/bin:${'$'}PATH; "
-                ProcessBuilder("su", "-c", "${pathExport}zstd -d -c '$escapedPath'").start()
-            }
+            val process = ProcessBuilder("zstd", "-d", "-c", archive.absolutePath).start()
             object : java.io.FilterInputStream(BufferedInputStream(process.inputStream)) {
                 private var reachedEof = false
 
@@ -2682,7 +2620,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
-        /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
+        /** Top-level rootfs directories that proot-exec.sh binds from Android or the app on every launch. */
         private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
@@ -2820,7 +2758,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             sha256 = "001cbb373a1110ce32c939c2b27138b46b676b157c9329b50c34e790aa2b7eff",
             compressedBytes = 42_003_928L,
         )
-        private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
         private const val ENV_CLEANUP_POLL_MS = 1_000L
         /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
         private const val BUNDLE_DOWNLOAD_SPACE_FACTOR = 4
@@ -2831,256 +2768,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
         private val ANSI_ESCAPE = Regex("\\u001B(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\u0007]*(?:\\u0007|\\u001B\\\\))")
         private val VALID_ENV_NAME = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
-
-        private val CHROOT_EXEC_SCRIPT = """
-            #!/system/bin/sh
-            set -e
-
-            if [ "${'$'}#" -lt 6 ]; then
-                echo "Usage: chroot-exec.sh <rootfs> <host_workspace> <guest_workspace> <host_bridge> <app_uid> <cmd...>" >&2
-                exit 2
-            fi
-
-            ROOTFS="${'$'}1"
-            HOST_WORKSPACE="${'$'}2"
-            GUEST_WORKSPACE="${'$'}3"
-            HOST_BRIDGE="${'$'}4"
-            APP_UID="${'$'}5"
-            shift 5
-
-            if [ -z "${'$'}ROOTFS" ] || [ -z "${'$'}HOST_WORKSPACE" ] || [ -z "${'$'}GUEST_WORKSPACE" ] || [ -z "${'$'}HOST_BRIDGE" ] || [ -z "${'$'}APP_UID" ]; then
-                echo "Usage: chroot-exec.sh <rootfs> <host_workspace> <guest_workspace> <host_bridge> <app_uid> <cmd...>" >&2
-                exit 2
-            fi
-
-            case "${'$'}GUEST_WORKSPACE" in
-                *..*|/workspace/.|/workspace/*/*|*[!a-zA-Z0-9._/-]*)
-                    echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
-                    exit 65
-                    ;;
-                /root|/workspace|/workspace/[a-zA-Z0-9._-]*) ;;
-                *)
-                    echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
-                    exit 65
-                    ;;
-            esac
-
-            case "${'$'}APP_UID" in
-                ''|*[!0-9]*)
-                    echo "Invalid app UID: ${'$'}APP_UID" >&2
-                    exit 65
-                    ;;
-            esac
-
-            is_mounted() {
-                awk -v target="${'$'}1" '${'$'}2 == target { found=1; exit } END { exit !found }' /proc/mounts
-            }
-
-            mount_once() {
-                local src="${'$'}1"
-                local dst="${'$'}2"
-                local fstype="${'$'}3"
-                local opts="${'$'}4"
-                mkdir -p "${'$'}dst"
-                if ! is_mounted "${'$'}dst"; then
-                    if [ "${'$'}fstype" = "bind" ]; then
-                        mount -o bind "${'$'}src" "${'$'}dst"
-                        if [ "${'$'}opts" = "ro" ]; then
-                            mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
-                        fi
-                    else
-                        mount -t "${'$'}fstype" -o "${'$'}opts" "${'$'}src" "${'$'}dst"
-                    fi
-                fi
-            }
-
-            # Android's /apex is a tmpfs with every APEX module mounted below it, and /system/bin/linker64 (the interpreter
-            # of Bionic tools such as aapt2) points into /apex/com.android.runtime. A plain bind leaves those modules out.
-            # A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
-            # and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
-            # its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
-            has_submounts() {
-                awk -v prefix="${'$'}1/" 'index(${'$'}2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
-            }
-
-            make_slave() {
-                mount --make-rslave "${'$'}1" 2>/dev/null || mount -o rslave "${'$'}1" 2>/dev/null ||
-                    mount --make-slave "${'$'}1" 2>/dev/null || mount -o slave "${'$'}1" 2>/dev/null
-            }
-
-            mount_bionic() {
-                local src="${'$'}1"
-                local dst="${'$'}2"
-                mkdir -p "${'$'}dst"
-                # Earlier versions bound these directories without their submounts; replace such a mount.
-                if is_mounted "${'$'}dst" && has_submounts "${'$'}src" && ! has_submounts "${'$'}dst"; then
-                    umount "${'$'}dst" 2>/dev/null || umount -l "${'$'}dst" 2>/dev/null || true
-                fi
-                is_mounted "${'$'}dst" && return 0
-                mount -o bind "${'$'}src" "${'$'}dst" || return 1
-                if ! make_slave "${'$'}dst"; then
-                    echo "Warning: mount propagation cannot be changed; ${'$'}dst is bound without its submounts" >&2
-                    mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
-                    return 0
-                fi
-                # Parents first, so each module lands on a mount point that is already a slave copy.
-                awk -v prefix="${'$'}src/" 'index(${'$'}2, prefix) == 1 { print ${'$'}2 }' /proc/mounts | sort | while read -r sub; do
-                    target="${'$'}dst${'$'}{sub#"${'$'}src"}"
-                    [ -d "${'$'}sub" ] && [ -d "${'$'}target" ] || continue
-                    is_mounted "${'$'}target" && continue
-                    if mount -o bind "${'$'}sub" "${'$'}target" 2>/dev/null && ! make_slave "${'$'}target"; then
-                        umount "${'$'}target" 2>/dev/null || true
-                    fi
-                done
-                mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
-            }
-
-            mount_dynamic_bind() {
-                local src="${'$'}1"
-                local dst="${'$'}2"
-                local state_dir="${'$'}ROOTFS/tmp/.nextcraft-mounts"
-                local state_key
-                state_key=${'$'}(printf '%s' "${'$'}dst" | tr '/' '_')
-                local state_file="${'$'}state_dir/${'$'}state_key"
-                mkdir -p "${'$'}src" "${'$'}dst" "${'$'}state_dir"
-                if is_mounted "${'$'}dst"; then
-                    local prev_src=""
-                    [ -f "${'$'}state_file" ] && prev_src=${'$'}(cat "${'$'}state_file" 2>/dev/null || true)
-                    if [ "${'$'}prev_src" != "${'$'}src" ]; then
-                        umount "${'$'}dst" 2>/dev/null || umount -l "${'$'}dst" 2>/dev/null || true
-                    fi
-                fi
-                if ! is_mounted "${'$'}dst"; then
-                    mount -o bind "${'$'}src" "${'$'}dst"
-                    printf '%s' "${'$'}src" > "${'$'}state_file"
-                fi
-            }
-
-            # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
-            if ! is_mounted "${'$'}ROOTFS"; then
-                mount -o bind "${'$'}ROOTFS" "${'$'}ROOTFS" 2>/dev/null || true
-            fi
-            mount -o remount,bind,suid,exec "${'$'}ROOTFS" 2>/dev/null || true
-
-            mount_once "/dev" "${'$'}ROOTFS/dev" "bind" "rw"
-            mount_once "/dev/pts" "${'$'}ROOTFS/dev/pts" "bind" "rw"
-            mount_once "proc" "${'$'}ROOTFS/proc" "proc" "rw,nosuid,nodev,noexec"
-            mount_once "sysfs" "${'$'}ROOTFS/sys" "sysfs" "rw,nosuid,nodev,noexec"
-            mount_once "tmpfs" "${'$'}ROOTFS/tmp" "tmpfs" "rw,nosuid,nodev,mode=1777"
-            mount_once "tmpfs" "${'$'}ROOTFS/dev/shm" "tmpfs" "rw,nosuid,nodev,mode=1777,size=256M"
-
-            for bionic_dir in /system /apex /vendor /product; do
-                if [ -d "${'$'}bionic_dir" ]; then
-                    mount_bionic "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir"
-                fi
-            done
-
-            mkdir -p "${'$'}HOST_WORKSPACE" "${'$'}HOST_BRIDGE"
-            if [ "${'$'}HOST_WORKSPACE" != "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" ]; then
-                mount_dynamic_bind "${'$'}HOST_WORKSPACE" "${'$'}ROOTFS${'$'}GUEST_WORKSPACE"
-            fi
-            mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/nextcraft-bridge"
-            mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/pocketdev-bridge"
-            mount_dynamic_bind "${'$'}HOST_BRIDGE" "${'$'}ROOTFS/pocket-bridge"
-            HOST_RESP="${'$'}HOST_BRIDGE-responses"
-            mkdir -p "${'$'}HOST_RESP"
-            chown "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_RESP" 2>/dev/null || true
-            mount_dynamic_bind "${'$'}HOST_RESP" "${'$'}ROOTFS/pocketdev-bridge-responses"
-            mount -o remount,bind,ro "${'$'}ROOTFS/pocketdev-bridge-responses" 2>/dev/null || true
-
-            if [ ! -s "${'$'}ROOTFS/etc/resolv.conf" ]; then
-                mkdir -p "${'$'}ROOTFS/etc"
-                printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" > "${'$'}ROOTFS/etc/resolv.conf"
-            fi
-
-            fix_workspace_ownership() {
-                case "${'$'}HOST_WORKSPACE" in
-                    "${'$'}ROOTFS"|"${'$'}ROOTFS"/*)
-                        ;;
-                    *)
-                        chown -R -h "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_WORKSPACE" 2>/dev/null || true
-                        chmod -R u+rwX,g+rwX "${'$'}HOST_WORKSPACE" 2>/dev/null || true
-                        ;;
-                esac
-                chown -R -h "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_BRIDGE" 2>/dev/null || true
-                chmod -R u+rwX,g+rwX "${'$'}HOST_BRIDGE" 2>/dev/null || true
-            }
-            # INT/TERM must end the script (exit fires the EXIT trap once); a plain trap handler would
-            # resume execution (keep mounting) and run the ownership fix twice.
-            trap fix_workspace_ownership EXIT
-            trap 'exit 130' INT
-            trap 'exit 143' TERM
-
-            unset ANDROID_ROOT ANDROID_DATA ANDROID_ART_ROOT ANDROID_I18N_ROOT ANDROID_TZDATA_ROOT
-            unset ANDROID_ASSETS ANDROID_BOOTLOGO ANDROID_RUNTIME_ROOT ANDROID_STORAGE
-            unset ASEC_MOUNTPOINT BOOTCLASSPATH DEX2OATBOOTCLASSPATH EXTERNAL_STORAGE SYSTEMSERVERCLASSPATH
-            unset LD_PRELOAD LD_LIBRARY_PATH
-
-            export HOME="/root"
-            export USER="root"
-            export LOGNAME="root"
-            export TERM="${'$'}{TERM:-xterm-256color}"
-            export LANG="${'$'}{LANG:-C.UTF-8}"
-            export TMPDIR="/tmp"
-            export CLAUDE_CONFIG_DIR="/root/.claude"
-            export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
-            export CURL_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
-            export NODE_EXTRA_CA_CERTS="/etc/ssl/certs/ca-certificates.crt"
-            export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
-            export GIT_SSL_CAINFO="/etc/ssl/certs/ca-certificates.crt"
-            export NODE_OPTIONS="${'$'}{NODE_OPTIONS:---dns-result-order=ipv4first}"
-            export COREPACK_ENABLE_DOWNLOAD_PROMPT="0"
-            export GLIBC_TUNABLES="glibc.pthread.rseq=0"
-            export NEXTCRAFT_BRIDGE_DIR="/pocketdev-bridge"
-            export POCKETDEV_BRIDGE_DIR="/pocketdev-bridge"
-            export NEXTCRAFT_RESPONSE_DIR="/pocketdev-bridge-responses"
-            export PATH="${'$'}{PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-            case ":${'$'}PATH:" in
-                *:/root/.local/bin:*) ;;
-                *) export PATH="/opt/nextcraft/bin:/root/.local/bin:${'$'}PATH" ;;
-            esac
-
-            CHROOT_BIN=""
-            for candidate in /system/bin/chroot /system/xbin/chroot /sbin/chroot /debug_ramdisk/chroot "${'$'}ROOTFS/usr/sbin/chroot"; do
-                if [ -x "${'$'}candidate" ]; then
-                    CHROOT_BIN="${'$'}candidate"
-                    break
-                fi
-            done
-            if [ -z "${'$'}CHROOT_BIN" ]; then
-                if command -v busybox >/dev/null 2>&1; then
-                    CHROOT_BIN="busybox chroot"
-                else
-                    echo "chroot binary not found on host or guest rootfs" >&2
-                    exit 127
-                fi
-            fi
-
-            # Run the guest command as a child and forward INT/TERM to it. With a plain foreground command the shell only runs
-            # its trap after the command exits, so a cancelled npm install or Gradle build kept running until it finished, and
-            # a later SIGKILL of this script orphaned it and skipped the ownership fix. Stdin (the
-            # Claude prompt) is passed through fd 3: a non-interactive shell gives background commands /dev/null.
-            child_status=0
-            exec 3<&0
-            forward_signal() {
-                kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
-            }
-
-            ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
-                GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
-                /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &
-            child=${'$'}!
-            trap 'forward_signal INT' INT
-            trap 'forward_signal TERM' TERM
-            # wait returns early when a trapped signal arrives; keep waiting until the child has really exited.
-            while :; do
-                # `|| child_status=...` keeps set -e from aborting when a trapped signal interrupts wait (status 128+N).
-                child_status=0
-                wait "${'$'}child" || child_status=${'$'}?
-                kill -0 "${'$'}child" 2>/dev/null || break
-            done
-            exit "${'$'}child_status"
-        """.trimIndent() + "\n"
 
         /** Non-root supervisor (ADR-007); byte-identical copy in scripts/runtime-bundles/proot-exec.sh. */
         private val PROOT_EXEC_SCRIPT = """
@@ -3115,6 +2802,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 /root|/workspace|/workspace/[a-zA-Z0-9._-]*) ;;
                 *)
                     echo "Invalid guest workspace path: ${'$'}GUEST_WORKSPACE" >&2
+                    exit 65
+                    ;;
+            esac
+
+            case "${'$'}APP_UID" in
+                ''|*[!0-9]*)
+                    echo "Invalid app uid: ${'$'}APP_UID" >&2
                     exit 65
                     ;;
             esac
@@ -3192,41 +2886,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 -b "${'$'}HOST_RESP:/pocketdev-bridge-responses" \
                 -w "${'$'}GUEST_WORKSPACE" \
                 /usr/bin/env GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@"
-        """.trimIndent() + "\n"
-
-        private val UNMOUNT_CHROOT_SCRIPT = """
-            #!/system/bin/sh
-            ROOTFS="${'$'}1"
-            if [ -z "${'$'}ROOTFS" ]; then
-                echo "Usage: unmount-chroot.sh <rootfs_path>" >&2
-                exit 2
-            fi
-            ROOTFS_REAL=${'$'}(realpath "${'$'}ROOTFS" 2>/dev/null || printf '%s' "${'$'}ROOTFS")
-            ROOTFS_CLEAN="${'$'}{ROOTFS_REAL%/}"
-            # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
-            # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
-            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
-                mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
-            done
-
-            for pass in 1 2 3; do
-                MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
-                if [ -z "${'$'}MOUNTS" ]; then
-                    break
-                fi
-                for mnt in ${'$'}MOUNTS; do
-                    if [ "${'$'}pass" -lt 3 ]; then
-                        umount "${'$'}mnt" 2>/dev/null || true
-                    else
-                        umount -l "${'$'}mnt" 2>/dev/null || umount -f "${'$'}mnt" 2>/dev/null || true
-                    fi
-                done
-            done
-            if awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { found=1; exit } END { exit !found }' /proc/mounts; then
-                exit 1
-            fi
-            rm -rf "${'$'}ROOTFS_CLEAN/tmp/.nextcraft-mounts" 2>/dev/null || true
-            exit 0
         """.trimIndent() + "\n"
     }
 }

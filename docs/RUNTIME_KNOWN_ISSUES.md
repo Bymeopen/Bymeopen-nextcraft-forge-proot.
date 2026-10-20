@@ -1,5 +1,8 @@
 # Runtime 24.04 — Masalah yang Diketahui dan Rencana Perbaikan
 
+> Repo ini PRoot-only (ADR-008). Bagian 1 dan catatan mount/`su` di bawah diwarisi dari repo chroot dan hanya relevan untuk
+> bundle lama; di PRoot tidak ada mount kernel, dan `aapt2` statis tidak butuh `/apex`.
+
 Status per 2026-10-18, dari uji di perangkat root (kernel 5.10 GKI, Ubuntu 24.04.5 arm64, glibc 2.39) memakai
 `scripts/runtime-bundles/chroot-health.sh` dan diagnosa manual di terminal chroot.
 
@@ -89,9 +92,9 @@ tanpa bind `/system`/`/apex`. Mount Bionic di `chroot-exec.sh` tetap dipertahank
 alat lain. Kompatibilitas dengan AGP 9.4.1 diverifikasi di x86_64 memakai `aapt2` resmi Build-Tools 35.0.1 (generasi
 sumber yang sama) lewat `android.aapt2FromMavenOverride`; `aapt2` ARM64 itu sendiri diuji dengan `qemu-user-static`.
 
-### Mesin PRoot (tanpa root, ADR-007)
+### Mesin PRoot (satu-satunya mesin di repo ini)
 
-Bila `su` tidak tersedia, aplikasi memakai `libproot.so` dari APK (`proot` 5.5.0 + `talloc` 2.4.3 statis, dibangun oleh
+Aplikasi memakai `libproot.so` dari APK (`proot` 5.5.0 + `talloc` 2.4.3 statis, dibangun oleh
 `scripts/runtime-bundles/build-proot-static.sh` dari `proot-me/proot` commit `25dc6a31…` dan `talloc-2.4.3.tar.gz`
 SHA-256 `dc46c40b…`; `libproot.so` 938.648 byte, SHA-256 `de90c7a62c5a27e23383625ade5995b99f761e35cf49665555af5b394299361f`; `libproot_loader.so` 73.552 byte, SHA-256 `350434c827459c6cd87827f728e9c933ee905baa4e597c430f44b013517f7677`; dua build berturut-turut identik). Bundle Core/Python/Claude/DSH/Agy/Android
 tidak berubah; `aapt2` statis membuat build Android tidak lagi bergantung pada `/apex`. Yang tidak tersedia di mode ini:
@@ -99,7 +102,8 @@ tidak berubah; `aapt2` statis membuat build Android tidak lagi bergantung pada `
 activity_manager max_phantom_processes 2147483647` bisa dilakukan manual), `chroot-health.sh` bagian *Mount* (ERR wajar).
 Bila `proot` gagal dengan `seccomp`/`ptrace` di kernel tertentu, coba `PROOT_NO_SECCOMP=1` lewat environment agen.
 
-**Belum diuji di perangkat.** Sandbox hanya bisa membangun binernya; `ptrace` tidak tersedia di bawah `qemu-user`.
+**Diuji di perangkat tanpa root** (Core, Node, Python, Android, PHP, C++ berjalan setelah `PROOT_LOADER` ditambahkan). Claude Code: rilis
+Bun resmi mati `SIGSYS` (exit 159, `rseq` diblokir seccomp aplikasi), sehingga dipasang dari npm `2.1.112`. `agy` (Go): status belum dipastikan.
 
 ## Belum terverifikasi
 

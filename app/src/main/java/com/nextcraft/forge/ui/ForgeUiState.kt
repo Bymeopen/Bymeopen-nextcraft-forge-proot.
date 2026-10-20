@@ -77,7 +77,6 @@ import com.nextcraft.forge.runtime.findAndroidProjectRoot
 import com.nextcraft.forge.runtime.findDebugApk
 import com.nextcraft.forge.runtime.hasAndroidLogcatAccess
 import com.nextcraft.forge.runtime.inferAndroidBuildStage
-import com.nextcraft.forge.runtime.isRootAccessAvailable
 import com.nextcraft.forge.runtime.parseAndroidBuildIssues
 import com.nextcraft.forge.runtime.readBoundedText
 import com.nextcraft.forge.runtime.startPackageLogcatProcess
@@ -134,11 +133,8 @@ enum class SetupScope { RUNTIME, AGENT }
 
 data class ForgeUiState(
     val arm64Supported: Boolean = true,
-    val rootAvailable: Boolean = false,
-    /** No root, but the APK's PRoot engine can run the runtime (slower; ADR-007). */
+    /** The APK's PRoot engine (libproot.so + loader) is present and executable. */
     val prootAvailable: Boolean = false,
-    /** Stored engine choice id (auto / chroot / proot). */
-    val runtimeEngineChoice: String = "auto",
     val runtimeInstalled: Boolean = false,
     val setupSnapshot: RuntimeSetupSnapshot = RuntimeSetupSnapshot(),
     val selectedDevStacks: Set<DevStack> = setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID),
@@ -174,7 +170,7 @@ data class ForgeUiState(
     val pendingAttachments: List<ChatAttachment> = emptyList(),
     /** Messages sent while the agent was busy; delivered as the next turn once the current one completes. */
     val queuedPrompts: List<QueuedPrompt> = emptyList(),
-    val terminalOutput: String = "NextCraft Forge Root Chroot Terminal Ready.\n",
+    val terminalOutput: String = "NextCraft Forge PRoot Terminal Ready.\n",
     val terminalRunning: Boolean = false,
     val androidBuild: AndroidBuildRecord = AndroidBuildRecord(),
     val androidLogcat: AndroidLogcatState = AndroidLogcatState(),

@@ -59,7 +59,6 @@ import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
 import com.nextcraft.forge.runtime.DshRuntimeBridge
-import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
@@ -78,7 +77,6 @@ import com.nextcraft.forge.runtime.findDebugApk
 import com.nextcraft.forge.runtime.hasAndroidLogcatAccess
 import com.nextcraft.forge.runtime.inferAndroidBuildStage
 import com.nextcraft.forge.runtime.RuntimeEngine
-import com.nextcraft.forge.runtime.RuntimeEngineChoice
 import com.nextcraft.forge.runtime.RuntimeEngines
 import com.nextcraft.forge.runtime.parseAndroidBuildIssues
 import com.nextcraft.forge.runtime.readBoundedText
@@ -206,7 +204,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ForgeUiState(
             themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
             languageCode = AppStrings.languageCode(application),
-            runtimeEngineChoice = RuntimeEngineChoice.fromStored(preferences.runtimeEngine).id,
         ),
     )
     val state: StateFlow<ForgeUiState> = _state.asStateFlow()
@@ -267,7 +264,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val arm64 = supportsArm64Runtime(Build.SUPPORTED_ABIS, System.getProperty("os.arch"))
             val engine = withContext(Dispatchers.IO) { installer.runtimeEngine() }
-            val rootOk = engine == RuntimeEngine.CHROOT
             val savedAgent = AgentKind.fromStored(preferences.agentKind)
             val savedStacks = preferences.selectedDevStacks
                 .mapNotNull { runCatching { DevStack.valueOf(it) }.getOrNull() }
@@ -313,7 +309,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     arm64Supported = arm64,
-                    rootAvailable = rootOk,
                     prootAvailable = engine == RuntimeEngine.PROOT,
                     runtimeInstalled = installed,
                     selectedDevStacks = savedStacks,
@@ -370,9 +365,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             readme.writeText(
                 "# Forge Sandbox\n\n" +
                     "Welcome to **NextCraft Forge**.\n" +
-                    "- Pure Root Chroot (`su -mm`) execution\n" +
+                    "- Ubuntu 24.04 on the built-in PRoot engine (no root needed)\n" +
                     "- Multi-agent coding (`Claude Code`, `Antigravity`, `DeepSeek Harness`)\n" +
-                    "- 1-Tap Android Debug APK Build & Silent Root Install\n",
+                    "- 1-Tap Android Debug APK Build & Install\n",
             )
         }
         val list = listOf(defaultProject)
@@ -402,7 +397,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshRuntimeStatus() {
         viewModelScope.launch {
             val engine = withContext(Dispatchers.IO) { installer.runtimeEngine() }
-            val rootOk = engine == RuntimeEngine.CHROOT
             val installed = withContext(Dispatchers.IO) { installer.isInstalled() }
             val installedStacks = if (installed) {
                 withContext(Dispatchers.IO) { installer.installedStacks() }
@@ -414,7 +408,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _state.update {
                 it.copy(
-                    rootAvailable = rootOk,
                     prootAvailable = engine == RuntimeEngine.PROOT,
                     runtimeInstalled = installed,
                     installedDevStacks = installedStacks,
@@ -571,14 +564,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repairing_chroot)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val rootfs = File(getApplication<Application>().filesDir, "runtime/ubuntu")
                     installer.ensureChrootScripts()
-                    if (RootfsRepair.ensureUnmounted(rootfs)) {
-                        "Chroot mount points and supervisor scripts verified."
-                    } else {
-                        "Chroot repair incomplete: some mounts are still active. Reboot the device and retry."
-                    }
-                }.getOrElse { "Chroot repair note: ${it.message}" }
+                    RuntimeEngines.invalidate()
+                    if (installer.isRuntimeAccessAvailable()) "PRoot engine and supervisor script verified." else "PRoot binary missing from the APK; reinstall the app."
+                }.getOrElse { "Runtime repair note: ${it.message}" }
             }
             refreshRuntimeStatus()
             _state.update { it.copy(bannerMessage = UiText.Raw(result)) }
@@ -1875,10 +1864,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.getOrDefault(emptyMap())
     }
 
-    /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
+    /** Starts [command] inside the PRoot runtime (Gradle, git and the SDK only exist there). */
     private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
         check(installer.isInstalled() && installer.isRuntimeAccessAvailable()) {
-            "Root access (or the PRoot engine) and the installed Linux runtime are required to run this."
+            "The PRoot engine and the installed Linux runtime are required to run this."
         }
         val (envFile, suCommand) = installer.prepareChrootShellCommand(
             workspace = workspaceDir,
@@ -2994,15 +2983,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(bannerMessage = failed, bannerAction = BannerAction(BannerActionKind.RETRY_IMPORT, failed)) }
             }
         }
-    }
-
-    /** Stores the engine choice and re-detects, so the onboarding row and the next launch follow it. */
-    fun setRuntimeEngineChoice(id: String) {
-        val choice = RuntimeEngineChoice.fromStored(id)
-        preferences.runtimeEngine = choice.id
-        RuntimeEngines.invalidate()
-        _state.update { it.copy(runtimeEngineChoice = choice.id) }
-        refreshRuntimeStatus()
     }
 
     fun setLanguageCode(code: String) {

@@ -79,7 +79,6 @@ import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
 import com.nextcraft.forge.runtime.AntigravityAuthStatus
-import com.nextcraft.forge.runtime.RuntimeEngineChoice
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import kotlinx.coroutines.launch
 
@@ -197,31 +196,6 @@ fun SettingsScreenModern(
             }
             ThinDivider()
 
-            // Runtime engine (ADR-007): auto prefers root chroot and falls back to PRoot; the others force one.
-            val engineChoices = RuntimeEngineChoice.entries
-            val activeEngine = RuntimeEngineChoice.fromStored(state.runtimeEngineChoice)
-            var engineOpen by rememberSaveable { mutableStateOf(false) }
-            SettingsRow(
-                icon = ForgeGlyph.TERMINAL,
-                title = stringResource(R.string.settings_runtime_engine),
-                subtitle = stringResource(activeEngine.titleRes()),
-                onClick = { engineOpen = !engineOpen },
-                trailing = { Chevron(engineOpen) },
-            )
-            AnimatedVisibility(visible = engineOpen) {
-                Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                    engineChoices.forEach { choice ->
-                        RadioRow(
-                            title = stringResource(choice.titleRes()),
-                            subtitle = stringResource(choice.subtitleRes()),
-                            selected = choice == activeEngine,
-                            onClick = { viewModel.setRuntimeEngineChoice(choice.id) },
-                        )
-                    }
-                }
-            }
-            ThinDivider()
-
             ForgeToggleRow(
                 title = stringResource(R.string.settings_high_risk_command_approvals),
                 subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
@@ -317,7 +291,7 @@ fun SettingsScreenModern(
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 KeyValueRow(stringResource(R.string.settings_architecture), if (state.arm64Supported) "ARM64 (aarch64)" else "—")
-                KeyValueRow(stringResource(R.string.settings_environment), "Ubuntu 24.04 · Root chroot")
+                KeyValueRow(stringResource(R.string.settings_environment), "Ubuntu 24.04 · PRoot (no root)")
                 KeyValueRow(stringResource(R.string.settings_active_agent), state.agentKind.displayTitle())
                 if (state.installedAgents.isNotEmpty()) {
                     ThinDivider()

@@ -33,6 +33,13 @@ case "$GUEST_WORKSPACE" in
         ;;
 esac
 
+case "$APP_UID" in
+    ''|*[!0-9]*)
+        echo "Invalid app uid: $APP_UID" >&2
+        exit 65
+        ;;
+esac
+
 PROOT="${NEXTCRAFT_PROOT:-}"
 if [ -z "$PROOT" ] || [ ! -x "$PROOT" ]; then
     echo "PRoot binary not available: ${PROOT:-NEXTCRAFT_PROOT unset}" >&2

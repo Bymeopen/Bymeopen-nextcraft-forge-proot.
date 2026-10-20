@@ -10,12 +10,12 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.nextcraft.forge"
+        applicationId = "com.nextcraft.forge.proot"
         minSdk = 26
         targetSdk = 35
         // The release workflow passes -PversionCode=... -PversionName=...; local builds keep the defaults.
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 100
-        versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-forge"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-proot"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -24,7 +24,7 @@ android {
         buildConfigField("String", "APP_VARIANT", "\"debug\"")
         // Manifest asset of the latest GitHub release; build with -PappUpdateManifestUrl=... to point elsewhere.
         val updateManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
-            ?: "https://github.com/bymeopen/nextcraft-forge/releases/latest/download/update-manifest.json"
+            ?: "https://github.com/bymeopen/nextcraft-forge-proot/releases/latest/download/update-manifest.json"
         buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 

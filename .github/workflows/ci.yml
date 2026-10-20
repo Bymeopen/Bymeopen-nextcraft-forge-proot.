@@ -42,16 +42,20 @@ jobs:
       - uses: actions/checkout@v4
       - name: Syntax check
         run: |
-          sh -n scripts/runtime-bundles/chroot-exec.sh
-          sh -n scripts/runtime-bundles/unmount-chroot.sh
+          sh -n scripts/runtime-bundles/proot-exec.sh
           for s in scripts/runtime-bundles/build-*.sh scripts/make-update-manifest.sh; do bash -n "$s"; done
-      - name: Chroot supervisor rejects unsafe arguments
+      - name: PRoot supervisor rejects unsafe arguments
         run: |
-          if sh scripts/runtime-bundles/chroot-exec.sh /tmp/r /tmp/w "/workspace/../../etc" /tmp/b 10000 true 2>/dev/null; then
+          if sh scripts/runtime-bundles/proot-exec.sh /tmp/r /tmp/w "/workspace/../../etc" /tmp/b 10000 true 2>/dev/null; then
             echo "accepted a traversal path"; exit 1
           fi
-          if sh scripts/runtime-bundles/chroot-exec.sh /tmp/r /tmp/w "/workspace/ok" /tmp/b "1000;id" true 2>/dev/null; then
+          if NEXTCRAFT_PROOT=/bin/true sh scripts/runtime-bundles/proot-exec.sh /tmp/r /tmp/w "/workspace/ok" /tmp/b "1000;id" true 2>/dev/null; then
             echo "accepted a non-numeric uid"; exit 1
+          fi
+      - name: No root or su code paths
+        run: |
+          if grep -rnE '"su"|su -mm|su -c|execlp\("su"' app/src/main --include='*.kt' --include='*.c'; then
+            echo "root/su code path found in a PRoot-only build"; exit 1
           fi
       - name: Shipped scripts match the copies in the repository
         run: python3 scripts/check-embedded-scripts.py

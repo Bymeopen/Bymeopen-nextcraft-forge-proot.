@@ -47,21 +47,7 @@ class AntigravityAuthController(
         "runtime/ubuntu/root/.gemini/antigravity-cli/antigravity-oauth-token",
     )
 
-    fun hasOfficialCredential(): Boolean {
-        val file = officialCredentialFile()
-        if (file.isFile) return true
-        val quoted = shellSingleQuote(file.absolutePath)
-        return runCatching {
-            val proc = ProcessBuilder("su", "-c", "test -s $quoted").start()
-            val finished = proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
-            if (!finished) {
-                proc.destroyForcibly()
-                false
-            } else {
-                proc.exitValue() == 0
-            }
-        }.getOrDefault(false)
-    }
+    fun hasOfficialCredential(): Boolean = officialCredentialFile().let { it.isFile && it.length() > 0L }
 
     suspend fun beginLogin() = withContext(Dispatchers.IO) {
         // process?.isAlive alone is check-then-act: two quick taps could each spawn an agy.
@@ -349,15 +335,6 @@ class AntigravityAuthController(
             val credential = officialCredentialFile()
             if (credential.exists()) {
                 credential.delete()
-            }
-            if (hasOfficialCredential()) {
-                val quoted = shellSingleQuote(credential.absolutePath)
-                runCatching {
-                    val proc = ProcessBuilder("su", "-c", "rm -f $quoted").start()
-                    if (!proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                        proc.destroyForcibly()
-                    }
-                }
             }
             check(!hasOfficialCredential()) { "Antigravity sign-out is incomplete." }
             onSignedInChanged(false, null)
