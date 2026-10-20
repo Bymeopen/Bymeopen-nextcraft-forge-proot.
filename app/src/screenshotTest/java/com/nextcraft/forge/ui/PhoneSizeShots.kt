@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -319,6 +320,60 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
             }
         }
         save("tabsStatus")
+    }
+    @Test
+    fun composerStates() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "Claude Code", onBack = {}, actions = {
+                    ForgeGlyphPillIcon(ForgeGlyph.HISTORY, "history", onClick = {})
+                })
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {}
+                QuickActionRow(listOf(
+                    QuickChip("Jelaskan struktur proyek ini", ForgeGlyph.SPARK) {},
+                    QuickChip("Cari dan perbaiki error build", ForgeGlyph.BUILD) {},
+                    QuickChip("Tambahkan fitur baru: ", ForgeGlyph.PLUS) {},
+                ))
+                ChatComposer("", {}, "Claude Code", running = false, canSend = false, captureEnabled = true, onAttachCamera = {}, onAttachFile = {}, onCapture = {}, onSend = {}, onStop = {})
+                ChatComposer("Tambahkan tombol hapus di daftar tugas lalu jalankan semua tes sekarang juga", {}, "Claude Code", running = false, canSend = true, captureEnabled = true, onAttachCamera = {}, onAttachFile = {}, onCapture = {}, onSend = {}, onStop = {})
+                ChatComposer("", {}, "Claude Code", running = true, canSend = false, captureEnabled = true, onAttachCamera = {}, onAttachFile = {}, onCapture = {}, onSend = {}, onStop = {})
+                ForgeBottomBar(projectEntries, ForgeTab.AGENT, changedCount = 0, agentRunning = true, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("composer")
+    }
+
+    @Test
+    fun terminalBottom() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "/workspace/aplikasi-batrei \u00B7 Ubuntu root chroot", onBack = {}, actions = {
+                    ForgeGlyphPillIcon(ForgeGlyph.FILE, "copy", onClick = {})
+                    ForgeGlyphPillIcon(ForgeGlyph.TRASH, "clear", onClick = {})
+                })
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp)
+                        .background(LocalForgeThemeTokens.current.terminalBackground, androidx.compose.foundation.shape.RoundedCornerShape(14.dp)),
+                ) {}
+                TerminalKeyRow(modifiers = TerminalModifierKeys(), holder = TerminalViewHolder(), enabled = true)
+                TerminalCommandBar(enabled = true, onSend = {})
+                ForgeBottomBar(projectEntries, ForgeTab.TERMINAL, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("terminal")
+    }
+
+    @Test
+    fun onboarding() {
+        rule.setContent {
+            NextCraftForgeTheme(theme) {
+                RuntimeOnboardingScreen(
+                    state = ForgeUiState(),
+                    onToggleStack = {}, onStartSetup = {}, onPauseSetup = {}, onRepairRootfs = {}, onRefreshStatus = {}, onEnterWorkspaceAnyway = {},
+                )
+            }
+        }
+        save("onboarding")
     }
 }
 

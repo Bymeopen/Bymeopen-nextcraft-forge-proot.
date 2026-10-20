@@ -77,7 +77,7 @@ private val quickCommands = listOf(
 )
 
 /** The TerminalView currently on screen, shared with the key row (plain holder: it is never read during composition). */
-private class TerminalViewHolder {
+internal class TerminalViewHolder {
     var view: TerminalView? = null
 }
 
@@ -269,7 +269,7 @@ fun TerminalScreen(
 }
 
 @Composable
-private fun TerminalCommandBar(enabled: Boolean, onSend: (String) -> Unit) {
+internal fun TerminalCommandBar(enabled: Boolean, onSend: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     val send = {
         if (text.isNotBlank()) {
@@ -346,7 +346,7 @@ private fun TerminalEmulatorView(
 
 /** Esc, Tab, Ctrl/Alt (armed for the next key), arrows, paging and the symbols that are buried on a phone keyboard. */
 @Composable
-private fun TerminalKeyRow(
+internal fun TerminalKeyRow(
     modifiers: TerminalModifierKeys,
     holder: TerminalViewHolder,
     enabled: Boolean,
@@ -368,10 +368,12 @@ private fun TerminalKeyRow(
         view.inputCodePoint(char.code, modifiers.consumeCtrl(), modifiers.consumeAlt())
     }
 
+    val keyScroll = rememberScrollState()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .forgeFadingEdges(keyScroll, MaterialTheme.colorScheme.background)
+            .horizontalScroll(keyScroll)
             .padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

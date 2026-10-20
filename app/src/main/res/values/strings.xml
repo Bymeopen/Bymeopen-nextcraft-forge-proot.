@@ -892,4 +892,11 @@
     <string name="capture_done">%1$d screen pictures attached</string>
     <string name="capture_failed">Could not capture the screens</string>
     <string name="projects_status_working">Agent working</string>
+    <string name="err_ws_read">Could not read the project files</string>
+    <string name="err_ws_revert_file">Could not revert %1$s</string>
+    <string name="err_ws_keep_file">Could not keep %1$s</string>
+    <string name="err_ws_keep">Could not keep the changes</string>
+    <string name="err_ws_revert">Could not revert the changes</string>
+    <string name="rt_msg_preparing_default">Preparing your private coding workspace</string>
+    <string name="chat_composer_hint">Message…</string>
 </resources>
