@@ -45,6 +45,13 @@ class RuntimeExecutionService : Service() {
 
         incomingProjectName?.takeIf(String::isNotBlank)?.let { projectNameOverride = it }
 
+        // Every start of this service, whatever the action, may have come through startForegroundService(): Android
+        // then requires startForeground() promptly or it kills the app (ForegroundServiceDidNotStartInTimeException).
+        // Promote first, unconditionally; the action handlers below may demote again right away.
+        runCatching {
+            startForeground(RUNNING_NOTIFICATION_ID, runningNotification(incomingDetail?.takeIf(String::isNotBlank) ?: "Working in $projectName", includeStop = canStop))
+        }
+
         when (action) {
             ACTION_STOP, LEGACY_ACTION_STOP -> {
                 RuntimeTaskController.requestStop()
@@ -108,10 +115,12 @@ class RuntimeExecutionService : Service() {
                 activeTasks++
                 val detail = incomingDetail?.takeIf(String::isNotBlank)
                     ?: "Working in $projectName"
-                startForeground(
-                    RUNNING_NOTIFICATION_ID,
-                    runningNotification(detail, includeStop = canStop),
-                )
+                runCatching {
+                    startForeground(
+                        RUNNING_NOTIFICATION_ID,
+                        runningNotification(detail, includeStop = canStop),
+                    )
+                }
                 acquireWakeLock()
             }
         }
