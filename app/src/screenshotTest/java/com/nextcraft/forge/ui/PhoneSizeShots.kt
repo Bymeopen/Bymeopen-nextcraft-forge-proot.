@@ -250,6 +250,58 @@ abstract class PhoneSizeShots(private val label: String) {
         }
         save("approval")
     }
+
+    /**
+     * Diagnostics-style tool screen with an EMPTY log box. The empty LogBox once had no upper height bound inside a
+     * vertically scrolling screen, which crashed Diagnostics, Build Matrix, SSH and ROM Studio: if that returns,
+     * this scenario fails to render instead of producing a picture.
+     */
+    @Test
+    fun diagnosticsEmptyLog() {
+        rule.setContent {
+            Frame {
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
+                    ToolScaffold(title = "Diagnostik Sistem", subtitle = "Pantau CPU, RAM, baterai, dan runtime Linux", onBack = {}) {
+                        ToolCard {
+                            KeyValueRow("Perangkat", "Xiaomi 21121210G")
+                            KeyValueRow("RAM", "6,0 GB kosong dari 10,9 GB")
+                            KeyValueRow("Stack", "Web (JavaScript / TypeScript), Python, Android (Gradle), C/C++, PHP")
+                        }
+                        LogBox(text = "", placeholder = "Jalankan pemeriksaan kesehatan untuk menguji mount, jaringan, Node, agen, dan toolchain di chroot.")
+                    }
+                }
+                ForgeBottomBar(navEntries, ForgeTab.TOOLS, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("diagnostics")
+    }
+
+    /** Syntax-coloured diff with line numbers (chat change review, Files > Changes and the Tools code viewer). */
+    @Test
+    fun codeViewerDiff() {
+        fun line(kind: com.nextcraft.forge.model.DiffLineType, text: String, old: Int?, new: Int?) =
+            com.nextcraft.forge.model.DiffLine(kind, text, old, new)
+        val context = com.nextcraft.forge.model.DiffLineType.CONTEXT
+        val added = com.nextcraft.forge.model.DiffLineType.ADDITION
+        val removed = com.nextcraft.forge.model.DiffLineType.DELETION
+        val lines = listOf(
+            line(context, "fun TodoRow(todo: Todo) {", 10, 10),
+            line(removed, "    Text(todo.title) // plain", 11, null),
+            line(added, "    Text(todo.title, maxLines = 1) // truncate \"long\" titles", null, 11),
+            line(added, "    val done = todo.done || false", null, 12),
+            line(context, "}", 12, 13),
+        )
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Pembaca kode", subtitle = "Aplikasi Batrei", onBack = {})
+                androidx.compose.foundation.layout.Column(modifier = Modifier.weight(1f).padding(14.dp)) {
+                    DiffCodeView(lines = lines, path = "TodoRow.kt")
+                }
+                ForgeBottomBar(navEntries, ForgeTab.TOOLS, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("code-viewer")
+    }
 }
 
 @Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")
