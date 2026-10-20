@@ -132,7 +132,9 @@ fun AgentScreen(
     viewModel: MainViewModel,
 ) {
     var promptInput by rememberSaveable { mutableStateOf("") }
-    val listState = rememberLazyListState()
+    // Coming back to a chat (leaving the app, another tab) recreates the list; open it at the newest message,
+    // not at the first one.
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = state.messages.lastIndex.coerceAtLeast(0))
     val agyAuthState by viewModel.antigravityAuth.state.collectAsState()
     val scope = rememberCoroutineScope()
     val tokens = LocalForgeThemeTokens.current
@@ -156,8 +158,10 @@ fun AgentScreen(
         if (state.messages.isNotEmpty()) {
             val lastIdx = state.messages.lastIndex
             if (state.messages.size != previousMessageCount) {
+                // A chat that just loaded jumps straight to its end; only new messages animate.
+                val firstLoad = previousMessageCount == 0
                 previousMessageCount = state.messages.size
-                listState.animateScrollToItem(lastIdx)
+                if (firstLoad) listState.scrollToItem(lastIdx) else listState.animateScrollToItem(lastIdx)
             } else {
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                 if (lastVisible >= lastIdx - 1) {
