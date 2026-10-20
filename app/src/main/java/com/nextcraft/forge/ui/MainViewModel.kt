@@ -286,18 +286,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptySet()
             }
-            val projects = loadOrCreateDefaultProject()
-            val firstProject = projects.first()
+            // A fresh install starts with no project: the Projects screen shows its empty state and the user creates
+            // or imports one. Everything below that needs a project is skipped until then.
+            val projects = loadProjects()
+            val firstProject = projects.firstOrNull()
             configureAllProjectRoots(projects)
-            val chats = preferences.loadProjectChats(firstProject.id)
+            val chats = firstProject?.let { preferences.loadProjectChats(it.id) }.orEmpty()
             val activeChatId = chats.firstOrNull()?.id ?: "main"
-            val messages = preferences.loadMessages(firstProject.id, activeChatId)
+            val messages = firstProject?.let { preferences.loadMessages(it.id, activeChatId) }.orEmpty()
             val loadedProfile = preferences.loadProvider(vault, savedAgent)
             val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
             val initialBuildRecord = withContext(Dispatchers.IO) {
-                val ws = checkpoints.ensureWorkspace(firstProject.id)
-                val androidRoot = findAndroidProjectRoot(ws)
+                val ws = firstProject?.let { checkpoints.ensureWorkspace(it.id) }
+                val androidRoot = ws?.let { findAndroidProjectRoot(it) }
                 val existingApk = androidRoot?.let { findDebugApk(it) }
                 if (existingApk != null) {
                     AndroidBuildRecord(
@@ -322,7 +324,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     agentKind = savedAgent,
                     themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
                     projects = projects,
-                    activeProjectId = firstProject.id,
+                    activeProjectId = firstProject?.id.orEmpty(),
                     chats = chats,
                     activeChatId = activeChatId,
                     messages = messages,
@@ -349,36 +351,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            refreshWorkspaceFilesAndChanges(firstProject.id)
+            firstProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
         }
     }
 
-    private suspend fun loadOrCreateDefaultProject(): List<Project> = withContext(Dispatchers.IO) {
+    /** Saved projects with their workspaces ensured; none on a fresh install (no pre-made sandbox). */
+    private suspend fun loadProjects(): List<Project> = withContext(Dispatchers.IO) {
         val existing = preferences.loadProjects()
-        if (existing.isNotEmpty()) {
-            existing.forEach { checkpoints.ensureWorkspace(it.id) }
-            return@withContext existing
-        }
-        val defaultProject = Project(
-            name = "Forge Sandbox",
-            description = getApplication<Application>().getString(R.string.project_default_sandbox_desc),
-            language = "Kotlin / TypeScript / Python",
-            slug = "forge-sandbox",
-        )
-        val ws = checkpoints.ensureWorkspace(defaultProject.id)
-        val readme = File(ws, "README.md")
-        if (!readme.exists()) {
-            readme.writeText(
-                "# Forge Sandbox\n\n" +
-                    "Welcome to **NextCraft Forge**.\n" +
-                    "- Ubuntu 24.04 on the built-in PRoot engine (no root needed)\n" +
-                    "- Multi-agent coding (`Claude Code`, `Antigravity`, `DeepSeek Harness`)\n" +
-                    "- 1-Tap Android Debug APK Build & Install\n",
-            )
-        }
-        val list = listOf(defaultProject)
-        preferences.saveProjects(list)
-        list
+        existing.forEach { checkpoints.ensureWorkspace(it.id) }
+        existing
     }
 
     private fun configureAllProjectRoots(projects: List<Project>) {
