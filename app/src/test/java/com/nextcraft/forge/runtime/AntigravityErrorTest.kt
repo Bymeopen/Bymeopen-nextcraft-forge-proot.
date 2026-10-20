@@ -43,4 +43,20 @@ class AntigravityErrorTest {
     fun taskTimeout_isStillReported() {
         assertTrue(antigravityFriendlyError("task timed out after 60m").contains("60-minute"))
     }
+
+    @Test
+    fun startupNotLoggedInNoise_isIgnoredAfterSilentAuth() {
+        val log = """
+            E1020 11:38:17.780000 121 errorreport.go:224] error getting token source: You are not logged into Antigravity.
+            I1020 11:38:19.700000 1 printmode.go:405] Print mode: silent auth succeeded
+        """.trimIndent()
+        val message = antigravityFriendlyError("agy exited with code 1", log)
+        assertTrue(message, !message.contains("sign-in"))
+    }
+
+    @Test
+    fun notLoggedIn_withoutSuccessfulAuth_stillAsksForSignIn() {
+        val log = "E1020 11:38:17.780000 121 errorreport.go:224] error getting token source: You are not logged into Antigravity."
+        assertTrue(antigravityFriendlyError("agy exited with code 1", log).contains("sign-in"))
+    }
 }

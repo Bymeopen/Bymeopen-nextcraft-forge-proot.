@@ -1450,7 +1450,8 @@ class RuntimeInstaller(private val context: Context) {
 
     private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
         val file = File(rootfs, relativePath.removePrefix("/"))
-        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+        // lstat first: following a toolchain symlink (gcc, php) from the app is denied by SELinux and logs an AVC.
+        return java.nio.file.Files.isSymbolicLink(file.toPath()) || file.exists()
     }
 
     fun isStackInstalled(stack: DevStack): Boolean {

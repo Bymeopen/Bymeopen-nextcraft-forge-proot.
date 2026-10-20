@@ -492,10 +492,11 @@ class AntigravityRuntimeBridge(
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
             // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
             activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
-            val message = if (userStopRequested) {
-                "Stopped by user"
-            } else {
-                antigravityFriendlyError(it.message.orEmpty(), diagnostic)
+            val message = when {
+                userStopRequested -> "Stopped by user"
+                // Already classified when it was thrown; classifying the friendly text again could pick up log noise.
+                it is AntigravitySessionException -> it.message.orEmpty()
+                else -> antigravityFriendlyError(it.message.orEmpty(), diagnostic)
             }
             emitFailure(sessionId, message)
             if (userStopRequested) cancelForegroundRuntime()
@@ -591,8 +592,22 @@ internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): Str
     // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
     // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
     return classifyAntigravityError(rawValue, allowTimeout = true)
-        ?: classifyAntigravityError("$rawValue ${diagnostic.replace(Regex("\\s+"), " ").trim()}", allowTimeout = false)
+        ?: classifyAntigravityError("$rawValue ${antigravityDiagnosticSignal(diagnostic)}", allowTimeout = false)
         ?: rawValue.ifBlank { "Antigravity could not complete the task." }.take(500)
+}
+
+/**
+ * The agy log tail without startup noise: every agy start logs "You are not logged into Antigravity" until its
+ * silent auth finishes, so those lines only mean "not signed in" when the log never reports a successful auth.
+ */
+private fun antigravityDiagnosticSignal(diagnostic: String): String {
+    val lines = diagnostic.lineSequence()
+    val authenticated = diagnostic.contains("silent auth succeeded", ignoreCase = true)
+    return lines
+        .filterNot { authenticated && it.contains("not logged in", ignoreCase = true) }
+        .joinToString(" ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 }
 
 private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
