@@ -360,7 +360,6 @@ fun AgentScreen(
         // Camera: the photo is written to a FileProvider URI in the app cache, then imported like any picked file.
         val cameraContext = LocalContext.current
         var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
-        var attachMenuOpen by remember { mutableStateOf(false) }
         var confirmCapture by remember { mutableStateOf(false) }
         if (confirmCapture) {
             val captureTarget = cameraContext.findWindow()
@@ -464,115 +463,23 @@ fun AgentScreen(
             }
             QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
         }
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = tokens.cardContainerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            border = tokens.cardBorderStroke,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-        ) {
-            Row(
-                modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Attach: photos or any file; it lands in attachments/ inside the workspace.
-                Box {
-                    IconButton(onClick = { attachMenuOpen = true }) {
-                        ForgeIcon(glyph = ForgeGlyph.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 22.dp, description = stringResource(R.string.agent_attach))
-                    }
-                    DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.agent_attach_camera)) },
-                            onClick = { attachMenuOpen = false; launchCamera() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.agent_attach_file)) },
-                            onClick = { attachMenuOpen = false; attachPicker.launch(arrayOf("*/*")) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.capture_menu)) },
-                            enabled = !state.capturingScreens,
-                            onClick = { attachMenuOpen = false; confirmCapture = true },
-                        )
-                    }
-                }
-                TextField(
-                    value = promptInput,
-                    onValueChange = { promptInput = it },
-                    placeholder = {
-                        Text(
-                            stringResource(R.string.agent_message_placeholder, state.agentKind.displayTitle()),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 5,
-                    // Enter stays a newline (messages are multi-line); send is the round button.
-                    keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
-                    colors = TextFieldDefaults.textFieldColors(
-                        containerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                    ),
-                )
-                val haptics = LocalHapticFeedback.current
-                val reduceMotion = rememberReduceMotion()
-                val sendScale by animateFloatAsState(
-                    targetValue = if (running || canSend) 1f else 0.86f,
-                    animationSpec = if (reduceMotion) snap() else ForgeMotion.springSnappy(),
-                    label = "sendScale",
-                )
-                val sendBg by animateColorAsState(
-                    targetValue = when {
-                        canSend -> MaterialTheme.colorScheme.primary
-                        running -> MaterialTheme.colorScheme.error
-                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
-                    },
-                    animationSpec = if (reduceMotion) snap() else tween(ForgeMotion.FADE_MS),
-                    label = "sendBg",
-                )
-                Box(
-                    modifier = Modifier
-                        .forgeMinTouch()
-                        .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(sendBg)
-                        .clickable(
-                            enabled = running || canSend,
-                            role = Role.Button,
-                            onClickLabel = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
-                        ) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            // While the agent works, sending queues the message; stop is available when nothing is typed.
-                            if (canSend) {
-                                val text = promptInput.trim()
-                                promptInput = ""
-                                viewModel.sendPrompt(text)
-                            } else if (running) {
-                                viewModel.stopActiveTask()
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = if (running && !canSend) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
-                        contentDescription = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
-                        tint = when {
-                            canSend -> MaterialTheme.colorScheme.onPrimary
-                            running -> MaterialTheme.colorScheme.onError
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-            }
-        }
+        ChatComposer(
+            promptInput = promptInput,
+            onPromptChange = { promptInput = it },
+            agentName = state.agentKind.displayTitle(),
+            running = running,
+            canSend = canSend,
+            captureEnabled = !state.capturingScreens,
+            onAttachCamera = { launchCamera() },
+            onAttachFile = { attachPicker.launch(arrayOf("*/*")) },
+            onCapture = { confirmCapture = true },
+            onSend = {
+                val text = promptInput.trim()
+                promptInput = ""
+                viewModel.sendPrompt(text)
+            },
+            onStop = viewModel::stopActiveTask,
+        )
     }
 }
 

@@ -1331,7 +1331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {
-            val (entries, changes) = workspaceIo("Could not read the project files") {
+            val (entries, changes) = workspaceIo(getApplication<Application>().getString(R.string.err_ws_read)) {
                 val ws = checkpoints.ensureWorkspace(projectId)
                 val rootCanonical = runCatching { ws.canonicalFile.toPath() }.getOrNull()
                 val ignored = setOf(".git", ".gradle", "build", "node_modules", "__pycache__")
@@ -1869,7 +1869,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not revert $path") {
+            workspaceIo(getApplication<Application>().getString(R.string.err_ws_revert_file, path)) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertFile(project.id, ws, path)
             } ?: return@launch
@@ -1885,7 +1885,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not keep $path") {
+            workspaceIo(getApplication<Application>().getString(R.string.err_ws_keep_file, path)) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.acceptFile(project.id, ws, path)
             } ?: return@launch
@@ -1897,7 +1897,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not keep the changes") { checkpoints.acceptAll(project.id) } ?: return@launch
+            workspaceIo(getApplication<Application>().getString(R.string.err_ws_keep)) { checkpoints.acceptAll(project.id) } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1906,7 +1906,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not revert the changes") {
+            workspaceIo(getApplication<Application>().getString(R.string.err_ws_revert)) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertLatestTurn(project.id, ws)
             } ?: return@launch
