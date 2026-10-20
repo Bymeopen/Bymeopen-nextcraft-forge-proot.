@@ -125,9 +125,11 @@ fun FilesAndDiffScreen(
                 onBack = { viewModel.projectBack() },
             )
         } else {
-            ForgeLargeTitle(
+            // Opened from Tools: same header and Back as every other tool screen.
+            ForgeProjectHeader(
                 title = stringResource(R.string.files_files),
                 subtitle = state.activeProject?.name,
+                onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
             )
         }
         FilesHeaderCard(
@@ -304,7 +306,7 @@ private fun FilesHeaderCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else stringResource(R.string.files_files),
+                text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else stringResource(R.string.files_project_folder),
                 fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),

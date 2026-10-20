@@ -183,7 +183,7 @@
     <string name="status_failed">Gagal</string>
     <string name="status_waiting">Menunggu</string>
     <string name="status_skipped">Dilewati</string>
-    <string name="files_tab_explorer">Explorer (%1$d)</string>
+    <string name="files_tab_explorer">Jelajah (%1$d)</string>
     <string name="files_tab_editor">Editor</string>
     <string name="files_tab_changes">Perubahan (%1$d)</string>
     <string name="agent_send">Kirim</string>
@@ -787,4 +787,5 @@
     <string name="settings_endpoint_default">Bawaan penyedia</string>
     <string name="settings_api_keys_optional">Kunci API cadangan (opsional)</string>
     <string name="settings_key_label_hint">Utama</string>
+    <string name="files_project_folder">Folder proyek</string>
 </resources>
