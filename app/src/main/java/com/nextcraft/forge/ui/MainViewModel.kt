@@ -1185,7 +1185,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             is RuntimeEvent.SessionFailed -> {
-                appendAssistantText("\n\n[${event.reason}]")
+                // The bridges report a user stop in English; show it in the app language.
+                val reason = if (event.reason == "Stopped by user") getApplication<Application>().getString(R.string.agent_stopped_by_user) else event.reason
+                appendAssistantText("\n\n[$reason]")
                 offerRetry()
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
                 discardQueuedPrompts()
@@ -2246,6 +2248,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
             }
+        }
+    }
+
+    /** Installs an APK that lives in the active project (e.g. one the agent built or copied), from the Files list. */
+    fun installWorkspaceApk(relativePath: String) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val apk = withContext(Dispatchers.IO) {
+                runCatching { checkpoints.safeWorkspaceFile(checkpoints.ensureWorkspace(project.id), relativePath) }.getOrNull()
+            }
+            if (apk != null && apk.isFile) installBuiltApk(apk.absolutePath)
         }
     }
 

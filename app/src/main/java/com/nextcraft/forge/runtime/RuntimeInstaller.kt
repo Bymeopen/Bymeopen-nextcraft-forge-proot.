@@ -1398,6 +1398,12 @@ class RuntimeInstaller(private val context: Context) {
         script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
     }
 
+    private fun deviceTotalMemoryMb(): Long {
+        val info = android.app.ActivityManager.MemoryInfo()
+        context.getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(info)
+        return if (info.totalMem > 0) info.totalMem / (1024 * 1024) else 4096L
+    }
+
     @Synchronized
     private fun writeAndroidGradleConfiguration(runtimeRootfs: File) {
         val aapt2 = File(runtimeRootfs, ANDROID_AAPT2_HOST_PATH)
@@ -1409,7 +1415,7 @@ class RuntimeInstaller(private val context: Context) {
         val existingLines = properties.readTextOrNull()?.lineSequence()?.toList().orEmpty()
         val managedLines = listOf(
             "$ANDROID_AAPT2_PROPERTY=$ANDROID_AAPT2_GUEST_PATH",
-            "$GRADLE_JVMARGS_PROPERTY=-Xmx512m -XX:MaxMetaspaceSize=256m -Dfile.encoding=UTF-8",
+            "$GRADLE_JVMARGS_PROPERTY=${gradleJvmArgs(deviceTotalMemoryMb())}",
             "$GRADLE_WORKERS_PROPERTY=2",
             "$GRADLE_PARALLEL_PROPERTY=false",
             "$KOTLIN_EXECUTION_PROPERTY=in-process",
@@ -2613,6 +2619,16 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /**
+         * Gradle JVM options for builds inside the chroot, sized to the device. A fixed 512 MB heap / 256 MB metaspace
+         * made Android builds die with OutOfMemoryError (Metaspace) or get killed (exit 137): about an eighth of RAM
+         * for the heap (768 MB to 2 GB, in 128 MB steps) and 512 MB of metaspace.
+         */
+        internal fun gradleJvmArgs(totalMemoryMb: Long): String {
+            val heapMb = ((totalMemoryMb / 8).coerceIn(768L, 2048L) / 128) * 128
+            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+        }
+
         /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
         private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
