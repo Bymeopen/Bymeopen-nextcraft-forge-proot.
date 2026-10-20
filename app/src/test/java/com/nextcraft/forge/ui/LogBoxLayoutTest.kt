@@ -13,7 +13,9 @@ class LogBoxLayoutTest {
     @Test
     fun logBox_hasABoundedHeight() {
         val source = File("src/main/java/com/nextcraft/forge/ui/ToolsKit.kt").readText()
+        // Comments may mention heightIn to explain why it is banned; only code counts.
         val body = source.substringAfter("internal fun LogBox(").substringBefore("\n}\n")
+            .lines().filterNot { it.trim().startsWith("//") }.joinToString("\n")
         assertTrue("LogBox must use a fixed .height(...)", ".height(" in body)
         assertTrue("heightIn(...) leaves the max height unbounded inside a scrolling screen", "heightIn(" !in body)
     }
