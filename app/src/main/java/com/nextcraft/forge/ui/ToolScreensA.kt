@@ -69,8 +69,10 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                     }
                     when {
                         stack == DevStack.WEB -> Text(stringResource(R.string.tool_core), fontSize = ForgeType.secondary, color = LocalForgeThemeTokens.current.accentText)
-                        installed -> OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.removeStack(stack) }, enabled = !busy) {
-                            Text(stringResource(R.string.tool_remove))
+                        installed -> UninstallConfirmed(name = stack.displayLabel(), onConfirm = { viewModel.removeStack(stack) }) { ask ->
+                            OutlinedButton(shape = RoundedCornerShape(100), onClick = ask, enabled = !busy) {
+                                Text(stringResource(R.string.tool_remove))
+                            }
                         }
                         else -> OutlinedButton(shape = RoundedCornerShape(100), onClick = { viewModel.installStack(stack) }, enabled = !running) {
                             Text(stringResource(R.string.tool_install))
@@ -110,7 +112,9 @@ fun ToolchainsScreen(state: ForgeUiState, viewModel: MainViewModel) {
                                 Text(stringResource(R.string.settings_agent_update, update.latestVersion))
                             }
                         }
-                        ForgeTextButton(onClick = { viewModel.removeAgent(agent) }, enabled = !busy) { Text(stringResource(R.string.tool_remove)) }
+                        UninstallConfirmed(name = agent.displayTitle(), onConfirm = { viewModel.removeAgent(agent) }) { ask ->
+                            ForgeTextButton(onClick = ask, enabled = !busy) { Text(stringResource(R.string.tool_remove)) }
+                        }
                     }
                 }
             }

@@ -100,6 +100,8 @@ fun AgentConfigScreen(
             trailing = {
                 AgentStatusPill(
                     when {
+                        // A connection test means nothing before the agent is installed.
+                        state.agentKind !in state.installedAgents -> AgentStatus.NOT_INSTALLED
                         statusText.startsWith("✓") -> AgentStatus.ONLINE
                         statusText.startsWith("✕") -> AgentStatus.FAILED
                         else -> AgentStatus.NOT_TESTED
@@ -421,8 +423,10 @@ fun AgentConfigScreen(
                                     Text(stringResource(R.string.settings_agent_update, info.latestVersion))
                                 }
                             }
-                            ForgeTextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
-                                Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                            UninstallConfirmed(name = kind.displayTitle(), onConfirm = { viewModel.removeAgent(kind) }) { ask ->
+                                ForgeTextButton(onClick = ask, enabled = !runtimeBusy) {
+                                    Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                                }
                             }
                         }
                     }
@@ -448,7 +452,7 @@ fun AgentConfigScreen(
     }
 }
 
-private enum class AgentStatus { ONLINE, NOT_TESTED, FAILED }
+private enum class AgentStatus { ONLINE, NOT_TESTED, FAILED, NOT_INSTALLED }
 
 /** Connection state chip at the end of the screen header: Online after a passing test, Failed after a failing one. */
 @Composable
@@ -459,12 +463,13 @@ private fun AgentStatusPill(status: AgentStatus) {
         AgentStatus.ONLINE -> stringResource(R.string.agent_status_online) to tokens.successText
         AgentStatus.FAILED -> stringResource(R.string.agent_status_failed) to tokens.dangerText
         AgentStatus.NOT_TESTED -> stringResource(R.string.agent_status_not_tested) to scheme.onSurfaceVariant
+        AgentStatus.NOT_INSTALLED -> stringResource(R.string.agent_status_not_installed) to scheme.onSurfaceVariant
     }
     Surface(shape = RoundedCornerShape(100), color = tokens.cardElevatedColor, border = tokens.cardBorderStroke) {
         Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(dot))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(label, fontSize = ForgeType.secondary, fontWeight = FontWeight.Medium, color = if (status == AgentStatus.NOT_TESTED) scheme.onSurfaceVariant else dot)
+            Text(label, fontSize = ForgeType.secondary, fontWeight = FontWeight.Medium, color = if (status == AgentStatus.NOT_TESTED || status == AgentStatus.NOT_INSTALLED) scheme.onSurfaceVariant else dot)
         }
     }
 }

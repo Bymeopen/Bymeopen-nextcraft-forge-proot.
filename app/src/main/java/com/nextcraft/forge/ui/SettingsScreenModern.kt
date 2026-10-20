@@ -257,8 +257,10 @@ fun SettingsScreenModern(
                                 ForgeStatusIcon(ForgeStatus.DONE, iconSize = 16.dp)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(stringResource(R.string.settings_agent_installed), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
-                                ForgeTextButton(onClick = { viewModel.removeStack(stack) }, enabled = !runtimeBusy) {
-                                    Text(stringResource(R.string.settings_remove), color = tokens.dangerText)
+                                UninstallConfirmed(name = stack.displayLabel(), onConfirm = { viewModel.removeStack(stack) }) { ask ->
+                                    ForgeTextButton(onClick = ask, enabled = !runtimeBusy) {
+                                        Text(stringResource(R.string.settings_remove), color = tokens.dangerText)
+                                    }
                                 }
                             }
                             else -> OutlinedButton(
