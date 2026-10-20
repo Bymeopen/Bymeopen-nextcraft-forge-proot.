@@ -196,7 +196,7 @@ fun AgentConfigScreen(
                 AgentDisclosureRow(
                     icon = ForgeGlyph.INFO,
                     title = stringResource(R.string.settings_endpoint_protocol),
-                    subtitle = state.providerProfile.baseUrl.ifBlank { provider.displaySubtitle() },
+                    subtitle = state.providerProfile.baseUrl.ifBlank { stringResource(R.string.settings_endpoint_default) },
                     expanded = endpointOpen,
                     onToggle = { endpointOpen = !endpointOpen },
                 ) {
@@ -322,7 +322,9 @@ fun AgentConfigScreen(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
+                            // Claude sign-in needs no key, so the form is a backup, not a requirement.
+                            text = if (provider == ProviderKind.CLAUDE) stringResource(R.string.settings_api_keys_optional)
+                            else stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
                             fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -356,7 +358,7 @@ fun AgentConfigScreen(
                             value = keyLabelInput,
                             onValueChange = { keyLabelInput = it },
                             label = { Text(stringResource(R.string.settings_label)) },
-                            placeholder = { Text("Primary") },
+                            placeholder = { Text(stringResource(R.string.settings_key_label_hint)) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         ForgeTextField(
@@ -430,7 +432,8 @@ fun AgentConfigScreen(
                         enabled = !state.checkingAgentUpdates,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     ) { Text(stringResource(R.string.settings_agent_check_updates)) }
-                    SetupProgress(state, SetupScope.AGENT)
+                    // The "not installed" card above already shows this progress; showing it twice looked like two installs.
+                    if (agentInstalled) SetupProgress(state, SetupScope.AGENT)
                 }
             }
         }

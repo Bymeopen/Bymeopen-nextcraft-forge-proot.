@@ -126,7 +126,11 @@ fun ModelPickerDialog(
                     ModelRow(
                         label = option.labelRes?.let { stringResource(it) } ?: option.label,
                         id = option.id,
-                        badge = option.badge,
+                        badge = when (option.badge) {
+                            "latest" -> stringResource(R.string.model_badge_latest)
+                            "fast" -> stringResource(R.string.model_badge_fast)
+                            else -> option.badge
+                        },
                         selected = option.id == selectedId,
                         onClick = { onSelect(option.id) },
                     )

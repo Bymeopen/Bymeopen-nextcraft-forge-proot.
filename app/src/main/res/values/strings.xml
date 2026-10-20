@@ -776,4 +776,31 @@
     <string name="rt_auth_agy_code_empty">Paste the verification code from Google first.</string>
     <string name="rt_auth_agy_signout_incomplete">Antigravity sign-out is incomplete.</string>
     <string name="rt_cicd_connect_github">Connect GitHub in Settings first.</string>
+
+    <!-- Diagnostics -->
+    <string name="diag_device">Device</string>
+    <string name="diag_android">Android</string>
+    <string name="diag_cpu">CPU</string>
+    <string name="diag_ram">RAM</string>
+    <string name="diag_storage">Storage</string>
+    <string name="diag_battery">Battery</string>
+    <string name="diag_root">Root access</string>
+    <string name="diag_linux">Linux runtime</string>
+    <string name="diag_rootfs">Rootfs</string>
+    <string name="diag_stacks">Stacks</string>
+    <string name="diag_agents">Agents</string>
+    <string name="diag_cores">%1$s · %2$d cores</string>
+    <string name="diag_free_of">%1$s free of %2$s</string>
+    <string name="diag_granted">granted</string>
+    <string name="diag_unavailable">not available</string>
+    <string name="diag_installed">installed</string>
+    <string name="diag_not_installed">not installed</string>
+    <string name="diag_none">none</string>
+    <string name="diag_health_failed">Health check failed</string>
+    <string name="diag_charging_value">%1$s · charging</string>
+    <string name="model_badge_latest">latest</string>
+    <string name="model_badge_fast">fast</string>
+    <string name="settings_endpoint_default">Provider default</string>
+    <string name="settings_api_keys_optional">Backup API keys (optional)</string>
+    <string name="settings_key_label_hint">Primary</string>
 </resources>

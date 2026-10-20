@@ -760,4 +760,31 @@
     <string name="rt_auth_agy_code_empty">Tempel kode verifikasi dari Google lebih dulu.</string>
     <string name="rt_auth_agy_signout_incomplete">Proses keluar dari Antigravity belum tuntas.</string>
     <string name="rt_cicd_connect_github">Hubungkan GitHub di Pengaturan lebih dulu.</string>
+
+    <!-- Diagnostics -->
+    <string name="diag_device">Perangkat</string>
+    <string name="diag_android">Android</string>
+    <string name="diag_cpu">CPU</string>
+    <string name="diag_ram">RAM</string>
+    <string name="diag_storage">Penyimpanan</string>
+    <string name="diag_battery">Baterai</string>
+    <string name="diag_root">Akses root</string>
+    <string name="diag_linux">Runtime Linux</string>
+    <string name="diag_rootfs">Rootfs</string>
+    <string name="diag_stacks">Stack</string>
+    <string name="diag_agents">Agen</string>
+    <string name="diag_cores">%1$s · %2$d inti</string>
+    <string name="diag_free_of">%1$s kosong dari %2$s</string>
+    <string name="diag_granted">diberikan</string>
+    <string name="diag_unavailable">tidak tersedia</string>
+    <string name="diag_installed">terpasang</string>
+    <string name="diag_not_installed">belum terpasang</string>
+    <string name="diag_none">tidak ada</string>
+    <string name="diag_health_failed">Pemeriksaan gagal</string>
+    <string name="diag_charging_value">%1$s · mengisi daya</string>
+    <string name="model_badge_latest">terbaru</string>
+    <string name="model_badge_fast">cepat</string>
+    <string name="settings_endpoint_default">Bawaan penyedia</string>
+    <string name="settings_api_keys_optional">Kunci API cadangan (opsional)</string>
+    <string name="settings_key_label_hint">Utama</string>
 </resources>
