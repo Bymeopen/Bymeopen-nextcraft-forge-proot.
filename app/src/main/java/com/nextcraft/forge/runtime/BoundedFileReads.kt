@@ -1,15 +1,5 @@
 package com.nextcraft.forge.runtime
 
-/**
- * Deletes this file or directory tree without following symlinks. Kotlin's deleteRecursively() descends into a
- * symlinked directory, so a link an agent made to another project would delete that project's files.
- */
-internal fun java.io.File.deleteRecursivelyNoFollow(): Boolean {
-    val isLink = java.nio.file.Files.isSymbolicLink(toPath())
-    if (!isLink && isDirectory) listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
-    return delete() || (!exists() && !java.nio.file.Files.isSymbolicLink(toPath()))
-}
-
 import android.os.FileObserver
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -202,4 +192,14 @@ internal class InotifyLogTailer(
     companion object {
         private const val MAX_TAIL_LINE_BYTES = 512 * 1024
     }
+}
+
+/**
+ * Deletes this file or directory tree without following symlinks. Kotlin's deleteRecursively() descends into a
+ * symlinked directory, so a link an agent made to another project would delete that project's files.
+ */
+internal fun java.io.File.deleteRecursivelyNoFollow(): Boolean {
+    val isLink = java.nio.file.Files.isSymbolicLink(toPath())
+    if (!isLink && isDirectory) listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
+    return delete() || (!exists() && !java.nio.file.Files.isSymbolicLink(toPath()))
 }
