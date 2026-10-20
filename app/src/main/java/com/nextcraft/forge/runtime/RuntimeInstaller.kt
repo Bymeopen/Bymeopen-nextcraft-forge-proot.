@@ -2031,6 +2031,18 @@ class RuntimeInstaller(private val context: Context) {
         return envFile to suCommand
     }
 
+    /** One hook entry (Bash/Edit/Write/NotebookEdit → permission-hook.sh); registered for PreToolUse and PermissionRequest. */
+    private fun permissionHookEntry(): JSONArray = JSONArray().put(
+        JSONObject()
+            .put("matcher", "Bash|Edit|Write|NotebookEdit")
+            .put(
+                "hooks",
+                JSONArray().put(
+                    JSONObject().put("type", "command").put("command", "/opt/pocket/permission-hook.sh"),
+                ),
+            ),
+    )
+
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
@@ -2046,7 +2058,10 @@ BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
 ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
-if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
+EVENT=PermissionRequest
+if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp"; then
+    grep -q '"hook_event_name" *: *"PreToolUse"' "${'$'}BRIDGE/${'$'}ID.request.tmp" && EVENT=PreToolUse
+    mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"
     i=0
     while [ "${'$'}i" -lt 600 ]; do
         if [ -f "${'$'}RESP/${'$'}ID.response" ]; then
@@ -2060,7 +2075,14 @@ if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'
 else
     cat > /dev/null
 fi
-printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
+# The same script serves both hook events. PreToolUse is the one every Claude Code version runs in headless (-p)
+# mode; PermissionRequest only runs there in newer releases, and 2.1.112 (the npm release PRoot is pinned to) turns an
+# unanswered "ask" into "This command requires approval" without consulting it.
+if [ "${'$'}EVENT" = "PreToolUse" ]; then
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"NextCraft Forge"}}\n' "${'$'}DECISION"
+else
+    printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"%s"}}}\n' "${'$'}DECISION"
+fi
 """,
             mode = 0b111101101,
         )
@@ -2089,19 +2111,9 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             )
             .put(
                 "hooks",
-                JSONObject().put(
-                    "PermissionRequest",
-                    JSONArray().put(
-                        JSONObject()
-                            .put("matcher", "Bash|Edit|Write|NotebookEdit")
-                            .put(
-                                "hooks",
-                                JSONArray().put(
-                                    JSONObject().put("type", "command").put("command", "/opt/pocket/permission-hook.sh"),
-                                ),
-                            ),
-                    ),
-                ),
+                JSONObject()
+                    .put("PreToolUse", permissionHookEntry())
+                    .put("PermissionRequest", permissionHookEntry()),
             )
             .toString()
 
