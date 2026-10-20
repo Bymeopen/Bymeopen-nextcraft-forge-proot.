@@ -33,8 +33,6 @@ data class InstalledRuntime(
     val chrootExec: File,
     val rootfs: File,
 ) {
-    /** Compatibility alias for callers referencing the runtime launcher executable. */
-    val proot: File get() = chrootExec
     val binDir: File get() = chrootExec.parentFile ?: rootfs
 }
 
