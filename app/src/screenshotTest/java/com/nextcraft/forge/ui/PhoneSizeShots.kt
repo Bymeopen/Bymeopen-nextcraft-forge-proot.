@@ -375,6 +375,59 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
         }
         save("onboarding")
     }
+
+    private fun fmEntries(): List<com.nextcraft.forge.model.WorkspaceEntry> {
+        fun d(path: String, n: Int) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), true, 0, childCount = n, modifiedMillis = System.currentTimeMillis() - 3_600_000)
+        fun f(path: String, size: Long) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), false, 0, size, modifiedMillis = System.currentTimeMillis() - 86_400_000)
+        return listOf(d("app/src/main", 4), d("app/src/test", 2), f("app/src/Main.kt", 2048), f("app/src/util-strings-and-formatting-helpers.kt", 18_400), f("app/build.gradle.kts", 1_200_000))
+    }
+
+    @Test
+    fun filesManager() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FilesHeaderCard(
+                    title = "5 item", selecting = false, selectedCount = 0, enabled = true, sort = FileSort.NAME, showHidden = false,
+                    onSort = {}, onToggleHidden = {}, onNewFile = {}, onNewFolder = {}, onUpload = {}, onToggleSelect = {}, onRefresh = {},
+                )
+                FileBreadcrumbs(rootName = "Aplikasi Batrei", dir = "app/src", onNavigate = {})
+                WorkspaceFolderList(
+                    entries = fmEntries(), loading = false, atRoot = false, truncated = false, selectedPath = null, selecting = false,
+                    selectedPaths = mutableListOf(), enabled = true, onOpenFolder = {}, onSelectFile = {}, onNewFileIn = {}, onNewFolderIn = {},
+                    onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onInstallApk = {}, onDelete = {},
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesManager")
+    }
+
+    @Test
+    fun filesSearch() {
+        val all = fmEntries()
+        val result = searchWorkspaceEntries(all, "main")
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FilesHeaderCard(
+                    title = "5 item", selecting = false, selectedCount = 0, enabled = true, sort = FileSort.NAME, showHidden = false,
+                    onSort = {}, onToggleHidden = {}, onNewFile = {}, onNewFolder = {}, onUpload = {}, onToggleSelect = {}, onRefresh = {},
+                    searching = true,
+                )
+                FileSearchBar(query = "main", onQueryChange = {}, resultCount = result.matches.size)
+                WorkspaceFolderList(
+                    entries = result.entries.filter { it.path in result.matches }, loading = false, atRoot = false, truncated = false, selectedPath = null,
+                    selecting = false, selectedPaths = mutableListOf(), enabled = true, onOpenFolder = {}, onSelectFile = {}, onNewFileIn = {},
+                    onNewFolderIn = {}, onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onInstallApk = {}, onDelete = {},
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesSearch")
+    }
 }
 
 @Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")

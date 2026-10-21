@@ -315,7 +315,7 @@
     <string name="tools_editor">Editor</string>
     <string name="tools_editor_desc">Code editor with unsaved-change protection</string>
     <string name="tools_header_subtitle">Toolchains · Diagnostics · SSH Manager</string>
-    <string name="tools_header_title">Developer Tools</string>
+    <string name="tools_header_title">Tools</string>
     <string name="tools_rom">ROM Studio</string>
     <string name="tools_rom_desc">Orchestrate repo sync for custom Android ROMs</string>
     <string name="tools_search">Search tools</string>

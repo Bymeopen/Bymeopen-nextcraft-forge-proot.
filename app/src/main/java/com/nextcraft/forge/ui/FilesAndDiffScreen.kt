@@ -180,7 +180,8 @@ fun FilesAndDiffScreen(
             )
         }
         FilesHeaderCard(
-            title = if (browseDir.isEmpty()) workspaceName else browseDir.substringAfterLast('/'),
+            // The screen header and the breadcrumb already name the workspace and folder; this says how much is in it.
+            title = pluralStringResource(R.plurals.fm_items_count, shownEntries.size, shownEntries.size),
             selecting = selecting,
             selectedCount = selectedPaths.size,
             enabled = !state.sessionRunning,
@@ -368,7 +369,7 @@ fun FilesAndDiffScreen(
 
 /** Card header for the explorer: title, "+" menu (new file / folder / upload), select-for-download, refresh. */
 @Composable
-private fun FilesHeaderCard(
+internal fun FilesHeaderCard(
     title: String,
     selecting: Boolean,
     selectedCount: Int,
@@ -506,7 +507,7 @@ internal fun sortWorkspaceEntries(entries: List<WorkspaceEntry>, sort: FileSort,
 
 /** "Workspace > folder > subfolder": the workspace folder is always the first crumb, every crumb jumps back to that level. */
 @Composable
-private fun FileBreadcrumbs(rootName: String, dir: String, onNavigate: (String) -> Unit) {
+internal fun FileBreadcrumbs(rootName: String, dir: String, onNavigate: (String) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
     val segments = if (dir.isEmpty()) emptyList() else dir.split('/')
@@ -556,7 +557,7 @@ private fun Crumb(label: String, isRoot: Boolean, current: Boolean, onClick: () 
 
 /** The direct children of the open folder: tap a folder to go in, tap a file to open it, ⋮ for the actions. */
 @Composable
-private fun WorkspaceFolderList(
+internal fun WorkspaceFolderList(
     entries: List<WorkspaceEntry>,
     loading: Boolean,
     atRoot: Boolean,
@@ -634,8 +635,9 @@ private fun WorkspaceFolderList(
                         fontSize = ForgeType.body,
                         color = if (entry.isDirectory) scheme.onSurface else tokens.accentText,
                         fontWeight = if (entry.isDirectory || isSelected) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        // One line with the middle cut out, so a long name still shows its extension.
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis,
                     )
                     val detail = if (entry.isDirectory) {
                         val count = entry.childCount ?: 0
