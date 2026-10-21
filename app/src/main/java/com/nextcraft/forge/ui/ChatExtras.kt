@@ -496,8 +496,11 @@ internal fun ChatComposer(
                 maxLines = 5,
                 // Enter stays a newline (messages are multi-line); send is the round button.
                 keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
-                colors = TextFieldDefaults.textFieldColors(
-                    containerColor = Color.Transparent,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    errorContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     disabledIndicatorColor = Color.Transparent,
