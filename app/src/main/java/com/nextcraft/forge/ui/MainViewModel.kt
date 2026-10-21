@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.model.ActivityItem
+import com.nextcraft.forge.model.AgentRouter
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.ChangeItem
@@ -23,6 +24,8 @@ import com.nextcraft.forge.model.ProjectType
 import com.nextcraft.forge.model.StarterTemplate
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.ProviderProfile
+import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutedMessage
 import com.nextcraft.forge.model.RuntimeEvent
 import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.model.WorkspaceDirListing
@@ -347,6 +350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDevStacks = savedStacks,
                     installedDevStacks = installedStacks,
                     agentKind = savedAgent,
+                    routing = preferences.routing,
                     themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
                     projects = projects,
                     activeProjectId = firstProject.id,
@@ -1149,12 +1153,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when {
             // This chat is still working: the message is sent automatically when its turn completes.
             runs.containsKey(chatId) -> enqueuePrompt(prompt)
-            !canStartAnotherRun() -> {
+            !canStartAnotherRun(tentativeAgent(cleanPrompt)) -> {
                 enqueuePrompt(prompt)
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             }
             else -> startRun(project, chatId, prompt)
         }
+    }
+
+    // --- Routing of messages between agents (single agent unless the user picked another mode in the chat) ---
+
+    fun setRouteMode(mode: RouteMode) = updateRouting(_state.value.routing.copy(mode = mode))
+
+    /** [agents] is the priority/rotation order; an agent left out of the list is not used by Failover or Balanced. */
+    fun setRouteAgents(agents: List<AgentKind>) = updateRouting(_state.value.routing.copy(agents = agents.distinct()))
+
+    private fun updateRouting(config: RoutingConfig) {
+        preferences.routing = config
+        _state.update { it.copy(routing = config) }
+    }
+
+    /** Checks off the main thread which agents have credentials (it reads the vault and Claude's login file). */
+    fun refreshReadyAgents() {
+        viewModelScope.launch {
+            val ready = withContext(Dispatchers.IO) { AgentKind.entries.filter(::agentReady).toSet() }
+            _state.update { it.copy(readyAgents = ready) }
+        }
+    }
+
+    private fun agentProfile(agent: AgentKind): ProviderProfile {
+        if (agent == _state.value.agentKind) return _state.value.providerProfile
+        val loaded = preferences.loadProvider(vault, agent)
+        return loaded.copy(hasSecret = !resolveProviderSecret(loaded).isNullOrBlank())
+    }
+
+    private fun agentReady(agent: AgentKind): Boolean = agentProfile(agent).hasSecret
+
+    /** The routing decision for [text]; null when no agent is left (all failed or none has credentials). */
+    private fun routeFor(text: String, tried: Set<AgentKind> = emptySet()): RoutedMessage? {
+        val here = _state.value
+        val ready = AgentKind.entries.filter(::agentReady).toSet()
+        return AgentRouter.route(text, here.routing, here.agentKind, ready, preferences.routeCounter, tried)
+    }
+
+    /** The agent a new message would most likely go to; only used to decide whether a run slot is free. */
+    private fun tentativeAgent(text: String): AgentKind =
+        if (_state.value.routing.mode == RouteMode.SINGLE) _state.value.agentKind else routeFor(text)?.agent ?: _state.value.agentKind
+
+    /**
+     * Moves a failed turn to the next agent when the mode allows it. The failed reply stays in the chat with a note,
+     * and the same message is sent again without being added to the history a second time.
+     */
+    private fun tryFailover(run: ChatRun, reason: String): Boolean {
+        if (!AgentRouter.failsOver(_state.value.routing.mode)) return false
+        val tried = run.tried + run.agent
+        val next = routeFor(run.lastPrompt.text, tried) ?: return false
+        val project = _state.value.projects.firstOrNull { it.id == run.projectId } ?: return false
+        appendAssistantText(run, "\n\n[" + reason + "]\n" + str(R.string.route_failover_notice, next.agent.title))
+        finishRun(run)
+        viewModelScope.launch {
+            run.job?.join()
+            startRun(project, run.chatId, run.lastPrompt.copy(projectId = project.id, chatId = run.chatId), tried = tried, resend = true)
+        }
+        return true
     }
 
     private fun enqueuePrompt(prompt: QueuedPrompt) {
@@ -1166,9 +1227,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * the other agents keep a single run. A further run also needs free memory: each Claude process is a Node
      * runtime, and the system kills processes when RAM runs out.
      */
-    private fun canStartAnotherRun(): Boolean {
+    private fun canStartAnotherRun(agent: AgentKind = _state.value.agentKind): Boolean {
         if (runs.isEmpty()) return true
-        if (_state.value.agentKind != AgentKind.CLAUDE_CODE) return false
+        if (agent != AgentKind.CLAUDE_CODE) return false
         if (runs.size >= MAX_PARALLEL_CHATS) return false
         val memory = android.app.ActivityManager.MemoryInfo()
         getApplication<Application>().getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(memory)
@@ -1181,17 +1242,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         rotateSecretFor = ::rotateProviderSecret,
     ).also { it.configureProjectRoot(project.id, project.rootPath) }
 
-    private fun startRun(project: Project, chatId: String, prompt: QueuedPrompt) {
+    private fun startRun(project: Project, chatId: String, prompt: QueuedPrompt, tried: Set<AgentKind> = emptySet(), resend: Boolean = false) {
         val cleanPrompt = prompt.text
         val attachments = prompt.attachments
         val now = System.currentTimeMillis()
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
+        // Single agent: exactly the old behaviour. Otherwise the routing picks the agent (and may strip an @agent tag).
+        val routed: RoutedMessage = if (_state.value.routing.mode == RouteMode.SINGLE) {
+            RoutedMessage(_state.value.agentKind, cleanPrompt, tagged = false)
+        } else {
+            routeFor(cleanPrompt, tried) ?: RoutedMessage(_state.value.agentKind, cleanPrompt, tagged = false).also {
+                _state.update { st -> st.copy(bannerMessage = UiText.res(R.string.route_none_ready)) }
+            }
+        }
+        val agent = routed.agent
+        if (!resend && _state.value.routing.mode == RouteMode.BALANCED) preferences.routeCounter = preferences.routeCounter + 1
         // The agent sees the attachments as workspace paths it can open with its own tools.
         val agentPrompt = if (attachments.isEmpty()) {
-            cleanPrompt
+            routed.text
         } else {
             buildString {
-                append(cleanPrompt.ifEmpty { "See the attached files." })
+                append(routed.text.ifEmpty { "See the attached files." })
                 append("\n\nAttached files (inside the workspace):\n")
                 attachments.forEach { append("- ").append(it.relativePath).append(" (").append(it.mimeType).append(")\n") }
             }
@@ -1200,19 +1271,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             id = "streaming-assistant",
             fromUser = false,
             text = "",
+            agent = agent.stableId.takeIf { _state.value.routing.mode != RouteMode.SINGLE },
         )
         // A placeholder left behind by an abnormal end would repeat its LazyColumn key ("Key was already used" crash).
         val base = if (chatId == _state.value.activeChatId) _state.value.messages else preferences.loadMessages(project.id, chatId)
         val historyBefore = base.filterNot { it.id == "streaming-assistant" }
-        val updatedMessages = historyBefore + userMsg + assistantPlaceholder
-        preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
+        val historyForAgent = if (resend) historyBefore else historyBefore + userMsg
+        val updatedMessages = historyForAgent + assistantPlaceholder
+        preferences.saveMessages(project.id, chatId, historyForAgent)
 
         val autoTitle = cleanPrompt.lineSequence().firstOrNull()?.trim().orEmpty().let { firstLine ->
             if (firstLine.length > 34) firstLine.take(34).trimEnd() + "…" else firstLine
         }
         // Only Claude Code runs several chats at once. When another chat is already working in the project, this
         // one gets its own branch so the two cannot overwrite each other's files.
-        val agentKind = _state.value.agentKind
+        val agentKind = agent
         val wasIsolated = _state.value.chats.firstOrNull { it.id == chatId }?.isolated == true
         val isolated = agentKind == AgentKind.CLAUDE_CODE && (wasIsolated || runs.isNotEmpty())
         if (isolated && !wasIsolated) _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_auto)) }
@@ -1236,7 +1309,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjectChats(project.id, updatedChats)
         preferences.saveProjects(updatedProjects)
 
-        val agent = _state.value.agentKind
         val bridge: RuntimeBridge = when (agent) {
             AgentKind.CLAUDE_CODE -> newClaudeBridge(project)
             AgentKind.DEEPSEEK_HARNESS -> dshRuntime
@@ -1249,6 +1321,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ownsBridge = agent == AgentKind.CLAUDE_CODE,
             lastPrompt = QueuedPrompt(text = cleanPrompt, attachments = attachments),
             isolated = isolated,
+            agent = agent,
+            tried = tried,
         )
         run.messages = updatedMessages
         run.statusLine = UiText.res(R.string.agent_status_starting, agent.title)
@@ -1281,12 +1355,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     projectSlug = branch?.slug ?: project.slug,
                     projectKind = project.kind,
                     prompt = agentPrompt,
-                    conversationHistory = historyBefore + userMsg,
-                    provider = _state.value.providerProfile,
+                    conversationHistory = historyForAgent,
+                    provider = agentProfile(agent),
                 )
             } catch (error: Throwable) {
                 if (error !is CancellationException) {
                     val app = getApplication<Application>()
+                    if (tryFailover(run, error.message ?: app.getString(R.string.agent_turn_error_unknown))) return@launch
                     appendAssistantText(run, "\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
                     offerRetry(run)
                 }
@@ -1341,7 +1416,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val retry = _state.value.retryPrompt ?: return
         val project = _state.value.activeProject ?: return
         if (runs.containsKey(retry.chatId) || retry.chatId != _state.value.activeChatId) return
-        if (!canStartAnotherRun()) {
+        if (!canStartAnotherRun(tentativeAgent(retry.prompt.text))) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             return
         }
@@ -1374,7 +1449,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 continue
             }
             if (runs.containsKey(chatId)) continue
-            if (!canStartAnotherRun()) break
+            if (!canStartAnotherRun(tentativeAgent(forChat.first().text))) break
             val merged = QueuedPrompt(
                 text = forChat.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n"),
                 attachments = forChat.flatMap { it.attachments },
@@ -1499,6 +1574,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is RuntimeEvent.SessionFailed -> {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
+                if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
                 appendAssistantText(run, "\n\n[$reason]")
                 offerRetry(run)
                 finishRun(run)
@@ -3835,6 +3911,9 @@ private class ChatRun(
     val lastPrompt: QueuedPrompt,
     /** True when the run works in the chat's own branch (a clone of the project), not in the project folder. */
     val isolated: Boolean = false,
+    val agent: AgentKind = AgentKind.CLAUDE_CODE,
+    /** Agents whose turn already failed for this message (Failover and Balanced). */
+    val tried: Set<AgentKind> = emptySet(),
 ) {
     var job: Job? = null
     var eventsJob: Job? = null

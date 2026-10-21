@@ -1,0 +1,129 @@
+package com.nextcraft.forge.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.nextcraft.forge.R
+import com.nextcraft.forge.model.AgentKind
+import com.nextcraft.forge.model.RouteMode
+
+/** Short label of a routing mode, shown on the composer chip. */
+@Composable
+internal fun routeModeLabel(mode: RouteMode): String = stringResource(
+    when (mode) {
+        RouteMode.SINGLE -> R.string.route_mode_single
+        RouteMode.MANUAL -> R.string.route_mode_manual
+        RouteMode.FAILOVER -> R.string.route_mode_failover
+        RouteMode.BALANCED -> R.string.route_mode_balanced
+    },
+)
+
+private fun routeModeHint(mode: RouteMode): Int = when (mode) {
+    RouteMode.SINGLE -> R.string.route_hint_single
+    RouteMode.MANUAL -> R.string.route_hint_manual
+    RouteMode.FAILOVER -> R.string.route_hint_failover
+    RouteMode.BALANCED -> R.string.route_hint_balanced
+}
+
+/**
+ * Chat settings for using several agents in one conversation: the mode (single, manual with @agent tags, failover,
+ * balanced) and which agents take part, in priority order. Opened from the composer chip next to the model chip.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val tokens = LocalForgeThemeTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val routing = state.routing
+    // Ordered list: enabled agents in priority order first, then the ones that are off.
+    val enabled = routing.agents
+    val ordered = enabled + AgentKind.entries.filterNot { it in enabled }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = tokens.cardContainerColor,
+    ) {
+        Column(
+            modifier = Modifier
+                .heightIn(max = 560.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = ForgeSpace.card)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(stringResource(R.string.route_sheet_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
+            RouteMode.entries.forEach { mode ->
+                RadioRow(
+                    title = routeModeLabel(mode),
+                    subtitle = stringResource(routeModeHint(mode)),
+                    selected = routing.mode == mode,
+                    onClick = { viewModel.setRouteMode(mode) },
+                    horizontalPadding = 0.dp,
+                )
+            }
+            if (routing.mode != RouteMode.SINGLE) {
+                Text(
+                    stringResource(if (routing.mode == RouteMode.MANUAL) R.string.route_agents_manual else R.string.route_agents_priority),
+                    fontSize = ForgeType.secondary,
+                    color = scheme.onSurfaceVariant,
+                )
+                ordered.forEachIndexed { index, agent ->
+                    val on = agent in enabled
+                    val ready = agent in state.readyAgents
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(agent.displayTitle(), fontWeight = FontWeight.Medium)
+                            Text(
+                                text = stringResource(if (ready) R.string.route_agent_ready else R.string.route_agent_not_ready),
+                                fontSize = ForgeType.secondary,
+                                color = if (ready) scheme.onSurfaceVariant else scheme.error,
+                            )
+                        }
+                        if (on && index > 0) {
+                            IconButton(onClick = {
+                                val moved = enabled.toMutableList()
+                                val at = moved.indexOf(agent)
+                                if (at > 0) {
+                                    moved.removeAt(at)
+                                    moved.add(at - 1, agent)
+                                    viewModel.setRouteAgents(moved)
+                                }
+                            }) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = stringResource(R.string.route_move_up, agent.displayTitle()))
+                            }
+                        }
+                        Switch(
+                            checked = on,
+                            onCheckedChange = { checked ->
+                                // At least one agent stays on, otherwise Failover and Balanced would have nobody to use.
+                                val next = if (checked) enabled + agent else enabled - agent
+                                if (next.isNotEmpty()) viewModel.setRouteAgents(next)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

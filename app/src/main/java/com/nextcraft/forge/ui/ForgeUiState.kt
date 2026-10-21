@@ -12,6 +12,7 @@ import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.runtime.BranchStatus
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
+import com.nextcraft.forge.model.RoutingConfig
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.ChangeItem
 import com.nextcraft.forge.model.ChatAttachment
@@ -161,6 +162,10 @@ data class ForgeUiState(
     val sessionRunning: Boolean = false,
     /** Chats of the active project whose agent turn is running right now. */
     val runningChatIds: Set<String> = emptySet(),
+    /** How chat messages pick an agent (single agent unless the user changed it in the chat). */
+    val routing: RoutingConfig = RoutingConfig(),
+    /** Agents that have credentials; refreshed when the routing sheet opens. */
+    val readyAgents: Set<AgentKind> = emptySet(),
     val activeStatusLine: UiText? = null,
     val pendingToolRequest: ToolRequest? = null,
     val changedItems: List<ChangeItem> = emptyList(),

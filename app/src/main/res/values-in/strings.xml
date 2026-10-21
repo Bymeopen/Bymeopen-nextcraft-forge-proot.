@@ -1192,4 +1192,20 @@
     <string name="rea_packed_hint">Entropi tinggi: berkas mungkin dipak atau dienkripsi.</string>
     <string name="rea_functions_hint">Ketuk fungsi untuk melihat disassembly-nya.</string>
     <string name="rea_no_files">Tidak ada berkas. Buka tab File sekali untuk memuat daftar.</string>
+    <string name="route_sheet_title">Agen dalam chat ini</string>
+    <string name="route_mode_single">Tunggal</string>
+    <string name="route_mode_manual">Manual</string>
+    <string name="route_mode_failover">Failover</string>
+    <string name="route_mode_balanced">Bergantian</string>
+    <string name="route_hint_single">Satu agen menjawab semuanya: yang dipilih di lembar model.</string>
+    <string name="route_hint_manual">Anda memilih per pesan dengan memulainya dengan @claude, @deepseek atau @agy. Pesan tanpa tag masuk ke agen terpilih.</string>
+    <string name="route_hint_failover">Agen pertama dalam daftar menjawab. Jika gilirannya gagal, agen berikutnya mengambil alih dengan pesan yang sama.</string>
+    <string name="route_hint_balanced">Agen bergiliran dari pesan ke pesan. Giliran yang gagal dilanjutkan oleh agen berikutnya.</string>
+    <string name="route_agents_manual">Agen yang bisa ditandai</string>
+    <string name="route_agents_priority">Agen yang dipakai, urut prioritas</string>
+    <string name="route_agent_ready">Siap</string>
+    <string name="route_agent_not_ready">Belum diatur (tambahkan kredensial di Atur AI)</string>
+    <string name="route_move_up">Naikkan %1$s</string>
+    <string name="route_failover_notice">Dilanjutkan oleh %1$s</string>
+    <string name="route_none_ready">Tidak ada agen di daftar yang siap; memakai agen terpilih.</string>
 </resources>
