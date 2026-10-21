@@ -56,6 +56,7 @@ import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
+import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 
 /**
