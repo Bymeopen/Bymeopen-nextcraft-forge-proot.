@@ -676,6 +676,7 @@ class RuntimeInstaller(private val context: Context) {
         }
         val claude = File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/"))
         claude.parentFile?.mkdirs()
+        claude.parentFile?.let { if (!it.canWrite()) RootfsRepair.reclaimOwnership(it, AndroidProcess.myUid(), recursive = false) }
         val staged = File(claude.parentFile, ".claude-$latest.installing")
         val previousVersion = claudeMarker.readTextOrNull()
         try {
@@ -725,6 +726,8 @@ class RuntimeInstaller(private val context: Context) {
             onProgress(RuntimeInstallProgress(agyDownloadLabel, ratio * 0.9f, bytes, total.takeIf { it > 0L }, event = RuntimeInstallEvent.DOWNLOAD))
         }
         val destination = File(rootfs, AGY_GUEST_PATH.removePrefix("/"))
+        destination.parentFile?.mkdirs()
+        destination.parentFile?.let { if (!it.canWrite()) RootfsRepair.reclaimOwnership(it, AndroidProcess.myUid(), recursive = false) }
         var found = false
         try {
           replaceBinaryWithRollback(
@@ -2059,6 +2062,7 @@ class RuntimeInstaller(private val context: Context) {
         ) { "Invalid project workspace path" }
         ensureChrootScripts()
         writeResolver()
+        ensureShellPrompt()
         workspace.mkdirs()
         File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         writeAndroidGradleConfiguration(targetRootfs)
@@ -2174,7 +2178,9 @@ class RuntimeInstaller(private val context: Context) {
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
-ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
+# Parallel chats share this directory: the session id (set by the app) tags the request so only its owner answers it.
+SID="${'$'}{NEXTCRAFT_SESSION_ID:-}"
+ID="${'$'}{SID:+${'$'}{SID}_}${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
 EVENT=PermissionRequest
 # Without a live app watcher (Claude started by hand from the Terminal tab) answer nothing, so Claude Code keeps its
@@ -2318,6 +2324,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             // Set the mode before the rename so the file is never visible without its execute bit.
             if (mode != null) Os.chmod(temp.absolutePath, mode)
             Os.rename(temp.absolutePath, target.absolutePath)
+        } catch (error: java.io.IOException) {
+            // EACCES: the folder or file belongs to root (or carries a label the app may not write). Let root write it.
+            val written = RootfsRepair.writeAsRoot(
+                target, content.toByteArray(Charsets.UTF_8), File(downloads, ".root-write.tmp"), AndroidProcess.myUid(),
+                mode ?: 0b110100100,
+            )
+            if (!written) throw error
         } finally {
             temp.delete()
         }
@@ -2336,7 +2349,35 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
     }
 
+    /**
+     * dpkg (any `apt install` inside the chroot) re-applies base-files' mode 0700 root:root to /root, and files that
+     * root creates there stay root's. The app UID is then locked out of /root and below: the version markers cannot be
+     * read (REA shows "not installed"), `.claude` cannot be written, `agy` cannot be replaced. Folders are handed back
+     * to the app UID (not recursively: root still reaches everything, and the per-file fallbacks cover the rest).
+     */
+    internal fun ensureAppAccess() {
+        val uid = AndroidProcess.myUid()
+        for (relative in listOf("root", "root/.claude", "root/.local", "root/.local/bin", "etc")) {
+            val dir = File(rootfs, relative)
+            if (dir.isDirectory && (!dir.canWrite() || !dir.canExecute())) {
+                RootfsRepair.reclaimOwnership(dir, uid, recursive = false)
+            }
+        }
+    }
+
+    /** Keeps the coloured prompt block in /root/.bashrc ([ShellPrompt]); an unreadable file is left alone. */
+    private fun ensureShellPrompt() {
+        val bashrc = File(rootfs, "root/.bashrc")
+        val current = runCatching { if (bashrc.isFile) bashrc.readText() else "" }.getOrNull() ?: return
+        val updated = ShellPrompt.apply(current)
+        if (updated != current) {
+            runCatching { writeRootfsFileAtomically(bashrc, updated, mode = 0b110100100) }
+                .onFailure { Log.w("RuntimeInstaller", "Could not write the shell prompt", it) }
+        }
+    }
+
     private fun writeResolver() {
+        ensureAppAccess()
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val dns = manager?.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
         val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
@@ -2345,7 +2386,17 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) {
             resolvFile.delete()
         }
-        resolvFile.writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        val resolver = servers.joinToString("\n") { "nameserver $it" } + "\n"
+        try {
+            // A link that survived the delete above (not ours to unlink) would send the write into /run, which is root's.
+            if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) throw java.io.IOException("resolv.conf is still a symlink")
+            resolvFile.writeText(resolver)
+        } catch (error: java.io.IOException) {
+            // /etc/resolv.conf is root-owned after the chroot supervisor (running as root) created it.
+            if (!RootfsRepair.writeAsRoot(resolvFile, resolver.toByteArray(Charsets.UTF_8), File(downloads, ".root-write.tmp"), AndroidProcess.myUid())) {
+                throw error
+            }
+        }
         ensureLocalhostInHosts()
     }
 
@@ -2409,6 +2460,25 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Opens [target] for writing during an unpack. An earlier unpack may have left a read-only file (mode 0555) or root
+     * rewrote it, which made the app UID's open fail with EACCES (Antigravity install stopped at 80%). A leftover is
+     * replaced; if the folder itself is root's it is reclaimed first.
+     */
+    private fun openForWrite(target: File): FileOutputStream {
+        try {
+            return FileOutputStream(target)
+        } catch (first: java.io.IOException) {
+            val parent = target.parentFile
+            if (parent != null && !parent.canWrite()) RootfsRepair.reclaimOwnership(parent, AndroidProcess.myUid(), recursive = false)
+            if (target.exists() && !target.canWrite() && !target.delete()) {
+                RootfsRepair.reclaimOwnership(target, AndroidProcess.myUid(), recursive = false)
+                target.delete()
+            }
+            return FileOutputStream(target)
         }
     }
 
@@ -2491,7 +2561,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                         currentEntry.isFile -> {
                             target.parentFile?.mkdirs()
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            FileOutputStream(target).use { output -> tar.copyTo(output) }
+                            openForWrite(target).use { output -> tar.copyTo(output) }
                             runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }
                         }
                     }
@@ -2891,7 +2961,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
-            label = "DeepSeek Harness",
+            label = "DeepSeek",
             fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
             sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
             compressedBytes = 28_066_921L,

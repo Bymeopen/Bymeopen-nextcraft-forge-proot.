@@ -81,7 +81,16 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
             )
-            auth.message?.let {
+            // The signed-in account: shown whenever it is known, not only right after the sign-in finished.
+            if (signedIn) {
+                androidx.compose.runtime.LaunchedEffect(signedIn, auth.status) {
+                    if (auth.accountEmail == null) viewModel.claudeAuth.loadAccountEmail()
+                }
+                auth.accountEmail?.let {
+                    Text(stringResource(R.string.rt_auth_connected_as, it), fontSize = ForgeType.rowTitle, color = scheme.primary)
+                }
+            }
+            auth.message?.takeUnless { signedIn && auth.accountEmail != null }?.let {
                 Text(it.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (inFlight) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

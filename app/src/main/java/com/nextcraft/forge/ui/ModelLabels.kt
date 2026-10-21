@@ -45,7 +45,7 @@ fun ProviderKind.displaySubtitle(): String = stringResource(subtitleRes())
 
 fun AgentKind.displayTitle(): String = when (this) {
     AgentKind.CLAUDE_CODE -> "Claude Code"
-    AgentKind.DEEPSEEK_HARNESS -> "DeepSeek Harness"
+    AgentKind.DEEPSEEK_HARNESS -> "DeepSeek"
     AgentKind.ANTIGRAVITY -> "Antigravity CLI"
 }
 

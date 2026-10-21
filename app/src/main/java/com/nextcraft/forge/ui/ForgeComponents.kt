@@ -154,7 +154,7 @@ fun rememberImeVisible(): State<Boolean> {
 fun forgeBackTarget(tab: ForgeTab): ForgeTab? = when (tab) {
     ForgeTab.PROJECTS -> null
     ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
-    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS, ForgeTab.CODE_VIEWER,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS, ForgeTab.CODE_VIEWER, ForgeTab.REA,
     -> ForgeTab.TOOLS
     ForgeTab.TERMINAL, ForgeTab.AGENT, ForgeTab.TOOLS, ForgeTab.SETTINGS -> ForgeTab.PROJECTS
 }
@@ -341,7 +341,7 @@ fun ForgePillIcon(
             .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 48.dp, height = 48.dp) // 48 dp is the minimum touch target
             .clip(RoundedCornerShape(100))
-            .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

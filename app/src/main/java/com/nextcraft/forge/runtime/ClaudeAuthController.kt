@@ -73,12 +73,12 @@ class ClaudeAuthController(
             return@withContext
         }
         // Show the account at once from the cache, then confirm it with the CLI (a few seconds under PRoot).
-        val cached = accountCache.getString(ACCOUNT_EMAIL_KEY, null)?.takeIf { it.isNotBlank() }
+        val cached = accountPrefs.claudeAccountEmail.takeIf { it.isNotBlank() }
         mutableState.value = signedInState(cached)
         if (mutableState.value.accountEmail == null || cached == null) {
             val live = readAccountEmail()
             if (live != null) {
-                accountCache.edit().putString(ACCOUNT_EMAIL_KEY, live).apply()
+                accountPrefs.claudeAccountEmail = live
                 if (mutableState.value.status == ClaudeAuthStatus.SIGNED_IN) mutableState.value = signedInState(live)
             }
         }
@@ -90,7 +90,10 @@ class ClaudeAuthController(
         accountEmail = account,
     )
 
-    private val accountCache by lazy { context.getSharedPreferences("claude_account", Context.MODE_PRIVATE) }
+    private val accountPrefs by lazy { com.nextcraft.forge.data.AppPreferences(context) }
+
+    /** Upstream entry point; the card refreshes through [refreshFromDisk], which also fills in the email. */
+    suspend fun loadAccountEmail() = refreshFromDisk()
 
     suspend fun beginLogin(mode: ClaudeLoginMode, email: String = "") = withContext(Dispatchers.IO) {
         if (!loginStarting.compareAndSet(false, true)) return@withContext
@@ -226,7 +229,7 @@ class ClaudeAuthController(
                         lastCredentialCheck = now
                         if ((exited || looksDone || mutableState.value.status == ClaudeAuthStatus.COMPLETING) && hasCredential()) {
                             val account = readAccountEmail()
-                            accountCache.edit().apply { if (account != null) putString(ACCOUNT_EMAIL_KEY, account) else remove(ACCOUNT_EMAIL_KEY) }.apply()
+                            accountPrefs.claudeAccountEmail = account.orEmpty()
                             mutableState.value = signedInState(account)
                             onSignedInChanged(true)
                             break
@@ -342,8 +345,9 @@ class ClaudeAuthController(
             if (!logout.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) logout.destroyForcibly()
             output.delete()
             if (hasCredential()) throw UiTextException(UiText.res(R.string.rt_auth_claude_signout_incomplete))
-            accountCache.edit().remove(ACCOUNT_EMAIL_KEY).apply()
+            accountPrefs.claudeAccountEmail = ""
             onSignedInChanged(false)
+            com.nextcraft.forge.data.AppPreferences(context).claudeAccountEmail = ""
             mutableState.value = ClaudeAuthState(message = UiText.res(R.string.rt_auth_claude_signed_out))
         } catch (error: Throwable) {
             mutableState.value = previous.copy(message = error.toUiText(R.string.rt_auth_claude_signout_failed))
@@ -393,7 +397,6 @@ class ClaudeAuthController(
 
     private companion object {
         const val CLAUDE_BINARY = "/usr/local/bin/claude"
-        const val ACCOUNT_EMAIL_KEY = "email"
         val TRUSTED_SIGN_IN_HOSTS = listOf("claude.ai", "claude.com", "anthropic.com")
         const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
         const val RESTART_WAIT_MS = 5_000L

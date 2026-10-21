@@ -16,6 +16,29 @@ internal object RootfsRepair {
         return source.renameTo(target)
     }
 
+    /**
+     * Replaces [target] with [content] by writing beside it and renaming over it, so a symlink standing there (an
+     * `apt install` puts /etc/resolv.conf back as a link into /run/systemd) is replaced rather than followed.
+     * Under PRoot the app UID owns every rootfs file, so no privilege is involved; [staging] and [uid] are kept for
+     * call-site compatibility with the chroot engine.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun writeAsRoot(target: File, content: ByteArray, staging: File, uid: Int, mode: Int = 0b110100100): Boolean {
+        val parent = target.parentFile ?: return false
+        parent.mkdirs()
+        val temp = File(parent, target.name + ".nextcraft-tmp")
+        return runCatching {
+            temp.writeBytes(content)
+            android.system.Os.chmod(temp.absolutePath, mode)
+            android.system.Os.rename(temp.absolutePath, target.absolutePath)
+            true
+        }.getOrElse { temp.delete(); false }
+    }
+
+    /** Every rootfs file is already owned by the app UID under PRoot; nothing to reclaim. */
+    @Suppress("UNUSED_PARAMETER")
+    fun reclaimOwnership(target: File, uid: Int, recursive: Boolean = true): Boolean = true
+
     fun safeDeleteRecursively(targetDir: File): Boolean {
         if (!targetDir.exists()) return true
         return targetDir.deleteRecursively() || !targetDir.exists()

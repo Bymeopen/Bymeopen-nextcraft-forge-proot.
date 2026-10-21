@@ -98,6 +98,30 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 )
             }
         }
+        // Cross-builds (Windows, Linux x86_64, iOS): install the missing compilers, or prepare the macOS CI workflow.
+        if (matrix.installCommand != null || matrix.iosProject != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                if (matrix.installCommand != null) {
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel.buildMatrix::installCrossTools,
+                        enabled = !matrix.running && !blocked,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.tool_install_cross_tools)) }
+                }
+                if (matrix.iosProject != null) {
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel.buildMatrix::createIosWorkflow,
+                        enabled = !matrix.running,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.tool_create_ios_workflow)) }
+                }
+            }
+            if (matrix.iosProject != null) {
+                Text(stringResource(R.string.tool_ios_needs_macos), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
+            }
+        }
         if (matrix.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         LogBox(text = matrix.log, placeholder = stringResource(R.string.tool_log_placeholder))
     }
