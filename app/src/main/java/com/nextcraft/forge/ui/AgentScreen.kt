@@ -232,35 +232,33 @@ fun AgentScreen(
         }
 
         state.activeStatusLine?.let { statusLine ->
+            // A slim status line: no sliding bar (the spinner by the chat title shows that it is working), small text,
+            // and a compact Stop (the composer's round button also stops).
             Surface(
                 color = tokens.cardElevatedColor,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    if (state.activeChatRunning) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(start = 12.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = statusLine.asString(),
-                            style = MaterialTheme.typography.labelMedium,
+                            fontSize = ForgeType.caption,
                             color = tokens.accentText,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         )
                         if (state.activeChatRunning) {
-                            OutlinedButton(
+                            ForgeTextButton(
                                 onClick = viewModel::stopActiveTask,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier.heightIn(min = ForgeSpace.minTouch),
+                                modifier = Modifier.heightIn(min = 32.dp),
                             ) {
                                 Text(stringResource(R.string.agent_stop), fontSize = ForgeType.caption)
                             }
