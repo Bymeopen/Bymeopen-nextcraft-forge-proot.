@@ -18,6 +18,8 @@
     <string name="agent_deny">Deny</string>
     <string name="agent_approve_execution">Approve Execution</string>
     <string name="agent_tool_steps">%1$s tool steps</string>
+    <string name="agent_status_writing">Writing…</string>
+    <string name="agent_status_working">Working…</string>
     <string name="agent_thinking">Thinking…</string>
     <string name="launch_launch">Launch</string>
     <string name="launch_cancel_build">Cancel build</string>

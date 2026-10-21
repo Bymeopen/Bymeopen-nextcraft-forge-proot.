@@ -9,6 +9,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -693,24 +697,78 @@ internal fun ChatMessageCard(
                     if (!streaming) CopyMessageButton(message.text, Modifier.align(Alignment.TopEnd))
                 }
             }
-        } else if (message.workItems.isEmpty()) {
-            val blink = rememberBlink()
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(width = 8.dp, height = 16.dp)
-                        .graphicsLayer { alpha = blink }
-                        .background(scheme.primary, RoundedCornerShape(2.dp)),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.agent_thinking),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
-                    modifier = Modifier.forgeLive(),
+        }
+        if (streaming) {
+            // Every provider shows the same live line: rotating dots, time since the reply started, and what it is doing.
+            val phase = when {
+                message.text.isNotBlank() -> R.string.agent_status_writing
+                message.workItems.isEmpty() -> R.string.agent_thinking
+                else -> R.string.agent_status_working
+            }
+            WorkingIndicator(startedAt = message.createdAt, label = stringResource(phase), modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+        }
+    }
+}
+
+/**
+ * "(dots) 1m 4s · Thinking…": a ring of dots that turns, the time since the reply started (ticks every second), and the
+ * phase. TalkBack hears only the phase (it changes rarely), never the per-second time.
+ */
+@Composable
+internal fun WorkingIndicator(startedAt: java.time.Instant, label: String, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(startedAt) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+    val elapsed = (now - startedAt.toEpochMilli()).coerceAtLeast(0L)
+    val reduceMotion = rememberReduceMotion()
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "working-dots")
+    val spinning by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "working-spin",
+    )
+    val angle = if (reduceMotion) 0f else spinning
+    val dotColor = scheme.primary
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.clearAndSetSemantics {
+            contentDescription = label
+            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+        },
+    ) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(18.dp)) {
+            val dots = 8
+            val ring = size.minDimension / 2f - 2.dp.toPx()
+            val head = angle / 360f * dots
+            for (i in 0 until dots) {
+                val radians = Math.toRadians(i * 360.0 / dots - 90.0)
+                // Dots just behind the head are bright, the rest fade: it reads as a turning tail.
+                val behind = ((head - i) % dots + dots) % dots
+                val alpha = (1f - behind / dots).coerceIn(0.15f, 1f)
+                drawCircle(
+                    color = dotColor.copy(alpha = alpha),
+                    radius = 1.7.dp.toPx() * (0.6f + 0.4f * alpha),
+                    center = androidx.compose.ui.geometry.Offset(
+                        center.x + (kotlin.math.cos(radians) * ring).toFloat(),
+                        center.y + (kotlin.math.sin(radians) * ring).toFloat(),
+                    ),
                 )
             }
         }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = formatWorked(elapsed) + " · " + label,
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -755,7 +813,7 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-private fun formatWorked(millis: Long): String {
+internal fun formatWorked(millis: Long): String {
     val totalSec = millis / 1000
     val m = totalSec / 60
     val sec = totalSec % 60

@@ -18,6 +18,8 @@
     <string name="agent_deny">Tolak</string>
     <string name="agent_approve_execution">Setujui eksekusi</string>
     <string name="agent_tool_steps">%1$s langkah alat</string>
+    <string name="agent_status_writing">Menulis…</string>
+    <string name="agent_status_working">Bekerja…</string>
     <string name="agent_thinking">Berpikir…</string>
     <string name="launch_launch">Luncurkan</string>
     <string name="launch_cancel_build">Batalkan build</string>

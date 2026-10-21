@@ -2236,7 +2236,24 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
     }
 
+    /**
+     * dpkg (any `apt install` inside the chroot) re-applies base-files' mode 0700 root:root to /root, and files that
+     * root creates there stay root's. The app UID is then locked out of /root and below: the version markers cannot be
+     * read (REA shows "not installed"), `.claude` cannot be written, `agy` cannot be replaced. Folders are handed back
+     * to the app UID (not recursively: root still reaches everything, and the per-file fallbacks cover the rest).
+     */
+    internal fun ensureAppAccess() {
+        val uid = AndroidProcess.myUid()
+        for (relative in listOf("root", "root/.claude", "root/.local", "root/.local/bin", "etc")) {
+            val dir = File(rootfs, relative)
+            if (dir.isDirectory && (!dir.canWrite() || !dir.canExecute())) {
+                RootfsRepair.reclaimOwnership(dir, uid, recursive = false)
+            }
+        }
+    }
+
     private fun writeResolver() {
+        ensureAppAccess()
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val dns = manager?.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
         val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }

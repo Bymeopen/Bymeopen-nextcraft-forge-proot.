@@ -323,6 +323,8 @@ class ReaController(context: Context) {
     }
 
     private fun readInstalledVersion(): String? = runCatching {
+        // /root can be locked to root after an apt install in the chroot; without access the marker looks missing.
+        if (!File(RuntimeInstaller.rootfsDir(appContext), "root").canExecute()) RuntimeInstaller(appContext).ensureAppAccess()
         File(RuntimeInstaller.rootfsDir(appContext), "root/.pocket-rea-version").takeIf { it.isFile }?.readText()?.trim()
     }.getOrNull()?.takeIf { it.isNotEmpty() }
 
