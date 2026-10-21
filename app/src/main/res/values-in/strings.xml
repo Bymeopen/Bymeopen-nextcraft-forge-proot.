@@ -1220,4 +1220,5 @@
     <string name="route_rule_add">Tambah aturan</string>
     <string name="settings_rea_chat_hint">Beri tahu agen tentang REA</string>
     <string name="settings_rea_chat_hint_subtitle">Mati secara bawaan. Jika menyala, pesan chat tentang biner (apk, elf, firmware) juga memberi tahu agen bahwa perintah rea tersedia. Selama mati, tidak ada teks tambahan yang dikirim.</string>
+    <string name="chat_menu_rea">REA (analisis biner)</string>
 </resources>

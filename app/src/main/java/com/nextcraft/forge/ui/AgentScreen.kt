@@ -218,6 +218,7 @@ fun AgentScreen(
                 branchSheetOpen = true
             },
             onEnableBranch = { viewModel.enableChatBranch(state.activeChatId) },
+            onOpenRea = { viewModel.selectTab(ForgeTab.REA) },
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
