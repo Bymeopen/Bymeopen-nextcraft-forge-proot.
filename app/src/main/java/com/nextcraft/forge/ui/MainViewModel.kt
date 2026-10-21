@@ -3470,6 +3470,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Guards createQuickProject against a second tap landing while the workspace for the first is still being
+    // created: tapping it twice quickly before the list updates created more than one quick project.
+    private val creatingQuickProject = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /** A throwaway chat workspace (kind QUICK_PROJECT) with a generated name; opens straight into Agent. */
     fun createQuickProject() {
         // The new workspace would be selected under a running agent, build, or terminal process.
@@ -3477,23 +3481,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_busy_before_quick_project)) }
             return
         }
+        if (!creatingQuickProject.compareAndSet(false, true)) return
         viewModelScope.launch {
-            val project = withContext(Dispatchers.IO) {
-                val identity = generateQuickChatIdentity(_state.value.projects.map { it.slug }.toSet())
-                val project = Project(
-                    name = identity.displayName,
-                    description = "Quick project",
-                    language = "Multi-language",
-                    slug = identity.slug,
-                    kind = ProjectKind.QUICK_PROJECT,
-                )
-                checkpoints.ensureWorkspace(project.id)
-                project
-            }
-            configureAllProjectRoots(prependProject(project))
-            leaveOpenFile {
-                selectProject(project.id)
-                openConversation()
+            try {
+                val project = withContext(Dispatchers.IO) {
+                    val identity = generateQuickChatIdentity(_state.value.projects.map { it.slug }.toSet())
+                    val project = Project(
+                        name = identity.displayName,
+                        description = "Quick project",
+                        language = "Multi-language",
+                        slug = identity.slug,
+                        kind = ProjectKind.QUICK_PROJECT,
+                    )
+                    checkpoints.ensureWorkspace(project.id)
+                    project
+                }
+                configureAllProjectRoots(prependProject(project))
+                leaveOpenFile {
+                    selectProject(project.id)
+                    openConversation()
+                }
+            } finally {
+                creatingQuickProject.set(false)
             }
         }
     }
