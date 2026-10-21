@@ -2,6 +2,8 @@
 
 package com.nextcraft.forge.ui
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -116,7 +118,7 @@ fun SettingsScreenModern(
         )
 
         // ───────────────────────── General ─────────────────────────
-        ForgeSectionLabel(stringResource(R.string.settings_general), horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_general), horizontalPadding = 6.dp, topPadding = 8.dp)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             val activeThemeMode = ForgeThemeMode.fromStored(state.themeMode)
             var appearanceOpen by rememberSaveable { mutableStateOf(false) }
@@ -128,48 +130,7 @@ fun SettingsScreenModern(
                 trailing = { Chevron(appearanceOpen) },
             )
             AnimatedVisibility(visible = appearanceOpen) {
-                // 2 × 2 tiles: icon-less by design, the badge carries the name; selection by accent tint + ring.
-                Column(
-                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ForgeThemeMode.entries.chunked(2).forEach { pair ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pair.forEach { mode ->
-                                val selected = mode == activeThemeMode
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = if (selected) scheme.primary.copy(alpha = 0.12f) else tokens.cardElevatedColor,
-                                    border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, scheme.primary.copy(alpha = 0.6f)) else null,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 76.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .clickable(role = Role.RadioButton) { viewModel.setThemeMode(mode.id) }
-                                        .forgeSelected(selected),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Text(
-                                            text = stringResource(mode.title),
-                                            fontSize = ForgeType.body,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (selected) scheme.primary else scheme.onSurface,
-                                        )
-                                        Text(
-                                            text = stringResource(mode.subtitle),
-                                            fontSize = ForgeType.caption,
-                                            color = scheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
-                            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
+                ThemeModeGrid(active = activeThemeMode, onSelect = viewModel::setThemeMode)
             }
             ThinDivider()
 
@@ -179,7 +140,7 @@ fun SettingsScreenModern(
             SettingsRow(
                 icon = ForgeGlyph.GLOBE,
                 title = stringResource(R.string.settings_language),
-                subtitle = activeLanguage.nativeName,
+                subtitle = if (activeLanguage == AppLanguage.SYSTEM) stringResource(R.string.settings_language_system) else activeLanguage.nativeName,
                 onClick = { languageOpen = !languageOpen },
                 trailing = { Chevron(languageOpen) },
             )
@@ -187,7 +148,7 @@ fun SettingsScreenModern(
                 Column(modifier = Modifier.padding(bottom = 6.dp)) {
                     languages.forEach { lang ->
                         RadioRow(
-                            title = lang.nativeName,
+                            title = if (lang == AppLanguage.SYSTEM) stringResource(R.string.settings_language_system) else lang.nativeName,
                             subtitle = lang.displayName,
                             selected = lang == activeLanguage,
                             onClick = { viewModel.setLanguageCode(lang.code) },
@@ -202,6 +163,13 @@ fun SettingsScreenModern(
                 subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
                 checked = state.interactiveHighRiskApprovals,
                 onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_rea_chat_hint),
+                subtitle = stringResource(R.string.settings_rea_chat_hint_subtitle),
+                checked = state.reaChatHint,
+                onCheckedChange = viewModel::setReaChatHint,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             ForgeToggleRow(
@@ -229,7 +197,7 @@ fun SettingsScreenModern(
         }
 
         // ───────────────────────── Developer tools ─────────────────────────
-        ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_runtime), horizontalPadding = 6.dp, topPadding = 8.dp)
         var toolsOpen by rememberSaveable { mutableStateOf(true) }
         val optionalInstalled = state.installedDevStacks.count { it != DevStack.WEB }
         DisclosureCard(
@@ -339,7 +307,7 @@ fun SettingsScreenModern(
         }
 
         // ───────────────────────── Danger zone ─────────────────────────
-        ForgeSectionLabel(stringResource(R.string.settings_danger_zone), horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_danger_zone), horizontalPadding = 6.dp, topPadding = 8.dp)
         ForgeThemedCard(
             modifier = Modifier.fillMaxWidth(),
             border = androidx.compose.foundation.BorderStroke(1.dp, tokens.dangerText.copy(alpha = 0.45f)),
@@ -355,7 +323,7 @@ fun SettingsScreenModern(
         }
 
         // ───────────────────────── About ─────────────────────────
-        ForgeSectionLabel(stringResource(R.string.settings_about), horizontalPadding = 6.dp)
+        ForgeSectionLabel(stringResource(R.string.settings_about), horizontalPadding = 6.dp, topPadding = 8.dp)
         ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             SettingsRow(
                 icon = ForgeGlyph.INFO,
@@ -814,3 +782,52 @@ private fun openAllFilesAccessSettings(context: android.content.Context) {
     }
 }
 
+/** 2 × 2 theme tiles: icon-less by design, the title carries the name; selection by accent tint + ring. Tiles in a row share one height. */
+@Composable
+internal fun ThemeModeGrid(active: ForgeThemeMode, onSelect: (String) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    Column(
+        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ForgeThemeMode.entries.chunked(2).forEach { pair ->
+            // IntrinsicSize.Min + fillMaxHeight: both tiles in a row are as tall as the taller one.
+            Row(modifier = Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { mode ->
+                    val selected = mode == active
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (selected) scheme.primary.copy(alpha = 0.12f) else tokens.cardElevatedColor,
+                        border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, scheme.primary.copy(alpha = 0.6f)) else null,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .heightIn(min = 76.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(role = Role.RadioButton) { onSelect(mode.id) }
+                            .forgeSelected(selected),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.Top,
+                        ) {
+                            Text(
+                                text = stringResource(mode.title),
+                                fontSize = ForgeType.body,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (selected) scheme.primary else scheme.onSurface,
+                            )
+                            Text(
+                                text = stringResource(mode.subtitle),
+                                fontSize = ForgeType.caption,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}

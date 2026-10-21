@@ -184,8 +184,8 @@ class RuntimeExecutionService : Service() {
         if (!taskRunning) stopSelf()
     }
 
-    private fun smallIconRes(): Int =
-        applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.stat_notify_sync
+    // Ikon status bar harus siluet satu warna, bukan ikon launcher adaptif
+    private fun smallIconRes(): Int = com.nextcraft.forge.R.drawable.ic_notification
 
     private fun openAppIntent(): PendingIntent {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)

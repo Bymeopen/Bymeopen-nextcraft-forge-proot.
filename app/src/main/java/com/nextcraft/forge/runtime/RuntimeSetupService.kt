@@ -412,8 +412,8 @@ class RuntimeSetupService : Service() {
         getSystemService(NotificationManager::class.java)?.notify(RESULT_NOTIFICATION_ID, notification)
     }
 
-    private fun smallIconRes(): Int =
-        applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.stat_notify_sync
+    // Ikon status bar harus siluet satu warna, bukan ikon launcher adaptif
+    private fun smallIconRes(): Int = com.nextcraft.forge.R.drawable.ic_notification
 
     private fun openAppIntent(): PendingIntent {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)

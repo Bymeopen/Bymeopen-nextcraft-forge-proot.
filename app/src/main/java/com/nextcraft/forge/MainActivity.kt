@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.ui.AppStrings
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()

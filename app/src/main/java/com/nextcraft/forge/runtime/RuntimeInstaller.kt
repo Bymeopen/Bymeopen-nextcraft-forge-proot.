@@ -3117,7 +3117,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
             BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if [ -d "${'$'}ROOTFS/root/android-sdk" ]; then
-                # Keep in sync with AndroidToolchain.kt and chroot-exec.sh.
+                # Keep in sync with AndroidToolchain.kt.
                 export ANDROID_HOME="${'$'}{ANDROID_HOME:-/root/android-sdk}"
                 export ANDROID_SDK_ROOT="${'$'}{ANDROID_SDK_ROOT:-/root/android-sdk}"
                 export GRADLE_HOME="${'$'}{GRADLE_HOME:-/opt/gradle/gradle-9.8.1}"

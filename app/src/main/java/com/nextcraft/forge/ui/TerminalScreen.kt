@@ -90,6 +90,8 @@ internal class TerminalViewHolder {
 fun TerminalScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
+    /** Null = the general terminal of the Terminal tab; otherwise the terminal of that chat, started in the chat's folder. */
+    chatId: String? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -97,9 +99,9 @@ fun TerminalScreen(
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
 
-    LaunchedEffect(Unit) { viewModel.ensureTerminalSession() }
-    val session = remember(state.terminalRevision) { viewModel.currentTerminalSession() }
-    val finished = remember(state.terminalRevision) { viewModel.isTerminalFinished() }
+    LaunchedEffect(chatId) { viewModel.ensureTerminalSession(chatId) }
+    val session = remember(state.terminalRevision, chatId) { viewModel.currentTerminalSession(chatId) }
+    val finished = remember(state.terminalRevision, chatId) { viewModel.isTerminalFinished(chatId) }
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
     val prefs = remember { context.getSharedPreferences("forge_terminal", android.content.Context.MODE_PRIVATE) }
@@ -118,7 +120,7 @@ fun TerminalScreen(
                     context.getSystemService(InputMethodManager::class.java)?.showSoftInput(terminal, 0)
                 }
             },
-            onEmulatorReady = viewModel::flushTerminalInput,
+            onEmulatorReady = { viewModel.flushTerminalInput(chatId) },
         ).also { client -> client.onTextSizeChanged = { px -> prefs.edit().putInt(TEXT_SIZE_KEY, px).apply() } }
     }
     val terminalBackground = tokens.terminalBackground.compositeOver(scheme.background)
@@ -152,7 +154,7 @@ fun TerminalScreen(
                 ForgePillIcon(
                     icon = Icons.Default.Delete,
                     description = stringResource(R.string.terminal_clear_terminal),
-                    onClick = viewModel::clearTerminal,
+                    onClick = { viewModel.clearTerminal(chatId) },
                     enabled = session != null,
                 )
             },
@@ -220,7 +222,7 @@ fun TerminalScreen(
                             text = stringResource(R.string.terminal_session_ended, session.exitStatus),
                             fontSize = ForgeType.secondary,
                         )
-                        ForgeTextButton(onClick = viewModel::restartTerminalSession) {
+                        ForgeTextButton(onClick = { viewModel.restartTerminalSession(chatId) }) {
                             Text(stringResource(R.string.terminal_restart))
                         }
                     }
@@ -236,7 +238,8 @@ fun TerminalScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             // The shell starts in the home folder; this jumps into the open project's folder.
-            state.activeProject?.let { project ->
+            // A chat's terminal already starts in the chat's folder, so only the general terminal needs the jump.
+            state.activeProject?.takeIf { chatId == null }?.let { project ->
                 AssistChip(
                     onClick = { dismissHint(); viewModel.terminalProjectDir()?.let { dir -> viewModel.runTerminalCommand("cd " + com.nextcraft.forge.runtime.shellSingleQuote(dir)) } },
                     enabled = ready,
@@ -246,7 +249,7 @@ fun TerminalScreen(
             }
             quickCommands.forEach { cmd ->
                 AssistChip(
-                    onClick = { dismissHint(); viewModel.runTerminalCommand(cmd) },
+                    onClick = { dismissHint(); viewModel.runTerminalCommand(cmd, chatId) },
                     enabled = ready,
                     shape = RoundedCornerShape(100),
                     label = {
@@ -264,7 +267,7 @@ fun TerminalScreen(
 
         // Command line pinned last, so it floats right above the keyboard (the layout is lifted by
         // imePadding). Text goes to the running program plus Enter.
-        TerminalCommandBar(enabled = session != null, onSend = { dismissHint(); viewModel.runTerminalCommand(it) })
+        TerminalCommandBar(enabled = session != null, onSend = { dismissHint(); viewModel.runTerminalCommand(it, chatId) })
     }
 }
 
