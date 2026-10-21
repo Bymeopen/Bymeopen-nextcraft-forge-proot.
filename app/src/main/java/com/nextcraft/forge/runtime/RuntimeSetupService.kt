@@ -287,7 +287,13 @@ class RuntimeSetupService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        startForeground(NOTIFICATION_ID, setupNotification(RuntimeSetupController.snapshot.value))
+        try {
+            startForeground(NOTIFICATION_ID, setupNotification(RuntimeSetupController.snapshot.value))
+        } catch (error: RuntimeException) {
+            // Android 12+ refuses foreground promotion once the app is in the background; the install can still
+            // run (it resumes from its .part files), so do not crash the process.
+            android.util.Log.w("RuntimeSetupService", "startForeground refused: ${error::class.simpleName}")
+        }
         acquireWakeLock()
         val previousJob = installJob
         // A cancelled job can still be winding down; start the new one after it instead of dropping the request.
@@ -451,6 +457,15 @@ class RuntimeSetupService : Service() {
             runCatching { lock.release() }
         }
         wakeLock = null
+    }
+
+    /** Android 15+ dataSync time limit (about six hours per 24 hours): stop promptly; downloads resume from .part files. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        android.util.Log.w("RuntimeSetupService", "dataSync foreground time limit reached")
+        installJob?.takeIf { it.isActive }?.cancel(CancellationException("Foreground time limit reached"))
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     override fun onDestroy() {

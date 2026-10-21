@@ -438,7 +438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val stacksCsv = current.selectedDevStacks.joinToString(",") { it.name }
         preferences.selectedDevStacks = current.selectedDevStacks.map { it.name }.toSet()
         preferences.agentKind = current.agentKind.stableId
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java)
                 .setAction(RuntimeSetupService.ACTION_START)
@@ -466,9 +466,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return false
     }
 
+    /** Android 8+ throws when the app is not allowed to start a foreground service (12+: also from the background). */
+    private fun startServiceSafely(context: android.content.Context, intent: Intent) {
+        runCatching { ContextCompat.startForegroundService(context, intent) }
+            .onFailure { android.util.Log.w("MainViewModel", "Could not start ${intent.component?.shortClassName}: ${it::class.simpleName}") }
+    }
+
     private fun startRuntimeOperation(scope: SetupScope, configure: Intent.() -> Unit) {
         _state.update { it.copy(setupScope = scope) }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java).apply(configure),
         )
@@ -536,7 +542,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun installCoreWith(stacks: Set<DevStack>, agent: AgentKind) {
         if (_state.value.setupSnapshot.status == RuntimeSetupStatus.RUNNING) return
         _state.update { it.copy(setupScope = SetupScope.RUNTIME) }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java)
                 .setAction(RuntimeSetupService.ACTION_START)
@@ -2167,7 +2173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeExecutionService::class.java)
                 .setAction(RuntimeExecutionService.ACTION_START)

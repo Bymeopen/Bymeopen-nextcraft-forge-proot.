@@ -108,10 +108,19 @@ class RuntimeExecutionService : Service() {
                 activeTasks++
                 val detail = incomingDetail?.takeIf(String::isNotBlank)
                     ?: "Working in $projectName"
-                startForeground(
-                    RUNNING_NOTIFICATION_ID,
-                    runningNotification(detail, includeStop = canStop),
-                )
+                try {
+                    startForeground(
+                        RUNNING_NOTIFICATION_ID,
+                        runningNotification(detail, includeStop = canStop),
+                    )
+                } catch (error: RuntimeException) {
+                    // Android 12+ refuses foreground promotion once the app has moved to the background
+                    // (ForegroundServiceStartNotAllowedException); crashing here would kill the running task.
+                    android.util.Log.w("RuntimeExecutionService", "startForeground refused: ${error::class.simpleName}")
+                    activeTasks = (activeTasks - 1).coerceAtLeast(0)
+                    if (!taskRunning) stopSelf()
+                    return START_NOT_STICKY
+                }
                 acquireWakeLock()
             }
         }
@@ -190,6 +199,19 @@ class RuntimeExecutionService : Service() {
             runCatching { lock.release() }
         }
         wakeLock = null
+    }
+
+    /**
+     * Android 15+ caps dataSync foreground services at about six hours per 24 hours and then calls this; the
+     * service must stop promptly or the system raises an exception that kills the app. Commands already
+     * running in the chroot are separate processes and are not touched.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        android.util.Log.w("RuntimeExecutionService", "dataSync foreground time limit reached")
+        activeTasks = 0
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     override fun onDestroy() {

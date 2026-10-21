@@ -54,14 +54,19 @@ internal object RootfsRepair {
         val quotedRootfs = shellSingleQuote(canonicalPath)
         val unmountScript = """
             ROOTFS_PATH=$quotedRootfs
+            mounts_at_or_under() {
+                while read -r _ mp _; do
+                    case "${'$'}mp" in "${'$'}1"|"${'$'}1"/*) printf '%s\n' "${'$'}mp" ;; esac
+                done < /proc/mounts
+            }
             # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
             # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
-            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
+            for mp in ${'$'}(mounts_at_or_under "${'$'}ROOTFS_PATH" | sort); do
                 mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
             done
 
             for pass in 1 2 3; do
-                MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
+                MOUNTS=${'$'}(mounts_at_or_under "${'$'}ROOTFS_PATH" | sort -r)
                 [ -z "${'$'}MOUNTS" ] && break
                 for mp in ${'$'}MOUNTS; do
                     if [ "${'$'}pass" -lt 3 ]; then
@@ -71,7 +76,7 @@ internal object RootfsRepair {
                     fi
                 done
             done
-            if awk -v prefix="${'$'}ROOTFS_PATH/" -v exact="${'$'}ROOTFS_PATH" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { found=1 } END { exit !found }' /proc/mounts; then
+            if [ -n "${'$'}(mounts_at_or_under "${'$'}ROOTFS_PATH")" ]; then
                 exit 1
             fi
             rm -rf "${'$'}{ROOTFS_PATH}/tmp/.nextcraft-mounts" 2>/dev/null || true

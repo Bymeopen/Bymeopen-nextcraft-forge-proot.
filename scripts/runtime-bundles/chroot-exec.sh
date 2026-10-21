@@ -37,8 +37,29 @@ case "$APP_UID" in
         ;;
 esac
 
+# Pure-sh readers of /proc/mounts: stock Android toolbox/toybox does not ship awk on every release, and the
+# mount logic must not depend on a Magisk/KernelSU busybox being on PATH.
+mounts_at_or_under() {
+    while read -r _ mp _; do
+        case "$mp" in "$1"|"$1"/*) printf '%s\n' "$mp" ;; esac
+    done < /proc/mounts
+}
+mounts_below() {
+    while read -r _ mp _; do
+        case "$mp" in "$1"/*) printf '%s\n' "$mp" ;; esac
+    done < /proc/mounts
+}
 is_mounted() {
-    awk -v target="$1" '$2 == target { found=1; exit } END { exit !found }' /proc/mounts
+    while read -r _ mp _; do
+        [ "$mp" = "$1" ] && return 0
+    done < /proc/mounts
+    return 1
+}
+has_submounts() {
+    while read -r _ mp _; do
+        case "$mp" in "$1"/*) return 0 ;; esac
+    done < /proc/mounts
+    return 1
 }
 
 mount_once() {
@@ -64,9 +85,6 @@ mount_once() {
 # A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
 # and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
 # its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
-has_submounts() {
-    awk -v prefix="$1/" 'index($2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
-}
 
 # On failure MAKE_SLAVE_ERR holds what each attempt printed, so the warning below can say why.
 make_slave() {
@@ -102,7 +120,7 @@ mount_bionic() {
         return 0
     fi
     # Parents first, so each module lands on a mount point that is already a slave copy.
-    awk -v prefix="$src/" 'index($2, prefix) == 1 { print $2 }' /proc/mounts | sort | while read -r sub; do
+    mounts_below "$src" | sort | while read -r sub; do
         target="$dst${sub#"$src"}"
         [ -d "$sub" ] && [ -d "$target" ] || continue
         is_mounted "$target" && continue
@@ -169,7 +187,7 @@ mount_android_view() {
         echo "Warning: skipped /android$src: mount propagation cannot be changed" >&2
         return 0
     fi
-    awk -v prefix="$src/" 'index($2, prefix) == 1 { print $2 }' /proc/mounts | sort | while read -r sub; do
+    mounts_below "$src" | sort | while read -r sub; do
         target="$dst${sub#"$src"}"
         [ -d "$sub" ] && [ -d "$target" ] || continue
         is_mounted "$target" && continue
@@ -179,7 +197,7 @@ mount_android_view() {
     done
     if [ "$ANDROID_ROOT_MODE" = "ro" ]; then
         # Read-only must cover every submount too, otherwise /android/data/media etc. stay writable.
-        awk -v prefix="$dst" 'index($2, prefix) == 1 { print $2 }' /proc/mounts | sort | while read -r m; do
+        mounts_at_or_under "$dst" | sort | while read -r m; do
             mount -o remount,bind,ro "$m" 2>/dev/null || echo "Warning: $m is still writable" >&2
         done
     fi
