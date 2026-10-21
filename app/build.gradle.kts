@@ -111,7 +111,7 @@ android {
         }
     }
 
-    // Opt-in layout screenshots across phone sizes: ./gradlew :app:testDebugUnitTest -PforgeScreenshots
+    // NextCraft Screenshot, opt-in layout screenshots across phone sizes: ./gradlew :app:testDebugUnitTest -PforgeScreenshots
     // (needs the Robolectric SDK download; default builds are unaffected).
     if (project.hasProperty("forgeScreenshots")) {
         testOptions {

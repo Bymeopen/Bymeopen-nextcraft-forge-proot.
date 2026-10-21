@@ -24,12 +24,12 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Opt-in (-PforgeScreenshots) renders of real composables at the phone sizes the app targets, written to
+ * NextCraft Screenshot: opt-in (-PforgeScreenshots) renders of real composables at the phone sizes the app targets, written to
  * app/build/screenshots. Each scenario is drawn in Indonesian, whose labels are the longest.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-abstract class PhoneSizeShots(private val label: String, private val theme: String = "dark") {
+abstract class NextCraftScreenshots(private val label: String, private val theme: String = "dark") {
     @get:Rule val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     private fun save(scenario: String) {
@@ -430,12 +430,12 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
     }
 }
 
-@Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")
-@Config(sdk = [34], qualifiers = "in-w412dp-h923dp-xxhdpi") class Shots63 : PhoneSizeShots("6.3in-412x923")
-@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class Shots667 : PhoneSizeShots("6.67in-393x873")
-@Config(sdk = [34], qualifiers = "in-w412dp-h915dp-xxhdpi") class Shots68 : PhoneSizeShots("6.8in-412x915")
-@Config(sdk = [34], qualifiers = "in-w440dp-h956dp-xxhdpi") class Shots69 : PhoneSizeShots("6.9in-440x956")
+@Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : NextCraftScreenshots("6.1in-360x800")
+@Config(sdk = [34], qualifiers = "in-w412dp-h923dp-xxhdpi") class Shots63 : NextCraftScreenshots("6.3in-412x923")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class Shots667 : NextCraftScreenshots("6.67in-393x873")
+@Config(sdk = [34], qualifiers = "in-w412dp-h915dp-xxhdpi") class Shots68 : NextCraftScreenshots("6.8in-412x915")
+@Config(sdk = [34], qualifiers = "in-w440dp-h956dp-xxhdpi") class Shots69 : NextCraftScreenshots("6.9in-440x956")
 
-@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsWhite : PhoneSizeShots("white-393x873", "white")
-@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsGlass : PhoneSizeShots("glass-393x873", "glass")
-@Config(sdk = [34], qualifiers = "in-w932dp-h430dp-land-xxhdpi") class ShotsLandscape : PhoneSizeShots("land-932x430")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsWhite : NextCraftScreenshots("white-393x873", "white")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsGlass : NextCraftScreenshots("glass-393x873", "glass")
+@Config(sdk = [34], qualifiers = "in-w932dp-h430dp-land-xxhdpi") class ShotsLandscape : NextCraftScreenshots("land-932x430")
