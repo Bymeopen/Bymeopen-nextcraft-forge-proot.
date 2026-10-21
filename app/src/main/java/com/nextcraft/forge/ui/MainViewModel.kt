@@ -362,9 +362,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Saved projects with their workspaces ensured; none on a fresh install (no pre-made sandbox). */
     private suspend fun loadProjects(): List<Project> = withContext(Dispatchers.IO) {
-        val existing = preferences.loadProjects()
+        val existing = preferences.loadProjects().filterNot(::removeUntouchedDefaultSandbox)
         existing.forEach { checkpoints.ensureWorkspace(it.id) }
         existing
+    }
+
+    /**
+     * Earlier builds created a "Forge Sandbox" project on first start. It is removed once from an existing install
+     * when the user never put anything in it (only the generated README, or nothing), so the Projects screen starts
+     * clean. A sandbox with user files is kept.
+     */
+    private fun removeUntouchedDefaultSandbox(project: Project): Boolean {
+        if (project.slug != "forge-sandbox" || project.name != "Forge Sandbox") return false
+        val workspace = File(getApplication<Application>().filesDir, "workspaces/${project.id}")
+        val entries = workspace.listFiles().orEmpty().filterNot { checkpoints.isInternalRuntimePath(it.name) }
+        val untouched = entries.isEmpty() ||
+            (entries.size == 1 && entries[0].name == "README.md" && entries[0].readText().startsWith("# Forge Sandbox"))
+        if (!untouched) return false
+        wipeProjectData(project)
+        preferences.saveProjects(preferences.loadProjects().filterNot { it.id == project.id })
+        synchronized(reservedSlugs) { reservedSlugs -= project.slug }
+        return true
     }
 
     private fun configureAllProjectRoots(projects: List<Project>) {
