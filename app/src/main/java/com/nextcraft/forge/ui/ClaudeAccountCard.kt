@@ -24,6 +24,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -59,6 +60,8 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
     }
     var email by rememberSaveable { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
+    // A login left by an earlier session is only known after the controller looks at the credential file.
+    LaunchedEffect(Unit) { viewModel.claudeAuth.refreshFromDisk() }
     val signedIn = auth.status == ClaudeAuthStatus.SIGNED_IN ||
         (hasCredential && auth.status == ClaudeAuthStatus.SIGNED_OUT)
     val inFlight = auth.status == ClaudeAuthStatus.STARTING || auth.status == ClaudeAuthStatus.COMPLETING

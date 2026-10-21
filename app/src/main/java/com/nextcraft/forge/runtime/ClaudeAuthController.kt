@@ -68,12 +68,29 @@ class ClaudeAuthController(
     suspend fun refreshFromDisk() = withContext(Dispatchers.IO) {
         val current = mutableState.value.status
         if (current != ClaudeAuthStatus.SIGNED_OUT && current != ClaudeAuthStatus.SIGNED_IN) return@withContext
-        mutableState.value = if (hasCredential()) {
-            mutableState.value.copy(status = ClaudeAuthStatus.SIGNED_IN, message = null)
-        } else {
-            ClaudeAuthState()
+        if (!hasCredential()) {
+            mutableState.value = ClaudeAuthState()
+            return@withContext
+        }
+        // Show the account at once from the cache, then confirm it with the CLI (a few seconds under PRoot).
+        val cached = accountCache.getString(ACCOUNT_EMAIL_KEY, null)?.takeIf { it.isNotBlank() }
+        mutableState.value = signedInState(cached)
+        if (mutableState.value.accountEmail == null || cached == null) {
+            val live = readAccountEmail()
+            if (live != null) {
+                accountCache.edit().putString(ACCOUNT_EMAIL_KEY, live).apply()
+                if (mutableState.value.status == ClaudeAuthStatus.SIGNED_IN) mutableState.value = signedInState(live)
+            }
         }
     }
+
+    private fun signedInState(account: String?) = ClaudeAuthState(
+        ClaudeAuthStatus.SIGNED_IN,
+        message = account?.let { UiText.res(R.string.rt_auth_connected_as, it) } ?: UiText.res(R.string.rt_auth_claude_connected),
+        accountEmail = account,
+    )
+
+    private val accountCache by lazy { context.getSharedPreferences("claude_account", Context.MODE_PRIVATE) }
 
     suspend fun beginLogin(mode: ClaudeLoginMode, email: String = "") = withContext(Dispatchers.IO) {
         if (!loginStarting.compareAndSet(false, true)) return@withContext
@@ -205,11 +222,8 @@ class ClaudeAuthController(
                         lastCredentialCheck = now
                         if ((exited || looksDone || mutableState.value.status == ClaudeAuthStatus.COMPLETING) && hasCredential()) {
                             val account = readAccountEmail()
-                            mutableState.value = ClaudeAuthState(
-                                ClaudeAuthStatus.SIGNED_IN,
-                                message = account?.let { UiText.res(R.string.rt_auth_connected_as, it) } ?: UiText.res(R.string.rt_auth_claude_connected),
-                                accountEmail = account,
-                            )
+                            accountCache.edit().apply { if (account != null) putString(ACCOUNT_EMAIL_KEY, account) else remove(ACCOUNT_EMAIL_KEY) }.apply()
+                            mutableState.value = signedInState(account)
                             onSignedInChanged(true)
                             break
                         }
@@ -324,6 +338,7 @@ class ClaudeAuthController(
             if (!logout.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) logout.destroyForcibly()
             output.delete()
             if (hasCredential()) throw UiTextException(UiText.res(R.string.rt_auth_claude_signout_incomplete))
+            accountCache.edit().remove(ACCOUNT_EMAIL_KEY).apply()
             onSignedInChanged(false)
             mutableState.value = ClaudeAuthState(message = UiText.res(R.string.rt_auth_claude_signed_out))
         } catch (error: Throwable) {
@@ -374,6 +389,7 @@ class ClaudeAuthController(
 
     private companion object {
         const val CLAUDE_BINARY = "/usr/local/bin/claude"
+        const val ACCOUNT_EMAIL_KEY = "email"
         val TRUSTED_SIGN_IN_HOSTS = listOf("claude.ai", "claude.com", "anthropic.com")
         const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
         const val RESTART_WAIT_MS = 5_000L
