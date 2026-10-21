@@ -981,6 +981,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        // Its shell may sit in the branch folder that is about to be removed.
+        closeChatTerminal(chatId)
         if (currentChats.firstOrNull { it.id == chatId }?.isolated == true) {
             viewModelScope.launch { runCatching { chatBranches.discard(project, chatId) } }
         }
@@ -2395,39 +2397,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // attaches a TerminalView to the session; the shell starts when the view is first laid out. Projects live under
     // /workspace/<name>: use "cd" or the project chip, or "Run in terminal" from chat, which changes into the project.
 
-    private var terminalSession: TerminalSession? = null
-    private var terminalIsFinished = false
-    private var terminalStarting = false
-    private var terminalInChroot = false
-
-    /** A line to type: [inProject] lines first change into the active project's folder (resolved when typed). */
+    /** A line to type: [inProject] lines first change into the terminal's folder (resolved when typed). */
     private class TerminalInput(val text: String, val inProject: Boolean)
 
-    /** Commands sent before the shell exists (e.g. "Run in terminal" from chat). */
-    private val pendingTerminalInput = mutableListOf<TerminalInput>()
+    /**
+     * One shell. [chatId] null is the general terminal of the Terminal tab (the chroot's home); otherwise the shell
+     * belongs to that chat and starts in the chat's own folder (its branch clone when the chat is isolated, else the
+     * project folder), so every chat has a separate terminal.
+     */
+    private class TerminalHandle(val chatId: String?) {
+        var session: TerminalSession? = null
+        var finished = false
+        var starting = false
+        var inChroot = false
+
+        /** Chat terminals: the folder as seen from the shell (resolved when the shell starts). */
+        var guestDir: String? = null
+        var hostDir: File? = null
+
+        /** Commands sent before the shell exists (e.g. "Run in terminal" from chat). */
+        val pending = mutableListOf<TerminalInput>()
+    }
+
+    private val terminals = HashMap<String, TerminalHandle>()
+
+    private fun terminalHandle(chatId: String?): TerminalHandle =
+        terminals.getOrPut(chatId?.let { "chat:$it" } ?: "main") { TerminalHandle(chatId) }
 
     val terminalSessionClient = ForgeTerminalSessionClient(application) { session -> onTerminalSessionEnded(session) }
 
-    fun currentTerminalSession(): TerminalSession? = terminalSession
+    fun currentTerminalSession(chatId: String? = null): TerminalSession? = terminalHandle(chatId).session
 
-    fun isTerminalFinished(): Boolean = terminalIsFinished
+    fun isTerminalFinished(chatId: String? = null): Boolean = terminalHandle(chatId).finished
 
-    /** Where the active project lives as seen from the terminal's shell, or null when no project is open. */
-    fun terminalProjectDir(): String? {
+    /** Where the terminal's folder is as seen from its shell: the project for the general terminal, the chat folder for a chat's. */
+    fun terminalProjectDir(chatId: String? = null): String? {
+        val handle = terminalHandle(chatId)
+        if (chatId != null) return if (handle.inChroot) handle.guestDir else handle.hostDir?.absolutePath
         val project = _state.value.activeProject ?: return null
         // Known once the shell exists (commands are only typed then): the chroot mounts projects at /workspace/<name>.
-        return if (terminalInChroot) "/workspace/${project.slug}" else checkpoints.ensureWorkspace(project.id).absolutePath
+        return if (handle.inChroot) "/workspace/${project.slug}" else checkpoints.ensureWorkspace(project.id).absolutePath
     }
 
     /** Starts the shell if there is none. An ended shell is replaced only by [restartTerminalSession]. */
-    fun ensureTerminalSession() {
-        if (terminalSession != null || terminalStarting) return
-        terminalStarting = true
+    fun ensureTerminalSession() = ensureTerminalSession(null)
+
+    fun ensureTerminalSession(chatId: String?) {
+        val handle = terminalHandle(chatId)
+        if (handle.session != null || handle.starting) return
+        handle.starting = true
         viewModelScope.launch {
             try {
-                val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec() }
-                terminalInChroot = spec.inChroot
-                terminalSession = TerminalSession(
+                val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec(handle) }
+                handle.inChroot = spec.inChroot
+                handle.session = TerminalSession(
                     spec.shell,
                     spec.cwd,
                     spec.args,
@@ -2441,33 +2464,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.w("MainViewModel", "terminal session failed to start", e)
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.terminal_start_failed, e.message.orEmpty())) }
             } finally {
-                terminalStarting = false
+                handle.starting = false
                 _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
             }
         }
     }
 
     /** "Restart" after the shell ended: discards the dead session and starts a fresh one. */
-    fun restartTerminalSession() {
-        terminalSession?.finishIfRunning()
-        terminalSession = null
-        terminalIsFinished = false
-        pendingTerminalInput.clear()
+    fun restartTerminalSession() = restartTerminalSession(null)
+
+    fun restartTerminalSession(chatId: String?) {
+        val handle = terminalHandle(chatId)
+        handle.session?.finishIfRunning()
+        handle.session = null
+        handle.finished = false
+        handle.pending.clear()
         _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
-        ensureTerminalSession()
+        ensureTerminalSession(chatId)
+    }
+
+    /** Ends the shell of a chat that was deleted. */
+    private fun closeChatTerminal(chatId: String) {
+        terminals.remove("chat:$chatId")?.let { handle ->
+            handle.pending.clear()
+            handle.session?.finishIfRunning()
+        }
     }
 
     /** Types [command] and Enter into the shell. Queued (and the shell started) when it is not up yet. */
-    fun runTerminalCommand(command: String) = queueTerminalInput(command, inProject = false)
+    fun runTerminalCommand(command: String) = runTerminalCommand(command, null)
 
-    private fun queueTerminalInput(command: String, inProject: Boolean) {
+    fun runTerminalCommand(command: String, chatId: String?) = queueTerminalInput(command, inProject = false, chatId = chatId)
+
+    private fun queueTerminalInput(command: String, inProject: Boolean, chatId: String? = null) {
         val clean = command.trim()
         if (clean.isEmpty()) return
+        val handle = terminalHandle(chatId)
         // Asking for a command on an ended shell means "run it": start a fresh shell rather than dropping the request.
-        if (terminalIsFinished) restartTerminalSession()
-        pendingTerminalInput += TerminalInput(clean, inProject)
-        ensureTerminalSession()
-        flushTerminalInput()
+        if (handle.finished) restartTerminalSession(chatId)
+        handle.pending += TerminalInput(clean, inProject)
+        ensureTerminalSession(chatId)
+        flushTerminalInput(chatId)
     }
 
     /**
@@ -2486,30 +2523,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectTab(ForgeTab.REA)
     }
 
-    /** Runs [command] in the active project's folder (from chat: the snippet belongs to that project). */
+    /** Runs [command] in the active project's folder in the general terminal. */
     fun runTerminalCommandInProject(command: String) = queueTerminalInput(command, inProject = true)
 
+    /** "Run in terminal" from chat: runs [command] in the terminal of the chat on screen, which starts in that chat's folder. */
+    fun runInChatTerminal(command: String) {
+        val chatId = _state.value.activeChatId
+        queueTerminalInput(command, inProject = false, chatId = chatId)
+        selectProjectPane(ProjectPane.TERMINAL)
+    }
+
     /** Sends queued input once the emulator behind the session exists (it is created on first layout). */
-    fun flushTerminalInput() {
-        val session = terminalSession ?: return
-        if (session.emulator == null || terminalIsFinished) return
-        val queued = pendingTerminalInput.toList()
-        pendingTerminalInput.clear()
+    fun flushTerminalInput() = flushTerminalInput(null)
+
+    fun flushTerminalInput(chatId: String?) {
+        val handle = terminalHandle(chatId)
+        val session = handle.session ?: return
+        if (session.emulator == null || handle.finished) return
+        val queued = handle.pending.toList()
+        handle.pending.clear()
         queued.forEach { input ->
-            val dir = if (input.inProject) terminalProjectDir() else null
+            val dir = if (input.inProject) terminalProjectDir(chatId) else null
             session.write((if (dir == null) input.text else "cd ${shellSingleQuote(dir)} && ${input.text}") + "\r")
         }
     }
 
-    fun clearTerminal() {
+    fun clearTerminal() = clearTerminal(null)
+
+    fun clearTerminal(chatId: String?) {
         // reset() clears the screen and attributes; the shell redraws its prompt on the next key.
-        terminalSession?.reset()
+        terminalHandle(chatId).session?.reset()
     }
 
     private fun onTerminalSessionEnded(session: TerminalSession) {
-        if (session !== terminalSession) return
-        terminalIsFinished = true
-        pendingTerminalInput.clear()
+        val handle = terminals.values.firstOrNull { it.session === session } ?: return
+        handle.finished = true
+        handle.pending.clear()
         _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
     }
 
@@ -2522,7 +2571,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     /** Blocking (file IO, root probe): call off the main thread. */
-    private fun buildTerminalLaunchSpec(): TerminalLaunchSpec {
+    private fun buildTerminalLaunchSpec(handle: TerminalHandle): TerminalLaunchSpec {
         val app = getApplication<Application>()
         val env = System.getenv().toMutableMap().apply {
             put("TERM", "xterm-256color")
@@ -2533,17 +2582,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (chroot) {
             // The guest environment (PATH, HOME, TERM, provider keys) travels in a one-shot env file sourced by su.
             // /root is the chroot's home, so the shell is not tied to any project.
+            // The general terminal is not tied to a project; a chat's terminal starts in that chat's folder.
+            val folder = handle.chatId?.let { chatTerminalFolder(it) }
+            handle.guestDir = folder?.let { "/workspace/${it.second}" }
+            handle.hostDir = folder?.first
             val (_, suCommand) = installer.prepareChrootShellCommand(
-                workspace = File(RuntimeInstaller.rootfsDir(app), "root"),
-                guestWorkspacePath = "/root",
+                workspace = folder?.first ?: File(RuntimeInstaller.rootfsDir(app), "root"),
+                guestWorkspacePath = folder?.let { "/workspace/${it.second}" } ?: "/root",
                 environment = activeChrootEnvironment(),
                 guestCommand = listOf("/bin/bash", "-l"),
             )
             TerminalLaunchSpec("su", app.filesDir.absolutePath, arrayOf("su", "-mm", "-c", suCommand), env.toEnvArray(), inChroot = true)
         } else {
+            val folder = handle.chatId?.let { chatTerminalFolder(it) }
+            handle.hostDir = folder?.first
+            val home = folder?.first?.absolutePath ?: app.filesDir.absolutePath
             env["HOME"] = app.filesDir.absolutePath
-            TerminalLaunchSpec("/system/bin/sh", app.filesDir.absolutePath, arrayOf("sh"), env.toEnvArray(), inChroot = false)
+            TerminalLaunchSpec("/system/bin/sh", home, arrayOf("sh"), env.toEnvArray(), inChroot = false)
         }
+    }
+
+    /** Folder of [chatId] on the host and its name under /workspace: the branch clone of an isolated chat, else the project. */
+    private fun chatTerminalFolder(chatId: String): Pair<File, String>? {
+        val project = _state.value.activeProject ?: return null
+        val chat = _state.value.chats.firstOrNull { it.id == chatId }
+        if (chat?.isolated == true) {
+            val branch = chatBranches.branchFor(project, chatId)
+            if (branch.cloneDir.isDirectory) return branch.cloneDir to branch.slug
+        }
+        return checkpoints.ensureWorkspace(project.id) to project.slug
     }
 
     private fun Map<String, String>.toEnvArray(): Array<String> = map { "${it.key}=${it.value}" }.toTypedArray()
@@ -3946,7 +4013,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
         activeTerminalProcess?.destroyForcibly()
-        terminalSession?.finishIfRunning()
+        terminals.values.forEach { it.session?.finishIfRunning() }
         super.onCleared()
     }
 

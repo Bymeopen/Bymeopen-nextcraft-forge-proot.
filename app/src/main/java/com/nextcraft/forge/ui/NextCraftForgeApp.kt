@@ -374,7 +374,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 )
                                 Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                                     when (sidePane) {
-                                        ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                                        ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel, chatId = state.activeChatId)
                                         ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                                         else -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                                     }
@@ -387,7 +387,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 AgentScreen(state = state, viewModel = viewModel)
                             }
                             ProjectPane.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
-                            ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                            ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel, chatId = state.activeChatId)
                             ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                         }
                     }

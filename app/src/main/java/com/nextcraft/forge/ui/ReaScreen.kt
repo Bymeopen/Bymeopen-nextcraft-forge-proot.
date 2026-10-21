@@ -102,6 +102,7 @@ fun ReaScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 }
             }
             rea.message?.let { Text(it.asString(), fontSize = ForgeType.secondary, color = tokens.accentText) }
+            ReaInstallProgress(rea)
             LogBox(text = rea.log, placeholder = stringResource(R.string.rea_log_placeholder))
         }
 
@@ -536,5 +537,30 @@ private fun ReaCheckRow(check: ReaCheck) {
                 Text(check.hint, fontSize = ForgeType.secondary, color = tokens.accentText)
             }
         }
+    }
+}
+
+/** Percent of the install steps, the step running, MB received since the task began and the current MB/s. */
+@Composable
+private fun ReaInstallProgress(rea: ReaState) {
+    val transfer = rea.transfer ?: return
+    val percent = rea.progressPercent
+    val scheme = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        if (percent != null) {
+            androidx.compose.material3.LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
+        } else if (rea.busy) {
+            androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        Text(
+            text = stringResource(R.string.rea_progress_line, percent ?: 0, rea.progressLabel.orEmpty()),
+            fontSize = ForgeType.secondary,
+            color = scheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.rea_progress_speed, transfer.bytes / 1_048_576.0, transfer.bytesPerSecond / 1_048_576.0),
+            fontSize = ForgeType.secondary,
+            color = scheme.onSurfaceVariant,
+        )
     }
 }
