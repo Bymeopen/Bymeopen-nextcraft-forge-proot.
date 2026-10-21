@@ -128,6 +128,8 @@ android {
             }
         }
         sourceSets.getByName("test").java.srcDir("src/screenshotTest/java")
+        // AGP 9 built-in Kotlin only compiles .kt files from the kotlin source set.
+        sourceSets.getByName("test").kotlin.directories.add("src/screenshotTest/java")
     }
 
     packaging {
@@ -152,6 +154,8 @@ dependencies {
     implementation("androidx.compose.material:material")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material3:material3")
+    // Liquid-glass backdrop (blur / vibrancy / lens) for the Glass theme; effects need Android 12+ (lens: 13+).
+    implementation("io.github.kyant0:backdrop:2.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Interactive terminal: VT100/xterm emulator and its Android view. Pinned; see docs/TERMINAL.md for licensing.
