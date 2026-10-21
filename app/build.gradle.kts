@@ -27,6 +27,10 @@ android {
             ?: "https://github.com/Bymeopen/nextcraft-forge-proot/releases/latest/download/update-manifest.json"
         buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
+    // Debug builds (the shared debug key) update from the debug-latest pre-release that CI refreshes on every push
+    // to main; CI passes -PversionCode=<run number based> so each build is newer than the one before.
+    val debugManifestUrl = (project.findProperty("appUpdateManifestUrl") as String?)
+        ?: "https://github.com/Bymeopen/nextcraft-forge-proot/releases/download/debug-latest/update-manifest.json"
 
     // Release signing comes from the environment so no key material lives in the repo.
     val releaseKeystore = System.getenv("FORGE_KEYSTORE_FILE")
@@ -57,6 +61,7 @@ android {
             signingConfig = signingConfigs.getByName("sharedDebug")
             isMinifyEnabled = false
             buildConfigField("String", "APP_VARIANT", "\"debug\"")
+            buildConfigField("String", "APP_UPDATE_MANIFEST_URL", "\"$debugManifestUrl\"")
         }
         release {
             isMinifyEnabled = true
@@ -143,6 +148,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.core:core-ktx:1.8.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.browser:browser:1.8.0")
     implementation("com.google.android.material:material:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.5.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.1")

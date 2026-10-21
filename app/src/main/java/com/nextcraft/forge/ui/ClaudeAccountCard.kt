@@ -116,7 +116,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ForgePrimaryButton(
                             text = stringResource(R.string.settings_claude_open_page),
-                            onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                            onClick = { openSignInPage(context, url) },
                             modifier = Modifier.weight(1f),
                         )
                         OutlinedButton(
@@ -142,8 +142,9 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                         ForgePrimaryButton(
                             text = stringResource(R.string.settings_complete_sign_in),
                             onClick = {
-                                runCatching { viewModel.claudeAuth.submitCode(code.trim()) }
+                                val value = code.trim()
                                 code = ""
+                                scope.launch { runCatching { viewModel.claudeAuth.submitCode(value) } }
                             },
                             enabled = code.isNotBlank() && auth.status == ClaudeAuthStatus.AWAITING_BROWSER,
                             modifier = Modifier.weight(1f),
@@ -163,4 +164,18 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
             )
         }
     }
+}
+
+/**
+ * Opens the sign-in link in a Custom Tab (Chrome or the default browser engine) so the final redirect to the CLI's
+ * `http://localhost:<port>/callback` loads; some vendor browsers refuse plain-http localhost pages. Falls back to a
+ * plain VIEW intent when no Custom Tabs provider exists.
+ */
+private fun openSignInPage(context: android.content.Context, url: String) {
+    val uri = Uri.parse(url)
+    val opened = runCatching {
+        androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, uri)
+        true
+    }.getOrDefault(false)
+    if (!opened) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
 }

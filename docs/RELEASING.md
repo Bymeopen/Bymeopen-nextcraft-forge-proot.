@@ -28,3 +28,7 @@ Unggah APK dan `update-manifest.json` ke rilis `v1.0.1`, lalu tandai sebagai lat
 (`python3 scripts/check-embedded-scripts.py --write` untuk membuat ulang).
 
 Bundle runtime (`runtime-*`) **tidak** dirilis di repo ini: `RUNTIME_RELEASE_BASE_URL` di `RuntimeInstaller.kt` tetap menunjuk ke rilis `bymeopen/nextcraft-forge`, sehingga kedua aplikasi memakai bundle yang sama.
+
+## Debug builds
+
+Every push to `main` refreshes the `debug-latest` pre-release with the APK, its SHA-256 and an `update-manifest.json`. Debug installs (shared debug key) read that manifest from Settings → "Check for app updates"; CI gives each build `versionCode = 1000 + run number` so it counts as newer.

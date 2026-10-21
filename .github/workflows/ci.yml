@@ -29,8 +29,9 @@ jobs:
           gradle-version: "8.14.3"
       - name: Unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
+      # versionCode grows with the run number so the in-app updater sees each main build as newer than the last.
       - name: Assemble debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug -PversionCode=$((1000 + GITHUB_RUN_NUMBER)) -PversionName=1.0.0-proot.${GITHUB_RUN_NUMBER}
       # Private repos count artifacts against the account storage quota; a full quota must not turn a green build red.
       - uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -49,13 +50,15 @@ jobs:
           apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
           cp "$apk" nextcraft-forge-proot-debug.apk
           sha256sum nextcraft-forge-proot-debug.apk > nextcraft-forge-proot-debug.apk.sha256
-          notes="Debug build of ${GITHUB_SHA} (unsigned debug key; not for the in-app updater)."
+          notes="Debug build of ${GITHUB_SHA} (shared debug key; debug installs update to it from Settings)."
+          NEXTCRAFT_OUT_DIR=. scripts/make-update-manifest.sh nextcraft-forge-proot-debug.apk \
+            $((1000 + GITHUB_RUN_NUMBER)) "1.0.0-proot.${GITHUB_RUN_NUMBER}" debug-latest debug "$notes"
+          assets="nextcraft-forge-proot-debug.apk nextcraft-forge-proot-debug.apk.sha256 update-manifest.json"
           if gh release view debug-latest >/dev/null 2>&1; then
-            gh release upload debug-latest nextcraft-forge-proot-debug.apk nextcraft-forge-proot-debug.apk.sha256 --clobber
+            gh release upload debug-latest $assets --clobber
             gh release edit debug-latest --notes "$notes" --prerelease
           else
-            gh release create debug-latest nextcraft-forge-proot-debug.apk nextcraft-forge-proot-debug.apk.sha256 \
-              --title "Debug build (latest main)" --notes "$notes" --prerelease
+            gh release create debug-latest $assets --title "Debug build (latest main)" --notes "$notes" --prerelease
           fi
 
   scripts:

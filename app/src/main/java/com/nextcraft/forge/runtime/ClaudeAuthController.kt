@@ -259,27 +259,43 @@ class ClaudeAuthController(
         return TRUSTED_SIGN_IN_HOSTS.any { host == it || host.endsWith(".$it") }
     }
 
-    /** Sends the code shown on the sign-in page (used when the automatic redirect did not reach the CLI). */
-    @Synchronized
-    fun submitCode(code: String) {
+    /**
+     * Completes a browser sign-in whose final redirect to `http://localhost:<port>/callback` did not load in the
+     * browser (some Android browsers refuse plain-http localhost pages). The user pastes that page's address, or
+     * its `code#state` value, and the app delivers it to the CLI's listener over loopback itself.
+     *
+     * `claude auth login` (2.1.112) has no "paste code" prompt of its own: it only completes through that listener.
+     */
+    suspend fun submitCode(code: String) = withContext(Dispatchers.IO) {
         val value = code.trim()
         if (value.isBlank()) throw UiTextException(UiText.res(R.string.rt_auth_claude_code_empty))
         try {
             val running = process ?: error("Sign-in session is not active. Start sign-in again.")
             if (!running.isAlive) throw UiTextException(UiText.res(R.string.rt_auth_session_expired))
-            running.outputStream.write((value + "\r").toByteArray())
-            running.outputStream.flush()
+            val callback = buildCallbackUrl(value, mutableState.value.authorizationUrl)
+                ?: throw UiTextException(UiText.res(R.string.rt_auth_claude_code_unrecognized))
+            mutableState.value = mutableState.value.copy(
+                status = ClaudeAuthStatus.COMPLETING,
+                message = UiText.res(R.string.rt_auth_claude_completing),
+            )
+            val connection = java.net.URL(callback).openConnection() as java.net.HttpURLConnection
+            try {
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 30_000
+                connection.instanceFollowRedirects = false
+                val status = connection.responseCode
+                if (status !in 200..399) throw UiTextException(UiText.res(R.string.rt_auth_claude_code_rejected, status))
+            } finally {
+                connection.disconnect()
+            }
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             mutableState.value = ClaudeAuthState(
                 ClaudeAuthStatus.ERROR,
                 message = error.toUiText(R.string.rt_auth_code_submit_failed),
             )
             throw error
         }
-        mutableState.value = mutableState.value.copy(
-            status = ClaudeAuthStatus.COMPLETING,
-            message = UiText.res(R.string.rt_auth_claude_completing),
-        )
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {
@@ -365,6 +381,31 @@ class ClaudeAuthController(
         const val MAX_OUTPUT_CHARS = 100_000
         val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
     }
+}
+
+/**
+ * The loopback callback the app delivers for a pasted [input]: either the full `http://localhost:<port>/callback?…`
+ * address the browser ended on, or `code#state` combined with the port of the sign-in link's redirect_uri.
+ */
+internal fun buildCallbackUrl(input: String, authorizationUrl: String?): String? {
+    val pastedUrl = runCatching { java.net.URI(input) }.getOrNull()
+    if (pastedUrl != null && pastedUrl.scheme == "http" && pastedUrl.host in setOf("localhost", "127.0.0.1") &&
+        pastedUrl.port in 1..65535 && pastedUrl.path == "/callback" && !pastedUrl.rawQuery.isNullOrBlank()
+    ) {
+        return "http://127.0.0.1:${pastedUrl.port}/callback?${pastedUrl.rawQuery}"
+    }
+    val parts = input.split('#', limit = 2)
+    if (parts.size != 2 || parts.any { it.isBlank() || !it.all { c -> c.isLetterOrDigit() || c == '-' || c == '_' } }) return null
+    val redirect = authorizationUrl?.let { url ->
+        runCatching { java.net.URI(url) }.getOrNull()?.rawQuery?.split('&')
+            ?.firstOrNull { it.startsWith("redirect_uri=") }
+            ?.removePrefix("redirect_uri=")
+            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+    } ?: return null
+    val port = runCatching { java.net.URI(redirect) }.getOrNull()?.takeIf { it.host == "localhost" }?.port ?: return null
+    if (port !in 1..65535) return null
+    val encode = { v: String -> java.net.URLEncoder.encode(v, "UTF-8") }
+    return "http://127.0.0.1:$port/callback?code=${encode(parts[0])}&state=${encode(parts[1])}"
 }
 
 // OSC sequences (the hyperlink wrapper around the URL) are removed lazily so the visible URL text between the
