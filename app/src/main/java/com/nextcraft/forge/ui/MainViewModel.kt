@@ -278,7 +278,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val installed = withContext(Dispatchers.IO) {
                 installer.migrateLegacyToolMarkers()
                 installer.isInstalled().also { ready ->
-                    if (ready) installer.cleanupLegacyWorkspaceScaffolding()
+                    if (ready) {
+                        installer.cleanupLegacyWorkspaceScaffolding()
+                        // Existing installs: refresh the launcher script and the guest's /etc/group names for the
+                        // app's supplementary GIDs. Only a fresh rootfs install did this before.
+                        runCatching { installer.refreshGuestConfiguration() }
+                    }
                 }
             }
             val installedStacks = if (installed) {

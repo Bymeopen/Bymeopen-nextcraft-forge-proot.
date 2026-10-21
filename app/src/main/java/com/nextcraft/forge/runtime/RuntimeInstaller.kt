@@ -1853,14 +1853,15 @@ class RuntimeInstaller(private val context: Context) {
             File("/proc/self/status").readLines().firstOrNull { it.startsWith("Groups:") }
                 ?.removePrefix("Groups:")?.trim()?.split(Regex("\\s+"))?.mapNotNull { it.toIntOrNull() }
         }.getOrNull().orEmpty()
-        val appId = AndroidProcess.myUid() % 100_000
+        // Android: cache GID = 20000 + (appId - 10000), "all" GID = 50000 + (appId - 10000).
+        val appIndex = AndroidProcess.myUid() % 100_000 - 10_000
         return groups.map { gid ->
             gid to when {
                 gid == 3003 -> "aid_inet"
                 gid == 3004 -> "aid_net_raw"
                 gid == 9997 -> "aid_everybody"
-                gid == 20_000 + appId -> "aid_cache"
-                gid == 50_000 + appId -> "aid_all"
+                gid == 20_000 + appIndex -> "aid_cache"
+                gid == 50_000 + appIndex -> "aid_all"
                 gid >= 99_900_000 -> "aid_shared"
                 else -> "aid_$gid"
             }
@@ -1891,6 +1892,13 @@ class RuntimeInstaller(private val context: Context) {
     }.getOrElse { error ->
         Log.w("RuntimeInstaller", "Could not decode process output as UTF-8: ${error.message}")
         ""
+    }
+
+    /** Idempotent per-start maintenance of an installed rootfs (scripts, group names, apt conf). */
+    fun refreshGuestConfiguration() {
+        if (!File(rootfs, "etc/group").isFile) return
+        ensureChrootScripts()
+        ensureAndroidSocketGroupConfiguration(rootfs)
     }
 
     suspend fun initializeExisting(onProgress: suspend (RuntimeInstallProgress) -> Unit): InstalledRuntime {
