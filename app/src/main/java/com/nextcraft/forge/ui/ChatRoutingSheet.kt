@@ -13,7 +13,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -116,8 +117,9 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                         if (on && routing.mode == RouteMode.BALANCED) {
                             val weight = routing.weightOf(agent)
                             val total = enabled.sumOf { routing.weightOf(it) }.takeIf { it > 0 } ?: 1
+                            val lessLabel = stringResource(R.string.route_weight_less, agent.displayTitle())
                             IconButton(onClick = { viewModel.setRouteWeight(agent, weight - 1) }, enabled = weight > 0) {
-                                Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.route_weight_less, agent.displayTitle()))
+                                Text("−", fontSize = ForgeType.screenTitle, modifier = Modifier.semantics { contentDescription = lessLabel })
                             }
                             Text(
                                 text = stringResource(R.string.route_share_percent, weight * 100 / total),
