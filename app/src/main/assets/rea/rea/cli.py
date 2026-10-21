@@ -17,6 +17,8 @@ from .analysis import xrefs as xrefs_mod
 from .analysis.code import decode, defined_functions
 from .capability import FAIL, OK, WARN, run_doctor
 from .identify import identify
+from .integrations import decompile as decompile_mod
+from .parsers import apk as apk_mod
 from .parsers import elf as elf_mod
 from .report.markdown import build_report
 from .result import E_BAD_FORMAT, E_INTERNAL, E_USAGE, ReaError, Result, emit_json, failure
@@ -74,6 +76,38 @@ def _parse_address(text: str) -> int:
         return int(text, 0)
     except ValueError as error:
         raise ReaError(E_USAGE, f"Alamat tidak valid: {text}", "Contoh: --addr 0x401136") from error
+
+
+def _apk(args: argparse.Namespace) -> Result:
+    info = identify(args.file)
+    if info["type"] != "APK":
+        raise ReaError(E_BAD_FORMAT, f"Bukan APK (terdeteksi: {info['type']}).", "Gunakan `rea id` untuk memeriksa tipe berkas.")
+    data = apk_mod.summarize_apk(args.file)
+    data["identify"] = info
+    if not args.json:
+        manifest = data["manifest"]
+        print(f"{manifest['package']}  v{manifest['version_name']} ({manifest['version_code']})  sdk {manifest['min_sdk']}→{manifest['target_sdk']}", file=sys.stderr)
+        print(f"  activity utama: {manifest['main_activity']}", file=sys.stderr)
+        print(f"  {len(manifest['permissions'])} izin, DEX: {', '.join(d['name'] for d in data['dex'])}", file=sys.stderr)
+        for finding in data["findings"]:
+            print(f"  [{finding['level']}] {finding['message']}", file=sys.stderr)
+    return Result(command="apk", data=data)
+
+
+def _dex(args: argparse.Namespace) -> Result:
+    data = apk_mod.list_dex_classes(args.file, name_filter=args.filter or "", limit=args.limit)
+    if not args.json:
+        print(f"{data['class_count']} class, {data['methods']} method ({data['matched']} cocok):", file=sys.stderr)
+        for item in data["classes"]:
+            print(f"  {item['name']}  [{' '.join(item['access'])}]  {item['methods']} method", file=sys.stderr)
+    return Result(command="dex", data=data)
+
+
+def _decompile(args: argparse.Namespace) -> Result:
+    data = decompile_mod.decompile(args.file, tool=args.tool, out_dir=args.output)
+    if not args.json:
+        print(f"{data['tool']}: {data['files']} berkas di {data['output_dir']} ({data['seconds']} detik)", file=sys.stderr)
+    return Result(command="decompile", data=data)
 
 
 def _cfg_for(path: str, symbol: str | None) -> dict:
@@ -219,10 +253,13 @@ def build_parser() -> argparse.ArgumentParser:
         ("id", "identifikasi berkas"),
         ("analyze", "analisis statis berkas ELF"),
         ("report", "laporan Markdown dari analisis"),
+        ("apk", "ringkasan APK: manifest, izin, DEX, tanda tangan"),
+        ("dex", "daftar class dari DEX atau APK"),
+        ("decompile", "dekompilasi APK/DEX dengan jadx atau apktool"),
     ):
         command = sub.add_parser(name, help=helptext)
         command.add_argument("--json", action="store_true", help="keluaran JSON di baris terakhir stdout")
-        if name in ("id", "analyze", "report"):
+        if name in ("id", "analyze", "report", "apk", "dex", "decompile"):
             command.add_argument("file", help="berkas yang diperiksa")
         if name == "analyze":
             command.add_argument("--strings", action="store_true", help="ekstrak string ASCII dan UTF-16")
@@ -236,6 +273,12 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--dot", action="store_true", help="sertakan keluaran Graphviz DOT untuk --cfg")
             command.add_argument("--xrefs", action="store_true", help="call graph dan fungsi yang memakai tiap string")
             command.add_argument("--entropy", action="store_true", help="peta entropi per blok dan per section")
+        if name == "dex":
+            command.add_argument("--filter", help="hanya class berawalan paket ini (mis. com.foo)")
+            command.add_argument("--limit", type=int, default=500, help="jumlah class maksimum (default 500)")
+        if name == "decompile":
+            command.add_argument("--tool", default="auto", choices=["auto", "jadx", "apktool"], help="alat dekompilasi")
+            command.add_argument("-o", "--output", help="folder keluaran (default .rea/<nama>.<alat>)")
         if name == "report":
             command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
             command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")
@@ -249,7 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_request:
         # argparse sudah mencetak pesan ke stderr; --version dan --help keluar dengan 0.
         return int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
-    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report}
+    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile}
     _show_notice_once()
     try:
         result = handlers[args.command](args)
