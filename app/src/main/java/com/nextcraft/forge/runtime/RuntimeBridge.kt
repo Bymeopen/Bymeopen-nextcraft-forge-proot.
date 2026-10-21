@@ -71,6 +71,9 @@ object RuntimeExecutionServiceContract {
     const val ACTION_CANCELLED = "com.nextcraft.forge.runtime.action.CANCELLED"
     const val EXTRA_PROJECT_NAME = "com.nextcraft.forge.runtime.extra.PROJECT_NAME"
     const val EXTRA_DETAIL = "com.nextcraft.forge.runtime.extra.DETAIL"
+    /** Fixed phrases travel as a string resource id plus format args, so the service words them in the app language. */
+    const val EXTRA_DETAIL_RES = "com.nextcraft.forge.runtime.extra.DETAIL_RES"
+    const val EXTRA_DETAIL_ARGS = "com.nextcraft.forge.runtime.extra.DETAIL_ARGS"
 
     private fun resolveServiceClass(): Class<*>? =
         runCatching { Class.forName(SERVICE_CLASS_NAME) }.getOrNull()
@@ -107,6 +110,22 @@ object RuntimeExecutionServiceContract {
                     .setAction(if (completed) ACTION_COMPLETE else ACTION_FAILED)
                     .putExtra(EXTRA_PROJECT_NAME, projectName)
                     .putExtra(EXTRA_DETAIL, detail),
+            )
+        }.onFailure { error ->
+            Log.w(tag, "Could not post task result notification", error)
+            runCatching { context.stopService(Intent(context, cls)) }
+        }
+    }
+
+    fun finishForegroundRes(context: Context, completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, args: Array<String>, tag: String = "RuntimeBridge") {
+        val cls = resolveServiceClass() ?: return
+        runCatching {
+            context.startService(
+                Intent(context, cls)
+                    .setAction(if (completed) ACTION_COMPLETE else ACTION_FAILED)
+                    .putExtra(EXTRA_PROJECT_NAME, projectName)
+                    .putExtra(EXTRA_DETAIL_RES, detailRes)
+                    .putExtra(EXTRA_DETAIL_ARGS, args),
             )
         }.onFailure { error ->
             Log.w(tag, "Could not post task result notification", error)

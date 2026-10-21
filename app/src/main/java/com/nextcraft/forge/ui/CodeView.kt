@@ -122,13 +122,15 @@ private fun DiffRow(line: DiffLine, language: CodeLanguage, digits: Int, style: 
         DiffLineType.CONTEXT -> Triple(Color.Transparent, " ", tokens.terminalText.copy(alpha = 0.7f))
     }
     val number = (line.newLine ?: line.oldLine)?.toString().orEmpty()
+    // Notes such as "… 12 unchanged lines …" come from the diff engine in English; translate them for display.
+    val shownInfo = if (line.type == DiffLineType.INFO) messageText(line.text) else line.text
     val spoken = when (line.type) {
         DiffLineType.ADDITION -> stringResource(R.string.diff_row_added, number, line.text)
         DiffLineType.DELETION -> stringResource(R.string.diff_row_removed, number, line.text)
-        DiffLineType.INFO, DiffLineType.CONTEXT -> stringResource(R.string.diff_row_context, number, line.text)
+        DiffLineType.INFO, DiffLineType.CONTEXT -> stringResource(R.string.diff_row_context, number, shownInfo)
     }
-    val text = remember(line.text, language, tokens) {
-        if (line.type == DiffLineType.INFO) AnnotatedString(line.text) else highlightLine(line.text, language, tokens)
+    val text = remember(shownInfo, line.type, language, tokens) {
+        if (line.type == DiffLineType.INFO) AnnotatedString(shownInfo) else highlightLine(line.text, language, tokens)
     }
     Row(
         modifier = Modifier

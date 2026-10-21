@@ -660,12 +660,24 @@ private fun Project.subtitle(): String = when {
     else -> stringResource(R.string.projects_general)
 }
 
-/** Projects saved by older builds store English defaults; show them in the current language. */
+/**
+ * Project text is stored in English (the defaults a project is created with) and translated when drawn, so it follows
+ * the app language even after the language is changed. Text the user typed is shown as written.
+ */
 @Composable
-private fun Project.localizedDescription(): String = when (description) {
-    "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
-    "General coding workspace" -> stringResource(R.string.project_general_desc)
-    else -> description
+private fun Project.localizedDescription(): String = when {
+    description == "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
+    description == "General coding workspace" -> stringResource(R.string.project_general_desc)
+    description == "Quick project" -> stringResource(R.string.project_quick_desc)
+    else -> {
+        val imported = Regex("^Imported from (.+)$").matchEntire(description)
+        val android = Regex("^Android \\((.+)\\) project$").matchEntire(description)
+        when {
+            imported != null -> stringResource(R.string.project_imported_desc, imported.groupValues[1])
+            android != null -> stringResource(R.string.project_android_desc, android.groupValues[1])
+            else -> description
+        }
+    }
 }
 
 @Composable

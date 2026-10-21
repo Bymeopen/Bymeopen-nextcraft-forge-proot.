@@ -118,7 +118,7 @@ class AntigravityAuthController(
             )
             if (spawned !is NativeSpawnProcess) {
                 runCatching { spawned.destroyForcibly() }
-                error("Unsupported Antigravity authentication process")
+                throw UiTextException(UiText.res(R.string.rt_auth_unsupported_process))
             }
             spawned
         } catch (error: Throwable) {
@@ -145,7 +145,7 @@ class AntigravityAuthController(
                 while (running.isAlive || native.outputFile.length() > offset) {
                     // An abandoned flow would otherwise keep agy alive in the chroot indefinitely.
                     if (android.os.SystemClock.elapsedRealtime() > deadline) {
-                        error("Sign-in timed out. Start sign-in again.")
+                        throw UiTextException(UiText.res(R.string.rt_auth_timeout))
                     }
                     val available = native.outputFile.length() - offset
                     if (available <= 0) {
@@ -261,17 +261,17 @@ class AntigravityAuthController(
                         workspaceTrustCompleted = true
                     }
                     if (clean.contains("authentication failed", true) || clean.contains("failed to exchange", true)) {
-                        error("Antigravity authentication failed. Please try again.")
+                        throw UiTextException(UiText.res(R.string.rt_auth_agy_failed_retry))
                     }
                 }
             }
             when (mutableState.value.status) {
                 AntigravityAuthStatus.STARTING -> if (!codeSubmitted) {
                     val exit = running.waitFor()
-                    error("Antigravity sign-in exited early (code $exit).")
+                    throw UiTextException(UiText.res(R.string.rt_auth_agy_exited_early, exit))
                 }
                 AntigravityAuthStatus.AWAITING_CODE ->
-                    error("Sign-in session ended before a code was submitted. Start sign-in again.")
+                    throw UiTextException(UiText.res(R.string.rt_auth_agy_no_code))
                 // agy can finish and exit without ever painting the screen we match on.
                 AntigravityAuthStatus.COMPLETING -> if (hasOfficialCredential()) {
                     onSignedInChanged(true, null)
@@ -280,7 +280,7 @@ class AntigravityAuthController(
                         message = UiText.res(R.string.rt_auth_google_connected),
                     )
                 } else {
-                    error("Antigravity sign-in ended before completing. Please try again.")
+                    throw UiTextException(UiText.res(R.string.rt_auth_agy_ended))
                 }
                 else -> Unit
             }
@@ -318,7 +318,7 @@ class AntigravityAuthController(
         val value = code.trim()
         if (value.isBlank()) throw UiTextException(UiText.res(R.string.rt_auth_agy_code_empty))
         try {
-            val running = process ?: error("Sign-in session is not active. Start sign-in again.")
+            val running = process ?: throw UiTextException(UiText.res(R.string.rt_auth_session_inactive))
             if (!running.isAlive) throw UiTextException(UiText.res(R.string.rt_auth_session_expired))
             running.outputStream.write((value + "\r\n").toByteArray())
             running.outputStream.flush()
