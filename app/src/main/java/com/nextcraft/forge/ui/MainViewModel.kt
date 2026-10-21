@@ -65,6 +65,7 @@ import com.nextcraft.forge.runtime.DshRuntimeBridge
 import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
+import com.nextcraft.forge.runtime.ReaChatHint
 import com.nextcraft.forge.runtime.RuntimeInstaller
 import com.nextcraft.forge.runtime.BranchMergeResult
 import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
@@ -1187,7 +1188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val now = System.currentTimeMillis()
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
         // The agent sees the attachments as workspace paths it can open with its own tools.
-        val agentPrompt = if (attachments.isEmpty()) {
+        val basePrompt = if (attachments.isEmpty()) {
             cleanPrompt
         } else {
             buildString {
@@ -1196,6 +1197,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 attachments.forEach { append("- ").append(it.relativePath).append(" (").append(it.mimeType).append(")\n") }
             }
         }
+        // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
+        val reaInstalled = File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
+        val agentPrompt = ReaChatHint.augment(basePrompt, attachments, reaInstalled)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
