@@ -55,9 +55,9 @@ android {
 
     buildTypes {
         debug {
-            // Installs next to the real app (com.nextcraft.forge): separate data dir, rootfs and launcher entry.
-            applicationIdSuffix = "x"
-            manifestPlaceholders["appLabel"] = "NextCraft Forge X"
+            // Same applicationId as release (com.nextcraft.forge): one app, one data dir and rootfs. Debug is signed with
+            // the shared public key below, release with the FORGE_KEYSTORE_* key, so a build of one kind cannot be
+            // installed over the other without uninstalling (the updater checks the certificate and says so).
             signingConfig = signingConfigs.getByName("sharedDebug")
             isMinifyEnabled = false
             buildConfigField("String", "APP_VARIANT", "\"debug\"")

@@ -26,3 +26,16 @@ Unggah APK dan `update-manifest.json` ke rilis `v1.0.1`, lalu tandai sebagai lat
 `.github/workflows/ci.yml` menjalankan unit test, `assembleDebug`, cek sintaks skrip, dan memastikan
 `scripts/runtime-bundles/{chroot-exec,unmount-chroot}.sh` sama dengan string yang dikirim di `RuntimeInstaller.kt`
 (`python3 scripts/check-embedded-scripts.py --write` untuk membuat ulang).
+
+## Debug builds (`release-debug.yml`)
+
+Debug and release use the same application id, `com.nextcraft.forge`, so there is one app, one data folder and one
+Ubuntu rootfs. The two kinds are signed differently: debug with the public key in `app/debug.keystore` (so CI builds
+update each other), release with the `FORGE_KEYSTORE_*` secrets. Android refuses to install one over the other, and the
+in-app updater checks the certificate first and says so. Going from one kind to the other means uninstalling, which
+deletes the rootfs, chats and root grant; back them up first.
+
+The workflow publishes the rolling `dev-latest` release with `nextcraft-forge-debug-<version>.apk` and a manifest whose
+`artifacts.debug` entry is read only by debug builds; a release build finds no `artifacts.release` there and offers
+nothing. Start it from the Actions tab (`Release debug build`, pick the branch). Builds before this change installed as
+`com.nextcraft.forge.x` and cannot update to this package from inside the app: install the new APK once by hand.
