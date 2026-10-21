@@ -20,6 +20,7 @@ import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
 import com.nextcraft.forge.model.ProjectKind
 import com.nextcraft.forge.model.ProjectType
+import com.nextcraft.forge.model.StarterTemplate
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.ProviderProfile
 import com.nextcraft.forge.model.RuntimeEvent
@@ -56,6 +57,7 @@ import com.nextcraft.forge.runtime.RomStudioController
 import com.nextcraft.forge.runtime.DiagnosticsController
 import com.nextcraft.forge.runtime.CiCdController
 import com.nextcraft.forge.runtime.BuildMatrixController
+import com.nextcraft.forge.runtime.GoProjectTemplateGenerator
 import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
@@ -711,6 +713,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         description: String,
         isAndroid: Boolean,
         androidTemplate: AndroidTemplate = AndroidTemplate.COMPOSE,
+        starter: StarterTemplate = StarterTemplate.EMPTY,
     ) {
         if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_busy_before_new_project)) }
@@ -723,9 +726,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
-                        if (isAndroid) "Android (${androidTemplate.label}) project" else "General coding workspace"
+                        when {
+                            isAndroid -> "Android (${androidTemplate.label}) project"
+                            starter == StarterTemplate.GO -> "Go command-line app"
+                            else -> "General coding workspace"
+                        }
                     },
-                    language = if (isAndroid) "Kotlin" else "Multi-language",
+                    language = when {
+                        isAndroid -> "Kotlin"
+                        starter == StarterTemplate.GO -> "Go"
+                        else -> "Multi-language"
+                    },
                     slug = slug,
                     type = if (isAndroid) ProjectType.ANDROID else ProjectType.GENERAL,
                     androidTemplate = if (isAndroid) androidTemplate else null,
@@ -740,7 +751,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } else {
                     checkpoints.ensureWorkspace(project.id)
-                    File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
+                    if (starter == StarterTemplate.GO) {
+                        GoProjectTemplateGenerator.generate(wsDir, cleanName)
+                    } else {
+                        File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
+                    }
                 }
                 project
             } }.getOrElse { error ->

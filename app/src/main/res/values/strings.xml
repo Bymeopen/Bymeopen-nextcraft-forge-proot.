@@ -270,6 +270,9 @@
     <string name="tool_rom_warning">A ROM source tree needs tens of GB and hours of network. %1$s. Keep the screen on and the app open while syncing.</string>
     <string name="tool_run">Run</string>
     <string name="tool_run_health_check">Run health check</string>
+    <string name="tool_install_cross_tools">Install cross-build tools</string>
+    <string name="tool_create_ios_workflow">Create iOS workflow</string>
+    <string name="tool_ios_needs_macos">iOS cannot be built on the phone: Xcode only runs on macOS. The workflow builds on a GitHub macOS runner without signing (simulator only).</string>
     <string name="tool_run_selected">Run selected</string>
     <string name="tool_runs">Recent runs</string>
     <string name="tool_runtime">Runtime</string>

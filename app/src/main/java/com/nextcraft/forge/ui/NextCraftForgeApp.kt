@@ -415,8 +415,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     if (showNewProjectDialog) {
         NewProjectDialog(
             onDismiss = { showNewProjectDialog = false },
-            onCreate = { name, desc, isAndroid, template ->
-                viewModel.createProject(name, desc, isAndroid, template)
+            onCreate = { name, desc, isAndroid, template, starter ->
+                viewModel.createProject(name, desc, isAndroid, template, starter)
                 showNewProjectDialog = false
             },
         )

@@ -173,6 +173,12 @@ enum class ProjectKind { PROJECT, QUICK_PROJECT }
 
 enum class ProjectType { GENERAL, ANDROID }
 
+/** Starter files for a non-Android project. */
+enum class StarterTemplate(val label: String) {
+    EMPTY("Empty"),
+    GO("Go (Windows/Linux)"),
+}
+
 enum class AndroidTemplate(val label: String) {
     COMPOSE("Jetpack Compose"),
     XML("Kotlin + XML"),

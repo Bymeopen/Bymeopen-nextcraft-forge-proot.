@@ -165,6 +165,28 @@ internal fun detectCrossTargets(workspace: File): List<CrossTarget> {
     return found
 }
 
+/** The Xcode workspace or project in the root of [workspace] (workspace preferred), or null. */
+internal fun findXcodeProject(workspace: File): String? {
+    val names = workspace.listFiles()?.map { it.name }.orEmpty().sorted()
+    return names.firstOrNull { it.endsWith(".xcworkspace") } ?: names.firstOrNull { it.endsWith(".xcodeproj") }
+}
+
+/** Path of the generated iOS workflow, relative to the workspace. */
+internal const val IOS_WORKFLOW_PATH = ".github/workflows/build-ios.yml"
+
+/**
+ * Writes [IOS_WORKFLOW_PATH] for the Xcode project in [workspace]. The scheme is assumed to share the project's name
+ * (Xcode's default). Returns false when there is no Xcode project or the workflow already exists (never overwritten).
+ */
+internal fun writeIosWorkflow(workspace: File): Boolean {
+    val project = findXcodeProject(workspace) ?: return false
+    val target = File(workspace, IOS_WORKFLOW_PATH)
+    if (target.exists()) return false
+    target.parentFile?.mkdirs()
+    target.writeText(iosWorkflowYaml(project, project.substringBeforeLast('.')))
+    return true
+}
+
 /**
  * GitHub Actions workflow that builds an Xcode project on a macOS runner without signing (simulator build plus an
  * unsigned device archive). Signing needs the user's Apple certificates and is added by the user as secrets.

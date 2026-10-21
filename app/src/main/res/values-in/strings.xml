@@ -270,6 +270,9 @@
     <string name="tool_rom_warning">Source ROM butuh puluhan GB dan berjam-jam jaringan. %1$s. Biarkan layar menyala dan aplikasi terbuka saat sync.</string>
     <string name="tool_run">Jalankan</string>
     <string name="tool_run_health_check">Jalankan pemeriksaan</string>
+    <string name="tool_install_cross_tools">Pasang alat cross-build</string>
+    <string name="tool_create_ios_workflow">Buat workflow iOS</string>
+    <string name="tool_ios_needs_macos">iOS tidak bisa di-build di HP: Xcode hanya jalan di macOS. Workflow ini build di runner macOS GitHub tanpa tanda tangan (hanya simulator).</string>
     <string name="tool_run_selected">Jalankan terpilih</string>
     <string name="tool_runs">Run terbaru</string>
     <string name="tool_runtime">Runtime</string>
