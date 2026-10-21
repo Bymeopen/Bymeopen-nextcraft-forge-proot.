@@ -216,12 +216,12 @@ data class ForgeUiState(
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
 )
-
-/** True while the open chat has its own agent turn running (drives its Stop button, status line and composer). */
-val ForgeUiState.activeChatRunning: Boolean get() = activeChatId in runningChatIds
  {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
+
+    /** True while the open chat has its own agent turn running (drives its Stop button, status line and composer). */
+    val activeChatRunning: Boolean get() = activeChatId in runningChatIds
 }
 
 /** [chatId] keeps the offer in the chat where the failure happened. */
