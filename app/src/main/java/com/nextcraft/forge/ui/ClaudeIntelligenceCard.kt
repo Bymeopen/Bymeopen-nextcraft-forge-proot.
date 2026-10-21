@@ -76,17 +76,18 @@ internal fun ClaudeIntelligenceCard(
                     Chevron(expanded = false)
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Stacked, not side by side: the long hint used to squeeze the label into two ragged lines.
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = stringResource(R.string.agent_reasoning_depth),
                     fontSize = ForgeType.secondary,
                     color = scheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
                 )
                 Text(text = effortLabels[effortIndex], fontSize = ForgeType.secondary, color = scheme.primary)
             }
             ForgePillTabs(
                 items = effortLabels,
+                equalWidth = true,
                 selectedIndex = effortIndex,
                 // Saved right away: there is no separate Save button in this layout.
                 onSelect = { viewModel.setClaudeEffort(levels[it]) },

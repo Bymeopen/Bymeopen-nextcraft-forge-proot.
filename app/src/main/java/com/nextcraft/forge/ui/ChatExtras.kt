@@ -274,7 +274,7 @@ private fun ChangedFileRow(
                 }
                 // Two fixed rows instead of one wrapping row, so no button is ever orphaned: ways to look at the file on top,
                 // the decision (revert / keep) below with the primary action on the right.
-                val actionHeight = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)
+                val actionHeight = Modifier.heightIn(min = ForgeSpace.minTouch)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     TextButton(onClick = { onEditInTerminal(change.path) }, modifier = actionHeight) { Text(stringResource(R.string.files_edit_in_terminal), maxLines = 1) }
                     TextButton(onClick = { onOpenFile(change.path) }, modifier = actionHeight) { Text(stringResource(R.string.chat_open_in_files), maxLines = 1) }
