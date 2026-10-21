@@ -1970,6 +1970,7 @@ class RuntimeInstaller(private val context: Context) {
         ) { "Invalid project workspace path" }
         ensureChrootScripts()
         writeResolver()
+        ensureShellPrompt()
         workspace.mkdirs()
         File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         writeAndroidGradleConfiguration(targetRootfs)
@@ -2249,6 +2250,17 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             if (dir.isDirectory && (!dir.canWrite() || !dir.canExecute())) {
                 RootfsRepair.reclaimOwnership(dir, uid, recursive = false)
             }
+        }
+    }
+
+    /** Keeps the coloured prompt block in /root/.bashrc ([ShellPrompt]); an unreadable file is left alone. */
+    private fun ensureShellPrompt() {
+        val bashrc = File(rootfs, "root/.bashrc")
+        val current = runCatching { if (bashrc.isFile) bashrc.readText() else "" }.getOrNull() ?: return
+        val updated = ShellPrompt.apply(current)
+        if (updated != current) {
+            runCatching { writeRootfsFileAtomically(bashrc, updated, mode = 0b110100100) }
+                .onFailure { Log.w("RuntimeInstaller", "Could not write the shell prompt", it) }
         }
     }
 
