@@ -46,7 +46,7 @@ jobs:
           apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
           mkdir -p dist
           cp "$apk" "dist/nextcraft-forge-x-$VERSION_NAME.apk"
-          NEXTCRAFT_OUT_DIR=dist scripts/make-update-manifest.sh \
+          NEXTCRAFT_PACKAGE=com.nextcraft.forge.x NEXTCRAFT_OUT_DIR=dist scripts/make-update-manifest.sh \
             "dist/nextcraft-forge-x-$VERSION_NAME.apk" "$VERSION_CODE" "$VERSION_NAME" "$TAG" debug "$NOTES"
       - name: Publish release
         env:
