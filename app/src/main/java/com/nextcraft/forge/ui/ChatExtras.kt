@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -442,6 +443,9 @@ internal fun ChatComposer(
     onCapture: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    /** Model (and effort) shown as a chip next to the attach button; tapping it opens the model sheet. */
+    modelChipLabel: String = "",
+    onModelChip: (() -> Unit)? = null,
 ) {
     val tokens = LocalForgeThemeTokens.current
     var attachMenuOpen by remember { mutableStateOf(false) }
@@ -455,10 +459,35 @@ internal fun ChatComposer(
             .fillMaxWidth()
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Column(modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)) {
+        // Message field on its own line, like Claude; the attach button, model chip and send button sit below it.
+        TextField(
+            value = promptInput,
+            onValueChange = onPromptChange,
+            placeholder = {
+                Text(
+                    stringResource(R.string.chat_composer_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            // The short hint fits a 360dp phone; TalkBack still hears which agent the message goes to.
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = composerLabel },
+            maxLines = 5,
+            // Enter stays a newline (messages are multi-line); send is the round button.
+            keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                disabledContainerColor = Color.Transparent,
+                errorContainerColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent,
+            ),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
             // Attach: photos or any file; it lands in attachments/ inside the workspace.
             Box {
                 IconButton(onClick = { attachMenuOpen = true }) {
@@ -480,32 +509,23 @@ internal fun ChatComposer(
                     )
                 }
             }
-            TextField(
-                value = promptInput,
-                onValueChange = onPromptChange,
-                placeholder = {
+            if (onModelChip != null && modelChipLabel.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onModelChip),
+                ) {
                     Text(
-                        stringResource(R.string.chat_composer_hint),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        text = modelChipLabel,
+                        fontSize = ForgeType.secondary,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 200.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                     )
-                },
-                // The short hint fits a 360dp phone; TalkBack still hears which agent the message goes to.
-                modifier = Modifier.weight(1f).semantics { contentDescription = composerLabel },
-                maxLines = 5,
-                // Enter stays a newline (messages are multi-line); send is the round button.
-                keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    errorContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                ),
-            )
+                }
+            }
+            Spacer(modifier = Modifier.weight(1f))
             val haptics = LocalHapticFeedback.current
             val reduceMotion = rememberReduceMotion()
             val sendScale by animateFloatAsState(
@@ -551,6 +571,7 @@ internal fun ChatComposer(
                     modifier = Modifier.size(22.dp),
                 )
             }
+        }
         }
     }
 }

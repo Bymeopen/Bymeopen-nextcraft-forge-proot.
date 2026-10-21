@@ -54,6 +54,8 @@ class AppUpdater(
                 }
             }
             val root = JSONObject(body)
+            // A manifest for another package (e.g. the ".x" side-by-side build) is not an update for this app.
+            root.stringOrEmpty("packageName").takeIf { it.isNotBlank() }?.let { if (it != context.packageName) return null }
             val versionCode = root.optLong("versionCode")
             if (versionCode <= currentVersionCode()) return null
             val variant = appVariant()

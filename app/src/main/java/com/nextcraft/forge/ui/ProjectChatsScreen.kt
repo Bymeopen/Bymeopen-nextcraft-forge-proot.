@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
+import com.nextcraft.forge.model.AgentKind
 
 /**
  * Inside a project: its chats, each with its own title, newest first. One primary New chat action;
@@ -78,7 +79,7 @@ fun ProjectChatsScreen(
         ForgePrimaryButton(
             text = "+ " + stringResource(R.string.chats_new_chat),
             onClick = { viewModel.createChat() },
-            enabled = !state.sessionRunning,
+            enabled = state.agentKind == AgentKind.CLAUDE_CODE || !state.sessionRunning,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 6.dp),
@@ -106,7 +107,7 @@ fun ProjectChatsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ForgeStatusIcon(
-                        status = if (active && state.sessionRunning) ForgeStatus.RUNNING else ForgeStatus.TODO,
+                        status = if (chat.id in state.runningChatIds) ForgeStatus.RUNNING else ForgeStatus.TODO,
                         iconSize = 16.dp,
                     )
                     Spacer(modifier = Modifier.width(14.dp))
@@ -127,7 +128,7 @@ fun ProjectChatsScreen(
                         )
                     }
                     if (chats.size > 1) {
-                        IconButton(onClick = { viewModel.deleteChat(chat.id) }, enabled = !state.sessionRunning) {
+                        IconButton(onClick = { viewModel.deleteChat(chat.id) }, enabled = chat.id !in state.runningChatIds && (state.agentKind == AgentKind.CLAUDE_CODE || !state.sessionRunning)) {
                             Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_delete_chat), tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                         }
                     }
