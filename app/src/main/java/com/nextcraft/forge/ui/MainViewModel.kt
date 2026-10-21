@@ -63,7 +63,9 @@ import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
+import com.nextcraft.forge.runtime.BranchMergeResult
 import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
+import com.nextcraft.forge.runtime.ChatBranches
 import com.nextcraft.forge.runtime.RuntimeLaunchConfigBuilder
 import com.nextcraft.forge.runtime.AgentUpdateInfo
 import com.nextcraft.forge.runtime.RuntimeSetupController
@@ -105,6 +107,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import com.nextcraft.forge.model.generateQuickChatIdentity
 import com.nextcraft.forge.R
@@ -114,6 +117,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val vault = ApiKeyVault(application)
     private val installer = RuntimeInstaller(application)
     private val checkpoints = WorkspaceCheckpoints(application.filesDir, application)
+    private val chatBranches = ChatBranches(application)
+    /** Serialises commits and clone setup per chat so a new turn never starts while the last one is being committed. */
+    private val branchLocks = HashMap<String, kotlinx.coroutines.sync.Mutex>()
+    private fun branchLock(chatId: String) = branchLocks.getOrPut(chatId) { kotlinx.coroutines.sync.Mutex() }
     private val providerApi = ProviderApiClient(application)
     private val githubClient = GitHubClient(application)
     val antigravityAuth = AntigravityAuthController(
@@ -869,6 +876,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pendingToolRequest = run?.pendingTool,
             )
         }
+        if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) refreshBranchStatus(chatId)
     }
 
     fun createChat(title: String = "") {
@@ -901,6 +909,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        if (currentChats.firstOrNull { it.id == chatId }?.isolated == true) {
+            viewModelScope.launch { runCatching { chatBranches.discard(project, chatId) } }
+        }
         preferences.saveProjectChats(project.id, updatedChats)
         viewModelScope.launch(Dispatchers.IO) {
             AgentKind.entries.forEach { agent ->
@@ -927,6 +938,136 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 queuedPrompts = it.queuedPrompts.filterNot { q -> q.chatId == chatId },
             )
         }
+    }
+
+    // ── Chat branches ────────────────────────────────────────────────────────────────────────────
+
+    private fun projectOf(id: String): Project? = _state.value.projects.firstOrNull { it.id == id }
+
+    /** One commit per finished turn, then a fresh status for the branch card. */
+    private fun commitBranchTurn(run: ChatRun) {
+        val project = projectOf(run.projectId) ?: return
+        viewModelScope.launch {
+            branchLock(run.chatId).withLock {
+                runCatching { chatBranches.commitTurn(project, run.chatId, run.lastPrompt.text) }
+                    .onFailure { Log.w("MainViewModel", "Could not commit the chat branch", it) }
+            }
+            refreshBranchStatus(run.chatId)
+        }
+    }
+
+    fun refreshBranchStatus(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch {
+            val status = runCatching { chatBranches.status(project, chatId) }.getOrNull()
+            _state.update { st ->
+                st.copy(branchStatus = if (status != null) st.branchStatus + (chatId to status) else st.branchStatus - chatId)
+            }
+        }
+    }
+
+    private fun <T> withBranchBusy(chatId: String, block: suspend () -> T) {
+        if (chatId in _state.value.branchBusy || runs.containsKey(chatId)) return
+        _state.update { it.copy(branchBusy = it.branchBusy + chatId) }
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Branch operation failed", e)
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_failed, e.message ?: e.javaClass.simpleName)) }
+            } finally {
+                _state.update { it.copy(branchBusy = it.branchBusy - chatId) }
+            }
+        }
+    }
+
+    /** Puts a chat on its own branch from now on (the clone is made at its next turn). */
+    fun enableChatBranch(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        if (runs.containsKey(chatId) || _state.value.agentKind != AgentKind.CLAUDE_CODE) return
+        val updated = _state.value.chats.map { if (it.id == chatId) it.copy(isolated = true) else it }
+        preferences.saveProjectChats(project.id, updated)
+        _state.update { it.copy(chats = updated, bannerMessage = UiText.res(R.string.branch_enabled)) }
+    }
+
+    /** Back to the project folder; only when the branch holds nothing that would be lost. */
+    fun disableChatBranch(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        val status = _state.value.branchStatus[chatId]
+        if (status != null && (status.commits > 0 || status.uncommitted > 0 || status.conflicts.isNotEmpty())) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
+            return
+        }
+        withBranchBusy(chatId) {
+            chatBranches.discard(project, chatId)
+            val updated = _state.value.chats.map { if (it.id == chatId) it.copy(isolated = false) else it }
+            preferences.saveProjectChats(project.id, updated)
+            _state.update { it.copy(chats = updated, branchStatus = it.branchStatus - chatId) }
+        }
+    }
+
+    fun mergeChatBranch(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        val title = _state.value.chats.firstOrNull { it.id == chatId }?.title.orEmpty()
+        withBranchBusy(chatId) {
+            val result = branchLock(chatId).withLock {
+                chatBranches.commitTurn(project, chatId, "Forge: save work before merge")
+                chatBranches.mergeIntoMain(project, chatId, title)
+            }
+            val message = when (result) {
+                BranchMergeResult.Done -> UiText.res(R.string.branch_merged)
+                is BranchMergeResult.Conflict -> UiText.res(R.string.branch_merge_conflict, result.files.joinToString(", ").take(200))
+                is BranchMergeResult.Failed -> UiText.res(R.string.branch_failed, result.message)
+            }
+            _state.update { it.copy(bannerMessage = message) }
+            if (result == BranchMergeResult.Done) refreshWorkspaceFilesAndChanges(project.id)
+            refreshBranchStatus(chatId)
+        }
+    }
+
+    fun updateChatBranchFromMain(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        withBranchBusy(chatId) {
+            val result = branchLock(chatId).withLock { chatBranches.updateFromMain(project, chatId) }
+            val message = when (result) {
+                BranchMergeResult.Done -> UiText.res(R.string.branch_updated)
+                is BranchMergeResult.Conflict -> UiText.res(R.string.branch_update_conflict, result.files.joinToString(", ").take(200))
+                is BranchMergeResult.Failed -> UiText.res(R.string.branch_failed, result.message)
+            }
+            _state.update { it.copy(bannerMessage = message) }
+            refreshBranchStatus(chatId)
+        }
+    }
+
+    fun discardChatBranch(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        withBranchBusy(chatId) {
+            chatBranches.discard(project, chatId)
+            val updated = _state.value.chats.map { if (it.id == chatId) it.copy(isolated = false) else it }
+            preferences.saveProjectChats(project.id, updated)
+            _state.update { it.copy(chats = updated, branchStatus = it.branchStatus - chatId, branchDiff = it.branchDiff - chatId) }
+        }
+    }
+
+    fun loadBranchDiff(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        withBranchBusy(chatId) {
+            val text = chatBranches.diff(project, chatId)
+            _state.update { it.copy(branchDiff = it.branchDiff + (chatId to text)) }
+        }
+    }
+
+    /** Asks the chat's agent to finish a merge that stopped on conflicts inside its branch. */
+    fun askAgentToResolveConflicts(chatId: String) {
+        val files = _state.value.branchStatus[chatId]?.conflicts.orEmpty()
+        if (files.isEmpty()) return
+        if (_state.value.activeChatId != chatId) selectChat(chatId)
+        if (_state.value.activeChatId != chatId) return
+        val text = getApplication<Application>().getString(R.string.branch_resolve_prompt, files.joinToString(", "))
+        _state.update { it.copy(pendingAttachments = emptyList()) }
+        sendPrompt(text)
     }
 
     /** Renames a chat of the open project; a renamed chat keeps its name (it is no longer auto-titled). */
@@ -1027,6 +1168,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val autoTitle = cleanPrompt.lineSequence().firstOrNull()?.trim().orEmpty().let { firstLine ->
             if (firstLine.length > 34) firstLine.take(34).trimEnd() + "…" else firstLine
         }
+        // Only Claude Code runs several chats at once. When another chat is already working in the project, this
+        // one gets its own branch so the two cannot overwrite each other's files.
+        val agentKind = _state.value.agentKind
+        val wasIsolated = _state.value.chats.firstOrNull { it.id == chatId }?.isolated == true
+        val isolated = agentKind == AgentKind.CLAUDE_CODE && (wasIsolated || runs.isNotEmpty())
+        if (isolated && !wasIsolated) _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_auto)) }
         val updatedChats = _state.value.chats.map { chat ->
             if (chat.id == chatId) {
                 val shouldRetitle = historyBefore.isEmpty() &&
@@ -1035,6 +1182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chat.copy(
                     title = if (shouldRetitle) autoTitle else chat.title,
                     updatedAtMillis = now,
+                    isolated = isolated,
                 )
             } else {
                 chat
@@ -1058,6 +1206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             bridge = bridge,
             ownsBridge = agent == AgentKind.CLAUDE_CODE,
             lastPrompt = QueuedPrompt(text = cleanPrompt, attachments = attachments),
+            isolated = isolated,
         )
         run.messages = updatedMessages
         run.statusLine = UiText.res(R.string.agent_status_starting, agent.title)
@@ -1083,9 +1232,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // A GitHub sync writes the token into the rootfs while it runs; never let an agent (root in the
                 // same chroot) start before that sync has removed it again.
                 withContext(Dispatchers.IO) { githubOperationLock.withLock { } }
+                // An isolated chat works in its own clone of the project (created on first use).
+                val branch = if (run.isolated) branchLock(chatId).withLock { chatBranches.ensure(project, chatId) } else null
                 bridge.startSession(
-                    projectId = project.id,
-                    projectSlug = project.slug,
+                    projectId = branch?.pseudoProjectId ?: project.id,
+                    projectSlug = branch?.slug ?: project.slug,
                     projectKind = project.kind,
                     prompt = agentPrompt,
                     conversationHistory = historyBefore + userMsg,
@@ -1288,7 +1439,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             is RuntimeEvent.FilesChanged -> {
-                if (_state.value.activeProjectId == run.projectId) {
+                // An isolated chat's changes live in its branch; the project's review list is not theirs.
+                if (!run.isolated && _state.value.activeProjectId == run.projectId) {
                     _state.update { it.copy(changedItems = event.changes) }
                     refreshWorkspaceFilesAndChanges(run.projectId)
                 }
@@ -1388,6 +1540,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         publishRunningFlags()
         refreshWorkspaceFilesAndChanges(run.projectId)
+        if (run.isolated) commitBranchTurn(run)
         // One sync after the last chat finished, not one per chat while others are still editing.
         if (preferences.autoSyncGitHub && runs.isEmpty()) {
             syncProjectWithGitHub(run.projectId, "Sync agent changes from NextCraft Forge")
@@ -3592,6 +3745,8 @@ private class ChatRun(
     /** True when [bridge] was created for this run (Claude Code); its events are collected by the run itself. */
     val ownsBridge: Boolean,
     val lastPrompt: QueuedPrompt,
+    /** True when the run works in the chat's own branch (a clone of the project), not in the project folder. */
+    val isolated: Boolean = false,
 ) {
     var job: Job? = null
     var eventsJob: Job? = null

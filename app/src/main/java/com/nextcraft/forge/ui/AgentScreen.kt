@@ -188,6 +188,7 @@ fun AgentScreen(
     var usageOpen by rememberSaveable { mutableStateOf(false) }
     var renameOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var branchSheetOpen by rememberSaveable { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     androidx.compose.material3.ModalNavigationDrawer(
@@ -207,6 +208,11 @@ fun AgentScreen(
             onUsage = { usageOpen = true },
             onClear = viewModel::clearActiveChat,
             onDelete = { viewModel.deleteChat(state.activeChatId) },
+            onBranch = {
+                viewModel.refreshBranchStatus(state.activeChatId)
+                branchSheetOpen = true
+            },
+            onEnableBranch = { viewModel.enableChatBranch(state.activeChatId) },
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -306,6 +312,13 @@ fun AgentScreen(
                                     viewModel.selectTab(ForgeTab.TERMINAL)
                                 },
                             )
+                            // A chat with its own branch shows what the branch holds instead of the project's review list.
+                            val branchStatus = state.branchStatus[state.activeChatId]
+                            if (message.id == lastAssistantId && !state.activeChatRunning && branchStatus != null &&
+                                (branchStatus.commits > 0 || branchStatus.uncommitted > 0 || branchStatus.conflicts.isNotEmpty())
+                            ) {
+                                BranchSummaryCard(status = branchStatus, onOpen = { branchSheetOpen = true })
+                            }
                             // Review right where the agent said it was done; the Files tab keeps the full diff view.
                             if (message.id == lastAssistantId && pendingChanges.isNotEmpty() && !state.sessionRunning) {
                                 ChangedFilesCard(
@@ -500,6 +513,7 @@ fun AgentScreen(
     }
 
     if (usageOpen) ChatUsageSheet(state = state, onDismiss = { usageOpen = false })
+    if (branchSheetOpen) BranchSheet(state = state, viewModel = viewModel, chatId = state.activeChatId, onDismiss = { branchSheetOpen = false })
     if (modelSheetOpen) ChatModelSheet(state = state, viewModel = viewModel, onDismiss = { modelSheetOpen = false })
     if (renameOpen) {
         RenameChatDialog(

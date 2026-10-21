@@ -108,7 +108,7 @@ class SnapshotManager(private val filesDir: File) {
 
     private companion object {
         val NAME = Regex("^(\\d{10,})-(.*)\\.zip$")
-        val EXCLUDED_DIRS = setOf("node_modules", ".gradle", "build", "__pycache__", ".cxx", ".venv")
+        val EXCLUDED_DIRS = setOf("node_modules", ".gradle", "build", "__pycache__", ".cxx", ".venv", ".forge")
         const val MAX_TOTAL_BYTES = 500L * 1024 * 1024
     }
 }

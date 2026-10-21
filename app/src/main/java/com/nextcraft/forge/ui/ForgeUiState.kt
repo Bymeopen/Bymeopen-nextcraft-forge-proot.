@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
+import com.nextcraft.forge.runtime.BranchStatus
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
@@ -200,6 +201,12 @@ data class ForgeUiState(
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
     val claudeEffort: String = "",
+    /** Branch status of the chats that work in their own branch, by chat id. */
+    val branchStatus: Map<String, BranchStatus> = emptyMap(),
+    /** Chats with a branch operation (merge, update, diff) in progress. */
+    val branchBusy: Set<String> = emptySet(),
+    /** Last diff text loaded for a branch (chat id to text). */
+    val branchDiff: Map<String, String> = emptyMap(),
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -50,6 +52,7 @@ import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.ProjectChat
+import com.nextcraft.forge.runtime.BranchStatus
 import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
 
 /*
@@ -67,6 +70,8 @@ internal fun ChatTopBar(
     onUsage: () -> Unit,
     onClear: () -> Unit,
     onDelete: () -> Unit,
+    onBranch: () -> Unit,
+    onEnableBranch: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     var menuOpen by rememberSaveable { mutableStateOf(false) }
@@ -123,6 +128,17 @@ internal fun ChatTopBar(
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_rename)) }, onClick = { menuOpen = false; onRename() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_usage)) }, onClick = { menuOpen = false; onUsage() })
+                if (state.agentKind == AgentKind.CLAUDE_CODE) {
+                    if (activeChat?.isolated == true) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.branch_menu_open)) }, onClick = { menuOpen = false; onBranch() })
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.branch_menu_enable)) },
+                            enabled = !state.activeChatRunning,
+                            onClick = { menuOpen = false; onEnableBranch() },
+                        )
+                    }
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.chat_menu_clear)) },
                     enabled = !state.activeChatRunning,
@@ -372,4 +388,171 @@ internal fun formatTokenCount(tokens: Int): String = when {
     tokens >= 1_000_000 -> if (tokens % 1_000_000 == 0) "${tokens / 1_000_000}M" else "%.1fM".format(java.util.Locale.ROOT, tokens / 1_000_000.0)
     tokens >= 1_000 -> if (tokens % 1_000 == 0) "${tokens / 1_000}k" else "%.1fk".format(java.util.Locale.ROOT, tokens / 1_000.0)
     else -> tokens.toString()
+}
+
+/** Under the last answer of a chat that has its own branch: what the branch holds, with a way into the branch sheet. */
+@Composable
+internal fun BranchSummaryCard(status: BranchStatus, onOpen: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = tokens.cardElevatedColor,
+        border = tokens.cardBorderStroke,
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen),
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.branch_card, status.commits, status.filesChanged),
+                    fontSize = ForgeType.rowTitle,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = stringResource(R.string.branch_card_lines, status.additions, status.deletions),
+                    fontSize = ForgeType.secondary,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            ForgeTextButton(onClick = onOpen) { Text(stringResource(R.string.branch_open)) }
+        }
+    }
+}
+
+/** The chat's branch: what it changed, how far it is from the project, and merge / update / discard. */
+@Composable
+internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: String, onDismiss: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    val status = state.branchStatus[chatId] ?: BranchStatus()
+    val busy = chatId in state.branchBusy
+    val running = chatId in state.runningChatIds
+    val diff = state.branchDiff[chatId]
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = tokens.cardContainerColor,
+    ) {
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.padding(horizontal = ForgeSpace.card),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Text(stringResource(R.string.branch_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
+                if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+            }
+            item {
+                Surface(shape = RoundedCornerShape(16.dp), color = tokens.cardElevatedColor, border = tokens.cardBorderStroke, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            stringResource(R.string.branch_summary, status.commits, status.filesChanged, status.additions, status.deletions),
+                            fontSize = ForgeType.rowTitle,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        if (status.uncommitted > 0) {
+                            Text(stringResource(R.string.branch_uncommitted, status.uncommitted), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                        }
+                        if (status.behind > 0) {
+                            Text(stringResource(R.string.branch_behind, status.behind), fontSize = ForgeType.secondary, color = tokens.accentText)
+                        }
+                        if (status.commits == 0 && status.uncommitted == 0) {
+                            Text(stringResource(R.string.branch_clean), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            if (status.conflicts.isNotEmpty()) {
+                item {
+                    Surface(shape = RoundedCornerShape(16.dp), color = scheme.error.copy(alpha = 0.10f), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(stringResource(R.string.branch_conflicts_title), fontWeight = FontWeight.SemiBold, color = scheme.error)
+                            status.conflicts.forEach { Text(it, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace) }
+                            ForgePrimaryButton(
+                                text = stringResource(R.string.branch_ask_agent),
+                                onClick = {
+                                    onDismiss()
+                                    viewModel.askAgentToResolveConflicts(chatId)
+                                },
+                                enabled = !busy && !running,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+            if (status.recent.isNotEmpty()) {
+                item { Text(stringResource(R.string.branch_commits_title), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant) }
+                items(status.recent, key = { it.hash }) { commit ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(commit.hash, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace, color = tokens.accentText)
+                        Text(commit.subject, fontSize = ForgeType.secondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { viewModel.loadBranchDiff(chatId) },
+                        enabled = !busy,
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.branch_diff)) }
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { viewModel.updateChatBranchFromMain(chatId) },
+                        enabled = !busy && !running && status.behind > 0 && status.conflicts.isEmpty(),
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.branch_update)) }
+                    ForgePrimaryButton(
+                        text = stringResource(R.string.branch_merge),
+                        onClick = { viewModel.mergeChatBranch(chatId) },
+                        enabled = !busy && !running && status.conflicts.isEmpty() && (status.commits > 0 || status.uncommitted > 0),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { confirmDiscard = true },
+                        enabled = !busy && !running,
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.branch_discard), color = scheme.error) }
+                    ForgeTextButton(
+                        onClick = { viewModel.disableChatBranch(chatId); onDismiss() },
+                        enabled = !busy && !running,
+                    ) { Text(stringResource(R.string.branch_use_project)) }
+                }
+            }
+            if (!diff.isNullOrBlank()) {
+                item {
+                    Surface(shape = RoundedCornerShape(12.dp), color = tokens.cardElevatedColor, modifier = Modifier.fillMaxWidth()) {
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(
+                                text = diff,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = ForgeType.caption,
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .heightIn(max = 360.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text(stringResource(R.string.branch_discard), fontWeight = FontWeight.SemiBold) },
+            text = { Text(stringResource(R.string.branch_discard_confirm)) },
+            confirmButton = {
+                ForgeTextButton(onClick = { confirmDiscard = false; viewModel.discardChatBranch(chatId); onDismiss() }) {
+                    Text(stringResource(R.string.branch_discard), color = scheme.error)
+                }
+            },
+            dismissButton = { ForgeTextButton(onClick = { confirmDiscard = false }) { Text(stringResource(R.string.projects_cancel)) } },
+        )
+    }
 }

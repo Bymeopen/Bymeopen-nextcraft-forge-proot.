@@ -45,6 +45,8 @@ class WorkspaceCheckpoints(
 
     fun ensureWorkspace(projectId: String): File {
         val safeId = safeProjectId(projectId)
+        // A chat branch (its own clone of the project) registered a directory for its pseudo project id.
+        workspaceOverrides[safeId]?.let { return it.apply { mkdirs() } }
         val base = File(filesDir, "workspaces/$safeId").apply { mkdirs() }.canonicalFile
         val rootPath = projectRoots[safeId].orEmpty()
         if (rootPath.isBlank()) return base
@@ -543,6 +545,8 @@ class WorkspaceCheckpoints(
             ".idea",
             // Kotlin compiler daemon state; Gradle builds in the chroot (root) leave unreadable files here.
             ".kotlin",
+            // Chat branches: one clone of the project per chat lives in here (see ChatBranches).
+            ".forge",
             ".next",
             ".dart_tool",
             ".venv",
@@ -551,5 +555,16 @@ class WorkspaceCheckpoints(
         )
         private val BUILD_OUTPUT_DIRECTORY_NAMES = setOf("build", "dist", "target")
         private val projectLocks = ConcurrentHashMap<String, Any>()
+
+        /** Pseudo project ids of chat branches -> the clone directory they work in (shared by every instance). */
+        private val workspaceOverrides = ConcurrentHashMap<String, File>()
+
+        fun registerWorkspaceOverride(projectId: String, directory: File) {
+            workspaceOverrides[projectId] = directory
+        }
+
+        fun clearWorkspaceOverride(projectId: String) {
+            workspaceOverrides.remove(projectId)
+        }
     }
 }

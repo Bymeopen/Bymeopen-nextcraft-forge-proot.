@@ -421,6 +421,7 @@ class AppPreferences(private val context: Context) {
                 put("title", chat.title)
                 put("createdAtMillis", chat.createdAtMillis)
                 put("updatedAtMillis", chat.updatedAtMillis)
+                put("isolated", chat.isolated)
             })
         }
         writeAtomically(File(projectDir, "index.json"), arr.toString())
@@ -443,6 +444,7 @@ class AppPreferences(private val context: Context) {
                             title = obj.optString("title", "Chat"),
                             createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
                             updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
+                            isolated = obj.optBoolean("isolated", false),
                         )
                     }.getOrNull()
                 }.sortedByDescending { it.updatedAtMillis }
