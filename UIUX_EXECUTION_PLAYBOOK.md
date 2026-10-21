@@ -370,3 +370,5 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Batch B (chat): grouped tool steps (3+ fold into one row, live step shown), inline diff card with keep/revert under the last finished reply, approval as non-dismissable bottom sheet with risk label and affected files, contextual quick-action chips plus starter ideas, "N new" pill. Components in ChatExtras.kt; renders in the phone-size harness (chatB, approval).
 
 - Round to 8.5: theme-level dialog/sheet/menu surfaces and one shape scale, fading edges on scrolling tabs, project card status pills (agent working, N files changed), landscape compact bar/header and no two-pane on landscape phones, diff actions wrap. Verified in renders: dark/white/glass at 393dp, landscape 932x430.
+
+- Visual fixes round: onboarding actions pinned (install button no longer below the fold on 360dp), English default runtime message mapped through runtimeText, composer short hint (TalkBack keeps the agent name), fading edges on quick chips and terminal keys, workspace error banners localised. Harness gained composer, terminal and onboarding scenarios.

@@ -360,7 +360,6 @@ fun AgentScreen(
         // Camera: the photo is written to a FileProvider URI in the app cache, then imported like any picked file.
         val cameraContext = LocalContext.current
         var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
-        var attachMenuOpen by remember { mutableStateOf(false) }
         var confirmCapture by remember { mutableStateOf(false) }
         if (confirmCapture) {
             val captureTarget = cameraContext.findWindow()
@@ -464,6 +463,7 @@ fun AgentScreen(
             }
             QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
         }
+<<<<<<< HEAD
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = tokens.cardContainerColor,
@@ -576,6 +576,25 @@ fun AgentScreen(
                 }
             }
         }
+=======
+        ChatComposer(
+            promptInput = promptInput,
+            onPromptChange = { promptInput = it },
+            agentName = state.agentKind.displayTitle(),
+            running = running,
+            canSend = canSend,
+            captureEnabled = !state.capturingScreens,
+            onAttachCamera = { launchCamera() },
+            onAttachFile = { attachPicker.launch(arrayOf("*/*")) },
+            onCapture = { confirmCapture = true },
+            onSend = {
+                val text = promptInput.trim()
+                promptInput = ""
+                viewModel.sendPrompt(text)
+            },
+            onStop = viewModel::stopActiveTask,
+        )
+>>>>>>> origin/main
     }
 }
 

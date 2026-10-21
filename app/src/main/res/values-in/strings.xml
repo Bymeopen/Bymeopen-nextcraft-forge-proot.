@@ -894,4 +894,11 @@
     <string name="fm_sort_size">Ukuran</string>
     <string name="fm_show_hidden">Tampilkan file tersembunyi</string>
     <string name="fm_truncated">Menampilkan %1$d item pertama dari folder ini</string>
+    <string name="err_ws_read">Tidak bisa membaca berkas proyek</string>
+    <string name="err_ws_revert_file">Tidak bisa membatalkan %1$s</string>
+    <string name="err_ws_keep_file">Tidak bisa menyimpan %1$s</string>
+    <string name="err_ws_keep">Tidak bisa menyimpan perubahan</string>
+    <string name="err_ws_revert">Tidak bisa membatalkan perubahan</string>
+    <string name="rt_msg_preparing_default">Menyiapkan ruang kerja pribadi Anda</string>
+    <string name="chat_composer_hint">Tulis pesan…</string>
 </resources>

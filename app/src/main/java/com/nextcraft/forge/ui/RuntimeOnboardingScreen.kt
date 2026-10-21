@@ -136,13 +136,13 @@ internal fun RuntimeOnboardingScreen(
         contentColor = scheme.onBackground,
         modifier = Modifier.fillMaxSize(),
     ) {
+    Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .weight(1f)
             .verticalScroll(rememberScrollState())
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
             .statusBarsPadding()
-            .padding(top = 12.dp, bottom = 24.dp),
+            .padding(top = 12.dp, bottom = 12.dp),
     ) {
         ForgeLargeTitle(
             title = stringResource(R.string.onb_title),
@@ -257,7 +257,11 @@ internal fun RuntimeOnboardingScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+    }
+    // The actions stay pinned: on 360dp phones the install button used to sit below the fold of a long checklist.
+    Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
+        Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+        Spacer(modifier = Modifier.height(12.dp))
         // One primary capsule (install / resume / pause), then quiet text actions, then the escape link.
         if (isInstalling) {
             OutlinedButton(
@@ -298,6 +302,7 @@ internal fun RuntimeOnboardingScreen(
             onClick = onEnterWorkspaceAnyway,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) { Text(stringResource(R.string.onb_continue_anyway), color = scheme.onSurfaceVariant) }
+    }
     }
     }
 }
