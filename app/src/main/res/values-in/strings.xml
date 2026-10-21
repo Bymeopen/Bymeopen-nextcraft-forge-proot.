@@ -1218,4 +1218,6 @@
     <string name="route_rule_delete">Hapus aturan</string>
     <string name="route_rule_keywords">Kata, pisahkan dengan koma</string>
     <string name="route_rule_add">Tambah aturan</string>
+    <string name="settings_rea_chat_hint">Beri tahu agen tentang REA</string>
+    <string name="settings_rea_chat_hint_subtitle">Mati secara bawaan. Jika menyala, pesan chat tentang biner (apk, elf, firmware) juga memberi tahu agen bahwa perintah rea tersedia. Selama mati, tidak ada teks tambahan yang dikirim.</string>
 </resources>

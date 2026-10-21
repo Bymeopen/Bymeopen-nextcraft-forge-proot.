@@ -1237,4 +1237,6 @@
     <string name="route_rule_delete">Delete rule</string>
     <string name="route_rule_keywords">Words, separated by commas</string>
     <string name="route_rule_add">Add rule</string>
+    <string name="settings_rea_chat_hint">Tell the agent about REA</string>
+    <string name="settings_rea_chat_hint_subtitle">Off by default. When on, chat messages about binaries (apk, elf, firmware) also tell the agent that the rea command exists. Nothing extra is sent while this is off.</string>
 </resources>

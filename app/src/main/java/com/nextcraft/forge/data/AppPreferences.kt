@@ -132,6 +132,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
 
+    /** Adds a note about the `rea` toolkit to chat messages that concern binaries. Off by default: nothing extra is sent. */
+    var reaChatHint: Boolean
+        get() = preferences.getBoolean("rea_chat_hint", false)
+        set(value) { preferences.edit().putBoolean("rea_chat_hint", value).apply() }
+
     /** Whether high-risk tool executions prompt for interactive approval instead of immediate rejection. */
     var interactiveHighRiskApprovals: Boolean
         // Auto-approve-all (default on) overrides prompting, so until the user chooses, show this as off instead of

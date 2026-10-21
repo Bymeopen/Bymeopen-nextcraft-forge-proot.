@@ -368,6 +368,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
+                    reaChatHint = preferences.reaChatHint,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
@@ -1311,7 +1312,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
-        val reaInstalled = File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
+        val reaInstalled = preferences.reaChatHint &&
+            File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
         val agentPrompt = ReaChatHint.augment(basePrompt, attachments, reaInstalled)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
@@ -3722,6 +3724,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setReaChatHint(enabled: Boolean) {
+        preferences.reaChatHint = enabled
+        _state.update { it.copy(reaChatHint = enabled) }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {
