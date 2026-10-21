@@ -892,4 +892,24 @@
     <string name="capture_done">%1$d screen pictures attached</string>
     <string name="capture_failed">Could not capture the screens</string>
     <string name="projects_status_working">Agent working</string>
+    <string name="fm_title">File manager</string>
+    <plurals name="fm_workspaces_count">
+        <item quantity="one">%d workspace</item>
+        <item quantity="other">%d workspaces</item>
+    </plurals>
+    <string name="fm_workspace_active">Active</string>
+    <string name="fm_workspaces_empty_title">No workspaces yet</string>
+    <string name="fm_workspaces_empty_message">Create a project in Projects and its folder will show up here.</string>
+    <string name="fm_folder_empty">This folder is empty</string>
+    <plurals name="fm_items_count">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    <string name="fm_meta">%1$s · %2$s</string>
+    <string name="fm_sort">Sort and view</string>
+    <string name="fm_sort_name">Name</string>
+    <string name="fm_sort_modified">Last modified</string>
+    <string name="fm_sort_size">Size</string>
+    <string name="fm_show_hidden">Show hidden files</string>
+    <string name="fm_truncated">Showing the first %1$d items of this folder</string>
 </resources>

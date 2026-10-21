@@ -24,6 +24,7 @@ import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.ProviderProfile
 import com.nextcraft.forge.model.RuntimeEvent
 import com.nextcraft.forge.model.ToolRequest
+import com.nextcraft.forge.model.WorkspaceDirListing
 import com.nextcraft.forge.model.WorkspaceEntry
 import com.nextcraft.forge.model.stringOrEmpty
 import com.nextcraft.forge.model.projectSlug
@@ -1402,6 +1403,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.selectedFilePath?.takeIf { !_state.value.selectedFileDirty }?.let {
                 loadWorkspaceFile(it, onlyIfClean = true)
             }
+        }
+    }
+
+    /**
+     * The direct children of [relativeDir] ("" is the workspace root) in the active project, for the file manager.
+     * Unlike [refreshWorkspaceFilesAndChanges] this lists one folder at a time with no depth or entry cap per tree, so a
+     * folder's item count is always its real one. Returns null when the folder no longer exists or is outside the
+     * workspace. Symbolic links are skipped, like everywhere else in the workspace tools.
+     */
+    suspend fun listWorkspaceDirectory(relativeDir: String): WorkspaceDirListing? {
+        val project = _state.value.activeProject ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val root = checkpoints.ensureWorkspace(project.id).canonicalFile
+                val clean = relativeDir.trim('/')
+                if (clean.split('/').any { it == ".." }) return@runCatching null
+                val dir = if (clean.isEmpty()) root else File(root, clean).canonicalFile
+                if (!dir.toPath().startsWith(root.toPath()) || !dir.isDirectory) return@runCatching null
+                val children = dir.listFiles().orEmpty().filter { !Files.isSymbolicLink(it.toPath()) }
+                val entries = children.take(MAX_DIRECTORY_ENTRIES).map { child ->
+                    val isDir = child.isDirectory
+                    WorkspaceEntry(
+                        path = child.relativeTo(root).invariantSeparatorsPath,
+                        name = child.name,
+                        isDirectory = isDir,
+                        depth = 0,
+                        sizeBytes = if (isDir) 0L else child.length(),
+                        childCount = if (isDir) child.list()?.size ?: 0 else null,
+                        modifiedMillis = child.lastModified(),
+                    )
+                }
+                WorkspaceDirListing(entries, truncated = children.size > MAX_DIRECTORY_ENTRIES)
+            }.getOrNull()
         }
     }
 
@@ -3462,6 +3496,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val UNDO_WINDOW_MS = 6_000L
 
         const val MAX_IMPORT_ENTRIES = 50_000
+        const val MAX_DIRECTORY_ENTRIES = 3_000
         const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TERMINAL_CHARS = 128 * 1024
         const val TERMINAL_TRANSCRIPT_ROWS = 4000

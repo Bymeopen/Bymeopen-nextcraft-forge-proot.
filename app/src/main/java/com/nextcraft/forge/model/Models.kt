@@ -249,6 +249,15 @@ data class WorkspaceEntry(
     val sizeBytes: Long = 0,
     /** Null until the directory's direct children have been counted off the UI thread. */
     val childCount: Int? = null,
+    /** Last-modified time in epoch millis; 0 when unknown. */
+    val modifiedMillis: Long = 0L,
+)
+
+/** The direct children of one workspace folder, as the file manager shows them. */
+data class WorkspaceDirListing(
+    val entries: List<WorkspaceEntry>,
+    /** True when the folder has more entries than [entries] holds. */
+    val truncated: Boolean = false,
 )
 
 enum class RiskLevel { SAFE, REVIEW, HIGH }

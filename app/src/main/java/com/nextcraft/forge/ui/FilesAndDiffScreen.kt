@@ -43,6 +43,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.remember
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.res.pluralStringResource
+import com.nextcraft.forge.model.WorkspaceDirListing
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -84,6 +91,8 @@ import androidx.compose.material3.TextFieldDefaults
 fun FilesAndDiffScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
+    /** Set when this is one workspace opened from the global file manager: Back then returns to the workspace list. */
+    onBackToWorkspaces: (() -> Unit)? = null,
 ) {
     var mode by rememberSaveable { mutableStateOf(if (state.selectedFilePath != null) "editor" else "files") } // "files" | "editor" | "diff"
     var showNewFileDialog by rememberSaveable { mutableStateOf(false) }
@@ -99,9 +108,12 @@ fun FilesAndDiffScreen(
         if (uris.isNotEmpty()) viewModel.importFilesToWorkspace(uris, uploadDir)
     }
     val zipSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        uri?.let { viewModel.exportWorkspaceZip(it, selectedPaths.toList()) }
-        selecting = false
-        selectedPaths.clear()
+        // Cancelling the save dialog keeps the selection, so the user can pick another place instead of starting over.
+        if (uri != null) {
+            viewModel.exportWorkspaceZip(uri, selectedPaths.toList())
+            selecting = false
+            selectedPaths.clear()
+        }
     }
     var saveCopyPath by rememberSaveable { mutableStateOf<String?>(null) }
     val fileSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
@@ -110,6 +122,39 @@ fun FilesAndDiffScreen(
         saveCopyPath = null
     }
     val inProject = state.activeTab == ForgeTab.PROJECTS
+    val workspaceName = state.activeProject?.name ?: stringResource(R.string.files_files)
+
+    // The folder being browsed, relative to the workspace root ("" is the workspace folder itself). Reset per project.
+    var browseDir by rememberSaveable(state.activeProjectId) { mutableStateOf("") }
+    var sortName by rememberSaveable { mutableStateOf(FileSort.NAME.name) }
+    var showHidden by rememberSaveable { mutableStateOf(false) }
+    var refreshTick by remember { mutableIntStateOf(0) }
+    val sort = FileSort.entries.firstOrNull { it.name == sortName } ?: FileSort.NAME
+    // Listed from disk one folder at a time, so a folder's item count is its real one. state.workspaceFiles changes
+    // whenever the agent, terminal or a revert touches the workspace, which re-lists the open folder.
+    val dirLoad by produceState<DirLoad>(DirLoad.Loading, state.activeProjectId, browseDir, state.workspaceFiles, refreshTick) {
+        val dir = browseDir
+        value = viewModel.listWorkspaceDirectory(dir)?.let { DirLoad.Ready(dir, it) } ?: DirLoad.Missing(dir)
+    }
+    // A folder that was deleted or renamed (by the agent, the terminal or from here): step up to one that still exists.
+    LaunchedEffect(dirLoad, browseDir) {
+        val load = dirLoad
+        if (load is DirLoad.Missing && load.dir == browseDir && browseDir.isNotEmpty()) {
+            browseDir = browseDir.substringBeforeLast('/', "")
+        }
+    }
+    val loaded = (dirLoad as? DirLoad.Ready)?.takeIf { it.dir == browseDir }
+    val shownEntries = remember(loaded, sort, showHidden) {
+        sortWorkspaceEntries(loaded?.listing?.entries.orEmpty(), sort, showHidden)
+    }
+    // Back climbs the folder tree first, then leaves the explorer: editor/changes -> explorer, workspace root -> list.
+    BackHandler(enabled = mode != "files" || browseDir.isNotEmpty() || (!inProject && onBackToWorkspaces != null)) {
+        when {
+            mode != "files" -> mode = "files"
+            browseDir.isNotEmpty() -> browseDir = browseDir.substringBeforeLast('/', "")
+            else -> onBackToWorkspaces?.invoke()
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(state.selectedFilePath) {
         if (state.selectedFilePath != null) {
@@ -120,35 +165,43 @@ fun FilesAndDiffScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         if (inProject) {
             ForgeProjectHeader(
-                title = state.activeProject?.name ?: stringResource(R.string.files_files),
+                title = workspaceName,
                 subtitle = stringResource(R.string.files_files),
                 onBack = { viewModel.projectBack() },
             )
         } else {
-            // Opened from Tools: same header and Back as every other tool screen.
+            // Opened from the Tools file manager: the workspace is the title, Back returns to the workspace list.
             ForgeProjectHeader(
-                title = stringResource(R.string.files_files),
-                subtitle = state.activeProject?.name,
-                onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
+                title = workspaceName,
+                subtitle = stringResource(R.string.fm_title),
+                onBack = onBackToWorkspaces ?: { viewModel.selectTab(ForgeTab.TOOLS) },
             )
         }
         FilesHeaderCard(
+            title = if (browseDir.isEmpty()) workspaceName else browseDir.substringAfterLast('/'),
             selecting = selecting,
             selectedCount = selectedPaths.size,
             enabled = !state.sessionRunning,
-            onNewFile = { newFileBaseDir = ""; showNewFileDialog = true },
-            onNewFolder = { newFolderBaseDir = "" },
-            onUpload = { uploadDir = ""; uploadPicker.launch(arrayOf("*/*")) },
+            sort = sort,
+            showHidden = showHidden,
+            onSort = { sortName = it.name },
+            onToggleHidden = { showHidden = !showHidden },
+            onNewFile = { newFileBaseDir = browseDir; showNewFileDialog = true },
+            onNewFolder = { newFolderBaseDir = browseDir },
+            onUpload = { uploadDir = browseDir; uploadPicker.launch(arrayOf("*/*")) },
             onToggleSelect = {
                 selecting = !selecting
                 if (!selecting) selectedPaths.clear()
             },
-            onRefresh = { state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) } },
+            onRefresh = {
+                refreshTick++
+                state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) }
+            },
         )
         val modes = listOf("files", "editor", "diff")
         ForgePillTabs(
             items = listOf(
-                stringResource(R.string.files_tab_explorer, state.workspaceFiles.size),
+                stringResource(R.string.files_tab_explorer, shownEntries.size),
                 state.selectedFilePath?.substringAfterLast('/') ?: stringResource(R.string.files_tab_editor),
                 stringResource(R.string.files_tab_changes, state.changedItems.size),
             ),
@@ -158,12 +211,17 @@ fun FilesAndDiffScreen(
 
         when (mode) {
             "files" -> Column(modifier = Modifier.weight(1f)) {
-                WorkspaceTreeList(
-                    entries = state.workspaceFiles,
+                FileBreadcrumbs(rootName = workspaceName, dir = browseDir, onNavigate = { browseDir = it })
+                WorkspaceFolderList(
+                    entries = shownEntries,
+                    loading = loaded == null,
+                    atRoot = browseDir.isEmpty(),
+                    truncated = loaded?.listing?.truncated == true,
                     selectedPath = state.selectedFilePath,
                     selecting = selecting,
                     selectedPaths = selectedPaths,
                     enabled = !state.sessionRunning,
+                    onOpenFolder = { dir -> browseDir = dir },
                     onSelectFile = { path ->
                         viewModel.openWorkspaceFile(path)
                         mode = "editor"
@@ -282,9 +340,14 @@ fun FilesAndDiffScreen(
 /** Card header for the explorer: title, "+" menu (new file / folder / upload), select-for-download, refresh. */
 @Composable
 private fun FilesHeaderCard(
+    title: String,
     selecting: Boolean,
     selectedCount: Int,
     enabled: Boolean,
+    sort: FileSort,
+    showHidden: Boolean,
+    onSort: (FileSort) -> Unit,
+    onToggleHidden: () -> Unit,
     onNewFile: () -> Unit,
     onNewFolder: () -> Unit,
     onUpload: () -> Unit,
@@ -294,6 +357,7 @@ private fun FilesHeaderCard(
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
     var addOpen by remember { mutableStateOf(false) }
+    var viewOpen by remember { mutableStateOf(false) }
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = tokens.cardContainerColor,
@@ -308,11 +372,39 @@ private fun FilesHeaderCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else stringResource(R.string.files_project_folder),
+                text = if (selecting) stringResource(R.string.files_selected_count, selectedCount) else title,
                 fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            Box {
+                ForgePillIcon(
+                    icon = Icons.Default.List,
+                    description = stringResource(R.string.fm_sort),
+                    onClick = { viewOpen = true },
+                )
+                DropdownMenu(expanded = viewOpen, onDismissRequest = { viewOpen = false }) {
+                    listOf(
+                        FileSort.NAME to R.string.fm_sort_name,
+                        FileSort.MODIFIED to R.string.fm_sort_modified,
+                        FileSort.SIZE to R.string.fm_sort_size,
+                    ).forEach { (option, label) ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(label)) },
+                            leadingIcon = { RadioButton(selected = sort == option, onClick = null) },
+                            onClick = { viewOpen = false; onSort(option) },
+                        )
+                    }
+                    Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.fm_show_hidden)) },
+                        leadingIcon = { Checkbox(checked = showHidden, onCheckedChange = null) },
+                        onClick = { viewOpen = false; onToggleHidden() },
+                    )
+                }
+            }
             Box {
                 ForgePillIcon(
                     icon = Icons.Default.Add,
@@ -353,13 +445,90 @@ private fun FilesHeaderCard(
     }
 }
 
+/** How the folder being browsed is ordered; folders always come first. */
+internal enum class FileSort { NAME, MODIFIED, SIZE }
+
+/** Result of listing the open folder: the folder it was listed for is kept so a slower answer is never shown for another one. */
+private sealed interface DirLoad {
+    data object Loading : DirLoad
+    data class Ready(val dir: String, val listing: WorkspaceDirListing) : DirLoad
+    data class Missing(val dir: String) : DirLoad
+}
+
+internal fun sortWorkspaceEntries(entries: List<WorkspaceEntry>, sort: FileSort, showHidden: Boolean): List<WorkspaceEntry> {
+    val visible = if (showHidden) entries else entries.filterNot { it.name.startsWith('.') }
+    val byName = compareBy<WorkspaceEntry, String>(String.CASE_INSENSITIVE_ORDER) { it.name }
+    val within: Comparator<WorkspaceEntry> = when (sort) {
+        FileSort.NAME -> byName
+        FileSort.MODIFIED -> compareByDescending<WorkspaceEntry> { it.modifiedMillis }.then(byName)
+        FileSort.SIZE -> compareByDescending<WorkspaceEntry> { it.sizeBytes }.then(byName)
+    }
+    // Folders first, like every file manager; the chosen order applies inside each group.
+    return visible.sortedWith(compareByDescending<WorkspaceEntry> { it.isDirectory }.then(within))
+}
+
+/** "Workspace > folder > subfolder": the workspace folder is always the first crumb, every crumb jumps back to that level. */
 @Composable
-private fun WorkspaceTreeList(
+private fun FileBreadcrumbs(rootName: String, dir: String, onNavigate: (String) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val scroll = rememberScrollState()
+    val segments = if (dir.isEmpty()) emptyList() else dir.split('/')
+    // Keep the current (deepest) crumb in view when the path is longer than the screen.
+    LaunchedEffect(dir) { scroll.animateScrollTo(scroll.maxValue) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scroll)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Crumb(label = rootName, isRoot = true, current = segments.isEmpty()) { onNavigate("") }
+        segments.forEachIndexed { index, name ->
+            Text(text = "›", fontSize = ForgeType.body, color = scheme.onSurfaceVariant)
+            val path = segments.take(index + 1).joinToString("/")
+            Crumb(label = name, isRoot = false, current = index == segments.lastIndex) { onNavigate(path) }
+        }
+    }
+}
+
+@Composable
+private fun Crumb(label: String, isRoot: Boolean, current: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = !current, role = Role.Button) { onClick() }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (isRoot) {
+            ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = 18.dp)
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(
+            text = label,
+            fontSize = ForgeType.body,
+            fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (current) scheme.onSurface else scheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** The direct children of the open folder: tap a folder to go in, tap a file to open it, ⋮ for the actions. */
+@Composable
+private fun WorkspaceFolderList(
     entries: List<WorkspaceEntry>,
+    loading: Boolean,
+    atRoot: Boolean,
+    truncated: Boolean,
     selectedPath: String?,
     selecting: Boolean,
     selectedPaths: MutableList<String>,
     enabled: Boolean,
+    onOpenFolder: (String) -> Unit,
     onSelectFile: (String) -> Unit,
     onNewFileIn: (String) -> Unit,
     onNewFolderIn: (String) -> Unit,
@@ -371,126 +540,120 @@ private fun WorkspaceTreeList(
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (entries.isEmpty()) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.files_workspace_is_empty_use),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
-        return
-    }
-
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
-    // Folders start collapsed; a row is visible only when every ancestor folder is open.
-    val collapsed = remember { mutableStateListOf<String>().apply { addAll(entries.filter { it.isDirectory }.map { it.path }) } }
-    val childCounts = remember(entries) {
-        entries.filter { it.depth > 0 }.groupingBy { it.path.substringBeforeLast('/') }.eachCount()
-    }
-    val visible = entries.filter { e ->
-        var parent = e.path.substringBeforeLast('/', "")
-        var ok = true
-        while (ok && parent.isNotEmpty()) {
-            if (parent in collapsed) ok = false
-            parent = parent.substringBeforeLast('/', "")
+    if (entries.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (!loading) {
+                Text(
+                    text = stringResource(if (atRoot) R.string.files_workspace_is_empty_use else R.string.fm_folder_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.padding(24.dp),
+                )
+            }
         }
-        ok
+        return
     }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        items(visible, key = { it.path }) { entry ->
+        items(entries, key = { it.path }) { entry ->
             val isSelected = entry.path == selectedPath
-            val isOpen = entry.path !in collapsed
             var menuOpen by remember { mutableStateOf(false) }
             val checked = entry.path in selectedPaths
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isSelected) scheme.onSurface.copy(alpha = 0.08f) else Color.Transparent)
-                        .clickable(role = Role.Button) {
-                            when {
-                                selecting -> if (checked) selectedPaths.remove(entry.path) else selectedPaths.add(entry.path)
-                                entry.isDirectory -> if (isOpen) collapsed.add(entry.path) else collapsed.remove(entry.path)
-                                else -> onSelectFile(entry.path)
-                            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isSelected) scheme.onSurface.copy(alpha = 0.08f) else Color.Transparent)
+                    .clickable(role = Role.Button) {
+                        when {
+                            selecting -> if (checked) selectedPaths.remove(entry.path) else selectedPaths.add(entry.path)
+                            entry.isDirectory -> onOpenFolder(entry.path)
+                            else -> onSelectFile(entry.path)
                         }
-                        .heightIn(min = 52.dp)
-                        .padding(start = (8 + entry.depth * 14).dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (selecting) {
-                        Checkbox(checked = checked, onCheckedChange = null)
-                        Spacer(modifier = Modifier.width(4.dp))
                     }
-                    if (entry.isDirectory) {
-                        Icon(
-                            imageVector = if (isOpen) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
-                            contentDescription = stringResource(if (isOpen) R.string.a11y_collapse else R.string.a11y_expand),
-                            tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.width(18.dp))
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    // Stroke glyphs at the same weight as the nav bar; the accent only marks folders.
-                    ForgeIcon(
-                        glyph = if (entry.isDirectory) ForgeGlyph.FOLDER else ForgeGlyph.FILE,
-                        tint = if (entry.isDirectory) scheme.primary else scheme.onSurfaceVariant,
-                        size = 20.dp,
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    .heightIn(min = 56.dp)
+                    .padding(start = 8.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (selecting) {
+                    Checkbox(checked = checked, onCheckedChange = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                // Stroke glyphs at the same weight as the nav bar; the accent only marks folders.
+                ForgeIcon(
+                    glyph = if (entry.isDirectory) ForgeGlyph.FOLDER else ForgeGlyph.FILE,
+                    tint = if (entry.isDirectory) scheme.primary else scheme.onSurfaceVariant,
+                    size = 22.dp,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (entry.isDirectory) "${entry.name} (${childCounts[entry.path] ?: 0})" else entry.name,
+                        text = entry.name,
                         fontSize = ForgeType.body,
                         color = if (entry.isDirectory) scheme.onSurface else tokens.accentText,
                         fontWeight = if (entry.isDirectory || isSelected) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
                     )
-                    if (!entry.isDirectory) {
-                        Text(
-                            text = formatBytes(entry.sizeBytes),
-                            fontSize = ForgeType.caption,
-                            color = scheme.onSurfaceVariant,
+                    val detail = if (entry.isDirectory) {
+                        val count = entry.childCount ?: 0
+                        pluralStringResource(R.plurals.fm_items_count, count, count)
+                    } else {
+                        formatBytes(entry.sizeBytes)
+                    }
+                    Text(
+                        text = if (entry.modifiedMillis > 0L) {
+                            stringResource(R.string.fm_meta, detail, formatRelativeTime(entry.modifiedMillis))
+                        } else {
+                            detail
+                        },
+                        fontSize = ForgeType.caption,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }, enabled = enabled && !selecting) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.files_row_menu), tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (entry.isDirectory) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
+                            Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
+                        }
+                        if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_install_apk)) }, leadingIcon = { ForgeIcon(ForgeGlyph.BUILD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onInstallApk(entry.path) })
+                        }
+                        if (!entry.isDirectory) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_edit_in_terminal)) }, leadingIcon = { ForgeIcon(ForgeGlyph.TERMINAL, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onEditInTerminal(entry.path) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
+                        }
+                        DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.files_delete), color = tokens.dangerText) },
+                            leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, tokens.dangerText) },
+                            onClick = { menuOpen = false; onDelete(entry.path) },
                         )
                     }
-                    Box {
-                        IconButton(onClick = { menuOpen = true }, enabled = enabled && !selecting) {
-                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.files_row_menu), tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            if (entry.isDirectory) {
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_upload_here)) }, leadingIcon = { ForgeIcon(ForgeGlyph.UPLOAD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onUploadIn(entry.path) })
-                                Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
-                            }
-                            if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_install_apk)) }, leadingIcon = { ForgeIcon(ForgeGlyph.BUILD, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onInstallApk(entry.path) })
-                            }
-                            if (!entry.isDirectory) {
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_edit_in_terminal)) }, leadingIcon = { ForgeIcon(ForgeGlyph.TERMINAL, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onEditInTerminal(entry.path) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
-                            }
-                            DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.files_delete), color = tokens.dangerText) },
-                                leadingIcon = { ForgeIcon(ForgeGlyph.TRASH, tokens.dangerText) },
-                                onClick = { menuOpen = false; onDelete(entry.path) },
-                            )
-                        }
-                    }
                 }
+            }
+        }
+        if (truncated) {
+            item(key = "truncated") {
+                Text(
+                    text = stringResource(R.string.fm_truncated, entries.size),
+                    fontSize = ForgeType.caption,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
             }
         }
     }
