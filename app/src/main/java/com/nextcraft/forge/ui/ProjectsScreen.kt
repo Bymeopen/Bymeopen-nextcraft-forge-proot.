@@ -113,8 +113,8 @@ fun ProjectsScreen(
     val busy = state.sessionRunning ||
         state.androidBuild.phase == com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING ||
         state.terminalRunning
-    // Mirrors MainViewModel.deleteProject, which refuses to delete the last project or while tasks run.
-    val canDelete = state.projects.size > 1 && !busy
+    // Mirrors MainViewModel.deleteProject, which refuses while a task runs (any project can be deleted, even the last).
+    val canDelete = !busy
     var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
     var pendingRenameProject by remember { mutableStateOf<Project?>(null) }
     var showCloneDialog by rememberSaveable { mutableStateOf(false) }
