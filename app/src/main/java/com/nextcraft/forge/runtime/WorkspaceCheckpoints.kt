@@ -102,6 +102,8 @@ class WorkspaceCheckpoints(
                         runCatching { it.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
                 }
                 .forEach { source ->
+                    // A file only root can read (made by a build in the chroot) must not abort the whole turn.
+                    if (!source.canRead()) return@forEach
                     val relative = source.relativeTo(workspace).invariantSeparatorsPath
                     activeRelatives.add(relative)
                     val destination = safeWorkspaceFile(backup, relative)
@@ -481,7 +483,9 @@ class WorkspaceCheckpoints(
                     !Files.isSymbolicLink(it.toPath()) &&
                     runCatching { it.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false)
             }
-            .associate { it.relativeTo(root).invariantSeparatorsPath to digest(it) }
+            // A file the app cannot read (root-owned, or removed meanwhile) is left out instead of failing the turn.
+            .mapNotNull { file -> runCatching { digest(file) }.getOrNull()?.let { file.relativeTo(root).invariantSeparatorsPath to it } }
+            .toMap()
     }
 
     fun changedFiles(root: File, before: Map<String, String>): List<String> {
@@ -537,6 +541,8 @@ class WorkspaceCheckpoints(
             ".git",
             ".gradle",
             ".idea",
+            // Kotlin compiler daemon state; Gradle builds in the chroot (root) leave unreadable files here.
+            ".kotlin",
             ".next",
             ".dart_tool",
             ".venv",
