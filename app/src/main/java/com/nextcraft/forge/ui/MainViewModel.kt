@@ -25,6 +25,7 @@ import com.nextcraft.forge.model.StarterTemplate
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.ProviderProfile
 import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutingConfig
 import com.nextcraft.forge.model.RoutedMessage
 import com.nextcraft.forge.model.RuntimeEvent
 import com.nextcraft.forge.model.ToolRequest
