@@ -116,6 +116,9 @@ class WorkspaceCheckpoints(
                             )
                     if (!upToDate) {
                         destination.parentFile?.mkdirs()
+                        // A baseline directory left by an interrupted run where the workspace now has a file:
+                        // copyTo(overwrite) cannot replace a non-empty directory.
+                        replaceDirectoryIfPresent(destination)
                         // Always copy bytes into a distinct inode so in-place O_TRUNC edits in
                         // workspace never overwrite the checkpoint baseline!
                         source.copyTo(destination, overwrite = true)
@@ -184,6 +187,11 @@ class WorkspaceCheckpoints(
         }
     }
 
+    /** A directory (never a symlink) standing where a file must be restored is removed first. */
+    private fun replaceDirectoryIfPresent(target: File) {
+        if (target.isDirectory && !Files.isSymbolicLink(target.toPath())) target.deleteRecursivelyNoFollow()
+    }
+
     fun revertFile(projectId: String, workspace: File, path: String): Boolean {
         val safeId = safeProjectId(projectId)
         if (isInternalRuntimePath(path)) return false
@@ -196,6 +204,7 @@ class WorkspaceCheckpoints(
             val original = safeWorkspaceFile(backup, path)
             if (original.isFile) {
                 target.parentFile?.mkdirs()
+                replaceDirectoryIfPresent(target)
                 original.copyTo(target, overwrite = true)
             } else if (target.isFile) {
                 deleteTargetAndPruneEmptyParents(workspace, target)
@@ -217,11 +226,14 @@ class WorkspaceCheckpoints(
             val backup = File(checkpoint, "project")
             val paths = readChangedPathsUnlocked(safeId).filterNot(::isInternalRuntimePath)
             if (!backup.isDirectory || paths.isEmpty()) return@synchronized emptyList()
-            paths.forEach { path ->
+            // Deepest paths first: when the agent turned file `utils.js` into package `utils/index.js`, the child is
+            // removed before the parent entry is restored as a file.
+            paths.sortedByDescending { it.count { c -> c == '/' } }.forEach { path ->
                 val target = safeWorkspaceFile(workspace, path)
                 val original = safeWorkspaceFile(backup, path)
                 if (original.isFile) {
                     target.parentFile?.mkdirs()
+                    replaceDirectoryIfPresent(target)
                     original.copyTo(target, overwrite = true)
                 } else if (target.isFile) {
                     deleteTargetAndPruneEmptyParents(workspace, target)

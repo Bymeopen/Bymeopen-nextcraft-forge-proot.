@@ -809,8 +809,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.deleteProjectChats(project.id)
         }
         runCatching {
+            // checkpointDir validates the id (no "/", "..", NUL) and throws before anything is deleted.
+            val checkpointDir = checkpoints.checkpointDir(project.id)
             File(getApplication<Application>().filesDir, "workspaces/${project.id}").deleteRecursively()
-            checkpoints.checkpointDir(project.id).deleteRecursively()
+            checkpointDir.deleteRecursively()
         }
     }
 

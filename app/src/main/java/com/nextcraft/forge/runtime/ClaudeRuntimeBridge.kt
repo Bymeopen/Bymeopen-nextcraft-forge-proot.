@@ -297,7 +297,7 @@ class ClaudeRuntimeBridge(
                 } else if (checkpoints.readChangedPaths(projectId).isEmpty()) {
                     acceptLastChanges(projectId)
                 }
-                if (exit == 0 || (turnCompletedFromStream && !userStopRequested)) {
+                if (!userStopRequested && (exit == 0 || turnCompletedFromStream)) {
                     emitCompletedOnce(sessionId)
                     finishForegroundRuntime(
                         completed = true,

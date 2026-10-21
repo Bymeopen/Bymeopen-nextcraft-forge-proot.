@@ -700,7 +700,10 @@ class RuntimeInstaller(private val context: Context) {
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
                 "rm -rf \"${'$'}next\"; mkdir -p \"${'$'}next\"; " +
                 "cd \"${'$'}next\"; npm init -y >/dev/null; " +
-                "npm install --omit=dev --no-audit --no-fund @deepseek-ai/dsh@$quotedVersion; " +
+                // Guest-writable npm config (~/.npmrc, /etc/npmrc) must not redirect the registry for a package that
+                // becomes the agent runtime.
+                "npm install --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org " +
+                "--userconfig=/dev/null --globalconfig=/dev/null @deepseek-ai/dsh@$quotedVersion; " +
                 // npm runs as root; the app patches the tree next (applyDshAndroidCompatibility) as its own UID.
                 "chown -R -h ${AndroidProcess.myUid()}:${AndroidProcess.myUid()} \"${'$'}next\"",
             displayCommand = "npm install @deepseek-ai/dsh@$quotedVersion",
@@ -2521,6 +2524,40 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         return resolved
     }
 
+    /**
+     * Walks [segments] from [start] one directory at a time. A symlink is resolved lexically against the root and
+     * the result is then walked again segment by segment, so a link whose target itself crosses another link
+     * (the guest owns every byte of the rootfs and can plant `tmp/esc -> ../../..`) cannot lead outside the root.
+     */
+    private fun walkDirectoryWithinRoot(
+        rootPath: java.nio.file.Path,
+        start: java.nio.file.Path,
+        segments: List<String>,
+        hops: IntArray,
+    ): java.nio.file.Path {
+        var currentDir = start
+        for (segment in segments) {
+            val candidate = currentDir.resolve(segment).normalize()
+            require(candidate.startsWith(rootPath) && candidate != rootPath) { "Archive path escapes runtime" }
+            currentDir = if (java.nio.file.Files.isSymbolicLink(candidate)) {
+                check(++hops[0] <= 16) { "Archive symlink loop detected" }
+                val resolved = resolveSafeSymlinkTarget(
+                    rootPath = rootPath,
+                    parentDir = candidate.parent ?: rootPath,
+                    linkName = java.nio.file.Files.readSymbolicLink(candidate).toString(),
+                    errorMessage = "Archive path escapes runtime via symlink",
+                )
+                val relative = rootPath.relativize(resolved)
+                val innerSegments = (0 until relative.nameCount).map { relative.getName(it).toString() }
+                    .filter { it.isNotEmpty() && it != "." }
+                walkDirectoryWithinRoot(rootPath, rootPath, innerSegments, hops)
+            } else {
+                candidate
+            }
+        }
+        return currentDir
+    }
+
     private fun safeChild(root: File, relative: String): File {
         val normalized = relative.replace('\\', '/').trimEnd('/')
         val segments = normalized.split('/')
@@ -2535,25 +2572,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
         val rootCanonical = root.canonicalFile
         val rootPath = rootCanonical.toPath()
-        var currentDir = rootPath
-        for (index in 0 until segments.lastIndex) {
-            val segment = segments[index]
-            var candidate = currentDir.resolve(segment).normalize()
-            require(candidate.startsWith(rootPath) && candidate != rootPath) { "Archive path escapes runtime" }
-            var hops = 0
-            while (java.nio.file.Files.isSymbolicLink(candidate)) {
-                check(++hops <= 16) { "Archive symlink loop detected" }
-                val linkTarget = java.nio.file.Files.readSymbolicLink(candidate).toString()
-                val parent = candidate.parent ?: rootPath
-                candidate = resolveSafeSymlinkTarget(
-                    rootPath = rootPath,
-                    parentDir = parent,
-                    linkName = linkTarget,
-                    errorMessage = "Archive path escapes runtime via symlink",
-                )
-            }
-            currentDir = candidate
-        }
+        val hops = intArrayOf(0)
+        val currentDir = walkDirectoryWithinRoot(rootPath, rootPath, segments.dropLast(1), hops)
         val finalPath = currentDir.resolve(segments.last()).normalize()
         require(finalPath.startsWith(rootPath) && finalPath != rootPath) {
             "Archive path escapes runtime"

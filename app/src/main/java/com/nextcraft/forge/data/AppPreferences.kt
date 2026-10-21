@@ -278,7 +278,8 @@ class AppPreferences(private val context: Context) {
                 val obj = arr.optJSONObject(i)
                 val id = obj?.optString("id").orEmpty()
                 val name = obj?.optString("name").orEmpty()
-                if (obj == null || id.isBlank() || name.isBlank()) {
+                // An id is a directory name under workspaces/; a tampered one such as ".." must never reach a delete.
+                if (obj == null || id.isBlank() || name.isBlank() || runCatching { safeStorageId(id) }.isFailure) {
                     dropped++
                     return@mapNotNull null
                 }
