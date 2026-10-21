@@ -2,8 +2,9 @@ name: Release debug build
 
 # Publishes the debug-signed APK (the "NextCraft Forge X" side-by-side build, shared debug key) as the latest GitHub
 # release together with update-manifest.json, so Settings > "Periksa pembaruan aplikasi" can install it in place.
-# Run it from the Actions tab (it must exist on the default branch to be dispatchable). The versionCode grows with
-# every run, which is what the updater compares against the installed build.
+# Runs from the Actions tab (once this file is on the default branch) or when a push to ccr-parallel-chats has
+# "[release]" in its commit message, so nothing is published by accident. One rolling release (tag dev-latest) is
+# replaced each time; the versionCode grows with every run, which is what the updater compares with the installed build.
 on:
   workflow_dispatch:
     inputs:
@@ -11,12 +12,15 @@ on:
         description: Release notes
         required: false
         default: ""
+  push:
+    branches: [ccr-parallel-chats]
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -32,7 +36,7 @@ jobs:
         run: |
           echo "VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
           echo "VERSION_NAME=1.0.${GITHUB_RUN_NUMBER}-forge" >> "$GITHUB_ENV"
-          echo "TAG=build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "TAG=dev-latest" >> "$GITHUB_ENV"
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
       - name: Prepare assets
@@ -49,5 +53,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES: ${{ inputs.notes }}
         run: |
+          # Rolling release: drop the previous one (and its tag) so the app always finds the newest build.
+          gh release delete "$TAG" --cleanup-tag --yes || true
           gh release create "$TAG" dist/*.apk dist/update-manifest.json \
-            --title "NextCraft Forge X $VERSION_NAME" --notes "$NOTES" --latest
+            --title "NextCraft Forge X $VERSION_NAME" --notes "${NOTES:-Debug build $VERSION_NAME from $GITHUB_REF_NAME}" --latest \
+            --target "$GITHUB_SHA"
