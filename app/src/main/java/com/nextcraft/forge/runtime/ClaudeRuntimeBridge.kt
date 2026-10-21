@@ -468,7 +468,9 @@ class ClaudeRuntimeBridge(
         val bridge = File(context.filesDir, "runtime-bridge")
         // permission-hook.sh only hands a decision to the app while this marker exists; a Claude the user starts from
         // the Terminal tab must keep its own prompt instead of waiting on a watcher that is not running.
-        val watcherMarker = File(bridge, ".watcher")
+        // One marker per session: another chat's watcher ending and deleting its own file must never make this
+        // session's permission requests go unanswered.
+        val watcherMarker = File(bridge, ".watcher-$sessionId")
         runCatching { bridge.mkdirs(); watcherMarker.writeText(sessionId) }
         val handledApprovals = HashSet<String>()
         try {

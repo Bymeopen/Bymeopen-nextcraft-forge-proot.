@@ -2214,8 +2214,13 @@ ID="${'$'}{SID:+${'$'}{SID}_}${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null
 DECISION=deny
 EVENT=PermissionRequest
 # Without a live app watcher (Claude started by hand from the Terminal tab) answer nothing, so Claude Code keeps its
-# own interactive prompt instead of waiting for a decision nobody will give.
-if [ ! -f "${'$'}BRIDGE/.watcher" ]; then
+# own interactive prompt instead of waiting for a decision nobody will give. Parallel chats each keep their own
+# .watcher-<id> marker, so one session ending never removes another's; any marker existing means some watcher runs.
+HAS_WATCHER=0
+for w in "${'$'}BRIDGE"/.watcher-*; do
+    [ -e "${'$'}w" ] && HAS_WATCHER=1 && break
+done
+if [ "${'$'}HAS_WATCHER" = "0" ]; then
     cat > /dev/null
     exit 0
 fi

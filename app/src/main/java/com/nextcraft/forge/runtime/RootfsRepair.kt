@@ -35,9 +35,26 @@ internal object RootfsRepair {
         }.getOrElse { temp.delete(); false }
     }
 
-    /** Every rootfs file is already owned by the app UID under PRoot; nothing to reclaim. */
+    /**
+     * Restores owner read/write/execute on [target]. Every rootfs file is already owned by the app UID under PRoot
+     * (there is no root to chown to), so a file dpkg or an agent left at mode 0700/0444 is not a privilege problem:
+     * the owning process can always chmod its own file regardless of its current mode. [uid] is kept for call-site
+     * compatibility with the chroot engine, where it names who to chown to.
+     */
     @Suppress("UNUSED_PARAMETER")
-    fun reclaimOwnership(target: File, uid: Int, recursive: Boolean = true): Boolean = true
+    fun reclaimOwnership(target: File, uid: Int, recursive: Boolean = true): Boolean {
+        val fixed = runCatching {
+            val mode = android.system.Os.lstat(target.path).st_mode
+            if (android.system.OsConstants.S_ISLNK(mode)) return@runCatching true
+            val ownerBits = if (android.system.OsConstants.S_ISDIR(mode)) 0b111000000 else 0b110000000
+            android.system.Os.chmod(target.path, (mode and 0b111111111111) or ownerBits)
+            true
+        }.getOrDefault(false)
+        if (!recursive || !target.isDirectory) return fixed
+        var all = fixed
+        target.listFiles()?.forEach { child -> all = reclaimOwnership(child, uid, recursive = true) && all }
+        return all
+    }
 
     fun safeDeleteRecursively(targetDir: File): Boolean {
         if (!targetDir.exists()) return true
