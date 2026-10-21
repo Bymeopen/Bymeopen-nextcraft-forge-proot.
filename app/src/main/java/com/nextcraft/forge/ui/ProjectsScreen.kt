@@ -3,6 +3,7 @@
 package com.nextcraft.forge.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectKind
 import com.nextcraft.forge.model.ProjectType
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.nextcraft.forge.R
 import androidx.annotation.StringRes
@@ -249,18 +251,28 @@ fun ProjectsScreen(
 private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-        Text(
-            text = stringResource(R.string.shell_nextcraft_forge),
-            fontSize = ForgeType.control,
-            color = scheme.onSurfaceVariant,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(top = 10.dp),
-        )
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_logo),
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.shell_nextcraft_forge),
+                fontSize = ForgeType.control,
+                color = scheme.onSurfaceVariant,
+            )
+        }
         Text(
-            text = stringResource(R.string.projects_build_from_your_phone),
+            text = stringResource(R.string.app_tagline),
             fontSize = ForgeType.screenTitle,
             fontWeight = FontWeight.SemiBold,
             lineHeight = 32.sp,
-            modifier = Modifier.padding(top = 2.dp),
+            modifier = Modifier.padding(top = 6.dp),
         )
         Text(
             text = stringResource(R.string.projects_tagline),

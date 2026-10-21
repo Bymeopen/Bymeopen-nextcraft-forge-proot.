@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NextCraft Forge</string>
-    <string name="app_tagline">Studio Coding AI Root Chroot untuk Android</string>
+    <string name="app_tagline">Forge your dreams with AI.</string>
     <!-- UI strings extracted from Compose screens -->
     <string name="agent_stop">Berhenti</string>
     <string name="agent_ask_to_build_refactor">Minta %1$s membangun, merombak, atau memperbaiki…</string>
@@ -331,7 +331,6 @@
     <string name="a11y_selected">Dipilih</string>
     <string name="a11y_expand">Buka langkah alat</string>
     <string name="a11y_collapse">Tutup langkah alat</string>
-    <string name="projects_build_from_your_phone">Bangun dari ponsel Anda</string>
     <string name="projects_tagline">Ngobrol, tinjau perubahan, dan pratinjau proyek Anda.</string>
     <string name="projects_quick_project">Proyek cepat</string>
     <string name="projects_bring_existing">Bawa proyek yang sudah ada</string>
