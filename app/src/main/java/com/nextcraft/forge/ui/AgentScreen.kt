@@ -312,8 +312,7 @@ fun AgentScreen(
                                 message = message,
                                 agentName = state.agentKind.displayTitle(),
                                 onRunSnippet = { cmd ->
-                                    viewModel.runTerminalCommandInProject(cmd)
-                                    viewModel.selectTab(ForgeTab.TERMINAL)
+                                    viewModel.runInChatTerminal(cmd)
                                 },
                             )
                             // A chat with its own branch shows what the branch holds instead of the project's review list.
