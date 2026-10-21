@@ -69,6 +69,10 @@ internal fun detectBuildTargets(workspace: File): List<DetectedTarget> {
         found += DetectedTarget("cmake:build", "CMake build", "cmake -S . -B build && cmake --build build -j2")
     }
     if (File(workspace, "Makefile").isFile) found += DetectedTarget("make:all", "make", "make -j2")
+    // Windows and Linux builds for other CPUs/systems that the chroot can cross-compile. iOS has no on-device build.
+    for (target in detectCrossTargets(workspace)) {
+        if (target.onDevice) found += DetectedTarget(target.id, target.name, withToolCheck(target.command, target.tools))
+    }
     return found
 }
 
