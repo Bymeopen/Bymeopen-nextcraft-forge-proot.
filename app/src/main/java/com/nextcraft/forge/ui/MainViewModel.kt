@@ -290,6 +290,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun bootstrap() {
         viewModelScope.launch {
+            // Projects come first: they only need local storage. A fresh install has no rootfs yet, and a root prompt or
+            // an installer check that throws or hangs must not leave the front page without its default project.
+            val projects = loadOrCreateDefaultProject()
+            _state.update { if (it.projects.isEmpty()) it.copy(projects = projects) else it }
             val arm64 = supportsArm64Runtime(Build.SUPPORTED_ABIS, System.getProperty("os.arch"))
             val rootOk = withContext(Dispatchers.IO) { isRootAccessAvailable() }
             val savedAgent = AgentKind.fromStored(preferences.agentKind)
@@ -298,17 +302,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .toSet()
                 .ifEmpty { setOf(DevStack.WEB, DevStack.PYTHON, DevStack.ANDROID) }
             val installed = withContext(Dispatchers.IO) {
-                installer.migrateLegacyToolMarkers()
-                installer.isInstalled().also { ready ->
-                    if (ready) installer.cleanupLegacyWorkspaceScaffolding()
-                }
+                runCatching {
+                    installer.migrateLegacyToolMarkers()
+                    installer.isInstalled().also { ready ->
+                        if (ready) installer.cleanupLegacyWorkspaceScaffolding()
+                    }
+                }.getOrDefault(false)
             }
             val installedStacks = if (installed) {
-                withContext(Dispatchers.IO) { installer.installedStacks() }
+                withContext(Dispatchers.IO) { runCatching { installer.installedStacks() }.getOrDefault(emptySet()) }
             } else {
                 emptySet()
             }
-            val projects = loadOrCreateDefaultProject()
             val firstProject = projects.first()
             configureAllProjectRoots(projects)
             val chats = preferences.loadProjectChats(firstProject.id)
