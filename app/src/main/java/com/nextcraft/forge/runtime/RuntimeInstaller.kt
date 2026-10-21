@@ -2291,6 +2291,17 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             runCatching { writeRootfsFileAtomically(bashrc, updated, mode = 0b110100100) }
                 .onFailure { Log.w("RuntimeInstaller", "Could not write the shell prompt", it) }
         }
+        ensureX86Wrapper()
+    }
+
+    /** Installs `run-x86` (see [X86Wrapper]) in the guest; skipped while it is up to date. */
+    private fun ensureX86Wrapper() {
+        val target = File(rootfs, X86Wrapper.GUEST_PATH)
+        if (runCatching { target.readText() }.getOrNull() == X86Wrapper.SCRIPT) return
+        runCatching {
+            target.parentFile?.mkdirs()
+            writeRootfsFileAtomically(target, X86Wrapper.SCRIPT, mode = 0b111101101)
+        }.onFailure { Log.w("RuntimeInstaller", "Could not write run-x86", it) }
     }
 
     private fun writeResolver() {
@@ -2924,6 +2935,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     exit 65
                     ;;
             esac
+
+            # Opt-in (create the file ${'$'}ROOTFS/.nextcraft-private-mounts): run this session in its own mount namespace, so its
+            # bind mounts disappear with its last process instead of piling up in the shared namespace. Skipped when unshare is
+            # missing or already applied.
+            if [ -z "${'$'}NEXTCRAFT_IN_MOUNT_NS" ] && [ -f "${'$'}ROOTFS/.nextcraft-private-mounts" ] && command -v unshare >/dev/null 2>&1; then
+                NEXTCRAFT_IN_MOUNT_NS=1 exec unshare -m "${'$'}0" "${'$'}ROOTFS" "${'$'}HOST_WORKSPACE" "${'$'}GUEST_WORKSPACE" "${'$'}HOST_BRIDGE" "${'$'}APP_UID" "${'$'}@"
+            fi
 
             is_mounted() {
                 awk -v target="${'$'}1" '${'$'}2 == target { found=1; exit } END { exit !found }' /proc/mounts
