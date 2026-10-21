@@ -2410,7 +2410,12 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         ensureAppAccess()
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val dns = manager?.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
-        val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
+        val deviceServers = dns.mapNotNull { it.hostAddress }
+        // Many carriers and most phones default Private DNS to a provider whose IP only answers DNS-over-TLS on port
+        // 853; the guest's plain resolver only ever queries port 53, so every lookup there times out even though the
+        // device's own apps and browser resolve fine. Public plain-DNS fallbacks are always appended (not only when
+        // the device list is empty) so the resolver falls through to them when the device entries are DoT-only.
+        val servers = (deviceServers + listOf("8.8.8.8", "1.1.1.1")).distinct()
         val resolvFile = File(rootfs, "etc/resolv.conf")
         resolvFile.parentFile?.mkdirs()
         if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) {
