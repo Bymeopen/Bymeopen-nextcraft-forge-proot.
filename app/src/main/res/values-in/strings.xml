@@ -1015,4 +1015,12 @@
     <string name="mt_snap_unsafe">Snapshot berisi path yang tidak aman</string>
     <string name="mt_snap_too_large">Proyek lebih besar dari %1$s MB; hapus keluaran build terlebih dahulu.</string>
     <string name="mt_snap_clear_failed">Tidak bisa menghapus %1$s; build atau terminal mungkin masih memakainya.</string>
+    <string name="files_search">Cari berkas</string>
+    <string name="files_search_hint">Cari berdasarkan nama…</string>
+    <string name="files_search_clear">Hapus pencarian</string>
+    <string name="files_search_empty_title">Tidak ada berkas yang cocok</string>
+    <string name="files_search_empty_message">Tidak ada yang bernama “%1$s” di proyek ini.</string>
+    <plurals name="files_search_results">
+        <item quantity="other">%d hasil</item>
+    </plurals>
 </resources>

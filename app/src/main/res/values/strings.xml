@@ -1031,4 +1031,13 @@
     <string name="mt_snap_unsafe">Snapshot contains an unsafe path</string>
     <string name="mt_snap_too_large">Project is larger than %1$s MB; remove build output first.</string>
     <string name="mt_snap_clear_failed">Could not clear %1$s; a build or terminal may still be using it.</string>
+    <string name="files_search">Search files</string>
+    <string name="files_search_hint">Search by name…</string>
+    <string name="files_search_clear">Clear search</string>
+    <string name="files_search_empty_title">No matching files</string>
+    <string name="files_search_empty_message">Nothing in this project is named “%1$s”.</string>
+    <plurals name="files_search_results">
+        <item quantity="one">%d result</item>
+        <item quantity="other">%d results</item>
+    </plurals>
 </resources>
