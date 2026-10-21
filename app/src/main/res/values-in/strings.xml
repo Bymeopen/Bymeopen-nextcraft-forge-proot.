@@ -350,6 +350,8 @@
     <string name="projects_cancel">Batal</string>
     <string name="projects_expand">Buka</string>
     <string name="projects_collapse">Tutup</string>
+    <string name="settings_game_templates">Template game</string>
+    <string name="settings_game_templates_subtitle">Tampilkan template game libGDX (Android + PC) di Proyek baru</string>
     <string name="msg_repair_busy">Hentikan agen yang sedang berjalan sebelum memperbaiki chroot.</string>
     <string name="msg_repairing_chroot">Memperbaiki mount chroot &amp; skrip runtime…</string>
     <string name="msg_api_key_saved">Kunci API tersimpan aman di Android Keystore.</string>

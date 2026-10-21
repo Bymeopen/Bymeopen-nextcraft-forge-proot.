@@ -80,6 +80,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    /** Offer the libGDX game starter in New project and its build targets. Off by default. */
+    var gameTemplatesEnabled: Boolean
+        get() = preferences.getBoolean("game_templates_enabled", false)
+        set(value) { preferences.edit().putBoolean("game_templates_enabled", value).apply() }
+
     /** Auto-commit and push the workspace to GitHub after every agent turn. Off by default. */
     var autoSyncGitHub: Boolean
         get() = preferences.getBoolean("auto_sync_github", false)

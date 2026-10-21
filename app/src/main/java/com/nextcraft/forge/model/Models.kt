@@ -177,6 +177,8 @@ enum class ProjectType { GENERAL, ANDROID }
 enum class StarterTemplate(val label: String) {
     EMPTY("Empty"),
     GO("Go (Windows/Linux)"),
+    /** Off until Settings → "Game templates" is switched on. */
+    GAME_LIBGDX("Game (libGDX)"),
 }
 
 enum class AndroidTemplate(val label: String) {

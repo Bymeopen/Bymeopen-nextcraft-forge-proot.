@@ -58,6 +58,7 @@ import com.nextcraft.forge.runtime.DiagnosticsController
 import com.nextcraft.forge.runtime.CiCdController
 import com.nextcraft.forge.runtime.BuildMatrixController
 import com.nextcraft.forge.runtime.GoProjectTemplateGenerator
+import com.nextcraft.forge.runtime.GameProjectTemplateGenerator
 import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
@@ -361,6 +362,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
+                    gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
@@ -734,16 +736,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         when {
                             isAndroid -> "Android (${androidTemplate.label}) project"
                             starter == StarterTemplate.GO -> "Go command-line app"
+                            starter == StarterTemplate.GAME_LIBGDX -> "libGDX game (Android + PC)"
                             else -> "General coding workspace"
                         }
                     },
                     language = when {
                         isAndroid -> "Kotlin"
                         starter == StarterTemplate.GO -> "Go"
+                        starter == StarterTemplate.GAME_LIBGDX -> "Java (libGDX)"
                         else -> "Multi-language"
                     },
                     slug = slug,
-                    type = if (isAndroid) ProjectType.ANDROID else ProjectType.GENERAL,
+                    // A libGDX game has an Android :app module, so it gets the Android build-and-install flow.
+                    type = if (isAndroid || starter == StarterTemplate.GAME_LIBGDX) ProjectType.ANDROID else ProjectType.GENERAL,
                     androidTemplate = if (isAndroid) androidTemplate else null,
                 )
                 val wsDir = File(getApplication<Application>().filesDir, "workspaces/${project.id}")
@@ -758,6 +763,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     checkpoints.ensureWorkspace(project.id)
                     if (starter == StarterTemplate.GO) {
                         GoProjectTemplateGenerator.generate(wsDir, cleanName)
+                    } else if (starter == StarterTemplate.GAME_LIBGDX) {
+                        GameProjectTemplateGenerator.generate(wsDir, cleanName)
                     } else {
                         File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
                     }
@@ -3600,6 +3607,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setGameTemplatesEnabled(enabled: Boolean) {
+        preferences.gameTemplatesEnabled = enabled
+        _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {
