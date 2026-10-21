@@ -268,6 +268,14 @@ class RuntimeSetupService : Service() {
     private var lastWakeLockRenewAt = 0L
     private var lastNotificationAt = 0L
 
+    /** Resources in the language chosen inside the app; the service's own context follows the system language. */
+    private fun t(@androidx.annotation.StringRes id: Int, vararg args: Any): String =
+        com.nextcraft.forge.ui.LocaleHelper.wrapContext(this).getString(id, *args)
+
+    /** Installer sentences are English; known ones are shown in the app language (same table the install panel uses). */
+    private fun localizedRuntimeText(raw: String): String =
+        com.nextcraft.forge.ui.RuntimeText.match(raw)?.let { (id, args) -> t(id, *args.toTypedArray()) } ?: raw
+
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel(this)
@@ -355,10 +363,10 @@ class RuntimeSetupService : Service() {
 
     private fun setupNotification(state: RuntimeSetupSnapshot): Notification {
         val latest = state.logs.lastOrNull().orEmpty().take(180)
-        val bodyText = latest.ifBlank { state.message }
+        val bodyText = localizedRuntimeText(latest.ifBlank { state.message })
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIconRes())
-            .setContentTitle("Setting up Linux chroot runtime")
+            .setContentTitle(t(com.nextcraft.forge.R.string.notif_setup_title))
             .setContentText(bodyText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(bodyText))
             .setContentIntent(openAppIntent())
@@ -373,7 +381,7 @@ class RuntimeSetupService : Service() {
         }
         builder.addAction(
             0,
-            "Pause",
+            t(com.nextcraft.forge.R.string.notif_pause),
             PendingIntent.getService(
                 this,
                 102,
@@ -386,11 +394,11 @@ class RuntimeSetupService : Service() {
 
     private fun showFinishedNotification(success: Boolean) {
         val state = RuntimeSetupController.snapshot.value
-        val title = if (success) "Linux chroot runtime is ready" else "Runtime setup needs attention"
+        val title = if (success) t(com.nextcraft.forge.R.string.rt_msg_chroot_ready) else t(com.nextcraft.forge.R.string.notif_setup_attention)
         val detail = if (success) {
-            "Your Ubuntu ARM64 chroot environment and coding tools are ready."
+            t(com.nextcraft.forge.R.string.rt_msg_env_ready)
         } else {
-            state.errorMessage ?: "Runtime setup encountered an error."
+            state.errorMessage?.let(::localizedRuntimeText) ?: t(com.nextcraft.forge.R.string.notif_setup_error)
         }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIconRes())
@@ -481,13 +489,14 @@ class RuntimeSetupService : Service() {
         private const val MAX_SETUP_WAKE_MS = 4 * 60 * 60 * 1_000L
 
         fun ensureNotificationChannel(context: Context) {
+            val localized = com.nextcraft.forge.ui.LocaleHelper.wrapContext(context)
             context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "Runtime setup",
+                    localized.getString(com.nextcraft.forge.R.string.notif_channel_setup),
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "Shows download and extraction progress during Linux chroot setup."
+                    description = localized.getString(com.nextcraft.forge.R.string.notif_channel_setup_desc)
                 },
             )
         }

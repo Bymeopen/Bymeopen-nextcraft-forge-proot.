@@ -490,7 +490,7 @@ class AntigravityRuntimeBridge(
                 acceptLastChanges(projectId)
             }
             emitCompleted(sessionId)
-            finishForegroundRuntime(true, projectSlug, "Antigravity finished in $projectSlug")
+            finishForegroundRuntimeRes(true, projectSlug, com.nextcraft.forge.R.string.notif_agent_finished_in, "Antigravity", projectSlug)
         }.onFailure {
             val diagnostic = recentAntigravityDiagnostic(sessionStartedAtMillis)
             // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
@@ -572,6 +572,9 @@ class AntigravityRuntimeBridge(
 
     private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
         foreground.finish(completed, projectName, detail)
+
+    private fun finishForegroundRuntimeRes(completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, vararg args: String) =
+        foreground.finishRes(completed, projectName, detailRes, *args)
 
     private fun cancelForegroundRuntime() = foreground.cancel()
 

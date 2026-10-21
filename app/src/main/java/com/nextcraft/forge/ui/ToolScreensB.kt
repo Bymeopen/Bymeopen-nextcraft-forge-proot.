@@ -210,7 +210,7 @@ fun SshScreen(viewModel: MainViewModel) {
                     ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next, value = host, onValueChange = { host = it }, label = { Text(stringResource(R.string.tool_ssh_host)) }, modifier = Modifier.fillMaxWidth())
                     ForgeTextField(kind = ForgeFieldKind.NUMBER, imeAction = ImeAction.Next, error = port.takeIf { it.isNotBlank() && !FieldValidation.isPort(it) }?.let { stringResource(R.string.field_error_port) }, value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text(stringResource(R.string.tool_ssh_port)) }, modifier = Modifier.fillMaxWidth())
                     ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done, value = forward, onValueChange = { forward = it }, label = { Text(stringResource(R.string.tool_ssh_forward)) }, modifier = Modifier.fillMaxWidth())
-                    error?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.error) }
+                    error?.let { Text(messageText(it), fontSize = ForgeType.secondary, color = scheme.error) }
                 }
             },
             confirmButton = {

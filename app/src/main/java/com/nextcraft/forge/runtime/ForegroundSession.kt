@@ -56,6 +56,13 @@ internal class ForegroundSession(
         RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, tag)
     }
 
+    /** Same as [finish] for a fixed phrase: the service words [detailRes] in the app language. */
+    fun finishRes(completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, vararg args: String) {
+        if (resultPosted) return
+        resultPosted = true
+        RuntimeExecutionServiceContract.finishForegroundRes(context, completed, projectName, detailRes, arrayOf(*args), tag)
+    }
+
     fun cancel() {
         if (resultPosted) return
         resultPosted = true

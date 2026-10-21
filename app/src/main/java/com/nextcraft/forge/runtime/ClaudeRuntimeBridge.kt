@@ -299,11 +299,7 @@ class ClaudeRuntimeBridge(
                 }
                 if (exit == 0 || (turnCompletedFromStream && !userStopRequested)) {
                     emitCompletedOnce(sessionId)
-                    finishForegroundRuntime(
-                        completed = true,
-                        projectName = projectSlug,
-                        detail = "Claude Code finished in $projectSlug",
-                    )
+                    finishForegroundRuntimeRes(true, projectSlug, com.nextcraft.forge.R.string.notif_agent_finished_in, "Claude Code", projectSlug)
                 } else {
                     if (userStopRequested) throw ProviderSessionException("Stopped by user")
                     error(lastDiagnostic.ifBlank { "Claude Code stopped with exit code $exit" })
@@ -757,11 +753,7 @@ class ClaudeRuntimeBridge(
     private suspend fun emitCompletedOnce(sessionId: String) {
         if (finishedSessions.add(sessionId)) {
             eventBus.emit(RuntimeEvent.SessionCompleted(sessionId))
-            finishForegroundRuntime(
-                completed = true,
-                projectName = activeProjectSlug ?: "Project",
-                detail = "Claude Code finished",
-            )
+            finishForegroundRuntimeRes(true, activeProjectSlug ?: "Project", com.nextcraft.forge.R.string.notif_agent_finished, "Claude Code")
         }
     }
 
@@ -891,6 +883,9 @@ class ClaudeRuntimeBridge(
 
     private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
         foreground.finish(completed, projectName, detail)
+
+    private fun finishForegroundRuntimeRes(completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, vararg args: String) =
+        foreground.finishRes(completed, projectName, detailRes, *args)
 
     private fun cancelForegroundRuntime() = foreground.cancel()
 

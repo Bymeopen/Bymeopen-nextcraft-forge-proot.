@@ -17,7 +17,8 @@ sealed interface UiText {
     /** [context] may be null only for [Raw], which needs no lookup; [Res] requires a real Context. */
     fun asString(context: Context?): String = when (this) {
         is Res -> requireNotNull(context) { "UiText.Res needs a Context" }.getString(id, *args.toTypedArray())
-        is Raw -> text
+        // Raw is final text, except that fixed English sentences from lower layers are translated when shown.
+        is Raw -> if (context == null) text else localizeKnownText(context, text)
     }
 
     companion object {
@@ -28,7 +29,13 @@ sealed interface UiText {
 @Composable
 fun UiText.asString(): String = when (this) {
     is UiText.Res -> stringResource(id, *args.toTypedArray())
-    is UiText.Raw -> text
+    is UiText.Raw -> localizeKnownText(androidx.compose.ui.platform.LocalContext.current, text)
+}
+
+/** [raw] in the app language when it is a sentence the app itself produced in English (see MessageText). */
+internal fun localizeKnownText(context: Context, raw: String): String {
+    val known = MessageText.match(raw) ?: return raw
+    return context.getString(known.first, *known.second.toTypedArray())
 }
 
 /** An error's own text when it has one, else the translated fallback. */
