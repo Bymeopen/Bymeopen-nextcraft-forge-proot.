@@ -577,6 +577,8 @@
     <string name="terminal_key_tab">Tab</string>
     <string name="terminal_key_ctrl">Control, applies to the next key</string>
     <string name="terminal_key_alt">Alt, applies to the next key</string>
+    <string name="terminal_key_shift">Shift, applies to the next key (Shift+Enter inserts a newline)</string>
+    <string name="terminal_key_enter">Enter</string>
     <string name="terminal_key_up">Arrow up</string>
     <string name="terminal_key_down">Arrow down</string>
     <string name="terminal_key_left">Arrow left</string>

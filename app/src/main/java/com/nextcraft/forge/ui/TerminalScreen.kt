@@ -344,7 +344,7 @@ private fun TerminalEmulatorView(
     )
 }
 
-/** Esc, Tab, Ctrl/Alt (armed for the next key), arrows, paging and the symbols that are buried on a phone keyboard. */
+/** Esc, Tab, Ctrl/Alt/Shift (armed for the next key), Enter, arrows, paging and the symbols that are buried on a phone keyboard. */
 @Composable
 internal fun TerminalKeyRow(
     modifiers: TerminalModifierKeys,
@@ -368,6 +368,18 @@ internal fun TerminalKeyRow(
         view.inputCodePoint(char.code, modifiers.consumeCtrl(), modifiers.consumeAlt())
     }
 
+    fun enter() {
+        val view = liveView() ?: return
+        if (modifiers.consumeShift()) {
+            // Shift+Enter as the CSI u sequence terminals send for it (what Claude Code and other TUIs read as
+            // "insert a newline"); a plain Enter is the ordinary key event.
+            modifiers.consumeCtrl(); modifiers.consumeAlt()
+            view.currentSession?.write("\u001b[13;2u")
+        } else {
+            press(KeyEvent.KEYCODE_ENTER)
+        }
+    }
+
     val keyScroll = rememberScrollState()
     Row(
         modifier = Modifier
@@ -381,6 +393,8 @@ internal fun TerminalKeyRow(
         TerminalKey("Tab", stringResource(R.string.terminal_key_tab), enabled) { press(KeyEvent.KEYCODE_TAB) }
         TerminalKey("Ctrl", stringResource(R.string.terminal_key_ctrl), enabled, active = modifiers.ctrl) { modifiers.ctrl = !modifiers.ctrl }
         TerminalKey("Alt", stringResource(R.string.terminal_key_alt), enabled, active = modifiers.alt) { modifiers.alt = !modifiers.alt }
+        TerminalKey("Shift", stringResource(R.string.terminal_key_shift), enabled, active = modifiers.shift) { modifiers.shift = !modifiers.shift }
+        TerminalKey("Enter", stringResource(R.string.terminal_key_enter), enabled) { enter() }
         TerminalKey("↑", stringResource(R.string.terminal_key_up), enabled) { press(KeyEvent.KEYCODE_DPAD_UP) }
         TerminalKey("↓", stringResource(R.string.terminal_key_down), enabled) { press(KeyEvent.KEYCODE_DPAD_DOWN) }
         TerminalKey("←", stringResource(R.string.terminal_key_left), enabled) { press(KeyEvent.KEYCODE_DPAD_LEFT) }

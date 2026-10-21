@@ -22,9 +22,11 @@ import com.termux.view.TerminalViewClient
 class TerminalModifierKeys {
     var ctrl by mutableStateOf(false)
     var alt by mutableStateOf(false)
+    var shift by mutableStateOf(false)
 
     fun consumeCtrl(): Boolean = ctrl.also { ctrl = false }
     fun consumeAlt(): Boolean = alt.also { alt = false }
+    fun consumeShift(): Boolean = shift.also { shift = false }
 }
 
 /**
