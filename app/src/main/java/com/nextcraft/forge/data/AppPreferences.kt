@@ -8,6 +8,7 @@ import com.nextcraft.forge.model.ChatAttachment
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
+import com.nextcraft.forge.model.PromptRule
 import com.nextcraft.forge.model.RouteMode
 import com.nextcraft.forge.model.RoutingConfig
 import com.nextcraft.forge.model.ProjectKind
@@ -59,12 +60,29 @@ class AppPreferences(private val context: Context) {
                     val agent = AgentKind.fromStoredOrNull(id) ?: return@mapNotNull null
                     weight.toIntOrNull()?.let { agent to it }
                 }?.toMap().orEmpty(),
+                rules = runCatching {
+                    val array = org.json.JSONArray(preferences.getString("routing_rules", "[]"))
+                    (0 until array.length()).mapNotNull { index ->
+                        val item = array.getJSONObject(index)
+                        val agent = AgentKind.fromStoredOrNull(item.optString("agent")) ?: return@mapNotNull null
+                        val words = item.optJSONArray("keywords")?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
+                        if (words.isEmpty()) null else PromptRule(words, agent)
+                    }
+                }.getOrDefault(emptyList()),
             )
         }
         set(value) {
             preferences.edit()
                 .putString("routing_mode", value.mode.stableId)
                 .putString("routing_agents", value.agents.joinToString(",") { it.stableId })
+                .putString(
+                    "routing_rules",
+                    org.json.JSONArray().apply {
+                        value.rules.forEach { rule ->
+                            put(org.json.JSONObject().put("agent", rule.agent.stableId).put("keywords", org.json.JSONArray(rule.keywords)))
+                        }
+                    }.toString(),
+                )
                 .putString("routing_weights", value.weights.entries.joinToString(",") { "${it.key.stableId}:${it.value}" })
                 .apply()
         }

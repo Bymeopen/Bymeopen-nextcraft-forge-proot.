@@ -20,12 +20,25 @@ enum class RouteMode(val stableId: String) {
     }
 }
 
+/** A message containing any of [keywords] (case-insensitive) goes to [agent], when that agent is ready. */
+data class PromptRule(val keywords: List<String>, val agent: AgentKind) {
+    fun matches(text: String): Boolean = keywords.any { it.isNotBlank() && text.contains(it, ignoreCase = true) }
+
+    companion object {
+        /** "test, unit tests" gives ["test", "unit tests"]; blanks and duplicates are dropped. */
+        fun parseKeywords(input: String): List<String> =
+            input.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+    }
+}
+
 /** [agents] is the priority order used by [RouteMode.FAILOVER] and the rotation order of [RouteMode.BALANCED]. */
 data class RoutingConfig(
     val mode: RouteMode = RouteMode.SINGLE,
     val agents: List<AgentKind> = AgentKind.entries,
     /** Share of the messages [RouteMode.BALANCED] gives each agent; an agent without an entry weighs 1 (equal shares). */
     val weights: Map<AgentKind, Int> = emptyMap(),
+    /** Content rules, checked in order after an @agent tag and before the mode's own choice. */
+    val rules: List<PromptRule> = emptyList(),
 ) {
     fun weightOf(agent: AgentKind): Int = (weights[agent] ?: 1).coerceIn(0, MAX_WEIGHT)
 
@@ -71,6 +84,11 @@ internal object AgentRouter {
     ): RoutedMessage? {
         parseTag(text)?.let { (agent, rest) ->
             if (agent in ready && agent !in tried && rest.isNotEmpty()) return RoutedMessage(agent, rest, tagged = true)
+        }
+        if (config.mode != RouteMode.SINGLE) {
+            config.rules.firstOrNull { it.agent in ready && it.agent !in tried && it.matches(text) }?.let {
+                return RoutedMessage(it.agent, text, tagged = false)
+            }
         }
         val candidates = config.agents.filter { it in ready && it !in tried }
         val agent = when (config.mode) {

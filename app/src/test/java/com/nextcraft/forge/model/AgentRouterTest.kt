@@ -77,6 +77,23 @@ class AgentRouterTest {
     }
 
     @Test
+    fun promptRulesRouteByContentBeforeTheMode() {
+        val rules = listOf(PromptRule(listOf("unit test", "pytest"), AgentKind.DEEPSEEK_HARNESS))
+        val cfg = RoutingConfig(RouteMode.MANUAL, rules = rules)
+        assertEquals(AgentKind.DEEPSEEK_HARNESS, AgentRouter.route("Write a Unit Test for login", cfg, AgentKind.CLAUDE_CODE, all, 0)!!.agent)
+        assertEquals(AgentKind.CLAUDE_CODE, AgentRouter.route("refactor login", cfg, AgentKind.CLAUDE_CODE, all, 0)!!.agent)
+        // A tag still wins, a rule for a not-ready agent is ignored, and Single mode ignores rules.
+        assertEquals(AgentKind.ANTIGRAVITY, AgentRouter.route("@agy unit test it", cfg, AgentKind.CLAUDE_CODE, all, 0)!!.agent)
+        assertEquals(AgentKind.CLAUDE_CODE, AgentRouter.route("unit test", cfg, AgentKind.CLAUDE_CODE, setOf(AgentKind.CLAUDE_CODE), 0)!!.agent)
+        assertEquals(AgentKind.CLAUDE_CODE, AgentRouter.route("unit test", cfg.copy(mode = RouteMode.SINGLE), AgentKind.CLAUDE_CODE, all, 0)!!.agent)
+    }
+
+    @Test
+    fun keywordsAreSplitOnCommasAndNewlines() {
+        assertEquals(listOf("test", "unit tests"), PromptRule.parseKeywords(" test, unit tests,\n TEST ,, "))
+    }
+
+    @Test
     fun onlyFailoverAndBalancedFailOver() {
         assertTrue(AgentRouter.failsOver(RouteMode.FAILOVER))
         assertTrue(AgentRouter.failsOver(RouteMode.BALANCED))
