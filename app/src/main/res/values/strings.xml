@@ -979,4 +979,35 @@
     <string name="rea_mode_full">full dynamic (ptrace and gdb work)</string>
     <string name="rea_mode_emulated">emulated dynamic (QEMU or Unicorn)</string>
     <string name="rea_mode_static">static only</string>
+    <string name="rea_section_analysis">Analyse a file</string>
+    <string name="rea_open_project">Open a project first; files are analysed inside the project.</string>
+    <string name="rea_pick_file">Pick a file</string>
+    <string name="rea_opt_strings">Extract strings</string>
+    <string name="rea_opt_interesting">Only interesting strings (URLs, paths, keys)</string>
+    <string name="rea_opt_symbol">Function to disassemble (blank = skip)</string>
+    <string name="rea_analyze">Analyse</string>
+    <string name="rea_install_first">Install REA first.</string>
+    <string name="rea_analyzing">Analysing…</string>
+    <string name="rea_reporting">Writing the report…</string>
+    <string name="rea_save_report">Save report (.rea)</string>
+    <string name="rea_report_saved">Report saved: %1$s</string>
+    <string name="rea_section_report">Report</string>
+    <string name="rea_section_identity">Identification</string>
+    <string name="rea_section_elf">ELF</string>
+    <string name="rea_section_functions">Functions (%1$d)</string>
+    <string name="rea_section_strings">Strings (%1$d of %2$d)</string>
+    <string name="rea_section_disasm">Disassembly: %1$s @ %2$s</string>
+    <string name="rea_k_type">Type</string>
+    <string name="rea_k_size">Size</string>
+    <string name="rea_k_entropy">Entropy</string>
+    <string name="rea_k_entry">Entry point</string>
+    <string name="rea_k_symbols">Symbols</string>
+    <string name="rea_k_layout">Layout</string>
+    <string name="rea_k_libs">Libraries</string>
+    <string name="rea_stripped">stripped (none)</string>
+    <string name="rea_has_symbols">present</string>
+    <string name="rea_layout">%1$d sections, %2$d segments</string>
+    <string name="rea_packed_hint">High entropy: the file may be packed or encrypted.</string>
+    <string name="rea_functions_hint">Tap a function to disassemble it.</string>
+    <string name="rea_no_files">No files found. Open the Files tab once to load the list.</string>
 </resources>

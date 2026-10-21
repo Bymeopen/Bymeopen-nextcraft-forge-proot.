@@ -1,5 +1,6 @@
 import json
 import os
+import os
 import re
 import shutil
 import subprocess
@@ -143,3 +144,40 @@ def test_cli_analyze_json(run_rea, tmp_path, sample):
     assert bad.returncode == 1
     error = json.loads([line for line in bad.stdout.splitlines() if line.startswith("{")][-1])["error"]
     assert error["code"] == "symbol_not_found"
+
+
+def test_report_markdown_has_the_expected_sections(sample, tmp_path, run_rea):
+    out = tmp_path / "out" / "r.md"
+    done = run_rea("report", sample, "-o", str(out), "--notes", "diperiksa manual | aman", "--json", cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    result = json.loads([line for line in done.stdout.splitlines() if line.startswith("{")][-1])
+    assert result["ok"] is True and result["data"]["path"] == str(out)
+    text = out.read_text(encoding="utf-8")
+    for heading in ("# Laporan REA:", "## Ringkasan", "## ELF", "### Fungsi", "## String menarik", "## Disassembly: main", "## Catatan analis"):
+        assert heading in text, heading
+    assert "https://example.com/api/v1" in text
+    assert "diperiksa manual | aman" in text
+    assert "SHA256" in text
+
+
+def test_report_default_path_and_non_elf(run_rea, tmp_path):
+    sample_text = tmp_path / "catatan.txt"
+    sample_text.write_text("kunci: https://contoh.test/x\n")
+    done = run_rea("report", str(sample_text), "--json", cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    result = json.loads([line for line in done.stdout.splitlines() if line.startswith("{")][-1])
+    assert result["data"]["path"] == os.path.join(".rea", "catatan.txt.report.md")
+    text = (tmp_path / ".rea" / "catatan.txt.report.md").read_text(encoding="utf-8")
+    assert "belum tersedia" in text and "https://contoh.test/x" in text
+
+
+def test_report_builder_escapes_table_cells():
+    from rea.report.markdown import build_report
+
+    data = {
+        "identify": {"path": "a|b", "type": "unknown", "size": 3, "md5": "m", "sha256": "s", "entropy": 1.0},
+        "strings": {"strings": [{"offset": 1, "score": 5, "text": "x|y`z", "encoding": "ascii"}], "total": 1, "truncated": False},
+    }
+    text = build_report(data, notes="")
+    assert "x|y" in text  # dalam kode inline; pipa di dalam backtick tidak merusak sel karena sudah dibungkus
+    assert "`x|y'z`" in text

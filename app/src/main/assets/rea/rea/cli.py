@@ -14,6 +14,7 @@ from .analysis import strings as strings_mod
 from .capability import FAIL, OK, WARN, run_doctor
 from .identify import identify
 from .parsers import elf as elf_mod
+from .report.markdown import build_report
 from .result import E_BAD_FORMAT, E_INTERNAL, E_USAGE, ReaError, Result, emit_json, failure
 
 _NOTICE = (
@@ -95,6 +96,30 @@ def _analyze(args: argparse.Namespace) -> Result:
     return result
 
 
+def _report(args: argparse.Namespace) -> Result:
+    """Laporan Markdown: identifikasi, ringkasan ELF, string menarik, dan disassembly fungsi utama."""
+    info = identify(args.file)
+    data: dict = {"identify": info, "missing": []}
+    if info["type"] == "ELF":
+        data["elf"] = elf_mod.summarize(args.file)
+        try:
+            symbol = "main" if any(f["name"] == "main" for f in data["elf"]["functions"]) else None
+            data["disasm"] = disasm_mod.disassemble(args.file, symbol=symbol, count=40)
+        except ReaError as error:
+            data["missing"].append(f"Disassembly dilewati: {error.message}")
+    else:
+        data["missing"].append(f"Parser untuk {info['type']} belum tersedia; laporan hanya berisi identifikasi dan string.")
+    data["strings"] = strings_mod.extract(args.file, max_items=500)
+    text = build_report(data, notes=args.notes or "")
+    out = args.output or os.path.join(".rea", os.path.basename(args.file) + ".report.md")
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    if not args.json:
+        print(f"Laporan ditulis ke {out}", file=sys.stderr)
+    return Result(command="report", data={"path": out, "bytes": len(text.encode("utf-8")), "sections": text.count("\n## ")})
+
+
 def _print_analysis(data: dict) -> None:
     info = data["identify"]
     print(f"{info['path']}  {info['type']} {info.get('arch', '')} {info.get('bits', '')}  {info['size']} bayt", file=sys.stderr)
@@ -125,10 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
         ("doctor", "cek kemampuan lingkungan"),
         ("id", "identifikasi berkas"),
         ("analyze", "analisis statis berkas ELF"),
+        ("report", "laporan Markdown dari analisis"),
     ):
         command = sub.add_parser(name, help=helptext)
         command.add_argument("--json", action="store_true", help="keluaran JSON di baris terakhir stdout")
-        if name in ("id", "analyze"):
+        if name in ("id", "analyze", "report"):
             command.add_argument("file", help="berkas yang diperiksa")
         if name == "analyze":
             command.add_argument("--strings", action="store_true", help="ekstrak string ASCII dan UTF-16")
@@ -138,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--disasm", nargs="?", const="", metavar="FUNGSI", help="disassembly fungsi (tanpa nama: titik masuk)")
             command.add_argument("--addr", metavar="ALAMAT", help="disassembly mulai dari alamat virtual (mis. 0x401136)")
             command.add_argument("--count", type=int, default=64, help="jumlah instruksi maksimum (default 64)")
+        if name == "report":
+            command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
+            command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")
     return parser
 
 
@@ -148,7 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_request:
         # argparse sudah mencetak pesan ke stderr; --version dan --help keluar dengan 0.
         return int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
-    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze}
+    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report}
     _show_notice_once()
     try:
         result = handlers[args.command](args)

@@ -1578,6 +1578,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return below.isEmpty() || (below.size <= 3 && below[0] == "outputs" && (below.size == 1 || below[1] == "apk"))
     }
 
+    /** Refreshes the file list of the open project (the REA file picker reads it). */
+    fun refreshWorkspaceFiles() {
+        _state.value.activeProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+    }
+
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {

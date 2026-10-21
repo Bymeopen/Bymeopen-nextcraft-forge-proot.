@@ -2,6 +2,7 @@ package com.nextcraft.forge.runtime
 
 import android.content.Context
 import com.nextcraft.forge.R
+import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.ui.UiText
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -25,6 +26,12 @@ data class ReaState(
     val mode: String? = null,
     val checks: List<ReaCheck> = emptyList(),
     val message: UiText? = null,
+    /** File being analysed (path relative to the project), and what `rea analyze` found in it. */
+    val target: String? = null,
+    val analysis: ReaAnalysis? = null,
+    /** Markdown report written by `rea report` (path relative to the project, and its text). */
+    val reportPath: String? = null,
+    val reportMarkdown: String? = null,
 )
 
 /**
@@ -119,6 +126,75 @@ class ReaController(context: Context) {
         }
     }
 
+    /**
+     * Identifies and analyses [path] (relative to the project): ELF summary, strings and, when [symbol] is not null, the
+     * disassembly of that function (blank = entry point).
+     */
+    fun analyze(project: Project, path: String, strings: Boolean, interesting: Boolean, symbol: String?) =
+        launchTask(R.string.rea_analyzing) {
+            val command = analyzeCommand(path, strings, interesting, symbol)
+            val response = runInProject(project, command)
+            mutable.update { current ->
+                val analysis = response?.takeIf { it.ok }?.analysis()
+                when {
+                    analysis != null -> current.copy(target = path, analysis = analysis, reportPath = null, reportMarkdown = null, message = null)
+                    else -> current.copy(target = path, analysis = null, message = failureMessage(response))
+                }
+            }
+        }
+
+    /** Disassembles one function and keeps the rest of the current analysis. */
+    fun disassemble(project: Project, path: String, symbol: String) = launchTask(R.string.rea_analyzing) {
+        val response = runInProject(project, analyzeCommand(path, strings = false, interesting = false, symbol = symbol))
+        val disasm = response?.takeIf { it.ok }?.analysis()?.disasm
+        mutable.update { current ->
+            if (disasm != null && current.analysis != null) current.copy(analysis = current.analysis.copy(disasm = disasm), message = null)
+            else current.copy(message = failureMessage(response))
+        }
+    }
+
+    /** Writes `.rea/<name>.report.md` in the project and loads its text. */
+    fun report(project: Project, path: String) = launchTask(R.string.rea_reporting) {
+        val response = runInProject(project, "rea report ${ChrootRunner.quote(path)} --json")
+        val written = response?.takeIf { it.ok }?.data?.optString("path").orEmpty()
+        val text = if (written.isNotEmpty()) withContext(Dispatchers.IO) { readProjectFile(project, written) } else null
+        mutable.update {
+            if (text != null) it.copy(reportPath = written, reportMarkdown = text, message = UiText.res(R.string.rea_report_saved, written))
+            else it.copy(message = failureMessage(response))
+        }
+    }
+
+    private suspend fun runInProject(project: Project, command: String): ReaResponse? {
+        val workspace = WorkspaceCheckpoints(appContext.filesDir, appContext).ensureWorkspace(project.id)
+        val result = runner.run(workspaceDir = workspace, slug = project.slug, command = command, timeoutMillis = 3 * 60_000L)
+        val response = ReaJson.parse(result.output)
+        if (response == null) appendLog(result.output)
+        return response
+    }
+
+    private fun readProjectFile(project: Project, relative: String): String? = runCatching {
+        val workspace = WorkspaceCheckpoints(appContext.filesDir, appContext).ensureWorkspace(project.id).canonicalFile
+        val file = File(workspace, relative).canonicalFile
+        // The report path comes from the command's output: never read outside the project folder.
+        if (!file.path.startsWith(workspace.path + File.separator)) null else file.takeIf { it.isFile }?.readText()
+    }.getOrNull()
+
+    private fun failureMessage(response: ReaResponse?): UiText = when {
+        response == null -> UiText.res(R.string.rea_no_answer)
+        response.error != null -> UiText.Raw(
+            listOf(response.error.message, response.error.hint).filter { it.isNotBlank() }.joinToString(" "),
+        )
+        else -> UiText.res(R.string.rea_no_answer)
+    }
+
+    fun selectTarget(path: String) {
+        mutable.update { it.copy(target = path, analysis = null, reportPath = null, reportMarkdown = null, message = null) }
+    }
+
+    fun clearAnalysis() {
+        mutable.update { it.copy(target = null, analysis = null, reportPath = null, reportMarkdown = null) }
+    }
+
     fun cancel() {
         job?.cancel()
         mutable.update { it.copy(busy = false) }
@@ -165,7 +241,7 @@ class ReaController(context: Context) {
 
     companion object {
         /** Must equal `__version__` in the Python package (a unit test checks it). */
-        const val REA_VERSION = "0.2.0"
+        const val REA_VERSION = "0.3.0"
         private const val TOOL_SLUG = "rea"
         private const val ASSET_ROOT = "rea"
         private const val MAX_LOG_CHARS = 60_000
@@ -174,6 +250,19 @@ class ReaController(context: Context) {
          * Runs in the chroot as root. The package was staged in the tool workspace (/workspace/rea/stage) by the app,
          * so no file is written into the rootfs from the app's own uid. Python 3 is installed from apt only if missing.
          */
+        /** The `rea analyze` command line for the options of the screen; [symbol] null = no disassembly, blank = entry. */
+        internal fun analyzeCommand(path: String, strings: Boolean, interesting: Boolean, symbol: String?): String = buildList {
+            add("rea analyze ${ChrootRunner.quote(path)} --json")
+            if (strings) {
+                add("--strings --max-strings 300")
+                if (interesting) add("--interesting")
+            }
+            if (symbol != null) {
+                add(if (symbol.isBlank()) "--disasm" else "--disasm ${ChrootRunner.quote(symbol)}")
+                add("--count 80")
+            }
+        }.joinToString(" ")
+
         internal fun installScript(): String = """
             set -e
             export DEBIAN_FRONTEND=noninteractive

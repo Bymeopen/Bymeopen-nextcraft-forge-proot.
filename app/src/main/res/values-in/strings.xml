@@ -963,4 +963,35 @@
     <string name="rea_mode_full">dinamis penuh (ptrace dan gdb berfungsi)</string>
     <string name="rea_mode_emulated">dinamis emulasi (QEMU atau Unicorn)</string>
     <string name="rea_mode_static">statis saja</string>
+    <string name="rea_section_analysis">Analisis berkas</string>
+    <string name="rea_open_project">Buka proyek dulu; berkas dianalisis di dalam proyek.</string>
+    <string name="rea_pick_file">Pilih berkas</string>
+    <string name="rea_opt_strings">Ekstrak string</string>
+    <string name="rea_opt_interesting">Hanya string menarik (URL, jalur, kunci)</string>
+    <string name="rea_opt_symbol">Fungsi untuk disassembly (kosong = lewati)</string>
+    <string name="rea_analyze">Analisis</string>
+    <string name="rea_install_first">Pasang REA dulu.</string>
+    <string name="rea_analyzing">Menganalisis…</string>
+    <string name="rea_reporting">Menulis laporan…</string>
+    <string name="rea_save_report">Simpan laporan (.rea)</string>
+    <string name="rea_report_saved">Laporan disimpan: %1$s</string>
+    <string name="rea_section_report">Laporan</string>
+    <string name="rea_section_identity">Identifikasi</string>
+    <string name="rea_section_elf">ELF</string>
+    <string name="rea_section_functions">Fungsi (%1$d)</string>
+    <string name="rea_section_strings">String (%1$d dari %2$d)</string>
+    <string name="rea_section_disasm">Disassembly: %1$s @ %2$s</string>
+    <string name="rea_k_type">Tipe</string>
+    <string name="rea_k_size">Ukuran</string>
+    <string name="rea_k_entropy">Entropi</string>
+    <string name="rea_k_entry">Titik masuk</string>
+    <string name="rea_k_symbols">Simbol</string>
+    <string name="rea_k_layout">Susunan</string>
+    <string name="rea_k_libs">Pustaka</string>
+    <string name="rea_stripped">di-strip (tidak ada)</string>
+    <string name="rea_has_symbols">ada</string>
+    <string name="rea_layout">%1$d section, %2$d segment</string>
+    <string name="rea_packed_hint">Entropi tinggi: berkas mungkin dipak atau dienkripsi.</string>
+    <string name="rea_functions_hint">Ketuk fungsi untuk melihat disassembly-nya.</string>
+    <string name="rea_no_files">Tidak ada berkas. Buka tab File sekali untuk memuat daftar.</string>
 </resources>

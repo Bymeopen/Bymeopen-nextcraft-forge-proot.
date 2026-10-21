@@ -61,3 +61,54 @@ class ReaResultTest {
         assertTrue(script.contains("python3 -m rea \"\$@\""))
     }
 }
+
+class ReaAnalysisTest {
+    private val line =
+        """{"schema":1,"command":"analyze","ok":true,"data":{"identify":{"path":"t","type":"ELF","arch":"arm64","bits":64,"size":15984,"md5":"m","sha256":"abcdef0123456789abcdef","entropy":5.9,"packed_hint":false},"elf":{"type":"dyn","machine":"aarch64","entry":4192,"stripped":false,"needed":["libc.so.6"],"sections":[{},{}],"segments":[{}],"functions":[{"name":"main","addr":4450,"size":40},{"name":"helper","addr":4400,"size":20}],"imports":["puts"]},"strings":{"strings":[{"offset":8206,"encoding":"ascii","text":"https://example.com","score":6}],"total":9,"truncated":true},"disasm":{"function":"main","address":4450,"instructions":[{"addr":4450,"size":4,"bytes":"f30f1efa","mnemonic":"endbr64","operands":""},{"addr":4454,"size":1,"bytes":"55","mnemonic":"push","operands":"rbp"}]}},"warnings":[],"error":null}"""
+
+    @Test
+    fun parsesAnAnalysis() {
+        val analysis = ReaJson.parse(line)!!.analysis()!!
+        assertEquals("ELF", analysis.identity.type)
+        assertEquals("arm64", analysis.identity.arch)
+        assertEquals(64, analysis.identity.bits)
+        val elf = analysis.elf!!
+        assertEquals(4192L, elf.entry)
+        assertEquals(2, elf.sectionCount)
+        assertEquals(listOf(ReaFunction("main", 4450, 40), ReaFunction("helper", 4400, 20)), elf.functions)
+        assertEquals(listOf("libc.so.6"), elf.needed)
+        assertEquals(1, analysis.strings.size)
+        assertEquals(9, analysis.stringsTotal)
+        assertEquals("endbr64", analysis.disasm!!.instructions[0].mnemonic)
+        assertEquals("rbp", analysis.disasm!!.instructions[1].operands)
+    }
+
+    @Test
+    fun partsThatWereNotRequestedStayEmpty() {
+        val bare = """{"schema":1,"command":"analyze","ok":true,"data":{"identify":{"path":"a.txt","type":"text","size":3,"md5":"m","sha256":"s","entropy":1.0,"packed_hint":false}},"warnings":[],"error":null}"""
+        val analysis = ReaJson.parse(bare)!!.analysis()!!
+        assertNull(analysis.elf)
+        assertNull(analysis.disasm)
+        assertTrue(analysis.strings.isEmpty())
+        assertNull(analysis.identity.arch)
+        assertNull(analysis.identity.bits)
+    }
+
+    @Test
+    fun aResponseWithoutIdentityIsNotAnAnalysis() {
+        assertNull(ReaJson.parse("""{"schema":1,"command":"doctor","ok":true,"data":{"checks":[]},"warnings":[],"error":null}""")!!.analysis())
+    }
+
+    @Test
+    fun theAnalyzeCommandFollowsTheOptions() {
+        assertEquals("rea analyze 'a b.elf' --json", ReaController.analyzeCommand("a b.elf", strings = false, interesting = false, symbol = null))
+        assertEquals(
+            "rea analyze 'x' --json --strings --max-strings 300 --interesting --disasm 'main' --count 80",
+            ReaController.analyzeCommand("x", strings = true, interesting = true, symbol = "main"),
+        )
+        // A blank symbol means "start at the entry point".
+        assertEquals("rea analyze 'x' --json --disasm --count 80", ReaController.analyzeCommand("x", strings = false, interesting = false, symbol = ""))
+        // A quote in the file name cannot break out of the command.
+        assertTrue(ReaController.analyzeCommand("a'; rm -rf /; '", strings = false, interesting = false, symbol = null).contains("'\"'\"'"))
+    }
+}

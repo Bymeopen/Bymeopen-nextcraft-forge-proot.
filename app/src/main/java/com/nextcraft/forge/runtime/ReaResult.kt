@@ -61,3 +61,91 @@ object ReaJson {
         return null
     }
 }
+
+data class ReaIdentity(
+    val path: String,
+    val type: String,
+    val arch: String?,
+    val bits: Int?,
+    val size: Long,
+    val md5: String,
+    val sha256: String,
+    val entropy: Double,
+    val packedHint: Boolean,
+)
+
+data class ReaFunction(val name: String, val addr: Long, val size: Long)
+
+data class ReaString(val offset: Long, val encoding: String, val text: String, val score: Int)
+
+data class ReaInstruction(val addr: Long, val bytes: String, val mnemonic: String, val operands: String)
+
+data class ReaElf(
+    val type: String,
+    val machine: String,
+    val entry: Long,
+    val stripped: Boolean,
+    val needed: List<String>,
+    val sectionCount: Int,
+    val segmentCount: Int,
+    val functions: List<ReaFunction>,
+    val imports: List<String>,
+)
+
+data class ReaDisasm(val function: String?, val address: Long, val instructions: List<ReaInstruction>)
+
+/** What `rea analyze --json` found; the parts the user did not ask for are empty or null. */
+data class ReaAnalysis(
+    val identity: ReaIdentity,
+    val elf: ReaElf?,
+    val strings: List<ReaString>,
+    val stringsTotal: Int,
+    val disasm: ReaDisasm?,
+)
+
+private fun org.json.JSONArray?.objects(): List<JSONObject> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+
+/** Reads the `data` of an `analyze` response; null when it does not carry an identity. */
+fun ReaResponse.analysis(): ReaAnalysis? {
+    val root = data ?: return null
+    val id = root.optJSONObject("identify") ?: return null
+    val identity = ReaIdentity(
+        path = id.optString("path"),
+        type = id.optString("type"),
+        arch = id.optString("arch").takeIf { it.isNotEmpty() },
+        bits = if (id.has("bits")) id.optInt("bits") else null,
+        size = id.optLong("size"),
+        md5 = id.optString("md5"),
+        sha256 = id.optString("sha256"),
+        entropy = id.optDouble("entropy", 0.0),
+        packedHint = id.optBoolean("packed_hint", false),
+    )
+    val elf = root.optJSONObject("elf")?.let { e ->
+        ReaElf(
+            type = e.optString("type"),
+            machine = e.optString("machine"),
+            entry = e.optLong("entry"),
+            stripped = e.optBoolean("stripped"),
+            needed = e.optJSONArray("needed")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty(),
+            sectionCount = e.optJSONArray("sections")?.length() ?: 0,
+            segmentCount = e.optJSONArray("segments")?.length() ?: 0,
+            functions = e.optJSONArray("functions").objects().map { ReaFunction(it.optString("name"), it.optLong("addr"), it.optLong("size")) },
+            imports = e.optJSONArray("imports")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty(),
+        )
+    }
+    val stringsObject = root.optJSONObject("strings")
+    val strings = stringsObject?.optJSONArray("strings").objects().map {
+        ReaString(it.optLong("offset"), it.optString("encoding"), it.optString("text"), it.optInt("score"))
+    }
+    val disasm = root.optJSONObject("disasm")?.let { d ->
+        ReaDisasm(
+            function = d.optString("function").takeIf { it.isNotEmpty() },
+            address = d.optLong("address"),
+            instructions = d.optJSONArray("instructions").objects().map {
+                ReaInstruction(it.optLong("addr"), it.optString("bytes"), it.optString("mnemonic"), it.optString("operands"))
+            },
+        )
+    }
+    return ReaAnalysis(identity, elf, strings, stringsObject?.optInt("total") ?: strings.size, disasm)
+}

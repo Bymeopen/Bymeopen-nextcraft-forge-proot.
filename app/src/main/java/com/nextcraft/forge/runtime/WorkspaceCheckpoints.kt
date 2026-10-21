@@ -547,6 +547,8 @@ class WorkspaceCheckpoints(
             ".kotlin",
             // Chat branches: one clone of the project per chat lives in here (see ChatBranches).
             ".forge",
+            // REA reports and sessions (see the REA tool).
+            ".rea",
             ".next",
             ".dart_tool",
             ".venv",
