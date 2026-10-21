@@ -28,10 +28,10 @@
     <string name="launch_assemble_debug_no_install">Rakit debug (tanpa instal)</string>
     <string name="launch_install_last_apk">Instal APK terakhir</string>
     <string name="launch_clean">Bersihkan</string>
-    <string name="launch_fix_with_agent">Perbaiki dengan Agent</string>
+    <string name="launch_fix_with_agent">Perbaiki dengan Agen</string>
     <string name="launch_install_apk">Instal APK</string>
     <string name="launch_zero_compiler_or_aapt2">Tidak ada masalah compiler atau resource AAPT2.</string>
-    <string name="launch_ask_agent_to_fix">Minta Agent memperbaiki</string>
+    <string name="launch_ask_agent_to_fix">Minta Agen memperbaiki</string>
     <string name="launch_open_file">Buka file</string>
     <string name="launch_pause">Jeda</string>
     <string name="launch_stream_logcat">Mulai Logcat</string>
@@ -42,7 +42,7 @@
     <string name="files_files">File</string>
     <string name="files_new_file">File baru</string>
     <string name="files_refresh">Muat ulang</string>
-    <string name="files_workspace_is_empty_use">Workspace kosong. Gunakan + untuk membuat file atau minta Agent membuat kode awal.</string>
+    <string name="files_workspace_is_empty_use">Workspace kosong. Gunakan + untuk membuat file atau minta Agen membuat kode awal.</string>
     <string name="files_kb">%1$s KB</string>
     <string name="files_select_a_file_from">Pilih file dari Explorer untuk melihat atau mengedit.</string>
     <string name="files_open_file_explorer">Buka File Explorer</string>
@@ -113,7 +113,7 @@
     <string name="settings_connected_as">Terhubung sebagai @%1$s</string>
     <string name="settings_disconnect">Putuskan</string>
     <string name="settings_auto_commit_push">Commit &amp; push otomatis</string>
-    <string name="settings_commit_and_push_the">Commit dan push workspace setelah setiap giliran Agent</string>
+    <string name="settings_commit_and_push_the">Commit dan push workspace setelah setiap giliran Agen</string>
     <string name="settings_push_workspace">Push workspace</string>
     <string name="settings_pull_latest">Pull terbaru</string>
     <string name="settings_create_push_new_github">Buat &amp; push repositori GitHub baru</string>
@@ -154,7 +154,7 @@
     <string name="tools_android_builder_desc">Compile, tanda tangan, dan instal APK langsung</string>
     <string name="tools_section_development">Pengembangan</string>
     <string name="tools_section_build_deploy">Build &amp; Deploy</string>
-    <string name="projects_agent_running">Agent sedang berjalan</string>
+    <string name="projects_agent_running">Agen sedang berjalan</string>
     <string name="projects_active_project">Proyek aktif</string>
     <string name="projects_project">Proyek</string>
     <string name="projects_quick_chat">Obrolan cepat</string>
@@ -184,7 +184,7 @@
     <string name="nav_projects">Proyek</string>
     <string name="nav_agent">Atur AI</string>
     <string name="nav_tools">Alat</string>
-    <string name="nav_settings">Setelan</string>
+    <string name="nav_settings">Pengaturan</string>
     <string name="status_done">Selesai</string>
     <string name="status_running">Berjalan</string>
     <string name="status_failed">Gagal</string>
@@ -202,7 +202,7 @@
     <string name="shell_check_root">Akses root (mount namespace `su -mm`)</string>
     <string name="shell_root_granted">Magisk / KernelSU / APatch diizinkan</string>
     <string name="shell_root_required">Hak akses root diperlukan untuk chroot</string>
-    <string name="shell_check_rootfs">Rootfs Ubuntu 24.04 &amp; toolchain Agent</string>
+    <string name="shell_check_rootfs">Rootfs Ubuntu 24.04 &amp; toolchain Agen</string>
     <string name="shell_installed_ready">Terpasang &amp; siap</string>
     <string name="shell_resume_setup">Lanjutkan pemasangan</string>
     <string name="shell_install_runtime">Pasang runtime chroot</string>
@@ -315,7 +315,7 @@
     <string name="tools_editor">Editor</string>
     <string name="tools_editor_desc">Editor kode dengan perlindungan perubahan belum disimpan</string>
     <string name="tools_header_subtitle">Toolchain · Diagnostik · Manajer SSH</string>
-    <string name="tools_header_title">Alat pengembang</string>
+    <string name="tools_header_title">Alat</string>
     <string name="tools_rom">ROM Studio</string>
     <string name="tools_rom_desc">Orkestrasi repo sync untuk ROM Android kustom</string>
     <string name="tools_search">Cari alat</string>
@@ -341,7 +341,7 @@
     <string name="projects_git_url">URL Git</string>
     <string name="projects_connect_github">Hubungkan GitHub</string>
     <string name="projects_browse_remote">Telusuri repositori remote Anda</string>
-    <string name="projects_github_connected">Terhubung sebagai @%1$s · pilih repositori di Settings</string>
+    <string name="projects_github_connected">Terhubung sebagai @%1$s · pilih repositori di Pengaturan</string>
     <string name="projects_your_projects">Proyek Anda</string>
     <string name="projects_empty_hint">Buat proyek bernama atau mulai langsung dengan Proyek Cepat.</string>
     <string name="projects_clone_title">Clone dari URL Git</string>

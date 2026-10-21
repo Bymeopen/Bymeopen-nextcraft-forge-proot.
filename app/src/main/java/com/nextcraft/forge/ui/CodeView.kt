@@ -82,13 +82,16 @@ internal fun DiffCodeView(
     val shown = lines.take(if (showAll) MAX_SHOWN_LINES else previewLines)
     val hidden = lines.size - shown.size
     val digits = remember(lines) { (lines.maxOfOrNull { maxOf(it.newLine ?: 0, it.oldLine ?: 0) } ?: 0).toString().length.coerceAtLeast(2) }
+    // Long lines scroll sideways; the fading edge is the cue that there is more to the right.
+    val sideScroll = rememberScrollState()
     Column(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(tokens.terminalBackground)
-                .horizontalScroll(rememberScrollState())
+                .forgeFadingEdges(sideScroll, tokens.terminalBackground)
+                .horizontalScroll(sideScroll)
                 .padding(vertical = 6.dp),
         ) {
             shown.forEach { line -> DiffRow(line, language, digits, textStyle, tokens) }
