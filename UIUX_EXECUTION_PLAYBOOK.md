@@ -370,3 +370,9 @@ Branch: `ccr-a85f0c92-q5dlfw`. Build: `ANDROID_HOME=/root/android-sdk gradle :ap
 - Batch B (chat): grouped tool steps (3+ fold into one row, live step shown), inline diff card with keep/revert under the last finished reply, approval as non-dismissable bottom sheet with risk label and affected files, contextual quick-action chips plus starter ideas, "N new" pill. Components in ChatExtras.kt; renders in the phone-size harness (chatB, approval).
 
 - Round to 8.5: theme-level dialog/sheet/menu surfaces and one shape scale, fading edges on scrolling tabs, project card status pills (agent working, N files changed), landscape compact bar/header and no two-pane on landscape phones, diff actions wrap. Verified in renders: dark/white/glass at 393dp, landscape 932x430.
+
+- Visual fixes round: onboarding actions pinned (install button no longer below the fold on 360dp), English default runtime message mapped through runtimeText, composer short hint (TalkBack keeps the agent name), fading edges on quick chips and terminal keys, workspace error banners localised. Harness gained composer, terminal and onboarding scenarios.
+
+- Language round: in-app language now reaches the ViewModel (str()/quantity() wrap the application context) and foreground-service notifications (LocaleHelper); notification texts, auth errors, provider/build/diff/installer sentences are translated at display through MessageText (central UiText.Raw path, messageText() in Compose). MessageTextTest keeps table, English and Indonesian resources in sync and scans sources for unmapped sentences. Opt-in Robolectric tests start the real service and check Indonesian and in-app-English output.
+
+- Files search: header search toggle, capsule field with result count, matches in tree order with the folders that lead to them (dimmed), empty state. Pure filter tested in FileSearchTest; renders in the harness (filesSearch, filesSearchEmpty).

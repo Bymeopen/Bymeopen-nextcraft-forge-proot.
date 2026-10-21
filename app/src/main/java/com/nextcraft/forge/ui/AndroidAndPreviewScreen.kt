@@ -274,7 +274,7 @@ fun AndroidBuildScreen(
                             quantityStringResource(R.plurals.launch_warnings, warningCount, warningCount),
                         )
                     } else {
-                        build.message ?: build.stage.displayLabel()
+                        build.message?.let { messageText(it) } ?: build.stage.displayLabel()
                     },
                     fontSize = ForgeType.control,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -453,7 +453,7 @@ private fun BuildIssuesList(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = issue.title,
+                            text = messageText(issue.title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -471,13 +471,13 @@ private fun BuildIssuesList(
                         )
                     }
                     Text(
-                        text = issue.detail,
+                        text = messageText(issue.detail),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                     )
                     issue.suggestion?.let { hint ->
                         Text(
-                            text = hint,
+                            text = messageText(hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -529,7 +529,7 @@ private fun LogcatPanel(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
+                text = logcat.message ?: stringResource(R.string.logcat_uid_scoped, logcat.packageName ?: stringResource(R.string.logcat_app_fallback)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -702,8 +702,11 @@ fun WebPreviewScreen(
                         keyboardOptions = ForgeFieldKind.URL.keyboardOptions(ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { opened = true; openUrl(urlInput) }),
                         placeholder = { Text(stringResource(R.string.launch_preview_url), color = colors.onSurfaceVariant.copy(alpha = 0.6f)) },
-                        colors = TextFieldDefaults.textFieldColors(
-                            containerColor = Color.Transparent,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            errorContainerColor = Color.Transparent,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
                             disabledIndicatorColor = Color.Transparent,

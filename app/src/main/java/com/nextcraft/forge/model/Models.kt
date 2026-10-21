@@ -173,6 +173,12 @@ enum class ProjectKind { PROJECT, QUICK_PROJECT }
 
 enum class ProjectType { GENERAL, ANDROID }
 
+/** Starter files for a non-Android project. */
+enum class StarterTemplate(val label: String) {
+    EMPTY("Empty"),
+    GO("Go (Windows/Linux)"),
+}
+
 enum class AndroidTemplate(val label: String) {
     COMPOSE("Jetpack Compose"),
     XML("Kotlin + XML"),
@@ -249,6 +255,15 @@ data class WorkspaceEntry(
     val sizeBytes: Long = 0,
     /** Null until the directory's direct children have been counted off the UI thread. */
     val childCount: Int? = null,
+    /** Last-modified time in epoch millis; 0 when unknown. */
+    val modifiedMillis: Long = 0L,
+)
+
+/** The direct children of one workspace folder, as the file manager shows them. */
+data class WorkspaceDirListing(
+    val entries: List<WorkspaceEntry>,
+    /** True when the folder has more entries than [entries] holds. */
+    val truncated: Boolean = false,
 )
 
 enum class RiskLevel { SAFE, REVIEW, HIGH }
@@ -365,6 +380,8 @@ data class ProjectChat(
     val title: String = "New chat",
     val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis(),
+    /** True when the chat works in its own branch (a clone of the project) and merges into it explicitly. */
+    val isolated: Boolean = false,
 )
 
 enum class DiffLineType { CONTEXT, ADDITION, DELETION, INFO }

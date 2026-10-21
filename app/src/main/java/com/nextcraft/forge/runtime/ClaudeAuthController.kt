@@ -75,6 +75,27 @@ class ClaudeAuthController(
         }
     }
 
+    /**
+     * Fills in the account email of a login that was already on disk (an earlier session, or `claude auth login` in
+     * the terminal): the email is otherwise only read right after signing in from this screen. The remembered value is
+     * shown at once and replaced by what `claude auth status` reports.
+     */
+    suspend fun loadAccountEmail() = withContext(Dispatchers.IO) {
+        if (!hasCredential()) return@withContext
+        val prefs = com.nextcraft.forge.data.AppPreferences(context)
+        fun show(email: String) {
+            val current = mutableState.value
+            if (current.status == ClaudeAuthStatus.SIGNED_IN || current.status == ClaudeAuthStatus.SIGNED_OUT) {
+                mutableState.value = current.copy(accountEmail = email)
+            }
+        }
+        prefs.claudeAccountEmail.takeIf { it.isNotBlank() }?.let(::show)
+        readAccountEmail()?.let {
+            prefs.claudeAccountEmail = it
+            show(it)
+        }
+    }
+
     suspend fun beginLogin(mode: ClaudeLoginMode, email: String = "") = withContext(Dispatchers.IO) {
         if (!loginStarting.compareAndSet(false, true)) return@withContext
         try {
@@ -143,7 +164,7 @@ class ClaudeAuthController(
             )
             if (spawned !is NativeSpawnProcess) {
                 runCatching { spawned.destroyForcibly() }
-                error("Unsupported Claude authentication process")
+                throw UiTextException(UiText.res(R.string.rt_auth_unsupported_process))
             }
             spawned
         } catch (error: Throwable) {
@@ -164,7 +185,7 @@ class ClaudeAuthController(
             RandomAccessFile(running.outputFile, "r").use { file ->
                 while (true) {
                     if (generation != loginGeneration.get()) break
-                    if (android.os.SystemClock.elapsedRealtime() > deadline) error("Sign-in timed out. Start sign-in again.")
+                    if (android.os.SystemClock.elapsedRealtime() > deadline) throw UiTextException(UiText.res(R.string.rt_auth_timeout))
                     val available = running.outputFile.length() - offset
                     if (available > 0) {
                         val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
@@ -196,7 +217,7 @@ class ClaudeAuthController(
                     if (clean.contains("authentication failed", true) || clean.contains("login failed", true) ||
                         clean.contains("invalid code", true) || clean.contains("failed to exchange", true)
                     ) {
-                        error("Claude sign-in failed. Start sign-in again.")
+                        throw UiTextException(UiText.res(R.string.rt_auth_claude_failed_retry))
                     }
                     val now = android.os.SystemClock.elapsedRealtime()
                     val exited = !running.isAlive
@@ -205,6 +226,7 @@ class ClaudeAuthController(
                         lastCredentialCheck = now
                         if ((exited || looksDone || mutableState.value.status == ClaudeAuthStatus.COMPLETING) && hasCredential()) {
                             val account = readAccountEmail()
+                            account?.let { com.nextcraft.forge.data.AppPreferences(context).claudeAccountEmail = it }
                             mutableState.value = ClaudeAuthState(
                                 ClaudeAuthStatus.SIGNED_IN,
                                 message = account?.let { UiText.res(R.string.rt_auth_connected_as, it) } ?: UiText.res(R.string.rt_auth_claude_connected),
@@ -215,7 +237,7 @@ class ClaudeAuthController(
                         }
                     }
                     if (exited && running.outputFile.length() <= offset) {
-                        error("Claude sign-in ended before completing (code ${runCatching { running.exitValue() }.getOrDefault(-1)}).")
+                        throw UiTextException(UiText.res(R.string.rt_auth_claude_ended, runCatching { running.exitValue() }.getOrDefault(-1)))
                     }
                     delay(120)
                 }
@@ -265,7 +287,7 @@ class ClaudeAuthController(
         val value = code.trim()
         if (value.isBlank()) throw UiTextException(UiText.res(R.string.rt_auth_claude_code_empty))
         try {
-            val running = process ?: error("Sign-in session is not active. Start sign-in again.")
+            val running = process ?: throw UiTextException(UiText.res(R.string.rt_auth_session_inactive))
             if (!running.isAlive) throw UiTextException(UiText.res(R.string.rt_auth_session_expired))
             running.outputStream.write((value + "\r").toByteArray())
             running.outputStream.flush()
@@ -309,6 +331,7 @@ class ClaudeAuthController(
             output.delete()
             if (hasCredential()) throw UiTextException(UiText.res(R.string.rt_auth_claude_signout_incomplete))
             onSignedInChanged(false)
+            com.nextcraft.forge.data.AppPreferences(context).claudeAccountEmail = ""
             mutableState.value = ClaudeAuthState(message = UiText.res(R.string.rt_auth_claude_signed_out))
         } catch (error: Throwable) {
             mutableState.value = previous.copy(message = error.toUiText(R.string.rt_auth_claude_signout_failed))

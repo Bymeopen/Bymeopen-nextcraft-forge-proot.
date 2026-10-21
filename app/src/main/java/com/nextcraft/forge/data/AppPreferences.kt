@@ -54,6 +54,16 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("agent_antigravity_model", "") ?: ""
         set(value) { preferences.edit().putString("agent_antigravity_model", value).apply() }
 
+    /** Email of the signed-in Claude account, remembered so the account card shows it before `claude auth status` answers. */
+    var claudeAccountEmail: String
+        get() = preferences.getString("claude_account_email", "") ?: ""
+        set(value) { preferences.edit().putString("claude_account_email", value).apply() }
+
+    /** Claude Code effort level (low/medium/high/xhigh/max); empty keeps the model's own default. */
+    var claudeEffort: String
+        get() = preferences.getString("agent_claude_effort", "") ?: ""
+        set(value) { preferences.edit().putString("agent_claude_effort", value).apply() }
+
     var antigravityEffort: String
         get() = preferences.getString("agent_antigravity_effort", "high") ?: "high"
         set(value) { preferences.edit().putString("agent_antigravity_effort", value).apply() }
@@ -411,6 +421,7 @@ class AppPreferences(private val context: Context) {
                 put("title", chat.title)
                 put("createdAtMillis", chat.createdAtMillis)
                 put("updatedAtMillis", chat.updatedAtMillis)
+                put("isolated", chat.isolated)
             })
         }
         writeAtomically(File(projectDir, "index.json"), arr.toString())
@@ -433,6 +444,7 @@ class AppPreferences(private val context: Context) {
                             title = obj.optString("title", "Chat"),
                             createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
                             updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
+                            isolated = obj.optBoolean("isolated", false),
                         )
                     }.getOrNull()
                 }.sortedByDescending { it.updatedAtMillis }

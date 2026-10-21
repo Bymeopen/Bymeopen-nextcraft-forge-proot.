@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -25,7 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.ripple.rememberRipple
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,10 +49,29 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.ChangeItem
@@ -276,10 +296,12 @@ internal fun QuickActionRow(chips: List<QuickChip>, modifier: Modifier = Modifie
     if (chips.isEmpty()) return
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
+    val scroll = rememberScrollState()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .forgeFadingEdges(scroll, scheme.background)
+            .horizontalScroll(scroll)
             .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -290,7 +312,7 @@ internal fun QuickActionRow(chips: List<QuickChip>, modifier: Modifier = Modifie
                     .forgePressScale(interaction, pressedScale = 0.95f)
                     .clip(RoundedCornerShape(100))
                     .background(tokens.cardElevatedColor)
-                    .clickable(interactionSource = interaction, indication = rememberRipple(), role = Role.Button, onClick = chip.onClick)
+                    .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = chip.onClick)
                     .heightIn(min = ForgeSpace.minTouch)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -403,6 +425,153 @@ internal fun ToolApprovalContent(request: ToolRequest, onApprove: () -> Unit, on
                 },
                 modifier = Modifier.weight(1f).heightIn(min = 52.dp),
             ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+/** The one-line composer capsule: attach menu, message field, and a round send/stop button. */
+@Composable
+internal fun ChatComposer(
+    promptInput: String,
+    onPromptChange: (String) -> Unit,
+    agentName: String,
+    running: Boolean,
+    canSend: Boolean,
+    captureEnabled: Boolean,
+    onAttachCamera: () -> Unit,
+    onAttachFile: () -> Unit,
+    onCapture: () -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    /** Model (and effort) shown as a chip next to the attach button; tapping it opens the model sheet. */
+    modelChipLabel: String = "",
+    onModelChip: (() -> Unit)? = null,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    var attachMenuOpen by remember { mutableStateOf(false) }
+    val composerLabel = stringResource(R.string.agent_message_placeholder, agentName)
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = tokens.cardContainerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = tokens.cardBorderStroke,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Column(modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)) {
+        // Message field on its own line, like Claude; the attach button, model chip and send button sit below it.
+        TextField(
+            value = promptInput,
+            onValueChange = onPromptChange,
+            placeholder = {
+                Text(
+                    stringResource(R.string.chat_composer_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            // The short hint fits a 360dp phone; TalkBack still hears which agent the message goes to.
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = composerLabel },
+            maxLines = 5,
+            // Enter stays a newline (messages are multi-line); send is the round button.
+            keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                disabledContainerColor = Color.Transparent,
+                errorContainerColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent,
+            ),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Attach: photos or any file; it lands in attachments/ inside the workspace.
+            Box {
+                IconButton(onClick = { attachMenuOpen = true }) {
+                    ForgeIcon(glyph = ForgeGlyph.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 22.dp, description = stringResource(R.string.agent_attach))
+                }
+                DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.agent_attach_camera)) },
+                        onClick = { attachMenuOpen = false; onAttachCamera() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.agent_attach_file)) },
+                        onClick = { attachMenuOpen = false; onAttachFile() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.capture_menu)) },
+                        enabled = captureEnabled,
+                        onClick = { attachMenuOpen = false; onCapture() },
+                    )
+                }
+            }
+            if (onModelChip != null && modelChipLabel.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onModelChip),
+                ) {
+                    Text(
+                        text = modelChipLabel,
+                        fontSize = ForgeType.secondary,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 200.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            val haptics = LocalHapticFeedback.current
+            val reduceMotion = rememberReduceMotion()
+            val sendScale by animateFloatAsState(
+                targetValue = if (running || canSend) 1f else 0.86f,
+                animationSpec = if (reduceMotion) snap() else ForgeMotion.springSnappy(),
+                label = "sendScale",
+            )
+            val sendBg by animateColorAsState(
+                targetValue = when {
+                    canSend -> MaterialTheme.colorScheme.primary
+                    running -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                },
+                animationSpec = if (reduceMotion) snap() else tween(ForgeMotion.FADE_MS),
+                label = "sendBg",
+            )
+            Box(
+                modifier = Modifier
+                    .forgeMinTouch()
+                    .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(sendBg)
+                    .clickable(
+                        enabled = running || canSend,
+                        role = Role.Button,
+                        onClickLabel = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
+                    ) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        // While the agent works, sending queues the message; stop is available when nothing is typed.
+                        if (canSend) onSend() else if (running) onStop()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (running && !canSend) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
+                    contentDescription = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
+                    tint = when {
+                        canSend -> MaterialTheme.colorScheme.onPrimary
+                        running -> MaterialTheme.colorScheme.onError
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
         }
     }
 }

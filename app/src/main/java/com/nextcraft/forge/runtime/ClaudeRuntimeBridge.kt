@@ -95,6 +95,9 @@ class ClaudeRuntimeBridge(
     private val autoApproveAllTools: () -> Boolean = {
         runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(true)
     },
+    private val claudeEffort: () -> String = {
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).claudeEffort }.getOrDefault("")
+    },
     private val interactiveHighRiskApprovals: () -> Boolean = {
         runCatching { com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals }.getOrDefault(true)
     },
@@ -135,6 +138,7 @@ class ClaudeRuntimeBridge(
         val sessionId = UUID.randomUUID().toString()
         finishedSessions.remove(sessionId)
         activeSessionId = sessionId
+        liveSessions.add(sessionId)
         userStopRequested = false
         turnCompletedFromStream = false
         activeProjectSlug = projectSlug
@@ -180,13 +184,14 @@ class ClaudeRuntimeBridge(
                     }, "forge-claude-stop").apply { isDaemon = true }.start()
                 }
             }
-            stopHandler?.let { RuntimeTaskController.register(RuntimeTaskController.AGENT, it) }
+            stopHandler?.let { RuntimeTaskController.register("${RuntimeTaskController.AGENT}:$sessionId", it) }
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
             // Requests left by a run that was killed before its watcher saw them would be shown as this session's.
+            // Only requests of sessions that are no longer running: another chat's live session may be waiting on one.
             File(context.filesDir, "runtime-bridge")
-                .listFiles { f -> f.name.endsWith(".request") }.orEmpty()
+                .listFiles { f -> f.name.endsWith(".request") && !isLiveSessionRequest(f.name) }.orEmpty()
                 .forEach { runCatching { it.delete() } }
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
@@ -204,6 +209,7 @@ class ClaudeRuntimeBridge(
                 authToken = secret,
                 localGatewayUrl = formatGateway?.url ?: openRouterGateway?.url,
                 useStoredLogin = storedLogin,
+                claudeEffort = claudeEffort(),
             )
             Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}")
             Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
@@ -232,7 +238,8 @@ class ClaudeRuntimeBridge(
                 installed.chrootExec,
                 installed.rootfs,
                 workspace,
-                launch.environment,
+                // The permission hook reads this to tag its requests with this session (see requestPrefix).
+                launch.environment + ("NEXTCRAFT_SESSION_ID" to sessionId),
                 command,
                 guestWorkspacePath = guestWorkspacePath,
             )
@@ -299,11 +306,7 @@ class ClaudeRuntimeBridge(
                 }
                 if (exit == 0 || (turnCompletedFromStream && !userStopRequested)) {
                     emitCompletedOnce(sessionId)
-                    finishForegroundRuntime(
-                        completed = true,
-                        projectName = projectSlug,
-                        detail = "Claude Code finished in $projectSlug",
-                    )
+                    finishForegroundRuntimeRes(true, projectSlug, com.nextcraft.forge.R.string.notif_agent_finished_in, "Claude Code", projectSlug)
                 } else {
                     if (userStopRequested) throw ProviderSessionException("Stopped by user")
                     error(lastDiagnostic.ifBlank { "Claude Code stopped with exit code $exit" })
@@ -335,6 +338,7 @@ class ClaudeRuntimeBridge(
         runCatching { spawnedOutputFile?.delete() }
         activeProcess = null
         activeSessionId = null
+        liveSessions.remove(sessionId)
         RuntimeTaskController.release(stopHandler)
         sessionId
     }
@@ -361,9 +365,11 @@ class ClaudeRuntimeBridge(
         val secret = if (storedLogin) "" else secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         check(secret.isNotBlank() || storedLogin) { "Not signed in to Claude." }
         val installed = installer.installedRuntime()
-        val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
+        // chroot-exec.sh bind-mounts this directory once and keeps the mount: deleting it after a test left a stale mount
+        // ("current working directory was deleted"), so it is created once and only emptied, never removed.
+        val probeDir = File(context.filesDir, "runtime-probes/claude-check").apply { mkdirs() }
         val outputFile = File(context.cacheDir, "claude-hello-${System.nanoTime()}.log")
-        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, useStoredLogin = storedLogin)
+        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, useStoredLogin = storedLogin, claudeEffort = claudeEffort())
         val command = listOf(
             launch.executable,
             "-p", "Reply with exactly: ok",
@@ -377,7 +383,7 @@ class ClaudeRuntimeBridge(
             probeDir,
             launch.environment,
             command,
-            guestWorkspacePath = "/workspace/claude-hello",
+            guestWorkspacePath = "/workspace/claude-check",
             emulateHardLinks = false,
             outputFile = outputFile,
         )
@@ -403,7 +409,7 @@ class ClaudeRuntimeBridge(
             runCatching { process.destroy() }
             runCatching { if (process.isAlive) process.destroyForcibly() }
             runCatching { outputFile.delete() }
-            runCatching { probeDir.deleteRecursively() }
+            runCatching { probeDir.listFiles()?.forEach { it.deleteRecursively() } }
             Log.d("ClaudeBridge", "Connection test took ${android.os.SystemClock.elapsedRealtime() - startedAt} ms")
         }
     }
@@ -463,7 +469,9 @@ class ClaudeRuntimeBridge(
         val handledApprovals = HashSet<String>()
         while (kotlin.coroutines.coroutineContext.isActive) {
             expirePendingPermissions(sessionId)
-            bridge.listFiles { file -> file.name.endsWith(".request") }.orEmpty().forEach { file ->
+            // The permission hook prefixes every request with the id of the session that raised it, so parallel
+            // sessions never pick up (or answer) each other's requests.
+            bridge.listFiles { file -> file.name.endsWith(".request") && file.name.startsWith(requestPrefix(sessionId)) }.orEmpty().forEach { file ->
                 val approvalId = file.name.removeSuffix(".request")
                 if (!handledApprovals.add(approvalId)) {
                     runCatching { file.delete() }
@@ -757,11 +765,7 @@ class ClaudeRuntimeBridge(
     private suspend fun emitCompletedOnce(sessionId: String) {
         if (finishedSessions.add(sessionId)) {
             eventBus.emit(RuntimeEvent.SessionCompleted(sessionId))
-            finishForegroundRuntime(
-                completed = true,
-                projectName = activeProjectSlug ?: "Project",
-                detail = "Claude Code finished",
-            )
+            finishForegroundRuntimeRes(true, activeProjectSlug ?: "Project", com.nextcraft.forge.R.string.notif_agent_finished, "Claude Code")
         }
     }
 
@@ -892,6 +896,9 @@ class ClaudeRuntimeBridge(
     private fun finishForegroundRuntime(completed: Boolean, projectName: String, detail: String) =
         foreground.finish(completed, projectName, detail)
 
+    private fun finishForegroundRuntimeRes(completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, vararg args: String) =
+        foreground.finishRes(completed, projectName, detailRes, *args)
+
     private fun cancelForegroundRuntime() = foreground.cancel()
 
     private data class PendingPermission(
@@ -902,6 +909,16 @@ class ClaudeRuntimeBridge(
     private class ProviderSessionException(message: String) : IllegalStateException(message)
 
     companion object {
+        /** Sessions running right now in any ClaudeRuntimeBridge instance (one instance per parallel chat). */
+        private val liveSessions: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+        /** Request files are named `<sessionId>_<uuid>.request` by the permission hook. */
+        internal fun requestPrefix(sessionId: String): String = "${sessionId}_"
+
+        /** True when a request file belongs to a session that is still running (so it must not be cleaned up). */
+        internal fun isLiveSessionRequest(fileName: String): Boolean =
+            liveSessions.any { fileName.startsWith(requestPrefix(it)) }
+
         private const val HIGH_RISK_APPROVAL_TIMEOUT_MS = 40_000L
         private const val STALE_RESPONSE_MS = 600_000L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
