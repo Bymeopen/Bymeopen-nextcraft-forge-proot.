@@ -31,3 +31,8 @@ CI (`.github/workflows/ci.yml`) juga menolak setiap jalur `su`/`su -mm` yang mas
 - `docs/RUNTIME_KNOWN_ISSUES.md`: asal biner `proot`, SHA-256, masalah yang diketahui.
 - `scripts/runtime-bundles/README.md`: skrip supervisor dan pembangun bundle (reproducible, checksum dipin).
 - `ARCHITECTURE.md`: ADR warisan dari repo chroot; ADR-008 di bagian atas menjelaskan fork ini.
+
+## Lisensi
+
+GPL-3.0-only, lihat `LICENSE` dan `THIRD_PARTY_NOTICES.md` (library terminal Termux bersifat GPLv3, sehingga
+distribusi APK wajib menyertakan source code). Copyright (C) 2026 Bymeopen.

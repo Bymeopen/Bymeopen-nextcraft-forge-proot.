@@ -1,3 +1,11 @@
+# Licence
+
+NextCraft Forge is licensed under the **GNU General Public License v3.0 only** (`GPL-3.0-only`); see `LICENSE`.
+Copyright (C) 2026 Bymeopen.
+
+This is required, not optional: the app links the Termux terminal libraries, which this project treats as GPLv3 (see
+below). Anyone who receives the APK must also receive the complete source code, `LICENSE` and this file.
+
 # Third-party notices
 
 ## Termux terminal libraries
