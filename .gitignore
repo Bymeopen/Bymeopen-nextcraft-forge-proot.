@@ -26,3 +26,6 @@ dist/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# REA writes its consent marker to $HOME/.rea (tests use the repo root as HOME)
+.rea/
