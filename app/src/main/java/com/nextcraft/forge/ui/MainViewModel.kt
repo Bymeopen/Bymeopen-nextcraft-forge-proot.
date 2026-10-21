@@ -372,6 +372,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     claudeEffort = preferences.claudeEffort,
                 )
             }
+            if (preferences.routing.mode != RouteMode.SINGLE) refreshReadyAgents()
             val savedGitHubToken = vault.get("GITHUB_TOKEN").orEmpty()
             if (savedGitHubToken.isNotBlank()) {
                 withContext(Dispatchers.IO) {
@@ -1145,6 +1146,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendPrompt(promptText: String) {
+        // Keeps the readiness used by routing current (a login can have changed since); the answer is used by the next message.
+        if (_state.value.routing.mode != RouteMode.SINGLE) refreshReadyAgents()
         val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
@@ -1165,7 +1168,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Routing of messages between agents (single agent unless the user picked another mode in the chat) ---
 
-    fun setRouteMode(mode: RouteMode) = updateRouting(_state.value.routing.copy(mode = mode))
+    fun setRouteMode(mode: RouteMode) {
+        updateRouting(_state.value.routing.copy(mode = mode))
+        if (mode != RouteMode.SINGLE) refreshReadyAgents()
+    }
 
     /** [agents] is the priority/rotation order; an agent left out of the list is not used by Failover or Balanced. */
     fun setRouteAgents(agents: List<AgentKind>) = updateRouting(_state.value.routing.copy(agents = agents.distinct()))
@@ -1212,12 +1218,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return loaded.copy(hasSecret = !resolveProviderSecret(loaded).isNullOrBlank())
     }
 
-    private fun agentReady(agent: AgentKind): Boolean = agentProfile(agent).hasSecret
+    /**
+     * Whether [agent] can run: Claude needs a key or its subscription login (the login file belongs to root, so it is
+     * checked with su), Antigravity its own login, DeepSeek a key. Runs su, so call it off the main thread only.
+     */
+    private fun agentReady(agent: AgentKind): Boolean = when (agent) {
+        AgentKind.CLAUDE_CODE -> agentProfile(agent).hasSecret || claudeAuth.hasCredential()
+        AgentKind.ANTIGRAVITY ->
+            antigravityAuth.state.value.status == com.nextcraft.forge.runtime.AntigravityAuthStatus.SIGNED_IN ||
+                antigravityAuth.hasOfficialCredential()
+        AgentKind.DEEPSEEK_HARNESS -> agentProfile(agent).hasSecret
+    }
 
     /** The routing decision for [text]; null when no agent is left (all failed or none has credentials). */
     private fun routeFor(text: String, tried: Set<AgentKind> = emptySet()): RoutedMessage? {
         val here = _state.value
-        val ready = AgentKind.entries.filter(::agentReady).toSet()
+        // Readiness is checked off the main thread (refreshReadyAgents); until the first check only the selected agent counts.
+        val ready = here.readyAgents.ifEmpty { setOf(here.agentKind) }
         return AgentRouter.route(text, here.routing, here.agentKind, ready, preferences.routeCounter, tried)
     }
 
