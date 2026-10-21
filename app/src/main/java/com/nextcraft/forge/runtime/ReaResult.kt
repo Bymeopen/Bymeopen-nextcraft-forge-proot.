@@ -1,5 +1,6 @@
 package com.nextcraft.forge.runtime
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** One line of `rea doctor`: a capability that was tested for real. [status] is "ok", "warn" or "fail". */
@@ -149,3 +150,102 @@ fun ReaResponse.analysis(): ReaAnalysis? {
     }
     return ReaAnalysis(identity, elf, strings, stringsObject?.optInt("total") ?: strings.size, disasm)
 }
+
+// --- Learn mode (`rea learn ... --json`) ---------------------------------------------------------------------------
+
+data class ReaLesson(
+    val n: Int,
+    val stage: Int,
+    val stageName: String,
+    val title: String,
+    val exerciseDone: Boolean,
+    val quizBest: Int?,
+    val quizTotal: Int?,
+)
+
+data class ReaLessonDetail(
+    val n: Int,
+    val stageName: String,
+    val title: String,
+    val theory: String,
+    val diagram: String,
+    val task: String,
+    val hint: String,
+    val requires: List<String>,
+    val hasExercise: Boolean,
+    val started: Boolean,
+    val exerciseDone: Boolean,
+    val attempts: Int,
+    val exerciseDir: String?,
+)
+
+data class ReaQuizQuestion(val text: String, val options: List<String>)
+
+data class ReaQuizResult(val score: Int, val total: Int, val passed: Boolean)
+
+data class ReaCheckResult(val correct: Boolean, val message: String, val hint: String?)
+
+private fun JSONObject.stringOrNull(key: String): String? = if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
+
+private fun JSONArray?.objects(): List<JSONObject> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+
+private fun JSONArray?.strings(): List<String> =
+    if (this == null) emptyList() else (0 until length()).map { optString(it) }
+
+/** `rea learn list`: every lesson with its progress; empty for other commands. */
+fun ReaResponse.lessons(): List<ReaLesson> = data?.optJSONArray("lessons").objects().map { item ->
+    val quiz = item.optJSONObject("quiz")
+    ReaLesson(
+        n = item.optInt("n"),
+        stage = item.optInt("stage"),
+        stageName = item.optString("stage_name"),
+        title = item.optString("title"),
+        exerciseDone = item.optBoolean("exercise_done"),
+        quizBest = quiz?.optInt("best"),
+        quizTotal = quiz?.optInt("total"),
+    )
+}
+
+/** `rea learn show`: theory, diagram, task and state of one lesson. */
+fun ReaResponse.lessonDetail(): ReaLessonDetail? {
+    val d = data ?: return null
+    if (!d.has("theory")) return null
+    return ReaLessonDetail(
+        n = d.optInt("n"),
+        stageName = d.optString("stage_name"),
+        title = d.optString("title"),
+        theory = d.optString("theory"),
+        diagram = d.optString("diagram"),
+        task = d.optString("task"),
+        hint = d.optString("hint"),
+        requires = d.optJSONArray("requires").strings(),
+        hasExercise = d.optBoolean("has_exercise"),
+        started = d.optBoolean("started"),
+        exerciseDone = d.optBoolean("exercise_done"),
+        attempts = d.optInt("attempts"),
+        exerciseDir = d.stringOrNull("exercise_dir"),
+    )
+}
+
+/** `rea learn quiz` without answers: the questions (the answer key is never sent). */
+fun ReaResponse.quizQuestions(): List<ReaQuizQuestion> = data?.optJSONArray("questions").objects().map {
+    ReaQuizQuestion(it.optString("text"), it.optJSONArray("options").strings())
+}
+
+/** `rea learn quiz --answers ...`: the grade. */
+fun ReaResponse.quizResult(): ReaQuizResult? {
+    val d = data ?: return null
+    if (!d.has("score")) return null
+    return ReaQuizResult(d.optInt("score"), d.optInt("total"), d.optBoolean("passed"))
+}
+
+/** `rea learn check`: whether the answer was right, with the explanation or the hint. */
+fun ReaResponse.checkResult(): ReaCheckResult? {
+    val d = data ?: return null
+    if (!d.has("correct")) return null
+    return ReaCheckResult(d.optBoolean("correct"), d.optString("message"), d.stringOrNull("hint"))
+}
+
+/** `rea learn answer`: the revealed answers joined for display. */
+fun ReaResponse.revealedAnswer(): String? = data?.optJSONArray("answers")?.strings()?.joinToString(" / ")?.takeIf { it.isNotBlank() }

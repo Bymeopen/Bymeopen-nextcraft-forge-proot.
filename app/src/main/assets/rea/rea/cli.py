@@ -24,6 +24,7 @@ from .dynamic import strace as strace_mod
 from .emulation import unicorn_runner as emu_mod
 from .identify import identify
 from .integrations import decompile as decompile_mod
+from .learn import engine as learn_mod
 from .parsers import apk as apk_mod
 from .parsers import elf as elf_mod
 from .report.markdown import build_report
@@ -143,6 +144,72 @@ def _emu(args: argparse.Namespace) -> Result:
             shown = dump["ascii"] if dump["ascii"] is not None else f"({dump['error']})"
             print(f"  [0x{dump['addr']:x}+{dump['size']}] {shown}", file=sys.stderr)
     return result
+
+
+def _learn(args: argparse.Namespace) -> Result:
+    action = args.learn_action
+    if action == "list":
+        data = learn_mod.list_lessons()
+        if not args.json:
+            stage = 0
+            for row in data["lessons"]:
+                if row["stage"] != stage:
+                    stage = row["stage"]
+                    print(f"\nTahap {stage}: {row['stage_name']}", file=sys.stderr)
+                mark = "✅" if row["exercise_done"] else "  "
+                quiz = f"  kuis {row['quiz']['best']}/{row['quiz']['total']}" if row["quiz"] else ""
+                print(f" {mark} {row['n']:>2}. {row['title']}{quiz}", file=sys.stderr)
+            print(f"\n{data['exercises_done']} dari {data['total']} latihan selesai. Mulai: rea learn show 1", file=sys.stderr)
+    elif action == "show":
+        data = learn_mod.show(args.number)
+        if not args.json:
+            print(f"Pelajaran {data['n']}: {data['title']}  (tahap {data['stage']}: {data['stage_name']})\n", file=sys.stderr)
+            print(data["theory"] + "\n\n" + data["diagram"] + "\n", file=sys.stderr)
+            print("Latihan: " + data["task"], file=sys.stderr)
+            if data["has_exercise"]:
+                print(f"Siapkan: rea learn start {data['n']}", file=sys.stderr)
+            print(f"Jawab:   rea learn check {data['n']} <jawaban>      Kuis: rea learn quiz {data['n']}", file=sys.stderr)
+    elif action == "start":
+        data = learn_mod.start(args.number)
+        if not args.json:
+            print(f"Folder latihan: {data['dir']}", file=sys.stderr)
+            if data["program"]:
+                print(f"Program: {data['program']}", file=sys.stderr)
+            print("Tugas: " + data["task"], file=sys.stderr)
+    elif action == "check":
+        data = learn_mod.check(args.number, args.answer)
+        if not args.json:
+            print(("✅ " if data["correct"] else "❌ ") + data["message"], file=sys.stderr)
+            if data["hint"]:
+                print("Petunjuk: " + data["hint"], file=sys.stderr)
+    elif action == "quiz":
+        chosen = None
+        if args.answers is not None:
+            try:
+                chosen = [int(part) for part in args.answers.split(",")]
+            except ValueError as error:
+                raise ReaError(E_USAGE, "--answers harus angka dipisah koma.", "Contoh: --answers 2,1") from error
+        data = learn_mod.quiz(args.number, chosen)
+        if not args.json:
+            if chosen is None:
+                for number, question in enumerate(data["questions"], 1):
+                    print(f"{number}. {question['text']}", file=sys.stderr)
+                    for index, option in enumerate(question["options"], 1):
+                        print(f"   {index}) {option}", file=sys.stderr)
+                print(f"Jawab: rea learn quiz {args.number} --answers " + ",".join("?" for _ in data["questions"]), file=sys.stderr)
+            else:
+                print(f"Skor {data['score']}/{data['total']}: {'lulus' if data['passed'] else 'ulangi pelajarannya'}", file=sys.stderr)
+    elif action == "answer":
+        data = learn_mod.reveal_answer(args.number)
+        if not args.json:
+            print("Jawaban: " + " / ".join(data["answers"]) + "\n" + data["explanation"], file=sys.stderr)
+    elif action == "reset":
+        data = learn_mod.reset(args.number)
+        if not args.json:
+            print("Progres direset.", file=sys.stderr)
+    else:
+        raise ReaError(E_USAGE, f"Aksi learn tidak dikenal: {action}", "rea learn --help")
+    return Result(command="learn", data=data)
 
 
 def _stop_text(stop: dict) -> str:
@@ -450,6 +517,27 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "report":
             command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
             command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")
+    learn = sub.add_parser("learn", help="mode belajar: pelajaran, latihan pada biner, dan kuis")
+    actions = learn.add_subparsers(dest="learn_action", required=True)
+    for action, helptext in (
+        ("list", "daftar pelajaran dan progres"),
+        ("show", "teori, diagram, dan tugas satu pelajaran"),
+        ("start", "siapkan (kompilasi) biner latihan"),
+        ("check", "periksa jawaban latihan"),
+        ("quiz", "kuis pilihan ganda"),
+        ("answer", "tampilkan kunci jawaban"),
+        ("reset", "hapus progres (semua atau satu pelajaran)"),
+    ):
+        sub_action = actions.add_parser(action, help=helptext)
+        sub_action.add_argument("--json", action="store_true", help="keluaran JSON di baris terakhir stdout")
+        if action in ("show", "start", "check", "quiz", "answer"):
+            sub_action.add_argument("number", type=int, help="nomor pelajaran")
+        if action == "reset":
+            sub_action.add_argument("number", type=int, nargs="?", help="nomor pelajaran (kosong = semua)")
+        if action == "check":
+            sub_action.add_argument("answer", help="jawabanmu")
+        if action == "quiz":
+            sub_action.add_argument("--answers", help="pilihan tiap pertanyaan, dipisah koma (mis. 2,1)")
     return parser
 
 
@@ -460,7 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_request:
         # argparse sudah mencetak pesan ke stderr; --version dan --help keluar dengan 0.
         return int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
-    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile, "emu": _emu, "run": _run}
+    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile, "emu": _emu, "run": _run, "learn": _learn}
     _show_notice_once()
     try:
         result = handlers[args.command](args)

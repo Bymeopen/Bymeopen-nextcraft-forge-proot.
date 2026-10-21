@@ -655,6 +655,7 @@ class RuntimeInstaller(private val context: Context) {
         }
         val claude = File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/"))
         claude.parentFile?.mkdirs()
+        claude.parentFile?.let { if (!it.canWrite()) RootfsRepair.reclaimOwnership(it, AndroidProcess.myUid(), recursive = false) }
         val staged = File(claude.parentFile, ".claude-$latest.installing")
         try {
             replaceBinaryWithRollback(
@@ -692,6 +693,8 @@ class RuntimeInstaller(private val context: Context) {
             onProgress(RuntimeInstallProgress(agyDownloadLabel, ratio * 0.9f, bytes, total.takeIf { it > 0L }, event = RuntimeInstallEvent.DOWNLOAD))
         }
         val destination = File(rootfs, AGY_GUEST_PATH.removePrefix("/"))
+        destination.parentFile?.mkdirs()
+        destination.parentFile?.let { if (!it.canWrite()) RootfsRepair.reclaimOwnership(it, AndroidProcess.myUid(), recursive = false) }
         var found = false
         try {
           replaceBinaryWithRollback(
@@ -2208,6 +2211,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             // Set the mode before the rename so the file is never visible without its execute bit.
             if (mode != null) Os.chmod(temp.absolutePath, mode)
             Os.rename(temp.absolutePath, target.absolutePath)
+        } catch (error: java.io.IOException) {
+            // EACCES: the folder or file belongs to root (or carries a label the app may not write). Let root write it.
+            val written = RootfsRepair.writeAsRoot(
+                target, content.toByteArray(Charsets.UTF_8), File(downloads, ".root-write.tmp"), AndroidProcess.myUid(),
+                mode ?: 0b110100100,
+            )
+            if (!written) throw error
         } finally {
             temp.delete()
         }
@@ -2235,7 +2245,15 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) {
             resolvFile.delete()
         }
-        resolvFile.writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        val resolver = servers.joinToString("\n") { "nameserver $it" } + "\n"
+        try {
+            resolvFile.writeText(resolver)
+        } catch (error: java.io.IOException) {
+            // /etc/resolv.conf is root-owned after the chroot supervisor (running as root) created it.
+            if (!RootfsRepair.writeAsRoot(resolvFile, resolver.toByteArray(Charsets.UTF_8), File(downloads, ".root-write.tmp"), AndroidProcess.myUid())) {
+                throw error
+            }
+        }
         ensureLocalhostInHosts()
     }
 
@@ -2305,6 +2323,25 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Opens [target] for writing during an unpack. An earlier unpack may have left a read-only file (mode 0555) or root
+     * rewrote it, which made the app UID's open fail with EACCES (Antigravity install stopped at 80%). A leftover is
+     * replaced; if the folder itself is root's it is reclaimed first.
+     */
+    private fun openForWrite(target: File): FileOutputStream {
+        try {
+            return FileOutputStream(target)
+        } catch (first: java.io.IOException) {
+            val parent = target.parentFile
+            if (parent != null && !parent.canWrite()) RootfsRepair.reclaimOwnership(parent, AndroidProcess.myUid(), recursive = false)
+            if (target.exists() && !target.canWrite() && !target.delete()) {
+                RootfsRepair.reclaimOwnership(target, AndroidProcess.myUid(), recursive = false)
+                target.delete()
+            }
+            return FileOutputStream(target)
         }
     }
 
@@ -2387,7 +2424,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                         currentEntry.isFile -> {
                             target.parentFile?.mkdirs()
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            FileOutputStream(target).use { output -> tar.copyTo(output) }
+                            openForWrite(target).use { output -> tar.copyTo(output) }
                             runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }
                         }
                     }

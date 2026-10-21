@@ -124,3 +124,84 @@ class ReaAnalysisTest {
         assertTrue(ReaController.analyzeCommand("a'; rm -rf /; '", strings = false, interesting = false, symbol = null).contains("'\"'\"'"))
     }
 }
+
+class ReaLearnParsingTest {
+    private fun parse(data: String, command: String = "learn") =
+        ReaJson.parse("""{"schema":1,"command":"$command","ok":true,"data":$data,"warnings":[],"error":null}""")!!
+
+    @Test
+    fun parsesTheLessonListWithProgress() {
+        val response = parse(
+            """{"stages":["Fondasi"],"lessons":[
+              {"n":1,"stage":1,"stage_name":"Fondasi","title":"Apa itu biner","exercise_done":true,"quiz":{"score":1,"total":2,"best":2},"has_exercise":true},
+              {"n":2,"stage":1,"stage_name":"Fondasi","title":"Bit dan byte","exercise_done":false,"quiz":null,"has_exercise":true}],
+              "total":2,"exercises_done":1}""",
+        )
+        val lessons = response.lessons()
+        assertEquals(2, lessons.size)
+        assertTrue(lessons[0].exerciseDone)
+        assertEquals(2, lessons[0].quizBest)
+        assertEquals(2, lessons[0].quizTotal)
+        assertNull(lessons[1].quizBest)
+        assertEquals("Bit dan byte", lessons[1].title)
+    }
+
+    @Test
+    fun parsesALessonAndTreatsANullFolderAsMissing() {
+        val detail = parse(
+            """{"n":4,"stage":2,"stage_name":"Format biner","title":"Simbol","exercise_done":false,"quiz":null,"has_exercise":true,
+              "theory":"t","diagram":"d","task":"tugas","hint":"petunjuk","requires":["gdb"],"quiz_count":2,
+              "started":false,"exercise_dir":null,"answer_viewed":false,"attempts":0}""",
+        ).lessonDetail()!!
+        assertEquals("tugas", detail.task)
+        assertEquals(listOf("gdb"), detail.requires)
+        assertNull(detail.exerciseDir)
+        assertFalse(detail.started)
+        val started = parse("""{"n":4,"theory":"t","diagram":"","task":"x","hint":"h","started":true,"exercise_dir":"/root/.rea/learn/lesson04"}""").lessonDetail()!!
+        assertEquals("/root/.rea/learn/lesson04", started.exerciseDir)
+    }
+
+    @Test
+    fun parsesQuizQuestionsAndTheGrade() {
+        val questions = parse("""{"n":1,"title":"x","questions":[{"text":"Q1","options":["a","b","c"]},{"text":"Q2","options":["x","y"]}]}""").quizQuestions()
+        assertEquals(listOf(3, 2), questions.map { it.options.size })
+        assertEquals("Q1", questions[0].text)
+        val grade = parse("""{"n":1,"score":1,"total":2,"correct":[true,false],"passed":true}""").quizResult()!!
+        assertEquals(1, grade.score)
+        assertTrue(grade.passed)
+        assertNull(parse("""{"questions":[]}""").quizResult())
+    }
+
+    @Test
+    fun parsesAnAnswerCheckWithAndWithoutAHint() {
+        val wrong = parse("""{"n":4,"correct":false,"attempts":1,"message":"Belum tepat.","hint":"Lihat daftar fungsi"}""").checkResult()!!
+        assertFalse(wrong.correct)
+        assertEquals("Lihat daftar fungsi", wrong.hint)
+        val right = parse("""{"n":4,"correct":true,"attempts":2,"message":"Benar.","hint":null}""").checkResult()!!
+        assertTrue(right.correct)
+        assertNull(right.hint)
+    }
+
+    @Test
+    fun revealsTheAnswersAsOneLine() {
+        assertEquals("35 / 0x23", parse("""{"n":9,"answers":["35","0x23"],"explanation":"e"}""").revealedAnswer())
+        assertNull(parse("""{"n":9,"answers":[]}""").revealedAnswer())
+    }
+
+    @Test
+    fun otherCommandsYieldNoLessonData() {
+        val doctor = parse("""{"checks":[]}""", command = "doctor")
+        assertTrue(doctor.lessons().isEmpty())
+        assertNull(doctor.lessonDetail())
+        assertNull(doctor.checkResult())
+    }
+
+    @Test
+    fun aFailedLearnCommandCarriesTheHint() {
+        val failed = ReaJson.parse(
+            "noise\n" + """{"schema":1,"command":"learn","ok":false,"data":{},"warnings":[],"error":{"code":"usage","message":"Pelajaran 99 tidak ada.","hint":"Pilih 1 sampai 13"}}""",
+        )!!
+        assertFalse(failed.ok)
+        assertEquals("Pilih 1 sampai 13", failed.error?.hint)
+    }
+}

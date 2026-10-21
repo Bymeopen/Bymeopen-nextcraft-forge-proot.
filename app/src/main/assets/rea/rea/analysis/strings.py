@@ -14,6 +14,7 @@ _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _PATH = re.compile(r"^(?:/[\w.\-@+]+){2,}/?$|^[A-Za-z]:\\[\w\\. -]+$")
 _HEXKEY = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 _B64KEY = re.compile(r"\b[A-Za-z0-9+/]{24,}={0,2}\b")
+_FLAG = re.compile(r"\b[A-Za-z][A-Za-z0-9_]{1,12}\{[\x20-\x7e]{3,}\}")  # REA{...}, FLAG{...}, CTF{...}
 _KEYWORDS = ("password", "passwd", "secret", "token", "api_key", "apikey", "private", "credential", "license", "serial")
 
 
@@ -30,6 +31,8 @@ def score(text: str) -> int:
     if _PATH.match(text):
         points += 3
     if _HEXKEY.search(text) or (_B64KEY.search(text) and any(c.isdigit() for c in text) and any(c.isalpha() for c in text)):
+        points += 4
+    if _FLAG.search(text):
         points += 4
     if any(word in lowered for word in _KEYWORDS):
         points += 3
