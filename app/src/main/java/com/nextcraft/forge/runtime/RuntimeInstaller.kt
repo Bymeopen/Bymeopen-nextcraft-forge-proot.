@@ -2276,6 +2276,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
         val resolver = servers.joinToString("\n") { "nameserver $it" } + "\n"
         try {
+            // A link that survived the delete above (not ours to unlink) would send the write into /run, which is root's.
+            if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) throw java.io.IOException("resolv.conf is still a symlink")
             resolvFile.writeText(resolver)
         } catch (error: java.io.IOException) {
             // /etc/resolv.conf is root-owned after the chroot supervisor (running as root) created it.

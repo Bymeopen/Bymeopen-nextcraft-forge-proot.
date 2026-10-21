@@ -116,10 +116,13 @@ internal object RootfsRepair {
         return try {
             staging.writeBytes(content)
             val dest = shellSingleQuote(target.absolutePath)
+            val temp = shellSingleQuote(target.absolutePath + ".nextcraft-tmp")
+            // Write beside the target and `mv -f` over it: rename replaces a symlink itself (an `apt install` puts
+            // /etc/resolv.conf back as a link into /run/systemd), where `cat > target` would follow the link instead.
             val exit = runRootCommand(
                 "su", "-c",
-                "mkdir -p -- ${shellSingleQuote(parent.absolutePath)} && cat -- ${shellSingleQuote(staging.absolutePath)} > $dest && " +
-                    "chown $uid:$uid -- $dest && chmod ${mode.toString(8)} -- $dest",
+                "mkdir -p -- ${shellSingleQuote(parent.absolutePath)} && cat -- ${shellSingleQuote(staging.absolutePath)} > $temp && " +
+                    "chown $uid:$uid -- $temp && chmod ${mode.toString(8)} -- $temp && mv -f -- $temp $dest",
                 timeoutSeconds = 30L,
             )
             exit == 0
