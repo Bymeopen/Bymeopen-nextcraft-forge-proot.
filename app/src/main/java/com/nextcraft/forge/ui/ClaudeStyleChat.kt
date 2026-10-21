@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -111,7 +112,7 @@ internal fun ChatTopBar(
             Box(contentAlignment = Alignment.TopEnd) {
                 ForgeIcon(glyph = ForgeGlyph.CODE, tint = scheme.onSurface, size = 22.dp, description = stringResource(R.string.chat_menu_changes))
                 if (pending > 0) {
-                    Surface(shape = RoundedCornerShape(50), color = scheme.primary, modifier = Modifier.padding(start = 14.dp)) {
+                    Surface(shape = RoundedCornerShape(50), color = scheme.primary, modifier = Modifier.offset(x = 10.dp, y = (-8).dp)) {
                         Text(
                             text = pending.toString(),
                             fontSize = ForgeType.caption,
