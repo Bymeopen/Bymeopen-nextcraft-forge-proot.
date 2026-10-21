@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.model.ActivityItem
+import com.nextcraft.forge.model.AgentRouter
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
 import com.nextcraft.forge.model.ChangeItem
@@ -23,6 +24,10 @@ import com.nextcraft.forge.model.ProjectType
 import com.nextcraft.forge.model.StarterTemplate
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.ProviderProfile
+import com.nextcraft.forge.model.PromptRule
+import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutingConfig
+import com.nextcraft.forge.model.RoutedMessage
 import com.nextcraft.forge.model.RuntimeEvent
 import com.nextcraft.forge.model.ToolRequest
 import com.nextcraft.forge.model.WorkspaceDirListing
@@ -65,6 +70,7 @@ import com.nextcraft.forge.runtime.DshRuntimeBridge
 import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
+import com.nextcraft.forge.runtime.ReaChatHint
 import com.nextcraft.forge.runtime.RuntimeInstaller
 import com.nextcraft.forge.runtime.BranchMergeResult
 import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
@@ -347,6 +353,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDevStacks = savedStacks,
                     installedDevStacks = installedStacks,
                     agentKind = savedAgent,
+                    routing = preferences.routing,
                     themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
                     projects = projects,
                     activeProjectId = firstProject.id,
@@ -361,11 +368,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
+                    reaChatHint = preferences.reaChatHint,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
                 )
             }
+            if (preferences.routing.mode != RouteMode.SINGLE) refreshReadyAgents()
             val savedGitHubToken = vault.get("GITHUB_TOKEN").orEmpty()
             if (savedGitHubToken.isNotBlank()) {
                 withContext(Dispatchers.IO) {
@@ -951,6 +960,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
         if (updatedChats.size == currentChats.size) return
+        // Its shell may sit in the branch folder that is about to be removed.
+        closeChatTerminal(chatId)
         if (currentChats.firstOrNull { it.id == chatId }?.isolated == true) {
             viewModelScope.launch { runCatching { chatBranches.discard(project, chatId) } }
         }
@@ -1139,6 +1150,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendPrompt(promptText: String) {
+        // Keeps the readiness used by routing current (a login can have changed since); the answer is used by the next message.
+        if (_state.value.routing.mode != RouteMode.SINGLE) refreshReadyAgents()
         val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
@@ -1149,12 +1162,106 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when {
             // This chat is still working: the message is sent automatically when its turn completes.
             runs.containsKey(chatId) -> enqueuePrompt(prompt)
-            !canStartAnotherRun() -> {
+            !canStartAnotherRun(tentativeAgent(cleanPrompt)) -> {
                 enqueuePrompt(prompt)
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             }
             else -> startRun(project, chatId, prompt)
         }
+    }
+
+    // --- Routing of messages between agents (single agent unless the user picked another mode in the chat) ---
+
+    fun setRouteMode(mode: RouteMode) {
+        updateRouting(_state.value.routing.copy(mode = mode))
+        if (mode != RouteMode.SINGLE) refreshReadyAgents()
+    }
+
+    /** [agents] is the priority/rotation order; an agent left out of the list is not used by Failover or Balanced. */
+    fun setRouteAgents(agents: List<AgentKind>) = updateRouting(_state.value.routing.copy(agents = agents.distinct()))
+
+    /** Balanced mode: [weight] (0..9) is the agent's share of messages relative to the others; equal weights are 50/50. */
+    fun setRouteWeight(agent: AgentKind, weight: Int) {
+        val current = _state.value.routing
+        updateRouting(current.copy(weights = current.weights + (agent to weight.coerceIn(0, RoutingConfig.MAX_WEIGHT))))
+    }
+
+    /** Adds a rule: messages containing one of the comma-separated [keywords] go to [agent]. Returns false for no keywords. */
+    fun addRouteRule(keywords: String, agent: AgentKind): Boolean {
+        val words = PromptRule.parseKeywords(keywords)
+        if (words.isEmpty()) return false
+        val current = _state.value.routing
+        updateRouting(current.copy(rules = current.rules + PromptRule(words, agent)))
+        return true
+    }
+
+    fun removeRouteRule(index: Int) {
+        val current = _state.value.routing
+        if (index in current.rules.indices) updateRouting(current.copy(rules = current.rules.filterIndexed { i, _ -> i != index }))
+    }
+
+    /** Balanced mode: every agent weighs the same (50/50 with two agents). */
+    fun resetRouteWeights() = updateRouting(_state.value.routing.copy(weights = emptyMap()))
+
+    private fun updateRouting(config: RoutingConfig) {
+        preferences.routing = config
+        _state.update { it.copy(routing = config) }
+    }
+
+    /** Checks off the main thread which agents have credentials (it reads the vault and Claude's login file). */
+    fun refreshReadyAgents() {
+        viewModelScope.launch {
+            val ready = withContext(Dispatchers.IO) { AgentKind.entries.filter(::agentReady).toSet() }
+            _state.update { it.copy(readyAgents = ready) }
+        }
+    }
+
+    private fun agentProfile(agent: AgentKind): ProviderProfile {
+        if (agent == _state.value.agentKind) return _state.value.providerProfile
+        val loaded = preferences.loadProvider(vault, agent)
+        return loaded.copy(hasSecret = !resolveProviderSecret(loaded).isNullOrBlank())
+    }
+
+    /**
+     * Whether [agent] can run: Claude needs a key or its subscription login (the login file belongs to root, so it is
+     * checked with su), Antigravity its own login, DeepSeek a key. Runs su, so call it off the main thread only.
+     */
+    private fun agentReady(agent: AgentKind): Boolean = when (agent) {
+        AgentKind.CLAUDE_CODE -> agentProfile(agent).hasSecret || claudeAuth.hasCredential()
+        AgentKind.ANTIGRAVITY ->
+            antigravityAuth.state.value.status == com.nextcraft.forge.runtime.AntigravityAuthStatus.SIGNED_IN ||
+                antigravityAuth.hasOfficialCredential()
+        AgentKind.DEEPSEEK_HARNESS -> agentProfile(agent).hasSecret
+    }
+
+    /** The routing decision for [text]; null when no agent is left (all failed or none has credentials). */
+    private fun routeFor(text: String, tried: Set<AgentKind> = emptySet()): RoutedMessage? {
+        val here = _state.value
+        // Readiness is checked off the main thread (refreshReadyAgents); until the first check only the selected agent counts.
+        val ready = here.readyAgents.ifEmpty { setOf(here.agentKind) }
+        return AgentRouter.route(text, here.routing, here.agentKind, ready, preferences.routeCounter, tried)
+    }
+
+    /** The agent a new message would most likely go to; only used to decide whether a run slot is free. */
+    private fun tentativeAgent(text: String): AgentKind =
+        if (_state.value.routing.mode == RouteMode.SINGLE) _state.value.agentKind else routeFor(text)?.agent ?: _state.value.agentKind
+
+    /**
+     * Moves a failed turn to the next agent when the mode allows it. The failed reply stays in the chat with a note,
+     * and the same message is sent again without being added to the history a second time.
+     */
+    private fun tryFailover(run: ChatRun, reason: String): Boolean {
+        if (!AgentRouter.failsOver(_state.value.routing.mode)) return false
+        val tried = run.tried + run.agent
+        val next = routeFor(run.lastPrompt.text, tried) ?: return false
+        val project = _state.value.projects.firstOrNull { it.id == run.projectId } ?: return false
+        appendAssistantText(run, "\n\n[" + reason + "]\n" + str(R.string.route_failover_notice, next.agent.title))
+        finishRun(run)
+        viewModelScope.launch {
+            run.job?.join()
+            startRun(project, run.chatId, run.lastPrompt.copy(projectId = project.id, chatId = run.chatId), tried = tried, resend = true)
+        }
+        return true
     }
 
     private fun enqueuePrompt(prompt: QueuedPrompt) {
@@ -1166,9 +1273,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * the other agents keep a single run. A further run also needs free memory: each Claude process is a Node
      * runtime, and the system kills processes when RAM runs out.
      */
-    private fun canStartAnotherRun(): Boolean {
+    private fun canStartAnotherRun(agent: AgentKind = _state.value.agentKind): Boolean {
         if (runs.isEmpty()) return true
-        if (_state.value.agentKind != AgentKind.CLAUDE_CODE) return false
+        if (agent != AgentKind.CLAUDE_CODE) return false
         if (runs.size >= MAX_PARALLEL_CHATS) return false
         val memory = android.app.ActivityManager.MemoryInfo()
         getApplication<Application>().getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(memory)
@@ -1181,38 +1288,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         rotateSecretFor = ::rotateProviderSecret,
     ).also { it.configureProjectRoot(project.id, project.rootPath) }
 
-    private fun startRun(project: Project, chatId: String, prompt: QueuedPrompt) {
+    private fun startRun(project: Project, chatId: String, prompt: QueuedPrompt, tried: Set<AgentKind> = emptySet(), resend: Boolean = false) {
         val cleanPrompt = prompt.text
         val attachments = prompt.attachments
         val now = System.currentTimeMillis()
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
+        // Single agent: exactly the old behaviour. Otherwise the routing picks the agent (and may strip an @agent tag).
+        val routed: RoutedMessage = if (_state.value.routing.mode == RouteMode.SINGLE) {
+            RoutedMessage(_state.value.agentKind, cleanPrompt, tagged = false)
+        } else {
+            routeFor(cleanPrompt, tried) ?: RoutedMessage(_state.value.agentKind, cleanPrompt, tagged = false).also {
+                _state.update { st -> st.copy(bannerMessage = UiText.res(R.string.route_none_ready)) }
+            }
+        }
+        val agent = routed.agent
+        if (!resend && _state.value.routing.mode == RouteMode.BALANCED) preferences.routeCounter = preferences.routeCounter + 1
         // The agent sees the attachments as workspace paths it can open with its own tools.
-        val agentPrompt = if (attachments.isEmpty()) {
-            cleanPrompt
+        val basePrompt = if (attachments.isEmpty()) {
+            routed.text
         } else {
             buildString {
-                append(cleanPrompt.ifEmpty { "See the attached files." })
+                append(routed.text.ifEmpty { "See the attached files." })
                 append("\n\nAttached files (inside the workspace):\n")
                 attachments.forEach { append("- ").append(it.relativePath).append(" (").append(it.mimeType).append(")\n") }
             }
         }
+        // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
+        val reaInstalled = preferences.reaChatHint &&
+            File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
+        val agentPrompt = ReaChatHint.augment(basePrompt, attachments, reaInstalled)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
             text = "",
+            agent = agent.stableId.takeIf { _state.value.routing.mode != RouteMode.SINGLE },
         )
         // A placeholder left behind by an abnormal end would repeat its LazyColumn key ("Key was already used" crash).
         val base = if (chatId == _state.value.activeChatId) _state.value.messages else preferences.loadMessages(project.id, chatId)
         val historyBefore = base.filterNot { it.id == "streaming-assistant" }
-        val updatedMessages = historyBefore + userMsg + assistantPlaceholder
-        preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
+        val historyForAgent = if (resend) historyBefore else historyBefore + userMsg
+        val updatedMessages = historyForAgent + assistantPlaceholder
+        preferences.saveMessages(project.id, chatId, historyForAgent)
 
         val autoTitle = cleanPrompt.lineSequence().firstOrNull()?.trim().orEmpty().let { firstLine ->
             if (firstLine.length > 34) firstLine.take(34).trimEnd() + "…" else firstLine
         }
         // Only Claude Code runs several chats at once. When another chat is already working in the project, this
         // one gets its own branch so the two cannot overwrite each other's files.
-        val agentKind = _state.value.agentKind
+        val agentKind = agent
         val wasIsolated = _state.value.chats.firstOrNull { it.id == chatId }?.isolated == true
         val isolated = agentKind == AgentKind.CLAUDE_CODE && (wasIsolated || runs.isNotEmpty())
         if (isolated && !wasIsolated) _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_auto)) }
@@ -1236,7 +1359,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjectChats(project.id, updatedChats)
         preferences.saveProjects(updatedProjects)
 
-        val agent = _state.value.agentKind
         val bridge: RuntimeBridge = when (agent) {
             AgentKind.CLAUDE_CODE -> newClaudeBridge(project)
             AgentKind.DEEPSEEK_HARNESS -> dshRuntime
@@ -1249,6 +1371,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ownsBridge = agent == AgentKind.CLAUDE_CODE,
             lastPrompt = QueuedPrompt(text = cleanPrompt, attachments = attachments),
             isolated = isolated,
+            agent = agent,
+            tried = tried,
         )
         run.messages = updatedMessages
         run.statusLine = UiText.res(R.string.agent_status_starting, agent.title)
@@ -1281,12 +1405,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     projectSlug = branch?.slug ?: project.slug,
                     projectKind = project.kind,
                     prompt = agentPrompt,
-                    conversationHistory = historyBefore + userMsg,
-                    provider = _state.value.providerProfile,
+                    conversationHistory = historyForAgent,
+                    provider = agentProfile(agent),
                 )
             } catch (error: Throwable) {
                 if (error !is CancellationException) {
                     val app = getApplication<Application>()
+                    if (tryFailover(run, error.message ?: app.getString(R.string.agent_turn_error_unknown))) return@launch
                     appendAssistantText(run, "\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
                     offerRetry(run)
                 }
@@ -1341,7 +1466,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val retry = _state.value.retryPrompt ?: return
         val project = _state.value.activeProject ?: return
         if (runs.containsKey(retry.chatId) || retry.chatId != _state.value.activeChatId) return
-        if (!canStartAnotherRun()) {
+        if (!canStartAnotherRun(tentativeAgent(retry.prompt.text))) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             return
         }
@@ -1374,7 +1499,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 continue
             }
             if (runs.containsKey(chatId)) continue
-            if (!canStartAnotherRun()) break
+            if (!canStartAnotherRun(tentativeAgent(forChat.first().text))) break
             val merged = QueuedPrompt(
                 text = forChat.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n"),
                 attachments = forChat.flatMap { it.attachments },
@@ -1499,6 +1624,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is RuntimeEvent.SessionFailed -> {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
+                if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
                 appendAssistantText(run, "\n\n[$reason]")
                 offerRetry(run)
                 finishRun(run)
@@ -2250,39 +2376,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // attaches a TerminalView to the session; the shell starts when the view is first laid out. Projects live under
     // /workspace/<name>: use "cd" or the project chip, or "Run in terminal" from chat, which changes into the project.
 
-    private var terminalSession: TerminalSession? = null
-    private var terminalIsFinished = false
-    private var terminalStarting = false
-    private var terminalInChroot = false
-
-    /** A line to type: [inProject] lines first change into the active project's folder (resolved when typed). */
+    /** A line to type: [inProject] lines first change into the terminal's folder (resolved when typed). */
     private class TerminalInput(val text: String, val inProject: Boolean)
 
-    /** Commands sent before the shell exists (e.g. "Run in terminal" from chat). */
-    private val pendingTerminalInput = mutableListOf<TerminalInput>()
+    /**
+     * One shell. [chatId] null is the general terminal of the Terminal tab (the chroot's home); otherwise the shell
+     * belongs to that chat and starts in the chat's own folder (its branch clone when the chat is isolated, else the
+     * project folder), so every chat has a separate terminal.
+     */
+    private class TerminalHandle(val chatId: String?) {
+        var session: TerminalSession? = null
+        var finished = false
+        var starting = false
+        var inChroot = false
+
+        /** Chat terminals: the folder as seen from the shell (resolved when the shell starts). */
+        var guestDir: String? = null
+        var hostDir: File? = null
+
+        /** Commands sent before the shell exists (e.g. "Run in terminal" from chat). */
+        val pending = mutableListOf<TerminalInput>()
+    }
+
+    private val terminals = HashMap<String, TerminalHandle>()
+
+    private fun terminalHandle(chatId: String?): TerminalHandle =
+        terminals.getOrPut(chatId?.let { "chat:$it" } ?: "main") { TerminalHandle(chatId) }
 
     val terminalSessionClient = ForgeTerminalSessionClient(application) { session -> onTerminalSessionEnded(session) }
 
-    fun currentTerminalSession(): TerminalSession? = terminalSession
+    fun currentTerminalSession(chatId: String? = null): TerminalSession? = terminalHandle(chatId).session
 
-    fun isTerminalFinished(): Boolean = terminalIsFinished
+    fun isTerminalFinished(chatId: String? = null): Boolean = terminalHandle(chatId).finished
 
-    /** Where the active project lives as seen from the terminal's shell, or null when no project is open. */
-    fun terminalProjectDir(): String? {
+    /** Where the terminal's folder is as seen from its shell: the project for the general terminal, the chat folder for a chat's. */
+    fun terminalProjectDir(chatId: String? = null): String? {
+        val handle = terminalHandle(chatId)
+        if (chatId != null) return if (handle.inChroot) handle.guestDir else handle.hostDir?.absolutePath
         val project = _state.value.activeProject ?: return null
         // Known once the shell exists (commands are only typed then): the chroot mounts projects at /workspace/<name>.
-        return if (terminalInChroot) "/workspace/${project.slug}" else checkpoints.ensureWorkspace(project.id).absolutePath
+        return if (handle.inChroot) "/workspace/${project.slug}" else checkpoints.ensureWorkspace(project.id).absolutePath
     }
 
     /** Starts the shell if there is none. An ended shell is replaced only by [restartTerminalSession]. */
-    fun ensureTerminalSession() {
-        if (terminalSession != null || terminalStarting) return
-        terminalStarting = true
+    fun ensureTerminalSession() = ensureTerminalSession(null)
+
+    fun ensureTerminalSession(chatId: String?) {
+        val handle = terminalHandle(chatId)
+        if (handle.session != null || handle.starting) return
+        handle.starting = true
         viewModelScope.launch {
             try {
-                val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec() }
-                terminalInChroot = spec.inChroot
-                terminalSession = TerminalSession(
+                val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec(handle) }
+                handle.inChroot = spec.inChroot
+                handle.session = TerminalSession(
                     spec.shell,
                     spec.cwd,
                     spec.args,
@@ -2296,33 +2443,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.w("MainViewModel", "terminal session failed to start", e)
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.terminal_start_failed, e.message.orEmpty())) }
             } finally {
-                terminalStarting = false
+                handle.starting = false
                 _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
             }
         }
     }
 
     /** "Restart" after the shell ended: discards the dead session and starts a fresh one. */
-    fun restartTerminalSession() {
-        terminalSession?.finishIfRunning()
-        terminalSession = null
-        terminalIsFinished = false
-        pendingTerminalInput.clear()
+    fun restartTerminalSession() = restartTerminalSession(null)
+
+    fun restartTerminalSession(chatId: String?) {
+        val handle = terminalHandle(chatId)
+        handle.session?.finishIfRunning()
+        handle.session = null
+        handle.finished = false
+        handle.pending.clear()
         _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
-        ensureTerminalSession()
+        ensureTerminalSession(chatId)
+    }
+
+    /** Ends the shell of a chat that was deleted. */
+    private fun closeChatTerminal(chatId: String) {
+        terminals.remove("chat:$chatId")?.let { handle ->
+            handle.pending.clear()
+            handle.session?.finishIfRunning()
+        }
     }
 
     /** Types [command] and Enter into the shell. Queued (and the shell started) when it is not up yet. */
-    fun runTerminalCommand(command: String) = queueTerminalInput(command, inProject = false)
+    fun runTerminalCommand(command: String) = runTerminalCommand(command, null)
 
-    private fun queueTerminalInput(command: String, inProject: Boolean) {
+    fun runTerminalCommand(command: String, chatId: String?) = queueTerminalInput(command, inProject = false, chatId = chatId)
+
+    private fun queueTerminalInput(command: String, inProject: Boolean, chatId: String? = null) {
         val clean = command.trim()
         if (clean.isEmpty()) return
+        val handle = terminalHandle(chatId)
         // Asking for a command on an ended shell means "run it": start a fresh shell rather than dropping the request.
-        if (terminalIsFinished) restartTerminalSession()
-        pendingTerminalInput += TerminalInput(clean, inProject)
-        ensureTerminalSession()
-        flushTerminalInput()
+        if (handle.finished) restartTerminalSession(chatId)
+        handle.pending += TerminalInput(clean, inProject)
+        ensureTerminalSession(chatId)
+        flushTerminalInput(chatId)
     }
 
     /**
@@ -2341,30 +2502,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectTab(ForgeTab.REA)
     }
 
-    /** Runs [command] in the active project's folder (from chat: the snippet belongs to that project). */
+    /** Runs [command] in the active project's folder in the general terminal. */
     fun runTerminalCommandInProject(command: String) = queueTerminalInput(command, inProject = true)
 
+    /** "Run in terminal" from chat: runs [command] in the terminal of the chat on screen, which starts in that chat's folder. */
+    fun runInChatTerminal(command: String) {
+        val chatId = _state.value.activeChatId
+        queueTerminalInput(command, inProject = false, chatId = chatId)
+        selectProjectPane(ProjectPane.TERMINAL)
+    }
+
     /** Sends queued input once the emulator behind the session exists (it is created on first layout). */
-    fun flushTerminalInput() {
-        val session = terminalSession ?: return
-        if (session.emulator == null || terminalIsFinished) return
-        val queued = pendingTerminalInput.toList()
-        pendingTerminalInput.clear()
+    fun flushTerminalInput() = flushTerminalInput(null)
+
+    fun flushTerminalInput(chatId: String?) {
+        val handle = terminalHandle(chatId)
+        val session = handle.session ?: return
+        if (session.emulator == null || handle.finished) return
+        val queued = handle.pending.toList()
+        handle.pending.clear()
         queued.forEach { input ->
-            val dir = if (input.inProject) terminalProjectDir() else null
+            val dir = if (input.inProject) terminalProjectDir(chatId) else null
             session.write((if (dir == null) input.text else "cd ${shellSingleQuote(dir)} && ${input.text}") + "\r")
         }
     }
 
-    fun clearTerminal() {
+    fun clearTerminal() = clearTerminal(null)
+
+    fun clearTerminal(chatId: String?) {
         // reset() clears the screen and attributes; the shell redraws its prompt on the next key.
-        terminalSession?.reset()
+        terminalHandle(chatId).session?.reset()
     }
 
     private fun onTerminalSessionEnded(session: TerminalSession) {
-        if (session !== terminalSession) return
-        terminalIsFinished = true
-        pendingTerminalInput.clear()
+        val handle = terminals.values.firstOrNull { it.session === session } ?: return
+        handle.finished = true
+        handle.pending.clear()
         _state.update { it.copy(terminalRevision = it.terminalRevision + 1) }
     }
 
@@ -2377,7 +2550,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     /** Blocking (file IO, root probe): call off the main thread. */
-    private fun buildTerminalLaunchSpec(): TerminalLaunchSpec {
+    private fun buildTerminalLaunchSpec(handle: TerminalHandle): TerminalLaunchSpec {
         val app = getApplication<Application>()
         val env = System.getenv().toMutableMap().apply {
             put("TERM", "xterm-256color")
@@ -2388,17 +2561,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (chroot) {
             // The guest environment (PATH, HOME, TERM, provider keys) travels in a one-shot env file sourced by su.
             // /root is the chroot's home, so the shell is not tied to any project.
+            // The general terminal is not tied to a project; a chat's terminal starts in that chat's folder.
+            val folder = handle.chatId?.let { chatTerminalFolder(it) }
+            handle.guestDir = folder?.let { "/workspace/${it.second}" }
+            handle.hostDir = folder?.first
             val (_, suCommand) = installer.prepareChrootShellCommand(
-                workspace = File(RuntimeInstaller.rootfsDir(app), "root"),
-                guestWorkspacePath = "/root",
+                workspace = folder?.first ?: File(RuntimeInstaller.rootfsDir(app), "root"),
+                guestWorkspacePath = folder?.let { "/workspace/${it.second}" } ?: "/root",
                 environment = activeChrootEnvironment(),
                 guestCommand = listOf("/bin/bash", "-l"),
             )
             TerminalLaunchSpec("su", app.filesDir.absolutePath, arrayOf("su", "-mm", "-c", suCommand), env.toEnvArray(), inChroot = true)
         } else {
+            val folder = handle.chatId?.let { chatTerminalFolder(it) }
+            handle.hostDir = folder?.first
+            val home = folder?.first?.absolutePath ?: app.filesDir.absolutePath
             env["HOME"] = app.filesDir.absolutePath
-            TerminalLaunchSpec("/system/bin/sh", app.filesDir.absolutePath, arrayOf("sh"), env.toEnvArray(), inChroot = false)
+            TerminalLaunchSpec("/system/bin/sh", home, arrayOf("sh"), env.toEnvArray(), inChroot = false)
         }
+    }
+
+    /** Folder of [chatId] on the host and its name under /workspace: the branch clone of an isolated chat, else the project. */
+    private fun chatTerminalFolder(chatId: String): Pair<File, String>? {
+        val project = _state.value.activeProject ?: return null
+        val chat = _state.value.chats.firstOrNull { it.id == chatId }
+        if (chat?.isolated == true) {
+            val branch = chatBranches.branchFor(project, chatId)
+            if (branch.cloneDir.isDirectory) return branch.cloneDir to branch.slug
+        }
+        return checkpoints.ensureWorkspace(project.id) to project.slug
     }
 
     private fun Map<String, String>.toEnvArray(): Array<String> = map { "${it.key}=${it.value}" }.toTypedArray()
@@ -3602,6 +3793,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setReaChatHint(enabled: Boolean) {
+        preferences.reaChatHint = enabled
+        _state.update { it.copy(reaChatHint = enabled) }
+    }
+
     fun setAutoSyncGitHub(enabled: Boolean) {
         preferences.autoSyncGitHub = enabled
         _state.update { it.copy(autoSyncGitHub = enabled) }
@@ -3796,7 +3992,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeBuildProcess?.destroyForcibly()
         activeLogcatProcess?.destroyForcibly()
         activeTerminalProcess?.destroyForcibly()
-        terminalSession?.finishIfRunning()
+        terminals.values.forEach { it.session?.finishIfRunning() }
         super.onCleared()
     }
 
@@ -3835,6 +4031,9 @@ private class ChatRun(
     val lastPrompt: QueuedPrompt,
     /** True when the run works in the chat's own branch (a clone of the project), not in the project folder. */
     val isolated: Boolean = false,
+    val agent: AgentKind = AgentKind.CLAUDE_CODE,
+    /** Agents whose turn already failed for this message (Failover and Balanced). */
+    val tried: Set<AgentKind> = emptySet(),
 ) {
     var job: Job? = null
     var eventsJob: Job? = null

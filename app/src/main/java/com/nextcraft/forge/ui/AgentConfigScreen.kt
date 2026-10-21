@@ -238,81 +238,10 @@ fun AgentConfigScreen(
                 }
             }
 
-            // Claude subscription: sign in through Claude Code's own login (account, SSO or Console) instead of pasting a
-            // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
-            if (agent == AgentKind.CLAUDE_CODE) {
-                ClaudeAccountCard(viewModel)
-                ClaudeIntelligenceCard(state = state, viewModel = viewModel, onOpenModelPicker = { showModelPicker = true })
-            }
-
-            // Model & access: a heading with Discover, then the model row and the credentials row.
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp)) {
-                // Section heading with an action: same quiet style as every other section label, not a second page title.
-                Text(
-                    text = stringResource(R.string.settings_model_access).uppercase(),
-                    fontSize = ForgeType.caption,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = ForgeType.sectionTracking,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
-                    Text(stringResource(R.string.settings_discover_models))
-                }
-            }
-            if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            var modelOpen by rememberSaveable(agent) { mutableStateOf(false) }
-            var credentialsOpen by rememberSaveable(agent) { mutableStateOf(false) }
-            val activeKey = state.savedApiKeys.firstOrNull { it.isActive }
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                // Claude Code picks its model in the "active intelligence" card above; this row is for the other agents.
-                if (agent != AgentKind.CLAUDE_CODE) {
-                    AgentDisclosureRow(
-                        icon = ForgeGlyph.SPARK,
-                        title = stringResource(R.string.agent_ai_model),
-                        subtitle = state.providerProfile.model.ifBlank { "default" },
-                        expanded = modelOpen,
-                        onToggle = { modelOpen = !modelOpen },
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
-                                    Text(
-                                        text = state.providerProfile.model.ifBlank { "default" },
-                                        fontSize = ForgeType.cardTitle,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                }
-                                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
-                                    Text(stringResource(R.string.settings_choose_model))
-                                }
-                            }
-                            if (state.discoveredModels.isNotEmpty()) {
-                                Text(
-                                    text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
-                                    fontSize = ForgeType.secondary,
-                                    fontWeight = FontWeight.Medium,
-                                    color = scheme.onSurfaceVariant,
-                                )
-                                state.discoveredModels.take(30).forEach { m ->
-                                    RadioRow(
-                                        title = m.displayName,
-                                        subtitle = m.id,
-                                        mono = true,
-                                        selected = m.id == state.providerProfile.model,
-                                        onClick = {
-                                            modelInput = m.id
-                                            viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
-                                        },
-                                        horizontalPadding = 0.dp,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    ThinDivider()
-                }
+            // Credentials (saved API keys): inside the Claude account card for Claude Code, in its own card for the others.
+            val credentialsRow: @Composable () -> Unit = {
+                val activeKey = state.savedApiKeys.firstOrNull { it.isActive }
+                var credentialsOpen by rememberSaveable(agent) { mutableStateOf(false) }
                 AgentDisclosureRow(
                     icon = ForgeGlyph.LOCK,
                     title = stringResource(R.string.agent_credentials),
@@ -382,6 +311,100 @@ fun AgentConfigScreen(
                         )
                     }
                 }
+            }
+
+            // Claude subscription: sign in through Claude Code's own login (account, SSO or Console) instead of pasting a
+            // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
+            if (agent == AgentKind.CLAUDE_CODE) {
+                // Model and credentials are part of how Claude is signed in, so they live inside the account card.
+                ClaudeAccountCard(viewModel) {
+                    ThinDivider()
+                    ClaudeIntelligenceCard(state = state, viewModel = viewModel, onOpenModelPicker = { showModelPicker = true }, embedded = true)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.settings_model_access),
+                            fontSize = ForgeType.rowTitle,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
+                            Text(stringResource(R.string.settings_discover_models))
+                        }
+                    }
+                    if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    credentialsRow()
+                }
+            }
+
+            // Model & access for the other agents (Claude Code has both inside its account card above).
+            if (agent != AgentKind.CLAUDE_CODE) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp)) {
+                // Section heading with an action: same quiet style as every other section label, not a second page title.
+                Text(
+                    text = stringResource(R.string.settings_model_access).uppercase(),
+                    fontSize = ForgeType.caption,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = ForgeType.sectionTracking,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
+                    Text(stringResource(R.string.settings_discover_models))
+                }
+            }
+            if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            var modelOpen by rememberSaveable(agent) { mutableStateOf(false) }
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+                // Claude Code picks its model in the "active intelligence" card above; this row is for the other agents.
+                if (agent != AgentKind.CLAUDE_CODE) {
+                    AgentDisclosureRow(
+                        icon = ForgeGlyph.SPARK,
+                        title = stringResource(R.string.agent_ai_model),
+                        subtitle = state.providerProfile.model.ifBlank { "default" },
+                        expanded = modelOpen,
+                        onToggle = { modelOpen = !modelOpen },
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                                    Text(
+                                        text = state.providerProfile.model.ifBlank { "default" },
+                                        fontSize = ForgeType.cardTitle,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
+                                    Text(stringResource(R.string.settings_choose_model))
+                                }
+                            }
+                            if (state.discoveredModels.isNotEmpty()) {
+                                Text(
+                                    text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
+                                    fontSize = ForgeType.secondary,
+                                    fontWeight = FontWeight.Medium,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                                state.discoveredModels.take(30).forEach { m ->
+                                    RadioRow(
+                                        title = m.displayName,
+                                        subtitle = m.id,
+                                        mono = true,
+                                        selected = m.id == state.providerProfile.model,
+                                        onClick = {
+                                            modelInput = m.id
+                                            viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
+                                        },
+                                        horizontalPadding = 0.dp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    ThinDivider()
+                }
+                credentialsRow()
+            }
             }
             // Same connection test as Antigravity: one button under the card, result coloured below it.
             OutlinedButton(

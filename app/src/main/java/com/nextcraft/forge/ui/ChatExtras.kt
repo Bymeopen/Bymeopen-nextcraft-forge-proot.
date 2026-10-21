@@ -451,6 +451,9 @@ internal fun ChatComposer(
     /** Model (and effort) shown as a chip next to the attach button; tapping it opens the model sheet. */
     modelChipLabel: String = "",
     onModelChip: (() -> Unit)? = null,
+    /** Routing mode shown as a second chip (single agent, manual, failover, balanced); tapping it opens the routing sheet. */
+    routeChipLabel: String = "",
+    onRouteChip: (() -> Unit)? = null,
 ) {
     val tokens = LocalForgeThemeTokens.current
     var attachMenuOpen by remember { mutableStateOf(false) }
@@ -526,7 +529,24 @@ internal fun ChatComposer(
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 200.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.widthIn(max = 150.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            if (onRouteChip != null && routeChipLabel.isNotBlank()) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onRouteChip),
+                ) {
+                    Text(
+                        text = routeChipLabel,
+                        fontSize = ForgeType.secondary,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 110.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
             }

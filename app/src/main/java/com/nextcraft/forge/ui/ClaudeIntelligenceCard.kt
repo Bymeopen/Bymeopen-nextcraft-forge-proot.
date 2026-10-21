@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,6 +35,8 @@ internal fun ClaudeIntelligenceCard(
     state: ForgeUiState,
     viewModel: MainViewModel,
     onOpenModelPicker: () -> Unit,
+    /** True inside another card (the Claude account card): no card of its own and no extra padding. */
+    embedded: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
@@ -42,8 +45,7 @@ internal fun ClaudeIntelligenceCard(
     val effortLabels = levels.map { claudeEffortText(it) }
     val effortIndex = levels.indexOf(state.claudeEffort).coerceAtLeast(0)
 
-    ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val body: @Composable ColumnScope.() -> Unit = {
             Text(
                 text = stringResource(R.string.agent_intelligence_title),
                 fontSize = ForgeType.cardTitle,
@@ -95,6 +97,12 @@ internal fun ClaudeIntelligenceCard(
                 fontSize = ForgeType.secondary,
                 color = scheme.onSurfaceVariant,
             )
+    }
+    if (embedded) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp), content = body)
+    } else {
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(ForgeSpace.cardInner), verticalArrangement = Arrangement.spacedBy(12.dp), content = body)
         }
     }
 }

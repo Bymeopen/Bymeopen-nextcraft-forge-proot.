@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +40,10 @@ data class ReaState(
     val quizResult: ReaQuizResult? = null,
     val checkResult: ReaCheckResult? = null,
     val revealedAnswer: String? = null,
+    /** Install progress: percent of the steps done, the step running, and what the network delivered meanwhile. */
+    val progressPercent: Int? = null,
+    val progressLabel: String? = null,
+    val transfer: TransferStats? = null,
 )
 
 /**
@@ -61,7 +66,7 @@ class ReaController(context: Context) {
         }
     }
 
-    fun install() = launchTask(R.string.rea_installing) {
+    fun install() = launchTask(R.string.rea_installing, showTransfer = true) {
         val workspace = runner.toolWorkspace(TOOL_SLUG)
         val stage = File(workspace, "stage")
         withContext(Dispatchers.IO) {
@@ -80,6 +85,7 @@ class ReaController(context: Context) {
             mutable.update {
                 it.copy(
                     installedVersion = version,
+                    progressPercent = if (result.ok && version != null) 100 else it.progressPercent,
                     message = if (result.ok && version != null) UiText.res(R.string.rea_installed, version)
                     else UiText.res(R.string.rea_install_failed),
                 )
@@ -110,7 +116,7 @@ class ReaController(context: Context) {
     fun runDoctor() = launchTask(R.string.rea_checking) { refreshDoctor() }
 
     /** Installs the optional tools (strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio, unicorn, frida) and then re-runs the doctor. */
-    fun installOptionalTools() = launchTask(R.string.rea_installing_optional) {
+    fun installOptionalTools() = launchTask(R.string.rea_installing_optional, showTransfer = true) {
         val result = runner.run(
             workspaceDir = runner.toolWorkspace(TOOL_SLUG),
             slug = TOOL_SLUG,
@@ -120,7 +126,7 @@ class ReaController(context: Context) {
         )
         refreshDoctor()
         mutable.update {
-            it.copy(message = if (result.ok) UiText.res(R.string.rea_optional_done) else UiText.res(R.string.rea_optional_failed))
+            it.copy(progressPercent = if (result.ok) 100 else it.progressPercent, message = if (result.ok) UiText.res(R.string.rea_optional_done) else UiText.res(R.string.rea_optional_failed))
         }
     }
 
@@ -224,10 +230,12 @@ class ReaController(context: Context) {
         mutable.update { it.copy(busy = false) }
     }
 
-    private fun launchTask(@androidx.annotation.StringRes label: Int, block: suspend () -> Unit) {
+    private fun launchTask(@androidx.annotation.StringRes label: Int, showTransfer: Boolean = false, block: suspend () -> Unit) {
         if (mutable.value.busy) return
-        mutable.update { it.copy(busy = true, message = UiText.res(label), log = "") }
+        pendingLine = ""
+        mutable.update { it.copy(busy = true, message = UiText.res(label), log = "", progressPercent = null, progressLabel = null, transfer = null) }
         job = scope.launch {
+            val meter = if (showTransfer) launchTransferMeter() else null
             try {
                 block()
             } catch (cancelled: CancellationException) {
@@ -235,6 +243,7 @@ class ReaController(context: Context) {
             } catch (error: Exception) {
                 mutable.update { it.copy(message = UiText.Raw(error.message ?: error.javaClass.simpleName)) }
             } finally {
+                meter?.cancel()
                 mutable.update { it.copy(busy = false) }
             }
         }
@@ -318,8 +327,36 @@ class ReaController(context: Context) {
         if (text != null) refreshLesson(n)
     }
 
+    private var pendingLine = ""
+
+    /** Adds output to the log; `##STEP` lines of the install scripts move the progress instead of being shown. */
     private fun appendLog(chunk: String) {
-        mutable.update { it.copy(log = (it.log + chunk).takeLast(MAX_LOG_CHARS)) }
+        val (shown, step, rest) = InstallProgress.consume(pendingLine, chunk)
+        pendingLine = rest
+        mutable.update {
+            it.copy(
+                log = (it.log + shown).takeLast(MAX_LOG_CHARS),
+                progressPercent = step?.percentBefore ?: it.progressPercent,
+                progressLabel = step?.label ?: it.progressLabel,
+            )
+        }
+    }
+
+    /** Samples the device's received bytes once a second while an install runs (TrafficStats needs no permission). */
+    private fun CoroutineScope.launchTransferMeter(): Job? {
+        val start = android.net.TrafficStats.getTotalRxBytes()
+        if (start == android.net.TrafficStats.UNSUPPORTED.toLong()) return null
+        val smoother = SpeedSmoother()
+        smoother.add(start, android.os.SystemClock.elapsedRealtime())
+        mutable.update { it.copy(transfer = TransferStats()) }
+        return launch {
+            while (true) {
+                delay(1000)
+                val now = android.net.TrafficStats.getTotalRxBytes()
+                val speed = smoother.add(now, android.os.SystemClock.elapsedRealtime())
+                mutable.update { it.copy(transfer = TransferStats((now - start).coerceAtLeast(0L), speed)) }
+            }
+        }
     }
 
     private fun readInstalledVersion(): String? = runCatching {
@@ -373,13 +410,17 @@ class ReaController(context: Context) {
          */
         internal fun optionalToolsScript(): String = """
             export DEBIAN_FRONTEND=noninteractive
+            echo "##STEP 1/4 Memperbarui daftar paket"
             apt-get update -qq >/dev/null 2>&1 || true
+            echo "##STEP 2/4 Memasang strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio"
             apt-get install -y -qq strace ltrace qemu-user binwalk squashfs-tools cpio || echo "Peringatan: sebagian alat apt gagal dipasang."
+            echo "##STEP 3/4 Memasang unicorn"
             if ! python3 -c "import unicorn" >/dev/null 2>&1; then
               apt-get install -y -qq python3-unicorn >/dev/null 2>&1 \
                 || { apt-get install -y -qq python3-pip && python3 -m pip install --break-system-packages unicorn; } \
                 || echo "Peringatan: unicorn gagal dipasang."
             fi
+            echo "##STEP 4/4 Memasang frida"
             if ! python3 -c "import frida" >/dev/null 2>&1; then
               { apt-get install -y -qq python3-pip && python3 -m pip install --break-system-packages frida; } \
                 || echo "Peringatan: frida gagal dipasang (opsional)."
@@ -390,6 +431,7 @@ class ReaController(context: Context) {
         internal fun installScript(): String = """
             set -e
             export DEBIAN_FRONTEND=noninteractive
+            echo "##STEP 1/4 Memeriksa python3"
             if ! command -v python3 >/dev/null 2>&1; then
               echo "Memasang python3 (apt)…"
               apt-get update -qq
@@ -397,13 +439,16 @@ class ReaController(context: Context) {
             fi
             # Libraries for ELF parsing and disassembly (REA 0.2): from apt, so no pip or venv is needed. If they cannot
             # be installed the analysis commands say so and `rea doctor` shows what is missing.
+            echo "##STEP 2/4 Memasang capstone dan pyelftools"
             apt-get update -qq >/dev/null 2>&1 || true
             apt-get install -y -qq python3-capstone python3-pyelftools || echo "Peringatan: capstone/pyelftools gagal dipasang."
+            echo "##STEP 3/4 Menyalin paket REA"
             rm -rf /opt/rea/lib/rea
             mkdir -p /opt/rea/lib /usr/local/bin
             cp -a /workspace/rea/stage/rea /opt/rea/lib/rea
             printf '#!/bin/sh\nexec env PYTHONPATH=/opt/rea/lib PYTHONDONTWRITEBYTECODE=1 python3 -m rea "§@"\n' > /usr/local/bin/rea
             chmod 755 /usr/local/bin/rea
+            echo "##STEP 4/4 Memverifikasi"
             echo "$REA_VERSION" > /root/.pocket-rea-version
             rea --version
         """.trimIndent().replace('§', '$')
