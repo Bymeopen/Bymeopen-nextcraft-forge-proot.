@@ -609,6 +609,7 @@
     <string name="msg_agent_update_check_failed">Could not check for agent updates: %1$s</string>
     <string name="msg_agents_up_to_date">All installed agents are up to date.</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_language_system">System default</string>
     <string name="settings_language">Language</string>
     <string name="settings_agent_not_installed">%1$s is not installed</string>
     <string name="settings_agent_install_hint">Install its %1$s agent package to use it with your existing projects.</string>

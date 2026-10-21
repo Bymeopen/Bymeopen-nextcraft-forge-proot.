@@ -2,6 +2,7 @@ package com.nextcraft.forge.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -427,6 +428,31 @@ abstract class NextCraftScreenshots(private val label: String, private val theme
             }
         }
         save("filesSearch")
+    }
+
+    @Test
+    fun layoutFixes() {
+        val chats = listOf(
+            com.nextcraft.forge.model.ProjectChat(title = "Test 2", updatedAtMillis = System.currentTimeMillis() - 3 * 3_600_000),
+            com.nextcraft.forge.model.ProjectChat(title = "Tes", updatedAtMillis = System.currentTimeMillis() - 12 * 3_600_000),
+            com.nextcraft.forge.model.ProjectChat(title = "Perbaiki error build di Launch", updatedAtMillis = System.currentTimeMillis() - 26 * 3_600_000),
+        )
+        rule.setContent {
+            Frame {
+                ForgeLargeTitle(title = "Pengaturan", subtitle = "Preferensi & konfigurasi", horizontalPadding = 20.dp)
+                ForgeSectionLabel("Umum", horizontalPadding = 20.dp, topPadding = 8.dp)
+                ThemeModeGrid(active = ForgeThemeMode.DARK, onSelect = {})
+                Text("Kedalaman penalaran", modifier = Modifier.padding(horizontal = 20.dp), fontSize = ForgeType.secondary)
+                Text("Paling dalam, jawaban lebih lambat", modifier = Modifier.padding(horizontal = 20.dp), fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.primary)
+                ForgePillTabs(items = listOf("Rendah", "Sedang", "Tinggi"), selectedIndex = 2, onSelect = {}, equalWidth = true)
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                    Text("Forge Sandbox", fontSize = ForgeType.screenTitle, modifier = Modifier.padding(horizontal = 8.dp))
+                    ForgePrimaryButton(text = "Obrolan baru", onClick = {}, modifier = Modifier.fillMaxWidth())
+                    chats.forEachIndexed { i, c -> ChatDrawerRow(chat = c, current = i == 0, running = i == 2, canDelete = true, onOpen = {}, onDelete = {}) }
+                }
+            }
+        }
+        save("layoutFixes")
     }
 }
 

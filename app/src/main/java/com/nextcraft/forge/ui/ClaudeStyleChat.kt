@@ -2,6 +2,9 @@
 
 package com.nextcraft.forge.ui
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -172,6 +175,7 @@ internal fun ChatDrawerContent(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            // 12 (column) + 8 here = 20dp, the same left edge as the status slot in every row below.
             modifier = Modifier.padding(horizontal = 8.dp),
         )
         ForgePrimaryButton(
@@ -201,7 +205,7 @@ internal fun ChatDrawerContent(
 }
 
 @Composable
-private fun ChatDrawerRow(
+internal fun ChatDrawerRow(
     chat: ProjectChat,
     current: Boolean,
     running: Boolean,
@@ -214,11 +218,18 @@ private fun ChatDrawerRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onOpen)
-            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Spinner while working, a dot otherwise (accent for the open chat), so the slot is never an unexplained blank.
         Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
             if (running) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+            else Box(
+                modifier = Modifier
+                    .size(if (current) 8.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(if (current) scheme.primary else scheme.onSurfaceVariant.copy(alpha = 0.45f)),
+            )
         }
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {

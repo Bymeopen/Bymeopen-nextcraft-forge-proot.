@@ -597,6 +597,7 @@
     <string name="msg_agent_update_check_failed">Tidak bisa memeriksa pembaruan agen: %1$s</string>
     <string name="msg_agents_up_to_date">Semua agen yang terpasang sudah terbaru.</string>
     <string name="settings_appearance">Tampilan</string>
+    <string name="settings_language_system">Bawaan sistem</string>
     <string name="settings_language">Bahasa</string>
     <string name="settings_agent_not_installed">%1$s belum terpasang</string>
     <string name="settings_agent_install_hint">Pasang paket agen %1$s untuk memakainya di proyek yang sudah ada.</string>

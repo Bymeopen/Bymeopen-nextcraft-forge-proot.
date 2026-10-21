@@ -247,10 +247,13 @@ fun AgentConfigScreen(
 
             // Model & access: a heading with Discover, then the model row and the credentials row.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp)) {
+                // Section heading with an action: same quiet style as every other section label, not a second page title.
                 Text(
-                    text = stringResource(R.string.settings_model_access),
-                    fontSize = ForgeType.screenTitle,
-                    fontWeight = FontWeight.SemiBold,
+                    text = stringResource(R.string.settings_model_access).uppercase(),
+                    fontSize = ForgeType.caption,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = ForgeType.sectionTracking,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {

@@ -549,11 +549,11 @@ internal fun ProjectRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = listOf(project.localizedLanguage(), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
+                    text = listOf(compactLanguages(project.localizedLanguage()), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
                     fontSize = ForgeType.secondary,
                     color = muted,
-                    // Two lines: one line clipped "Kotlin / TypeScript / Python · 39" before the unit on 360-412dp phones.
-                    maxLines = 2,
+                    // One line: the language list is shortened ("Kotlin +2") so the time always fits, even at 360dp.
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 // Live state for the open project: the agent is working, or edits wait for review.
@@ -697,4 +697,10 @@ private fun ProjectStatusPill(text: String, glyph: ForgeGlyph, tint: androidx.co
         Spacer(modifier = Modifier.width(5.dp))
         Text(text, fontSize = ForgeType.caption, color = tint, fontWeight = FontWeight.Medium, maxLines = 1)
     }
+}
+
+/** "Kotlin / TypeScript / Python" becomes "Kotlin +2": up to two languages are listed in full, more collapse to the first plus a count. */
+internal fun compactLanguages(languages: String): String {
+    val parts = languages.split(" / ").map { it.trim() }.filter { it.isNotEmpty() }
+    return if (parts.size <= 2) languages else parts.first() + " +" + (parts.size - 1)
 }
