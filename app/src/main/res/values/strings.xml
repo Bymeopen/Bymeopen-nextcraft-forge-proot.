@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <string name="app_name">NextCraft Forge</string>
-    <string name="app_tagline">Root Chroot AI Coding Studio for Android</string>
+    <string name="app_tagline">Forge your dreams with AI.</string>
     <!-- UI strings extracted from Compose screens -->
     <string name="agent_stop">Stop</string>
     <string name="agent_ask_to_build_refactor">Ask %1$s to build, refactor, or fix…</string>
@@ -331,7 +331,6 @@
     <string name="a11y_selected">Selected</string>
     <string name="a11y_expand">Expand tool steps</string>
     <string name="a11y_collapse">Collapse tool steps</string>
-    <string name="projects_build_from_your_phone">Build from your phone</string>
     <string name="projects_tagline">Chat, review changes, and preview your project.</string>
     <string name="projects_quick_project">Quick project</string>
     <string name="projects_bring_existing">Bring an existing project</string>
@@ -609,6 +608,7 @@
     <string name="msg_agent_update_check_failed">Could not check for agent updates: %1$s</string>
     <string name="msg_agents_up_to_date">All installed agents are up to date.</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_language_system">System default</string>
     <string name="settings_language">Language</string>
     <string name="settings_agent_not_installed">%1$s is not installed</string>
     <string name="settings_agent_install_hint">Install its %1$s agent package to use it with your existing projects.</string>
