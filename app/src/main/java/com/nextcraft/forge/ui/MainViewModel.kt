@@ -507,7 +507,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** Manually installs one agent bundle (Claude Code, DeepSeek Harness or Antigravity) on top of the Core runtime. */
+    /** Manually installs one agent bundle (Claude Code, DeepSeek or Antigravity) on top of the Core runtime. */
     fun installAgent(agent: AgentKind) {
         if (!_state.value.runtimeInstalled) return installCoreWith(emptySet(), agent)
         if (!canRunRuntimeOperation()) return
@@ -2338,6 +2338,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val file = shellSingleQuote(relativePath)
         runTerminalCommandInProject("if command -v nano >/dev/null 2>&1; then nano -- $file; else vi -- $file; fi")
         selectTab(ForgeTab.TERMINAL)
+    }
+
+    /** Files row menu: picks [relativePath] as the target of the REA screen and opens it. */
+    fun analyzeWithRea(relativePath: String) {
+        rea.selectTarget(relativePath)
+        selectTab(ForgeTab.REA)
     }
 
     /** Runs [command] in the active project's folder (from chat: the snippet belongs to that project). */

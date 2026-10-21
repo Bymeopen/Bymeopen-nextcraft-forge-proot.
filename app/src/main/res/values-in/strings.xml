@@ -394,7 +394,7 @@
     <string name="provider_nim_sub">API inferensi NVIDIA NIM kompatibel OpenAI</string>
     <string name="provider_custom_title">Endpoint kustom</string>
     <string name="provider_custom_sub">Ollama, vLLM, LiteLLM self-hosted, atau server API kustom</string>
-    <string name="agent_claude_sub">CLI resmi @anthropic-ai/claude-code (npm 2.1.112) di PRoot</string>
+    <string name="agent_claude_sub">CLI resmi @anthropic-ai/claude-code di PRoot</string>
     <string name="agent_deepseek_sub">Harness SDK JSON-RPC 2.0 dengan routing multi-penyedia</string>
     <string name="agent_antigravity_sub">CLI coding agentik resmi Google Antigravity (agy)</string>
     <string name="stack_web">Web &amp; Node.js</string>
@@ -700,7 +700,7 @@
     <string name="agent_reasoning_depth">Kedalaman penalaran</string>
     <string name="agent_reasoning_low_hint">Respons tercepat</string>
     <string name="agent_reasoning_medium_hint">Seimbang</string>
-    <string name="agent_reasoning_high_hint">Penalaran paling dalam</string>
+    <string name="agent_reasoning_high_hint">Paling dalam, jawaban lebih lambat</string>
     <string name="agent_test_connection">Uji koneksi</string>
     <string name="agent_effort_low">Rendah</string>
     <string name="agent_effort_medium">Sedang</string>
@@ -814,6 +814,8 @@
     <string name="diag_battery">Baterai</string>
     <string name="diag_root">Mesin runtime</string>
     <string name="diag_linux">Runtime Linux</string>
+    <string name="files_analyze_rea">Analisis dengan REA</string>
+    <string name="diag_rea">REA</string>
     <string name="diag_rootfs">Rootfs</string>
     <string name="diag_stacks">Stack</string>
     <string name="diag_agents">Agen</string>
@@ -1125,7 +1127,7 @@
     <string name="rea_removing">Menghapus REA…</string>
     <string name="rea_install_optional">Pasang alat opsional</string>
     <string name="rea_installing_optional">Memasang alat opsional…</string>
-    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk (apt), unicorn, dan frida. Perlu internet; qemu-user cukup besar.</string>
+    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio (apt), unicorn, dan frida. Perlu internet; qemu-user cukup besar.</string>
     <string name="rea_optional_done">Alat opsional dipasang. Hasil pemeriksaan di bawah sudah diperbarui.</string>
     <string name="rea_optional_failed">Sebagian alat opsional gagal dipasang. Lihat keluaran di atas.</string>
     <string name="rea_section_learn">Belajar</string>

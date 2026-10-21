@@ -394,7 +394,7 @@
     <string name="provider_nim_sub">NVIDIA NIM OpenAI-compatible inference API</string>
     <string name="provider_custom_title">Custom Endpoint</string>
     <string name="provider_custom_sub">Self-hosted Ollama, vLLM, LiteLLM, or custom API server</string>
-    <string name="agent_claude_sub">Official @anthropic-ai/claude-code CLI (npm 2.1.112) in PRoot</string>
+    <string name="agent_claude_sub">Official @anthropic-ai/claude-code CLI in PRoot</string>
     <string name="agent_deepseek_sub">JSON-RPC 2.0 SDK harness with multi-provider routing</string>
     <string name="agent_antigravity_sub">Official Google Antigravity agentic coding CLI (agy)</string>
     <string name="stack_web">Web &amp; Node.js</string>
@@ -712,7 +712,7 @@
     <string name="agent_reasoning_depth">Reasoning depth</string>
     <string name="agent_reasoning_low_hint">Fastest responses</string>
     <string name="agent_reasoning_medium_hint">Balanced</string>
-    <string name="agent_reasoning_high_hint">Maximum reasoning depth</string>
+    <string name="agent_reasoning_high_hint">Deepest reasoning, slower answers</string>
     <string name="agent_test_connection">Test connection</string>
     <string name="agent_effort_low">Low</string>
     <string name="agent_effort_medium">Medium</string>
@@ -830,6 +830,8 @@
     <string name="diag_battery">Battery</string>
     <string name="diag_root">Runtime engine</string>
     <string name="diag_linux">Linux runtime</string>
+    <string name="files_analyze_rea">Analyze with REA</string>
+    <string name="diag_rea">REA</string>
     <string name="diag_rootfs">Rootfs</string>
     <string name="diag_stacks">Stacks</string>
     <string name="diag_agents">Agents</string>
@@ -1144,7 +1146,7 @@
     <string name="rea_removing">Removing REA…</string>
     <string name="rea_install_optional">Install optional tools</string>
     <string name="rea_installing_optional">Installing optional tools…</string>
-    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk (apt), unicorn and frida. Needs internet; qemu-user is large.</string>
+    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio (apt), unicorn and frida. Needs internet; qemu-user is large.</string>
     <string name="rea_optional_done">Optional tools installed. The check below is up to date.</string>
     <string name="rea_optional_failed">Some optional tools could not be installed. See the output above.</string>
     <string name="rea_section_learn">Learn</string>

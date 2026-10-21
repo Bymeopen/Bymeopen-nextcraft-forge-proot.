@@ -9,7 +9,7 @@ import org.junit.Test
 class RuntimeTextTest {
     @Test
     fun knownInstallerSentences_matchWithTheirArguments() {
-        assertEquals(listOf("DeepSeek Harness"), RuntimeText.match("Downloading DeepSeek Harness bundle…")!!.second)
+        assertEquals(listOf("DeepSeek"), RuntimeText.match("Downloading DeepSeek bundle…")!!.second)
         assertEquals(listOf("Node.js 24.1.0"), RuntimeText.match("Downloading Node.js 24.1.0…")!!.second)
         assertEquals(listOf("3,6 / 26,8 MB"), RuntimeText.match("Downloading: 3,6 / 26,8 MB")!!.second)
         assertEquals(listOf("Python"), RuntimeText.match("Python stack is ready")!!.second)

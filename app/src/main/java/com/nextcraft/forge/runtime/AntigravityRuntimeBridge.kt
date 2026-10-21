@@ -199,6 +199,49 @@ class AntigravityRuntimeBridge(
 
     @Volatile private var activeProjectSlug = ""
 
+    /**
+     * agy kept alive after its turn: the next message to the same project, model and conversation is written to its
+     * stdin, skipping the cold start (sign-in, quota and model lookup, conversation resume) of a new process.
+     */
+    private class WarmAgy(
+        val process: Process,
+        val tailer: InotifyLogTailer,
+        val outputFile: File,
+        val projectId: String,
+        val model: String,
+        val effort: String,
+        val conversationId: String?,
+    )
+    @Volatile private var warm: WarmAgy? = null
+    @Volatile private var warmGeneration = 0L
+    /** null until known; false once agy showed it only starts on end of input, so every turn closes stdin. */
+    @Volatile private var warmSupported: Boolean? = null
+
+    private fun closeWarm(entry: WarmAgy?) {
+        entry ?: return
+        runCatching { entry.tailer.close() }
+        runCatching { entry.process.destroy() }
+        Thread {
+            runCatching {
+                Thread.sleep(500)
+                if (entry.process.isAlive) entry.process.destroyForcibly()
+                entry.outputFile.delete()
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** An idle warm agy holds memory in the chroot; let it go after a while without messages. */
+    private fun scheduleWarmExpiry(entry: WarmAgy) {
+        val generation = ++warmGeneration
+        Thread {
+            runCatching { Thread.sleep(WARM_IDLE_MS) }
+            if (warmGeneration == generation && warm === entry) {
+                warm = null
+                closeWarm(entry)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     fun configureProjectRoot(projectId: String, rootPath: String) = checkpoints.configureProjectRoot(projectId, rootPath)
 
     /**
@@ -337,6 +380,8 @@ class AntigravityRuntimeBridge(
         }
 
         var spawnedOutputFile: File? = null
+        var openTailer: InotifyLogTailer? = null
+        var keptWarm = false
         var stopHandler: (() -> Unit)? = null
         runCatching {
             stopHandler = {
@@ -359,16 +404,40 @@ class AntigravityRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
-            val command = antigravityCommand(model(), effort(), conversationId(projectId))
-            val process = installer.process(
-                installed.chrootExec,
-                installed.rootfs,
-                workspace,
-                emptyMap(),
-                command,
-                guestWorkspacePath = "/workspace/$projectSlug",
-                emulateHardLinks = false,
-            )
+            val currentModel = model()
+            val currentEffort = effort()
+            val currentConversation = conversationId(projectId)
+            val previous = warm
+            warm = null
+            warmGeneration++
+            val reuse = previous?.takeIf {
+                warmSupported == true && it.process.isAlive && it.projectId == projectId &&
+                    it.model == currentModel && it.effort == currentEffort && it.conversationId == currentConversation
+            }
+            if (reuse == null) closeWarm(previous)
+            val process: Process
+            val tailer: InotifyLogTailer
+            if (reuse != null) {
+                process = reuse.process
+                tailer = reuse.tailer
+                spawnedOutputFile = reuse.outputFile
+                tailer.readLines(timeoutMs = 0L) // drop anything agy printed after the previous result
+            } else {
+                val command = antigravityCommand(currentModel, currentEffort, currentConversation)
+                process = installer.process(
+                    installed.chrootExec,
+                    installed.rootfs,
+                    workspace,
+                    emptyMap(),
+                    command,
+                    guestWorkspacePath = "/workspace/$projectSlug",
+                    emulateHardLinks = false,
+                )
+                val native = process as? NativeSpawnProcess ?: error("Unsupported Antigravity process")
+                spawnedOutputFile = native.outputFile
+                tailer = InotifyLogTailer(native.outputFile)
+            }
+            openTailer = tailer
             activeProcess = process
             if (userStopRequested) process.destroy()
             val request = JSONObject()
@@ -377,10 +446,11 @@ class AntigravityRuntimeBridge(
                 .toString() + "\n"
             process.outputStream.write(request.toByteArray())
             process.outputStream.flush()
-            process.outputStream.close()
-
-            val native = process as? NativeSpawnProcess ?: error("Unsupported Antigravity process")
-            spawnedOutputFile = native.outputFile
+            // Keep stdin open so agy can take the next message; once it proved it waits for end of input, close it.
+            var stdinOpen = warmSupported != false
+            if (!stdinOpen) process.outputStream.close()
+            val promptSentAtMillis = System.currentTimeMillis()
+            var eventSeen = false
             var lastDiagnostic = ""
             var resultSeen = false
             var assistantTextSeen = false
@@ -394,7 +464,9 @@ class AntigravityRuntimeBridge(
                 val line = rawLine.trimEnd('\r')
                 if (line.isBlank()) return
                 lastDiagnostic = line.takeLast(1_000)
-                when (val event = AntigravityEventParser.parse(line)) {
+                val parsed = AntigravityEventParser.parse(line)
+                if (parsed != null) eventSeen = true
+                when (val event = parsed) {
                     is AntigravityParsedEvent.Initialized -> saveConversationId(projectId, event.conversationId)
                     is AntigravityParsedEvent.Text -> {
                         assistantTextSeen = true
@@ -427,11 +499,24 @@ class AntigravityRuntimeBridge(
                     null -> Unit
                 }
             }
-            InotifyLogTailer(native.outputFile).use { tailer ->
+            run {
                 outputLoop@ while (process.isAlive || tailer.hasUnreadBytes()) {
                     val lines = tailer.readLines(timeoutMs = 50L)
                     if (lines.isEmpty()) {
                         val now = System.currentTimeMillis()
+                        if (stdinOpen && !eventSeen && now - promptSentAtMillis >= WARM_PROBE_MS) {
+                            if (reuse != null) {
+                                // A kept-alive agy that ignores the next message: start fresh from the next turn on.
+                                warmSupported = false
+                                throw AntigravitySessionException(
+                                    "Antigravity stopped responding. Send the message again.",
+                                )
+                            }
+                            // This agy only starts on end of input; give it that and remember for later turns.
+                            warmSupported = false
+                            stdinOpen = false
+                            runCatching { process.outputStream.close() }
+                        }
                         pushForegroundProgress(
                             activeToolName?.let { name -> "Running $name: $activeToolDetail" }
                                 ?: "Antigravity is working…",
@@ -480,7 +565,16 @@ class AntigravityRuntimeBridge(
                     }
                 }
             }
-            if (resultSeen) {
+            if (resultSeen && stdinOpen && process.isAlive) {
+                // agy answered without end of input and is still running: keep it for the next message.
+                warmSupported = true
+                val entry = WarmAgy(
+                    process, tailer, spawnedOutputFile!!, projectId, currentModel, currentEffort, conversationId(projectId),
+                )
+                warm = entry
+                keptWarm = true
+                scheduleWarmExpiry(entry)
+            } else if (resultSeen) {
                 stopAfterTerminalResult(process)
             } else {
                 val exit = process.waitFor()
@@ -526,7 +620,10 @@ class AntigravityRuntimeBridge(
             if (userStopRequested) cancelForegroundRuntime()
             else finishForegroundRuntime(false, projectSlug, message)
         }
-        runCatching { spawnedOutputFile?.delete() }
+        if (!keptWarm) {
+            runCatching { openTailer?.close() }
+            runCatching { spawnedOutputFile?.delete() }
+        }
         activeProcess = null
         activeSessionId = null
         activeProjectSlug = ""
@@ -682,6 +779,12 @@ private val ANTIGRAVITY_SERVER_ERRORS = listOf(
 )
 
 private const val RETRY_CHECK_INTERVAL_MS = 5_000L
+
+/** Without any agy event this long after the prompt, agy is waiting for end of input (or a kept one is stuck). */
+private const val WARM_PROBE_MS = 20_000L
+
+/** A kept-alive agy is stopped after this long without a message. */
+private const val WARM_IDLE_MS = 10 * 60_000L
 
 private const val ANTIGRAVITY_GENERIC_FAILURE = "Antigravity could not complete the task."
 

@@ -122,7 +122,7 @@ class AppPreferences(private val context: Context) {
         return "agent_conversation_${version}${agent.stableId}_${projectId}_$chatId"
     }
 
-    /** Pinned dsh version recorded when DeepSeek Harness was installed. */
+    /** Pinned dsh version recorded when DeepSeek was installed. */
     var dshVersion: String
         get() = preferences.getString("dsh_version", "") ?: ""
         set(value) { preferences.edit().putString("dsh_version", value).apply() }

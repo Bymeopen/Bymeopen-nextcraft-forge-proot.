@@ -45,6 +45,18 @@ def entropy_of(data: bytes) -> float:
     return -sum((c / total) * math.log2(c / total) for c in counts if c)
 
 
+def _looks_text(buf: bytes) -> bool:
+    """Teks = UTF-8 yang valid (huruf yang terpotong di ujung boleh) tanpa karakter kontrol selain tab dan baris baru.
+    Padding 0xff atau data biner dengan byte tinggi bukan teks."""
+    if not buf or any(b < 32 and b not in (9, 10, 13) or b == 127 for b in buf):
+        return False
+    try:
+        buf.decode("utf-8")
+    except UnicodeDecodeError as error:
+        return error.start >= len(buf) - 3
+    return True
+
+
 def _detect(head: bytes, path: str) -> dict[str, Any]:
     info: dict[str, Any] = {"type": "unknown"}
     if head[:4] == b"\x7fELF" and len(head) >= 20:
@@ -101,7 +113,7 @@ def _detect(head: bytes, path: str) -> dict[str, Any]:
         info["type"] = "PDF"
     elif head[:8] == b"\x89PNG\r\n\x1a\n":
         info["type"] = "PNG"
-    elif head and all(b in b"\t\n\r" or 32 <= b < 127 or b >= 128 for b in head[:512]) and b"\x00" not in head[:512]:
+    elif _looks_text(head[:512]):
         info["type"] = "text"
     return info
 
@@ -135,6 +147,16 @@ def identify(path: str) -> dict[str, Any]:
     except PermissionError as error:
         raise ReaError(E_PERMISSION, f"Tidak boleh membaca berkas: {path}", "Periksa izin berkas.") from error
     info = _detect(bytes(head), path)
+    if info["type"] in ("unknown", "text"):
+        # Imej firmware tidak diawali magic yang dikenal (bootloader, padding 0xff yang lolos heuristik teks); cari tanda
+        # kuat di sampel pertama. Berkas teks hanya dianggap firmware bila ada signature biner yang valid: log dmesg atau
+        # dokumen yang menyebut "U-Boot 2022.01" bukan firmware.
+        from .parsers import firmware
+
+        hint = firmware.looks_like_firmware(path, binary_only=info["type"] == "text")
+        if hint is not None:
+            info["type"] = "firmware"
+            info["firmware"] = hint
     entropy = round(entropy_of(bytes(sample)), 3)
     info.update(
         path=path,

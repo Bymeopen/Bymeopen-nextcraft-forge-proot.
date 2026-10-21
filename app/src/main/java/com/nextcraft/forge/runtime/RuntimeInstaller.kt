@@ -54,8 +54,46 @@ data class AgentUpdateInfo(
     val latestVersion: String,
 )
 
+/** The pinned dsh, or a newer one left by a later app build: an older app must not reinstall (downgrade) it. */
 internal fun isSupportedDshVersion(version: String): Boolean =
-    version == RuntimeInstaller.DSH_VERSION
+    version == RuntimeInstaller.DSH_VERSION || isAgentVersionNewer(version, RuntimeInstaller.DSH_VERSION)
+
+/** True when [candidate] is a newer agent version than [current] (numeric parts, then pre-release tags). */
+internal fun isAgentVersionNewer(candidate: String, current: String): Boolean {
+    fun numericParts(value: String) = value.substringBefore('-').substringBefore('+')
+        .split('.')
+        .map { it.toIntOrNull() ?: 0 }
+    val left = numericParts(candidate)
+    val right = numericParts(current)
+    for (index in 0 until maxOf(left.size, right.size)) {
+        val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
+        if (comparison != 0) return comparison > 0
+    }
+    val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+    val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+    if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+        // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+        return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+    }
+    // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+    val candidateIds = candidatePreTag.split('.')
+    val currentIds = currentPreTag.split('.')
+    for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+        val candidateId = candidateIds.getOrNull(index)
+        val currentId = currentIds.getOrNull(index)
+        if (candidateId == null) return false
+        if (currentId == null) return true
+        val candidateNum = candidateId.toIntOrNull()
+        val currentNum = currentId.toIntOrNull()
+        val comparison = if (candidateNum != null && currentNum != null) {
+            candidateNum.compareTo(currentNum)
+        } else {
+            candidateId.compareTo(currentId)
+        }
+        if (comparison != 0) return comparison > 0
+    }
+    return false
+}
 
 enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPLETED, COMPLETED }
 
@@ -769,10 +807,10 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         check(isSupportedDshVersion(expectedVersion)) {
-            "DeepSeek Harness $expectedVersion is not compatible with this NextCraft Forge build"
+            "DeepSeek $expectedVersion is not compatible with this NextCraft Forge build"
         }
         val quotedVersion = expectedVersion.replace(Regex("[^0-9A-Za-z.+-]"), "")
-        check(quotedVersion == expectedVersion) { "Invalid DeepSeek Harness version" }
+        check(quotedVersion == expectedVersion) { "Invalid DeepSeek version" }
         runGuestCommand(
             chrootExec = runtime.chrootExec,
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
@@ -788,7 +826,7 @@ class RuntimeInstaller(private val context: Context) {
             fraction = 0.55f,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
-            failureMessage = "Failed to update DeepSeek Harness",
+            failureMessage = "Failed to update DeepSeek",
         )
         val staged = File(rootfs, "usr/local/lib/dsh.updating")
         applyDshAndroidCompatibility(staged, expectedVersion)
@@ -798,32 +836,32 @@ class RuntimeInstaller(private val context: Context) {
                 "mv /usr/local/lib/dsh \"${'$'}old\"; " +
                 "if mv /usr/local/lib/dsh.updating /usr/local/lib/dsh; then :; " +
                 "else mv \"${'$'}old\" /usr/local/lib/dsh; exit 1; fi",
-            displayCommand = "Activate DeepSeek Harness $quotedVersion",
+            displayCommand = "Activate DeepSeek $quotedVersion",
             fraction = 0.9f,
             timeoutMs = 60_000L,
             onProgress = onProgress,
-            failureMessage = "Failed to activate DeepSeek Harness update",
+            failureMessage = "Failed to activate DeepSeek update",
         )
         val verified = runCatching {
-            verifyGuest(runtime.chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify updated DeepSeek Harness")
+            verifyGuest(runtime.chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify updated DeepSeek")
         }
         if (verified.isFailure) {
             runCatching {
                 runGuestCommand(
                     chrootExec = runtime.chrootExec,
                     command = "set -e; rm -rf /usr/local/lib/dsh; mv /usr/local/lib/dsh.previous /usr/local/lib/dsh",
-                    displayCommand = "Restore previous DeepSeek Harness",
+                    displayCommand = "Restore previous DeepSeek",
                     fraction = 0.95f,
                     timeoutMs = 60_000L,
                     onProgress = onProgress,
-                    failureMessage = "Failed to restore previous DeepSeek Harness",
+                    failureMessage = "Failed to restore previous DeepSeek",
                 )
             }
             verified.getOrThrow()
         }
         val previous = File(rootfs, "usr/local/lib/dsh.previous")
         if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
-            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek Harness copy")
+            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek copy")
         }
         dshMarker.writeText(expectedVersion)
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
@@ -833,41 +871,7 @@ class RuntimeInstaller(private val context: Context) {
         fetchText("https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_arm64.json"),
     )
 
-    private fun isVersionNewer(candidate: String, current: String): Boolean {
-        fun numericParts(value: String) = value.substringBefore('-').substringBefore('+')
-            .split('.')
-            .map { it.toIntOrNull() ?: 0 }
-        val left = numericParts(candidate)
-        val right = numericParts(current)
-        for (index in 0 until maxOf(left.size, right.size)) {
-            val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
-            if (comparison != 0) return comparison > 0
-        }
-        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
-        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
-        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
-            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
-            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
-        }
-        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
-        val candidateIds = candidatePreTag.split('.')
-        val currentIds = currentPreTag.split('.')
-        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
-            val candidateId = candidateIds.getOrNull(index)
-            val currentId = currentIds.getOrNull(index)
-            if (candidateId == null) return false
-            if (currentId == null) return true
-            val candidateNum = candidateId.toIntOrNull()
-            val currentNum = currentId.toIntOrNull()
-            val comparison = if (candidateNum != null && currentNum != null) {
-                candidateNum.compareTo(currentNum)
-            } else {
-                candidateId.compareTo(currentId)
-            }
-            if (comparison != 0) return comparison > 0
-        }
-        return false
-    }
+    private fun isVersionNewer(candidate: String, current: String): Boolean = isAgentVersionNewer(candidate, current)
 
     private fun migrateLegacyClaudeMarker() {
         if (claudeMarker.isFile) return
@@ -932,6 +936,8 @@ class RuntimeInstaller(private val context: Context) {
         verifyGuest(chrootExec, "$CLAUDE_GUEST_PATH --version", "Failed to verify Claude Code")
         claudeMarker.writeText(version)
         onProgress(RuntimeInstallProgress("Installed Claude Code $version (npm, PRoot)", 0.995f))
+        // A newer official release may exist; upgrading is best-effort and never fails the npm install itself.
+        upgradeAfterBundledInstall(AgentKind.CLAUDE_CODE, onProgress)
     }
 
     private suspend fun ensureAgyInstalled(
@@ -952,6 +958,30 @@ class RuntimeInstaller(private val context: Context) {
         agyMarker.writeText(AGY_VERSION)
         require(isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             "Antigravity CLI installation is incomplete"
+        }
+        upgradeAfterBundledInstall(AgentKind.ANTIGRAVITY, onProgress)
+    }
+
+    /**
+     * The APK bundles a fixed agent version, which can be older than what the user already ran: after a rootfs
+     * rebuild or a reinstall of the app, installing the bundle would silently downgrade the agent. Move it straight
+     * to the newest release instead. Best effort: offline or a failed download keeps the bundled version.
+     */
+    private suspend fun upgradeAfterBundledInstall(
+        agent: AgentKind,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        runCatching {
+            val update = checkAgentUpdates()[agent] ?: return
+            val runtime = installedRuntime()
+            when (agent) {
+                AgentKind.CLAUDE_CODE -> updateClaude(runtime, update.latestVersion, onProgress)
+                AgentKind.ANTIGRAVITY -> updateAgy(runtime, update.latestVersion, onProgress)
+                AgentKind.DEEPSEEK_HARNESS -> Unit
+            }
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            Log.w("RuntimeInstaller", "Kept the bundled ${agent.title}; updating to the latest release failed", error)
         }
     }
 
@@ -979,15 +1009,15 @@ class RuntimeInstaller(private val context: Context) {
         try {
             installRuntimeOverlay(
                 bundle = DSH_BUNDLE,
-                message = "Installing DeepSeek Harness $DSH_VERSION…",
+                message = "Installing DeepSeek $DSH_VERSION…",
                 from = fraction,
                 to = 0.995f,
                 onProgress = onProgress,
             )
             ensureDshAndroidCompatibility()
-            verifyGuest(chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify DeepSeek Harness")
+            verifyGuest(chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify DeepSeek")
             require(isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
-                "The DeepSeek Harness runtime bundle is incomplete"
+                "The DeepSeek runtime bundle is incomplete"
             }
             dshBackup.deleteRecursively()
             dshMarkerBackup.delete()
@@ -1017,7 +1047,7 @@ class RuntimeInstaller(private val context: Context) {
 
     private fun applyDshAndroidCompatibility(dshRoot: File, version: String) {
         check(isSupportedDshVersion(version)) {
-            "DeepSeek Harness $version is not compatible with this NextCraft Forge build"
+            "DeepSeek $version is not compatible with this NextCraft Forge build"
         }
         val persistence = File(
             dshRoot,
@@ -1050,11 +1080,11 @@ class RuntimeInstaller(private val context: Context) {
         callBefore: String,
         callAfter: String,
     ) {
-        check(file.isFile) { "DeepSeek Harness compatibility file is missing: ${file.name}" }
+        check(file.isFile) { "DeepSeek compatibility file is missing: ${file.name}" }
         var source = file.readText()
         if (callAfter in source && importAfter in source) return
         check(callBefore in source && importBefore in source) {
-            "Installed DeepSeek Harness source is not compatible with this NextCraft Forge build"
+            "Installed DeepSeek source is not compatible with this NextCraft Forge build"
         }
         source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
         val staging = File(file.parentFile, "${file.name}.tmp")
