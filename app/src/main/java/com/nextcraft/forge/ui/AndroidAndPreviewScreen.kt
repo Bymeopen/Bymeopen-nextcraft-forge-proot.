@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
@@ -169,6 +170,12 @@ fun AndroidBuildScreen(
                 .padding(end = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Opened from Tools there is no project header above: give it the same Back as the other tool screens.
+            if (state.activeTab != ForgeTab.PROJECTS) {
+                androidx.compose.material3.IconButton(onClick = { viewModel.selectTab(ForgeTab.TOOLS) }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.a11y_back))
+                }
+            }
             // Launch is reached from a project's header, so it reads as a project page: name first, "Launch" under it.
             ForgeLargeTitle(
                 title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
@@ -267,7 +274,7 @@ fun AndroidBuildScreen(
                             quantityStringResource(R.plurals.launch_warnings, warningCount, warningCount),
                         )
                     } else {
-                        build.message ?: build.stage.displayLabel()
+                        build.message?.let { messageText(it) } ?: build.stage.displayLabel()
                     },
                     fontSize = ForgeType.control,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -446,7 +453,7 @@ private fun BuildIssuesList(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = issue.title,
+                            text = messageText(issue.title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -464,13 +471,13 @@ private fun BuildIssuesList(
                         )
                     }
                     Text(
-                        text = issue.detail,
+                        text = messageText(issue.detail),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                     )
                     issue.suggestion?.let { hint ->
                         Text(
-                            text = hint,
+                            text = messageText(hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -522,7 +529,7 @@ private fun LogcatPanel(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = logcat.message ?: "UID-scoped Logcat (${logcat.packageName ?: "app"})",
+                text = logcat.message ?: stringResource(R.string.logcat_uid_scoped, logcat.packageName ?: stringResource(R.string.logcat_app_fallback)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -654,9 +661,11 @@ fun WebPreviewScreen(
                 onBack = { viewModel.projectBack() },
             )
         } else {
-            ForgeLargeTitle(
+            // Opened from Tools: same header and Back as every other tool screen.
+            ForgeProjectHeader(
                 title = stringResource(R.string.launch_preview),
                 subtitle = stringResource(R.string.launch_local_dev_server),
+                onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
             )
         }
 
@@ -693,8 +702,11 @@ fun WebPreviewScreen(
                         keyboardOptions = ForgeFieldKind.URL.keyboardOptions(ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { opened = true; openUrl(urlInput) }),
                         placeholder = { Text(stringResource(R.string.launch_preview_url), color = colors.onSurfaceVariant.copy(alpha = 0.6f)) },
-                        colors = TextFieldDefaults.textFieldColors(
-                            containerColor = Color.Transparent,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            errorContainerColor = Color.Transparent,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
                             disabledIndicatorColor = Color.Transparent,
@@ -796,6 +808,12 @@ fun WebPreviewScreen(
                     webView.setBackgroundColor(webViewBgArgb)
                     webViewRef = webView
                 }
+            },
+            // The view leaves composition when the server stops; destroy it there, not only when the screen closes.
+            onRelease = { view ->
+                if (webViewRef === view) webViewRef = null
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                (view as? WebView)?.let { runCatching { it.stopLoading(); it.destroy() } }
             },
         )
         }

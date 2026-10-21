@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.ripple.rememberRipple
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,10 +55,11 @@ fun ForgeProjectHeader(
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val compact = rememberCompactHeight()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = ForgeSpace.header)
+            .heightIn(min = if (compact) 48.dp else ForgeSpace.header)
             .padding(start = if (onBack != null) 4.dp else ForgeSpace.screen, end = 14.dp, top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -71,7 +72,7 @@ fun ForgeProjectHeader(
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
                 text = title,
-                fontSize = ForgeType.screenTitle,
+                fontSize = if (compact) ForgeType.cardTitle else ForgeType.screenTitle,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = (-0.2).sp,
                 maxLines = 1,
@@ -107,7 +108,7 @@ fun ForgeGlyphPillIcon(
             .forgePressScale(interaction, pressedScale = 0.88f)
             .size(width = 44.dp, height = 38.dp)
             .clip(RoundedCornerShape(100))
-            .clickable(interactionSource = interaction, indication = rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         ForgeIcon(glyph, tint = if (enabled) tint else tint.copy(alpha = 0.38f), description = description)
@@ -135,7 +136,7 @@ fun ForgeListRow(
         modifier = modifier
             .fillMaxWidth()
             .forgePressScale(interaction, pressedScale = 0.985f)
-            .clickable(interactionSource = interaction, indication = rememberRipple(), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = 64.dp)
             .padding(horizontal = ForgeSpace.screen, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -148,7 +149,8 @@ fun ForgeListRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(title, fontSize = ForgeType.rowTitle, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Two lines: on 360dp phones one line cut the descriptions mid-word ("paket bah…").
+                Text(subtitle, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         if (!badge.isNullOrBlank()) {

@@ -33,8 +33,6 @@ data class InstalledRuntime(
     val chrootExec: File,
     val rootfs: File,
 ) {
-    /** Compatibility alias for callers referencing the runtime launcher executable. */
-    val proot: File get() = chrootExec
     val binDir: File get() = chrootExec.parentFile ?: rootfs
 }
 
@@ -55,8 +53,46 @@ data class AgentUpdateInfo(
     val latestVersion: String,
 )
 
+/** The pinned dsh, or a newer one left by a later app build: an older app must not reinstall (downgrade) it. */
 internal fun isSupportedDshVersion(version: String): Boolean =
-    version == RuntimeInstaller.DSH_VERSION
+    version == RuntimeInstaller.DSH_VERSION || isAgentVersionNewer(version, RuntimeInstaller.DSH_VERSION)
+
+/** True when [candidate] is a newer agent version than [current] (numeric parts, then pre-release tags). */
+internal fun isAgentVersionNewer(candidate: String, current: String): Boolean {
+    fun numericParts(value: String) = value.substringBefore('-').substringBefore('+')
+        .split('.')
+        .map { it.toIntOrNull() ?: 0 }
+    val left = numericParts(candidate)
+    val right = numericParts(current)
+    for (index in 0 until maxOf(left.size, right.size)) {
+        val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
+        if (comparison != 0) return comparison > 0
+    }
+    val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+    val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+    if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+        // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+        return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+    }
+    // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+    val candidateIds = candidatePreTag.split('.')
+    val currentIds = currentPreTag.split('.')
+    for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+        val candidateId = candidateIds.getOrNull(index)
+        val currentId = currentIds.getOrNull(index)
+        if (candidateId == null) return false
+        if (currentId == null) return true
+        val candidateNum = candidateId.toIntOrNull()
+        val currentNum = currentId.toIntOrNull()
+        val comparison = if (candidateNum != null && currentNum != null) {
+            candidateNum.compareTo(currentNum)
+        } else {
+            candidateId.compareTo(currentId)
+        }
+        if (comparison != 0) return comparison > 0
+    }
+    return false
+}
 
 enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPLETED, COMPLETED }
 
@@ -657,6 +693,7 @@ class RuntimeInstaller(private val context: Context) {
         }
         val claude = File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/"))
         claude.parentFile?.mkdirs()
+        claude.parentFile?.let { if (!it.canWrite()) RootfsRepair.reclaimOwnership(it, AndroidProcess.myUid(), recursive = false) }
         val staged = File(claude.parentFile, ".claude-$latest.installing")
         try {
             replaceBinaryWithRollback(
@@ -694,6 +731,8 @@ class RuntimeInstaller(private val context: Context) {
             onProgress(RuntimeInstallProgress(agyDownloadLabel, ratio * 0.9f, bytes, total.takeIf { it > 0L }, event = RuntimeInstallEvent.DOWNLOAD))
         }
         val destination = File(rootfs, AGY_GUEST_PATH.removePrefix("/"))
+        destination.parentFile?.mkdirs()
+        destination.parentFile?.let { if (!it.canWrite()) RootfsRepair.reclaimOwnership(it, AndroidProcess.myUid(), recursive = false) }
         var found = false
         try {
           replaceBinaryWithRollback(
@@ -735,10 +774,10 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         check(isSupportedDshVersion(expectedVersion)) {
-            "DeepSeek Harness $expectedVersion is not compatible with this NextCraft Forge build"
+            "DeepSeek $expectedVersion is not compatible with this NextCraft Forge build"
         }
         val quotedVersion = expectedVersion.replace(Regex("[^0-9A-Za-z.+-]"), "")
-        check(quotedVersion == expectedVersion) { "Invalid DeepSeek Harness version" }
+        check(quotedVersion == expectedVersion) { "Invalid DeepSeek version" }
         runGuestCommand(
             chrootExec = runtime.chrootExec,
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
@@ -751,7 +790,7 @@ class RuntimeInstaller(private val context: Context) {
             fraction = 0.55f,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
-            failureMessage = "Failed to update DeepSeek Harness",
+            failureMessage = "Failed to update DeepSeek",
         )
         val staged = File(rootfs, "usr/local/lib/dsh.updating")
         applyDshAndroidCompatibility(staged, expectedVersion)
@@ -761,32 +800,32 @@ class RuntimeInstaller(private val context: Context) {
                 "mv /usr/local/lib/dsh \"${'$'}old\"; " +
                 "if mv /usr/local/lib/dsh.updating /usr/local/lib/dsh; then :; " +
                 "else mv \"${'$'}old\" /usr/local/lib/dsh; exit 1; fi",
-            displayCommand = "Activate DeepSeek Harness $quotedVersion",
+            displayCommand = "Activate DeepSeek $quotedVersion",
             fraction = 0.9f,
             timeoutMs = 60_000L,
             onProgress = onProgress,
-            failureMessage = "Failed to activate DeepSeek Harness update",
+            failureMessage = "Failed to activate DeepSeek update",
         )
         val verified = runCatching {
-            verifyGuest(runtime.chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify updated DeepSeek Harness")
+            verifyGuest(runtime.chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify updated DeepSeek")
         }
         if (verified.isFailure) {
             runCatching {
                 runGuestCommand(
                     chrootExec = runtime.chrootExec,
                     command = "set -e; rm -rf /usr/local/lib/dsh; mv /usr/local/lib/dsh.previous /usr/local/lib/dsh",
-                    displayCommand = "Restore previous DeepSeek Harness",
+                    displayCommand = "Restore previous DeepSeek",
                     fraction = 0.95f,
                     timeoutMs = 60_000L,
                     onProgress = onProgress,
-                    failureMessage = "Failed to restore previous DeepSeek Harness",
+                    failureMessage = "Failed to restore previous DeepSeek",
                 )
             }
             verified.getOrThrow()
         }
         val previous = File(rootfs, "usr/local/lib/dsh.previous")
         if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
-            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek Harness copy")
+            Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek copy")
         }
         dshMarker.writeText(expectedVersion)
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
@@ -796,41 +835,7 @@ class RuntimeInstaller(private val context: Context) {
         fetchText("https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_arm64.json"),
     )
 
-    private fun isVersionNewer(candidate: String, current: String): Boolean {
-        fun numericParts(value: String) = value.substringBefore('-').substringBefore('+')
-            .split('.')
-            .map { it.toIntOrNull() ?: 0 }
-        val left = numericParts(candidate)
-        val right = numericParts(current)
-        for (index in 0 until maxOf(left.size, right.size)) {
-            val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
-            if (comparison != 0) return comparison > 0
-        }
-        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
-        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
-        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
-            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
-            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
-        }
-        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
-        val candidateIds = candidatePreTag.split('.')
-        val currentIds = currentPreTag.split('.')
-        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
-            val candidateId = candidateIds.getOrNull(index)
-            val currentId = currentIds.getOrNull(index)
-            if (candidateId == null) return false
-            if (currentId == null) return true
-            val candidateNum = candidateId.toIntOrNull()
-            val currentNum = currentId.toIntOrNull()
-            val comparison = if (candidateNum != null && currentNum != null) {
-                candidateNum.compareTo(currentNum)
-            } else {
-                candidateId.compareTo(currentId)
-            }
-            if (comparison != 0) return comparison > 0
-        }
-        return false
-    }
+    private fun isVersionNewer(candidate: String, current: String): Boolean = isAgentVersionNewer(candidate, current)
 
     private fun migrateLegacyClaudeMarker() {
         if (claudeMarker.isFile) return
@@ -877,6 +882,7 @@ class RuntimeInstaller(private val context: Context) {
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
+        upgradeAfterBundledInstall(AgentKind.CLAUDE_CODE, onProgress)
     }
 
     private suspend fun ensureAgyInstalled(
@@ -897,6 +903,30 @@ class RuntimeInstaller(private val context: Context) {
         agyMarker.writeText(AGY_VERSION)
         require(isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             "Antigravity CLI installation is incomplete"
+        }
+        upgradeAfterBundledInstall(AgentKind.ANTIGRAVITY, onProgress)
+    }
+
+    /**
+     * The APK bundles a fixed agent version, which can be older than what the user already ran: after a rootfs
+     * rebuild or a reinstall of the app, installing the bundle would silently downgrade the agent. Move it straight
+     * to the newest release instead. Best effort: offline or a failed download keeps the bundled version.
+     */
+    private suspend fun upgradeAfterBundledInstall(
+        agent: AgentKind,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        runCatching {
+            val update = checkAgentUpdates()[agent] ?: return
+            val runtime = installedRuntime()
+            when (agent) {
+                AgentKind.CLAUDE_CODE -> updateClaude(runtime, update.latestVersion, onProgress)
+                AgentKind.ANTIGRAVITY -> updateAgy(runtime, update.latestVersion, onProgress)
+                AgentKind.DEEPSEEK_HARNESS -> Unit
+            }
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            Log.w("RuntimeInstaller", "Kept the bundled ${agent.title}; updating to the latest release failed", error)
         }
     }
 
@@ -924,15 +954,15 @@ class RuntimeInstaller(private val context: Context) {
         try {
             installRuntimeOverlay(
                 bundle = DSH_BUNDLE,
-                message = "Installing DeepSeek Harness $DSH_VERSION…",
+                message = "Installing DeepSeek $DSH_VERSION…",
                 from = fraction,
                 to = 0.995f,
                 onProgress = onProgress,
             )
             ensureDshAndroidCompatibility()
-            verifyGuest(chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify DeepSeek Harness")
+            verifyGuest(chrootExec, "/usr/local/bin/dsh --profile headless --help", "Failed to verify DeepSeek")
             require(isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
-                "The DeepSeek Harness runtime bundle is incomplete"
+                "The DeepSeek runtime bundle is incomplete"
             }
             dshBackup.deleteRecursively()
             dshMarkerBackup.delete()
@@ -964,7 +994,7 @@ class RuntimeInstaller(private val context: Context) {
 
     private fun applyDshAndroidCompatibility(dshRoot: File, version: String) {
         check(isSupportedDshVersion(version)) {
-            "DeepSeek Harness $version is not compatible with this NextCraft Forge build"
+            "DeepSeek $version is not compatible with this NextCraft Forge build"
         }
         val persistence = File(
             dshRoot,
@@ -997,11 +1027,11 @@ class RuntimeInstaller(private val context: Context) {
         callBefore: String,
         callAfter: String,
     ) {
-        check(file.isFile) { "DeepSeek Harness compatibility file is missing: ${file.name}" }
+        check(file.isFile) { "DeepSeek compatibility file is missing: ${file.name}" }
         var source = file.readText()
         if (callAfter in source && importAfter in source) return
         check(callBefore in source && importBefore in source) {
-            "Installed DeepSeek Harness source is not compatible with this NextCraft Forge build"
+            "Installed DeepSeek source is not compatible with this NextCraft Forge build"
         }
         source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
         val staging = File(file.parentFile, "${file.name}.tmp")
@@ -1066,6 +1096,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun removePythonStack() {
+        val dpkgOwned = dpkgOwnedPaths()
         // The overlay is unmanaged by dpkg, so it is removed by path. Covers the current Ubuntu 24.04 bundle
         // (Python 3.12) and the legacy 20.04 bundle (Python 3.8). Shared libraries the overlay also ships
         // (libsqlite3, libreadline, libhistory) and tzdata files are left in place: other tools may use them.
@@ -1102,8 +1133,17 @@ class RuntimeInstaller(private val context: Context) {
             "usr/share/python3",
             "usr/share/python-wheels",
             "root/.cache/pip",
-        ).forEach { removePath(File(rootfs, it)) }
+        )
+            // gdb (C/C++ stack) pulls in dpkg's libpython3.12 at these same paths; deleting them breaks gdb and
+            // leaves dpkg believing the packages are installed. Only remove what dpkg does not own.
+            .filterNot { "/$it" in dpkgOwned }
+            .forEach { removePath(File(rootfs, it)) }
     }
+
+    private fun dpkgOwnedPaths(): Set<String> = runCatching {
+        File(rootfs, "var/lib/dpkg/info").listFiles { f -> f.name.endsWith(".list") }.orEmpty()
+            .flatMapTo(HashSet()) { it.readLines() }
+    }.getOrDefault(emptySet())
 
     /** Removes the current overlay layout and every previous one, so an upgrade does not leave an old JDK behind. */
     private fun removeAndroidStack() {
@@ -1125,7 +1165,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun removePath(file: File) {
         val isLink = java.nio.file.Files.isSymbolicLink(file.toPath())
         if (!file.exists() && !isLink) return
-        val removed = if (file.isDirectory && !isLink) file.deleteRecursively() else file.delete()
+        val removed = if (file.isDirectory && !isLink) file.deleteRecursivelyNoFollow() else file.delete()
         // Caches and packages created inside the chroot (Gradle, pip, Composer) are root-owned, so the app UID
         // cannot delete them; fall back to a root rm, which first checks that nothing is mounted below the path.
         if (!removed) {
@@ -1291,7 +1331,8 @@ class RuntimeInstaller(private val context: Context) {
             extractZstdTar(archive, rootfs) { done, total ->
                 onProgress(unpackProgress(message, to * 0.8f + from * 0.2f, to, done, total))
             }
-            stripMacosMetadataArtifacts(rootfs)
+            // The rootfs may be mounted by a running session: never walk into /proc, /dev or a project bind.
+            stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         } finally {
             if (archive.parentFile == downloads) archive.delete()
         }
@@ -1400,6 +1441,12 @@ class RuntimeInstaller(private val context: Context) {
         script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
     }
 
+    private fun deviceTotalMemoryMb(): Long {
+        val info = android.app.ActivityManager.MemoryInfo()
+        context.getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(info)
+        return if (info.totalMem > 0) info.totalMem / (1024 * 1024) else 4096L
+    }
+
     @Synchronized
     private fun writeAndroidGradleConfiguration(runtimeRootfs: File) {
         val aapt2 = File(runtimeRootfs, ANDROID_AAPT2_HOST_PATH)
@@ -1411,7 +1458,7 @@ class RuntimeInstaller(private val context: Context) {
         val existingLines = properties.readTextOrNull()?.lineSequence()?.toList().orEmpty()
         val managedLines = listOf(
             "$ANDROID_AAPT2_PROPERTY=$ANDROID_AAPT2_GUEST_PATH",
-            "$GRADLE_JVMARGS_PROPERTY=-Xmx512m -XX:MaxMetaspaceSize=256m -Dfile.encoding=UTF-8",
+            "$GRADLE_JVMARGS_PROPERTY=${gradleJvmArgs(deviceTotalMemoryMb())}",
             "$GRADLE_WORKERS_PROPERTY=2",
             "$GRADLE_PARALLEL_PROPERTY=false",
             "$KOTLIN_EXECUTION_PROPERTY=in-process",
@@ -1452,7 +1499,8 @@ class RuntimeInstaller(private val context: Context) {
 
     private fun guestExecutableOrSymlinkExists(relativePath: String): Boolean {
         val file = File(rootfs, relativePath.removePrefix("/"))
-        return file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())
+        // lstat first: following a toolchain symlink (gcc, php) from the app is denied by SELinux and logs an AVC.
+        return java.nio.file.Files.isSymbolicLink(file.toPath()) || file.exists()
     }
 
     fun isStackInstalled(stack: DevStack): Boolean {
@@ -1951,6 +1999,7 @@ class RuntimeInstaller(private val context: Context) {
         ) { "Invalid project workspace path" }
         ensureChrootScripts()
         writeResolver()
+        ensureShellPrompt()
         workspace.mkdirs()
         File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         writeAndroidGradleConfiguration(targetRootfs)
@@ -2044,7 +2093,9 @@ class RuntimeInstaller(private val context: Context) {
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
-ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
+# Parallel chats share this directory: the session id (set by the app) tags the request so only its owner answers it.
+SID="${'$'}{NEXTCRAFT_SESSION_ID:-}"
+ID="${'$'}{SID:+${'$'}{SID}_}${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
 if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
     i=0
@@ -2190,6 +2241,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             // Set the mode before the rename so the file is never visible without its execute bit.
             if (mode != null) Os.chmod(temp.absolutePath, mode)
             Os.rename(temp.absolutePath, target.absolutePath)
+        } catch (error: java.io.IOException) {
+            // EACCES: the folder or file belongs to root (or carries a label the app may not write). Let root write it.
+            val written = RootfsRepair.writeAsRoot(
+                target, content.toByteArray(Charsets.UTF_8), File(downloads, ".root-write.tmp"), AndroidProcess.myUid(),
+                mode ?: 0b110100100,
+            )
+            if (!written) throw error
         } finally {
             temp.delete()
         }
@@ -2208,7 +2266,35 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
     }
 
+    /**
+     * dpkg (any `apt install` inside the chroot) re-applies base-files' mode 0700 root:root to /root, and files that
+     * root creates there stay root's. The app UID is then locked out of /root and below: the version markers cannot be
+     * read (REA shows "not installed"), `.claude` cannot be written, `agy` cannot be replaced. Folders are handed back
+     * to the app UID (not recursively: root still reaches everything, and the per-file fallbacks cover the rest).
+     */
+    internal fun ensureAppAccess() {
+        val uid = AndroidProcess.myUid()
+        for (relative in listOf("root", "root/.claude", "root/.local", "root/.local/bin", "etc")) {
+            val dir = File(rootfs, relative)
+            if (dir.isDirectory && (!dir.canWrite() || !dir.canExecute())) {
+                RootfsRepair.reclaimOwnership(dir, uid, recursive = false)
+            }
+        }
+    }
+
+    /** Keeps the coloured prompt block in /root/.bashrc ([ShellPrompt]); an unreadable file is left alone. */
+    private fun ensureShellPrompt() {
+        val bashrc = File(rootfs, "root/.bashrc")
+        val current = runCatching { if (bashrc.isFile) bashrc.readText() else "" }.getOrNull() ?: return
+        val updated = ShellPrompt.apply(current)
+        if (updated != current) {
+            runCatching { writeRootfsFileAtomically(bashrc, updated, mode = 0b110100100) }
+                .onFailure { Log.w("RuntimeInstaller", "Could not write the shell prompt", it) }
+        }
+    }
+
     private fun writeResolver() {
+        ensureAppAccess()
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val dns = manager?.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
         val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
@@ -2217,7 +2303,17 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) {
             resolvFile.delete()
         }
-        resolvFile.writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        val resolver = servers.joinToString("\n") { "nameserver $it" } + "\n"
+        try {
+            // A link that survived the delete above (not ours to unlink) would send the write into /run, which is root's.
+            if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) throw java.io.IOException("resolv.conf is still a symlink")
+            resolvFile.writeText(resolver)
+        } catch (error: java.io.IOException) {
+            // /etc/resolv.conf is root-owned after the chroot supervisor (running as root) created it.
+            if (!RootfsRepair.writeAsRoot(resolvFile, resolver.toByteArray(Charsets.UTF_8), File(downloads, ".root-write.tmp"), AndroidProcess.myUid())) {
+                throw error
+            }
+        }
         ensureLocalhostInHosts()
     }
 
@@ -2287,6 +2383,25 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Opens [target] for writing during an unpack. An earlier unpack may have left a read-only file (mode 0555) or root
+     * rewrote it, which made the app UID's open fail with EACCES (Antigravity install stopped at 80%). A leftover is
+     * replaced; if the folder itself is root's it is reclaimed first.
+     */
+    private fun openForWrite(target: File): FileOutputStream {
+        try {
+            return FileOutputStream(target)
+        } catch (first: java.io.IOException) {
+            val parent = target.parentFile
+            if (parent != null && !parent.canWrite()) RootfsRepair.reclaimOwnership(parent, AndroidProcess.myUid(), recursive = false)
+            if (target.exists() && !target.canWrite() && !target.delete()) {
+                RootfsRepair.reclaimOwnership(target, AndroidProcess.myUid(), recursive = false)
+                target.delete()
+            }
+            return FileOutputStream(target)
         }
     }
 
@@ -2369,7 +2484,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                         currentEntry.isFile -> {
                             target.parentFile?.mkdirs()
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-                            FileOutputStream(target).use { output -> tar.copyTo(output) }
+                            openForWrite(target).use { output -> tar.copyTo(output) }
                             runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }
                         }
                     }
@@ -2614,8 +2729,18 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        /**
+         * Gradle JVM options for builds inside the chroot, sized to the device. A fixed 512 MB heap / 256 MB metaspace
+         * made Android builds die with OutOfMemoryError (Metaspace) or get killed (exit 137): about an eighth of RAM
+         * for the heap (768 MB to 2 GB, in 128 MB steps) and 512 MB of metaspace.
+         */
+        internal fun gradleJvmArgs(totalMemoryMb: Long): String {
+            val heapMb = ((totalMemoryMb / 8).coerceIn(768L, 2048L) / 128) * 128
+            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+        }
+
         /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
-        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard")
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
@@ -2737,7 +2862,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
-            label = "DeepSeek Harness",
+            label = "DeepSeek",
             fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
             sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
             compressedBytes = 28_066_921L,
@@ -2831,9 +2956,22 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 awk -v prefix="${'$'}1/" 'index(${'$'}2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
             }
 
+            # On failure MAKE_SLAVE_ERR holds what each attempt printed, so the warning below can say why.
             make_slave() {
-                mount --make-rslave "${'$'}1" 2>/dev/null || mount -o rslave "${'$'}1" 2>/dev/null ||
-                    mount --make-slave "${'$'}1" 2>/dev/null || mount -o slave "${'$'}1" 2>/dev/null
+                local e1 e2 e3 e4
+                e1=$(mount --make-rslave "${'$'}1" 2>&1) && return 0
+                e2=$(mount -o rslave "${'$'}1" 2>&1) && return 0
+                e3=$(mount --make-slave "${'$'}1" 2>&1) && return 0
+                e4=$(mount -o slave "${'$'}1" 2>&1) && return 0
+                # Android's toybox mount reads "--make-rslave DIR" as "mount DIR" (fstab lookup), so also try a busybox mount.
+                local bb eb
+                for bb in busybox /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
+                    command -v "${'$'}bb" >/dev/null 2>&1 || continue
+                    "${'$'}bb" mount --make-rslave "${'$'}1" >/dev/null 2>&1 && return 0
+                    eb="${'$'}eb | ${'$'}bb: ${'$'}("${'$'}bb" mount --make-rslave "${'$'}1" 2>&1)"
+                done
+                MAKE_SLAVE_ERR="--make-rslave: ${'$'}e1 | -o rslave: ${'$'}e2 | --make-slave: ${'$'}e3 | -o slave: ${'$'}e4${'$'}eb"
+                return 1
             }
 
             mount_bionic() {
@@ -2847,7 +2985,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 is_mounted "${'$'}dst" && return 0
                 mount -o bind "${'$'}src" "${'$'}dst" || return 1
                 if ! make_slave "${'$'}dst"; then
-                    echo "Warning: mount propagation cannot be changed; ${'$'}dst is bound without its submounts" >&2
+                    echo "Warning: mount propagation cannot be changed; ${'$'}dst is bound without its submounts (${'$'}{MAKE_SLAVE_ERR:-no error output})" >&2
                     mount -o remount,bind,ro "${'$'}dst" 2>/dev/null || true
                     return 0
                 fi
@@ -2883,6 +3021,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     printf '%s' "${'$'}src" > "${'$'}state_file"
                 fi
             }
+
+            # Two launches at once (an agent plus a diagnostic) would both see a mount point as free and stack the
+            # mounts; the second /apex then has no modules. Serialize the mount phase; fd 9 is closed before the chroot.
+            exec 9>"${'$'}ROOTFS/.nextcraft-mount.lock"
+            flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true
 
             # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
             if ! is_mounted "${'$'}ROOTFS"; then
@@ -2991,10 +3134,34 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             child_status=0
             exec 3<&0
             forward_signal() {
-                kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+                if [ -n "${'$'}SETSID" ]; then
+                    kill "-${'$'}1" -- "-${'$'}child" 2>/dev/null || true
+                else
+                    kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+                fi
             }
 
-            ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
+            # Non-interactive runs (agents, builds) get their own session, so every process they spawn shares one process group
+            # that can be ended with the command. Interactive terminals keep the controlling tty and are left alone.
+            SETSID=""
+            if [ ! -t 0 ] && command -v setsid >/dev/null 2>&1; then
+                SETSID="setsid"
+            fi
+
+            # Ends whatever the command left behind (a dev server, a watcher, a daemonised helper): TERM, a short grace period, KILL.
+            reap_group() {
+                [ -n "${'$'}SETSID" ] || return 0
+                kill -s TERM -- "-${'$'}child" 2>/dev/null || return 0
+                local i=0
+                while [ "${'$'}i" -lt 10 ] && kill -0 -- "-${'$'}child" 2>/dev/null; do
+                    sleep 0.2
+                    i=${'$'}((i + 1))
+                done
+                kill -s KILL -- "-${'$'}child" 2>/dev/null || true
+            }
+
+            exec 9>&-
+            ${'$'}SETSID ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
                 GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
                 /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &
             child=${'$'}!
@@ -3007,6 +3174,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 wait "${'$'}child" || child_status=${'$'}?
                 kill -0 "${'$'}child" 2>/dev/null || break
             done
+            reap_group
             exit "${'$'}child_status"
         """.trimIndent() + "\n"
 

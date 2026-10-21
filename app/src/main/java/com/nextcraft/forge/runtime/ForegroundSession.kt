@@ -23,9 +23,12 @@ internal class ForegroundSession(
     @Volatile private var startedAt = 0L
     @Volatile private var lastProgressAt = 0L
     @Volatile private var resultPosted = false
+    /** True while this session holds one of the shared foreground-notification slots. */
+    @Volatile private var counted = false
 
     /** Marks the start of a turn: resets the timer, the progress throttle and the posted-result guard. */
     fun begin() {
+        releaseSlot()
         startedAt = SystemClock.elapsedRealtime()
         lastProgressAt = 0L
         resultPosted = false
@@ -37,6 +40,11 @@ internal class ForegroundSession(
     }
 
     fun start(projectName: String) {
+        // Several chats can run at once; the notification must outlive all of them, not just the first to finish.
+        if (!counted) {
+            counted = true
+            runningSessions.incrementAndGet()
+        }
         RuntimeExecutionServiceContract.startForeground(context, projectName)
     }
 
@@ -53,16 +61,35 @@ internal class ForegroundSession(
     fun finish(completed: Boolean, projectName: String, detail: String) {
         if (resultPosted) return
         resultPosted = true
+        if (releaseSlot() > 0) return
         RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, tag)
+    }
+
+    /** Same as [finish] for a fixed phrase: the service words [detailRes] in the app language. */
+    fun finishRes(completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, vararg args: String) {
+        if (resultPosted) return
+        resultPosted = true
+        RuntimeExecutionServiceContract.finishForegroundRes(context, completed, projectName, detailRes, arrayOf(*args), tag)
     }
 
     fun cancel() {
         if (resultPosted) return
         resultPosted = true
+        if (releaseSlot() > 0) return
         RuntimeExecutionServiceContract.cancelForeground(context)
+    }
+
+    /** Gives back this session's slot (once) and returns how many other sessions still hold one. */
+    private fun releaseSlot(): Int {
+        if (counted) {
+            counted = false
+            return runningSessions.decrementAndGet().coerceAtLeast(0)
+        }
+        return runningSessions.get()
     }
 
     private companion object {
         const val PROGRESS_MIN_INTERVAL_MS = 750L
+        val runningSessions = java.util.concurrent.atomic.AtomicInteger(0)
     }
 }

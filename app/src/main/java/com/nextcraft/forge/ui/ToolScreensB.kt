@@ -98,6 +98,30 @@ fun BuildMatrixScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 )
             }
         }
+        // Cross-builds (Windows, Linux x86_64, iOS): install the missing compilers, or prepare the macOS CI workflow.
+        if (matrix.installCommand != null || matrix.iosProject != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                if (matrix.installCommand != null) {
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel.buildMatrix::installCrossTools,
+                        enabled = !matrix.running && !blocked,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.tool_install_cross_tools)) }
+                }
+                if (matrix.iosProject != null) {
+                    OutlinedButton(
+                        shape = RoundedCornerShape(100),
+                        onClick = viewModel.buildMatrix::createIosWorkflow,
+                        enabled = !matrix.running,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.tool_create_ios_workflow)) }
+                }
+            }
+            if (matrix.iosProject != null) {
+                Text(stringResource(R.string.tool_ios_needs_macos), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
+            }
+        }
         if (matrix.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         LogBox(text = matrix.log, placeholder = stringResource(R.string.tool_log_placeholder))
     }
@@ -210,7 +234,7 @@ fun SshScreen(viewModel: MainViewModel) {
                     ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Next, value = host, onValueChange = { host = it }, label = { Text(stringResource(R.string.tool_ssh_host)) }, modifier = Modifier.fillMaxWidth())
                     ForgeTextField(kind = ForgeFieldKind.NUMBER, imeAction = ImeAction.Next, error = port.takeIf { it.isNotBlank() && !FieldValidation.isPort(it) }?.let { stringResource(R.string.field_error_port) }, value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text(stringResource(R.string.tool_ssh_port)) }, modifier = Modifier.fillMaxWidth())
                     ForgeTextField(kind = ForgeFieldKind.IDENTIFIER, imeAction = ImeAction.Done, value = forward, onValueChange = { forward = it }, label = { Text(stringResource(R.string.tool_ssh_forward)) }, modifier = Modifier.fillMaxWidth())
-                    error?.let { Text(it, fontSize = ForgeType.secondary, color = scheme.error) }
+                    error?.let { Text(messageText(it), fontSize = ForgeType.secondary, color = scheme.error) }
                 }
             },
             confirmButton = {
@@ -254,7 +278,7 @@ fun CiCdScreen(viewModel: MainViewModel) {
         onBack = { viewModel.selectTab(ForgeTab.TOOLS) },
     ) {
         if (ci.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        ci.message?.let { Text(it, fontSize = ForgeType.control, color = scheme.onSurfaceVariant) }
+        ci.message?.let { Text(it.asString(), fontSize = ForgeType.control, color = scheme.onSurfaceVariant) }
         OutlinedButton(shape = RoundedCornerShape(100), onClick = viewModel.cicd::refresh, enabled = !ci.loading, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.tool_refresh))
         }

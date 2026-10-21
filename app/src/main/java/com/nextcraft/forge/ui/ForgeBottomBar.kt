@@ -144,7 +144,7 @@ internal val fullWidthTabs = setOf(ForgeTab.TERMINAL, ForgeTab.FILES, ForgeTab.P
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
 private val toolsGroup = setOf(
     ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
-    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS, ForgeTab.CODE_VIEWER, ForgeTab.REA,
 )
 
 private fun ForgeTab.navIndex(): Int {
@@ -185,27 +185,31 @@ internal fun ForgeBottomBar(
     val pillEdge = scheme.primary.copy(alpha = 0.30f)
     val pillShape = RoundedCornerShape(if (floating) 100 else 22)
 
+    // Glass on Android 12+: the bar blurs and refracts the screen behind it; otherwise the translucent surface below.
+    val backdrop = LocalForgeBackdrop.current.takeIf { floating }
     Surface(
         shape = shape,
-        color = tokens.bottomBarContainerColor,
+        color = if (backdrop != null) Color.Transparent else tokens.bottomBarContainerColor,
         contentColor = scheme.onSurface,
         border = if (floating) tokens.cardBorderStroke else null,
         shadowElevation = if (floating) 12.dp else 0.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(outerPadding),
+            .padding(outerPadding)
+            .forgeGlassSurface(backdrop, tokens.bottomBarContainerColor),
     ) {
         Column(modifier = Modifier.navigationBarsPadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
             // Taller with larger system text, and labels stop scaling at 1.3x (five tabs share the width).
             val density = LocalDensity.current
             val navFontScale = density.fontScale.coerceAtMost(NAV_MAX_FONT_SCALE)
-            val barHeight = 72.dp + 16.dp * (navFontScale - 1f).coerceAtLeast(0f)
+            val compactHeight = rememberCompactHeight()
+            val barHeight = (if (compactHeight) 60.dp else 72.dp) + 16.dp * (navFontScale - 1f).coerceAtLeast(0f)
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(barHeight)
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                    .padding(horizontal = 6.dp, vertical = if (compactHeight) 2.dp else 6.dp),
             ) {
                 val slot = maxWidth / entries.size
                 val pillInset = if (entries.size >= 5) 2.dp else 6.dp
@@ -307,7 +311,7 @@ internal fun ForgeBottomBar(
                             CompositionLocalProvider(LocalDensity provides Density(density.density, navFontScale)) {
                                 Text(
                                     text = label,
-                                    fontSize = ForgeType.caption,
+                                    fontSize = if (slot < 76.dp) ForgeType.navCompact else ForgeType.caption,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                     color = tint,
                                     maxLines = 1,

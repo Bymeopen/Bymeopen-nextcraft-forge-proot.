@@ -419,7 +419,7 @@ internal class LocalFormatGateway(
             return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for localhost")
         }
         val currentKey = activeApiKey
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add)
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add).apply { instanceFollowRedirects = false }
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
@@ -486,7 +486,7 @@ internal class LocalFormatGateway(
         }
         val body = toOpenAi(anthropic).put("stream", true)
         val currentKey = activeApiKey
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add)
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add).apply { instanceFollowRedirects = false }
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000

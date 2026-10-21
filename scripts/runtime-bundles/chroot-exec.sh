@@ -68,9 +68,22 @@ has_submounts() {
     awk -v prefix="$1/" 'index($2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
 }
 
+# On failure MAKE_SLAVE_ERR holds what each attempt printed, so the warning below can say why.
 make_slave() {
-    mount --make-rslave "$1" 2>/dev/null || mount -o rslave "$1" 2>/dev/null ||
-        mount --make-slave "$1" 2>/dev/null || mount -o slave "$1" 2>/dev/null
+    local e1 e2 e3 e4
+    e1=$(mount --make-rslave "$1" 2>&1) && return 0
+    e2=$(mount -o rslave "$1" 2>&1) && return 0
+    e3=$(mount --make-slave "$1" 2>&1) && return 0
+    e4=$(mount -o slave "$1" 2>&1) && return 0
+    # Android's toybox mount reads "--make-rslave DIR" as "mount DIR" (fstab lookup), so also try a busybox mount.
+    local bb eb
+    for bb in busybox /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
+        command -v "$bb" >/dev/null 2>&1 || continue
+        "$bb" mount --make-rslave "$1" >/dev/null 2>&1 && return 0
+        eb="$eb | $bb: $("$bb" mount --make-rslave "$1" 2>&1)"
+    done
+    MAKE_SLAVE_ERR="--make-rslave: $e1 | -o rslave: $e2 | --make-slave: $e3 | -o slave: $e4$eb"
+    return 1
 }
 
 mount_bionic() {
@@ -84,7 +97,7 @@ mount_bionic() {
     is_mounted "$dst" && return 0
     mount -o bind "$src" "$dst" || return 1
     if ! make_slave "$dst"; then
-        echo "Warning: mount propagation cannot be changed; $dst is bound without its submounts" >&2
+        echo "Warning: mount propagation cannot be changed; $dst is bound without its submounts (${MAKE_SLAVE_ERR:-no error output})" >&2
         mount -o remount,bind,ro "$dst" 2>/dev/null || true
         return 0
     fi
@@ -120,6 +133,11 @@ mount_dynamic_bind() {
         printf '%s' "$src" > "$state_file"
     fi
 }
+
+# Two launches at once (an agent plus a diagnostic) would both see a mount point as free and stack the
+# mounts; the second /apex then has no modules. Serialize the mount phase; fd 9 is closed before the chroot.
+exec 9>"$ROOTFS/.nextcraft-mount.lock"
+flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true
 
 # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
 if ! is_mounted "$ROOTFS"; then
@@ -228,10 +246,34 @@ fi
 child_status=0
 exec 3<&0
 forward_signal() {
-    kill "-$1" "$child" 2>/dev/null || true
+    if [ -n "$SETSID" ]; then
+        kill "-$1" -- "-$child" 2>/dev/null || true
+    else
+        kill "-$1" "$child" 2>/dev/null || true
+    fi
 }
 
-$CHROOT_BIN "$ROOTFS" /usr/bin/env \
+# Non-interactive runs (agents, builds) get their own session, so every process they spawn shares one process group
+# that can be ended with the command. Interactive terminals keep the controlling tty and are left alone.
+SETSID=""
+if [ ! -t 0 ] && command -v setsid >/dev/null 2>&1; then
+    SETSID="setsid"
+fi
+
+# Ends whatever the command left behind (a dev server, a watcher, a daemonised helper): TERM, a short grace period, KILL.
+reap_group() {
+    [ -n "$SETSID" ] || return 0
+    kill -s TERM -- "-$child" 2>/dev/null || return 0
+    local i=0
+    while [ "$i" -lt 10 ] && kill -0 -- "-$child" 2>/dev/null; do
+        sleep 0.2
+        i=$((i + 1))
+    done
+    kill -s KILL -- "-$child" 2>/dev/null || true
+}
+
+exec 9>&-
+$SETSID $CHROOT_BIN "$ROOTFS" /usr/bin/env \
     GUEST_WORKSPACE="$GUEST_WORKSPACE" \
     /bin/sh -c 'cd "$GUEST_WORKSPACE" && exec "$@"' -- "$@" <&3 3<&- &
 child=$!
@@ -244,4 +286,5 @@ while :; do
     wait "$child" || child_status=$?
     kill -0 "$child" 2>/dev/null || break
 done
+reap_group
 exit "$child_status"

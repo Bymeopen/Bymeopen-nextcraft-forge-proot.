@@ -100,6 +100,8 @@ fun AgentConfigScreen(
             trailing = {
                 AgentStatusPill(
                     when {
+                        // A connection test means nothing before the agent is installed.
+                        state.agentKind !in state.installedAgents -> AgentStatus.NOT_INSTALLED
                         statusText.startsWith("✓") -> AgentStatus.ONLINE
                         statusText.startsWith("✕") -> AgentStatus.FAILED
                         else -> AgentStatus.NOT_TESTED
@@ -196,7 +198,7 @@ fun AgentConfigScreen(
                 AgentDisclosureRow(
                     icon = ForgeGlyph.INFO,
                     title = stringResource(R.string.settings_endpoint_protocol),
-                    subtitle = state.providerProfile.baseUrl.ifBlank { provider.displaySubtitle() },
+                    subtitle = state.providerProfile.baseUrl.ifBlank { stringResource(R.string.settings_endpoint_default) },
                     expanded = endpointOpen,
                     onToggle = { endpointOpen = !endpointOpen },
                 ) {
@@ -236,83 +238,10 @@ fun AgentConfigScreen(
                 }
             }
 
-            // Claude subscription: sign in through Claude Code's own login (account, SSO or Console) instead of pasting a
-            // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
-            if (agent == AgentKind.CLAUDE_CODE) {
-                ClaudeAccountCard(viewModel)
-            }
-
-            // Model & access: a heading with Discover, then the model row and the credentials row.
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp)) {
-                Text(
-                    text = stringResource(R.string.settings_model_access),
-                    fontSize = ForgeType.screenTitle,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
-                    Text(stringResource(R.string.settings_discover_models))
-                }
-            }
-            if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (statusText.isNotBlank()) {
-                Text(text = statusText, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp))
-            }
-            var modelOpen by rememberSaveable(agent) { mutableStateOf(false) }
-            var credentialsOpen by rememberSaveable(agent) { mutableStateOf(false) }
-            val activeKey = state.savedApiKeys.firstOrNull { it.isActive }
-            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                AgentDisclosureRow(
-                    icon = ForgeGlyph.SPARK,
-                    title = stringResource(R.string.agent_ai_model),
-                    subtitle = state.providerProfile.model.ifBlank { "default" },
-                    expanded = modelOpen,
-                    onToggle = { modelOpen = !modelOpen },
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
-                                Text(
-                                    text = state.providerProfile.model.ifBlank { "default" },
-                                    fontSize = ForgeType.cardTitle,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
-                                Text(stringResource(R.string.settings_choose_model))
-                            }
-                        }
-                        if (state.discoveredModels.isNotEmpty()) {
-                            Text(
-                                text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
-                                fontSize = ForgeType.secondary,
-                                fontWeight = FontWeight.Medium,
-                                color = scheme.onSurfaceVariant,
-                            )
-                            state.discoveredModels.take(30).forEach { m ->
-                                RadioRow(
-                                    title = m.displayName,
-                                    subtitle = m.id,
-                                    mono = true,
-                                    selected = m.id == state.providerProfile.model,
-                                    onClick = {
-                                        modelInput = m.id
-                                        viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
-                                    },
-                                    horizontalPadding = 0.dp,
-                                )
-                            }
-                        }
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::validateProviderConnection,
-                            enabled = !state.apiBusy,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                        ) { Text(stringResource(R.string.settings_validate)) }
-                    }
-                }
-                ThinDivider()
+            // Credentials (saved API keys): inside the Claude account card for Claude Code, in its own card for the others.
+            val credentialsRow: @Composable () -> Unit = {
+                val activeKey = state.savedApiKeys.firstOrNull { it.isActive }
+                var credentialsOpen by rememberSaveable(agent) { mutableStateOf(false) }
                 AgentDisclosureRow(
                     icon = ForgeGlyph.LOCK,
                     title = stringResource(R.string.agent_credentials),
@@ -322,7 +251,9 @@ fun AgentConfigScreen(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
+                            // Claude sign-in needs no key, so the form is a backup, not a requirement.
+                            text = if (provider == ProviderKind.CLAUDE) stringResource(R.string.settings_api_keys_optional)
+                            else stringResource(R.string.settings_api_keys_for_auto, provider.displayTitle()),
                             fontSize = ForgeType.rowTitle,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -356,7 +287,7 @@ fun AgentConfigScreen(
                             value = keyLabelInput,
                             onValueChange = { keyLabelInput = it },
                             label = { Text(stringResource(R.string.settings_label)) },
-                            placeholder = { Text("Primary") },
+                            placeholder = { Text(stringResource(R.string.settings_key_label_hint)) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         ForgeTextField(
@@ -380,6 +311,121 @@ fun AgentConfigScreen(
                         )
                     }
                 }
+            }
+
+            // Claude subscription: sign in through Claude Code's own login (account, SSO or Console) instead of pasting a
+            // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
+            if (agent == AgentKind.CLAUDE_CODE) {
+                // Model and credentials are part of how Claude is signed in, so they live inside the account card.
+                ClaudeAccountCard(viewModel) {
+                    ThinDivider()
+                    ClaudeIntelligenceCard(state = state, viewModel = viewModel, onOpenModelPicker = { showModelPicker = true }, embedded = true)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.settings_model_access),
+                            fontSize = ForgeType.rowTitle,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
+                            Text(stringResource(R.string.settings_discover_models))
+                        }
+                    }
+                    if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    credentialsRow()
+                }
+            }
+
+            // Model & access for the other agents (Claude Code has both inside its account card above).
+            if (agent != AgentKind.CLAUDE_CODE) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp)) {
+                Text(
+                    text = stringResource(R.string.settings_model_access),
+                    fontSize = ForgeType.screenTitle,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeTextButton(onClick = viewModel::discoverProviderModels, enabled = !state.apiBusy) {
+                    Text(stringResource(R.string.settings_discover_models))
+                }
+            }
+            if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            var modelOpen by rememberSaveable(agent) { mutableStateOf(false) }
+            ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
+                // Claude Code picks its model in the "active intelligence" card above; this row is for the other agents.
+                if (agent != AgentKind.CLAUDE_CODE) {
+                    AgentDisclosureRow(
+                        icon = ForgeGlyph.SPARK,
+                        title = stringResource(R.string.agent_ai_model),
+                        subtitle = state.providerProfile.model.ifBlank { "default" },
+                        expanded = modelOpen,
+                        onToggle = { modelOpen = !modelOpen },
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                                    Text(
+                                        text = state.providerProfile.model.ifBlank { "default" },
+                                        fontSize = ForgeType.cardTitle,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
+                                    Text(stringResource(R.string.settings_choose_model))
+                                }
+                            }
+                            if (state.discoveredModels.isNotEmpty()) {
+                                Text(
+                                    text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
+                                    fontSize = ForgeType.secondary,
+                                    fontWeight = FontWeight.Medium,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                                state.discoveredModels.take(30).forEach { m ->
+                                    RadioRow(
+                                        title = m.displayName,
+                                        subtitle = m.id,
+                                        mono = true,
+                                        selected = m.id == state.providerProfile.model,
+                                        onClick = {
+                                            modelInput = m.id
+                                            viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
+                                        },
+                                        horizontalPadding = 0.dp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    ThinDivider()
+                }
+                credentialsRow()
+            }
+            }
+            // Same connection test as Antigravity: one button under the card, result coloured below it.
+            OutlinedButton(
+                shape = RoundedCornerShape(100),
+                onClick = viewModel::validateProviderConnection,
+                enabled = !state.apiBusy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            ) {
+                ForgeIcon(glyph = ForgeGlyph.REFRESH, tint = scheme.primary, size = 18.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.agent_test_connection))
+            }
+            if (statusText.isNotBlank()) {
+                val themeTokens = LocalForgeThemeTokens.current
+                Text(
+                    text = statusText,
+                    fontSize = ForgeType.secondary,
+                    color = when {
+                        statusText.startsWith("✓") -> themeTokens.successText
+                        statusText.startsWith("✕") -> themeTokens.dangerText
+                        else -> scheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
             }
             if (showModelPicker) {
                 ModelPickerDialog(
@@ -419,8 +465,10 @@ fun AgentConfigScreen(
                                     Text(stringResource(R.string.settings_agent_update, info.latestVersion))
                                 }
                             }
-                            ForgeTextButton(onClick = { viewModel.removeAgent(kind) }, enabled = !runtimeBusy) {
-                                Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                            UninstallConfirmed(name = kind.displayTitle(), onConfirm = { viewModel.removeAgent(kind) }) { ask ->
+                                ForgeTextButton(onClick = ask, enabled = !runtimeBusy) {
+                                    Text(stringResource(R.string.settings_agent_remove), color = tokens.dangerText)
+                                }
                             }
                         }
                     }
@@ -430,7 +478,8 @@ fun AgentConfigScreen(
                         enabled = !state.checkingAgentUpdates,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     ) { Text(stringResource(R.string.settings_agent_check_updates)) }
-                    SetupProgress(state, SetupScope.AGENT)
+                    // The "not installed" card above already shows this progress; showing it twice looked like two installs.
+                    if (agentInstalled) SetupProgress(state, SetupScope.AGENT)
                 }
             }
         }
@@ -445,7 +494,7 @@ fun AgentConfigScreen(
     }
 }
 
-private enum class AgentStatus { ONLINE, NOT_TESTED, FAILED }
+private enum class AgentStatus { ONLINE, NOT_TESTED, FAILED, NOT_INSTALLED }
 
 /** Connection state chip at the end of the screen header: Online after a passing test, Failed after a failing one. */
 @Composable
@@ -456,12 +505,13 @@ private fun AgentStatusPill(status: AgentStatus) {
         AgentStatus.ONLINE -> stringResource(R.string.agent_status_online) to tokens.successText
         AgentStatus.FAILED -> stringResource(R.string.agent_status_failed) to tokens.dangerText
         AgentStatus.NOT_TESTED -> stringResource(R.string.agent_status_not_tested) to scheme.onSurfaceVariant
+        AgentStatus.NOT_INSTALLED -> stringResource(R.string.agent_status_not_installed) to scheme.onSurfaceVariant
     }
     Surface(shape = RoundedCornerShape(100), color = tokens.cardElevatedColor, border = tokens.cardBorderStroke) {
         Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(dot))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(label, fontSize = ForgeType.secondary, fontWeight = FontWeight.Medium, color = if (status == AgentStatus.NOT_TESTED) scheme.onSurfaceVariant else dot)
+            Text(label, fontSize = ForgeType.secondary, fontWeight = FontWeight.Medium, color = if (status == AgentStatus.NOT_TESTED || status == AgentStatus.NOT_INSTALLED) scheme.onSurfaceVariant else dot)
         }
     }
 }

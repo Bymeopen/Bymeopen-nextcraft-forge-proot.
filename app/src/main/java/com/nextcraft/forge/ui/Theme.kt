@@ -400,9 +400,22 @@ fun NextCraftForgeTheme(
         LocalForgeThemeTokens provides tokens,
         LocalTextSelectionColors provides tokens.selectionColors,
     ) {
+        // Dialogs, sheets and menus read the surfaceContainer roles; map them to the card surfaces so every
+        // AlertDialog, bottom sheet and dropdown matches the cards. Glass keeps the default: its card colour is
+        // translucent and a see-through dialog is unreadable over the scrim.
+        val themedScheme = if (tokens.isGlass) {
+            colorScheme
+        } else {
+            colorScheme.copy(
+                surfaceContainerHigh = tokens.cardContainerColor,
+                surfaceContainerLow = tokens.cardContainerColor,
+                surfaceContainer = tokens.cardElevatedColor,
+            )
+        }
         MaterialTheme(
-            colorScheme = colorScheme,
+            colorScheme = themedScheme,
             typography = ForgeTypography,
+            shapes = ForgeShapes,
         ) {
             // The app draws on a transparent Scaffold over its own canvas, so no Surface sets the
             // content colour. Without this, LocalContentColor stays black and every Text that
@@ -495,3 +508,12 @@ tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+/** One corner scale for dialogs (extraLarge), menus (extraSmall) and sheets, shared by all themes. */
+internal val ForgeShapes = androidx.compose.material3.Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(24.dp),
+)

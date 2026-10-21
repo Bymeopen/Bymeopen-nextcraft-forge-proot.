@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -47,7 +48,7 @@ import kotlinx.coroutines.launch
  * redirect back to the CLI finishes it; the pasted code is only a fallback.
  */
 @Composable
-fun ClaudeAccountCard(viewModel: MainViewModel) {
+fun ClaudeAccountCard(viewModel: MainViewModel, extra: @Composable ColumnScope.() -> Unit = {}) {
     val scheme = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -78,8 +79,17 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
             )
-            auth.message?.let {
-                Text(it, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            // The signed-in account: shown whenever it is known, not only right after the sign-in finished.
+            if (signedIn) {
+                androidx.compose.runtime.LaunchedEffect(signedIn, auth.status) {
+                    if (auth.accountEmail == null) viewModel.claudeAuth.loadAccountEmail()
+                }
+                auth.accountEmail?.let {
+                    Text(stringResource(R.string.rt_auth_connected_as, it), fontSize = ForgeType.rowTitle, color = scheme.primary)
+                }
+            }
+            auth.message?.takeUnless { signedIn && auth.accountEmail != null }?.let {
+                Text(it.asString(), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (inFlight) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
@@ -161,6 +171,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )
+            extra()
         }
     }
 }

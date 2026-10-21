@@ -90,7 +90,7 @@ internal object RootfsRepair {
      * Gives [target] (recursively) back to [uid]. Commands inside the chroot run as root, so files they create
      * (npm installs, Gradle/pip caches, Claude's own state) are root-owned and the app UID cannot change them.
      */
-    fun reclaimOwnership(target: File, uid: Int): Boolean {
+    fun reclaimOwnership(target: File, uid: Int, recursive: Boolean = true): Boolean {
         if (!target.exists() && !java.nio.file.Files.isSymbolicLink(target.toPath())) return true
         val canonicalPath = target.canonicalPath.trimEnd('/')
         require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
@@ -99,10 +99,36 @@ internal object RootfsRepair {
         // -h: change a symlink itself, never the file it points to (it may point outside the rootfs).
         val exit = runRootCommand(
             "su", "-c",
-            "chown -R -h $uid:$uid -- ${shellSingleQuote(canonicalPath)}",
+            "chown ${if (recursive) "-R " else ""}-h $uid:$uid -- ${shellSingleQuote(canonicalPath)}",
             timeoutSeconds = 120L,
         )
         return exit == 0
+    }
+
+    /**
+     * Last resort when the app UID cannot write [target] even after [reclaimOwnership] (a root-owned file in a folder the
+     * app does not own, or a label the app may not write): the bytes are staged in an app-owned [staging] file and root
+     * copies them in, then hands the file to [uid].
+     */
+    fun writeAsRoot(target: File, content: ByteArray, staging: File, uid: Int, mode: Int = 0b110100100): Boolean {
+        val parent = target.parentFile ?: return false
+        staging.parentFile?.mkdirs()
+        return try {
+            staging.writeBytes(content)
+            val dest = shellSingleQuote(target.absolutePath)
+            val temp = shellSingleQuote(target.absolutePath + ".nextcraft-tmp")
+            // Write beside the target and `mv -f` over it: rename replaces a symlink itself (an `apt install` puts
+            // /etc/resolv.conf back as a link into /run/systemd), where `cat > target` would follow the link instead.
+            val exit = runRootCommand(
+                "su", "-c",
+                "mkdir -p -- ${shellSingleQuote(parent.absolutePath)} && cat -- ${shellSingleQuote(staging.absolutePath)} > $temp && " +
+                    "chown $uid:$uid -- $temp && chmod ${mode.toString(8)} -- $temp && mv -f -- $temp $dest",
+                timeoutSeconds = 30L,
+            )
+            exit == 0
+        } finally {
+            staging.delete()
+        }
     }
 
     fun safeDeleteRecursively(targetDir: File): Boolean {

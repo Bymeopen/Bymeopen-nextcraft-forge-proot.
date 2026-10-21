@@ -140,6 +140,8 @@ object ForgeType {
     val body = 15.sp            // prose, Normal
     val control = 14.sp         // buttons, inline status and helper text
     val secondary = 13.sp       // subtitles and metadata, muted
+    /** Bottom-bar label when five tabs share a 360dp phone: "Pengaturan" must stay inside its pill. */
+    val navCompact = 10.5.sp
     val caption = 12.sp         // section labels (uppercase, tracked) and badges
     val sectionTracking = 0.6.sp
 }
@@ -147,12 +149,21 @@ object ForgeType {
 /** Width breakpoints (Material window size classes): >= [expanded] shows a project as two panes. */
 object ForgeBreakpoint {
     const val EXPANDED_DP = 840
+    const val MIN_PANE_HEIGHT_DP = 480
     val readableMaxWidth = 720.dp
 }
 
 /** True on tablets, foldables and landscape tablets where chat and workspace fit side by side. */
 @Composable
-fun rememberIsExpanded(): Boolean = LocalConfiguration.current.screenWidthDp >= ForgeBreakpoint.EXPANDED_DP
+fun rememberIsExpanded(): Boolean {
+    val c = LocalConfiguration.current
+    // A 6.9in phone in landscape is ~930dp wide but only ~430dp tall: two panes would leave neither one usable.
+    return c.screenWidthDp >= ForgeBreakpoint.EXPANDED_DP && c.screenHeightDp >= ForgeBreakpoint.MIN_PANE_HEIGHT_DP
+}
+
+/** Landscape phones: every vertical dp counts, so bars and headers shrink. */
+@Composable
+fun rememberCompactHeight(): Boolean = LocalConfiguration.current.screenHeightDp < ForgeBreakpoint.MIN_PANE_HEIGHT_DP
 
 /** 4dp grid. Screen edge 20, card edge 14, card inner 16, row 56, section gap 24, label-to-card 8. */
 object ForgeSpace {

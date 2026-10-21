@@ -155,6 +155,8 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
+                        changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
+                        running = state.sessionRunning && project.id == state.activeProjectId,
                         // MainViewModel.selectProject ignores switches while active tasks run.
                         locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
@@ -170,6 +172,8 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
+                        changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
+                        running = state.sessionRunning && project.id == state.activeProjectId,
                         locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
                         onOpen = { onOpenProject(project.id) },
@@ -468,7 +472,7 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
             )
         },
         confirmButton = {
-            Button(onClick = { onClone(url) }, enabled = url.isNotBlank()) {
+            Button(onClick = { onClone(url) }, enabled = FieldValidation.isHttpUrl(url)) {
                 Text(stringResource(R.string.projects_clone))
             }
         },
@@ -494,7 +498,7 @@ private const val MAX_PROJECT_NAME = 80
 /** Project card: folder tile, name, description, guest path, language and age, plus a rename/delete menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProjectRow(
+internal fun ProjectRow(
     project: Project,
     active: Boolean,
     locked: Boolean,
@@ -502,10 +506,14 @@ private fun ProjectRow(
     onOpen: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
+    changedCount: Int = 0,
+    running: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val muted = scheme.onSurfaceVariant
+    // Phones up to ~6.3in report <= 400dp wide: a smaller tile and gaps give the text column 16dp more.
+    val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 400
 
     ForgeThemedCard(
         modifier = Modifier
@@ -518,14 +526,14 @@ private fun ProjectRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(enabled = !locked, role = Role.Button, onClick = onOpen, onLongClick = { menuOpen = true })
-                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
+                .padding(start = if (narrow) 12.dp else 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
+                modifier = Modifier.size(if (narrow) 44.dp else 52.dp).clip(RoundedCornerShape(14.dp)).background(scheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
-            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = 26.dp) }
-            Spacer(modifier = Modifier.width(16.dp))
+            ) { ForgeIcon(glyph = ForgeGlyph.FOLDER, tint = scheme.primary, size = if (narrow) 22.dp else 26.dp) }
+            Spacer(modifier = Modifier.width(if (narrow) 12.dp else 16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = project.name,
@@ -556,8 +564,26 @@ private fun ProjectRow(
                     text = listOf(project.localizedLanguage(), project.relativeUpdatedAt()).filter { it.isNotBlank() }.joinToString(" · "),
                     fontSize = ForgeType.secondary,
                     color = muted,
-                    maxLines = 1,
+                    // Two lines: one line clipped "Kotlin / TypeScript / Python · 39" before the unit on 360-412dp phones.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                // Live state for the open project: the agent is working, or edits wait for review.
+                if (running || changedCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (running) {
+                            ProjectStatusPill(stringResource(R.string.projects_status_working), ForgeGlyph.SPARK, LocalForgeThemeTokens.current.warningText)
+                        }
+                        if (changedCount > 0) {
+                            ProjectStatusPill(quantityStringResource(R.plurals.chat_files_changed, changedCount, changedCount), ForgeGlyph.FILE, scheme.primary)
+                        }
+                    }
+                }
             }
             Box {
                 IconButton(onClick = { menuOpen = true }, enabled = !locked) {
@@ -646,13 +672,41 @@ private fun Project.subtitle(): String = when {
     else -> stringResource(R.string.projects_general)
 }
 
-/** Projects saved by older builds store English defaults; show them in the current language. */
+/**
+ * Project text is stored in English (the defaults a project is created with) and translated when drawn, so it follows
+ * the app language even after the language is changed. Text the user typed is shown as written.
+ */
 @Composable
-private fun Project.localizedDescription(): String = when (description) {
-    "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
-    "General coding workspace" -> stringResource(R.string.project_general_desc)
-    else -> description
+private fun Project.localizedDescription(): String = when {
+    description == "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
+    description == "General coding workspace" -> stringResource(R.string.project_general_desc)
+    description == "Quick project" -> stringResource(R.string.project_quick_desc)
+    else -> {
+        val imported = Regex("^Imported from (.+)$").matchEntire(description)
+        val android = Regex("^Android \\((.+)\\) project$").matchEntire(description)
+        when {
+            imported != null -> stringResource(R.string.project_imported_desc, imported.groupValues[1])
+            android != null -> stringResource(R.string.project_android_desc, android.groupValues[1])
+            else -> description
+        }
+    }
 }
 
 @Composable
 private fun Project.localizedLanguage(): String = if (language == "Multi-language") stringResource(R.string.project_lang_multi) else language
+
+/** Small status capsule on a project card: glyph plus words, so colour is never the only signal. */
+@Composable
+private fun ProjectStatusPill(text: String, glyph: ForgeGlyph, tint: androidx.compose.ui.graphics.Color) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100))
+            .background(tint.copy(alpha = 0.12f))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ForgeIcon(glyph, tint = tint, size = 12.dp)
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(text, fontSize = ForgeType.caption, color = tint, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}

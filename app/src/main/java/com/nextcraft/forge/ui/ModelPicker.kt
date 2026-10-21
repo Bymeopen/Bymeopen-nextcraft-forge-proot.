@@ -46,7 +46,7 @@ import com.nextcraft.forge.R
 data class ModelOption(val id: String, val label: String, val badge: String = "", @androidx.annotation.StringRes val labelRes: Int? = null)
 
 /**
- * Searchable model list shared by every agent (Claude Code, DeepSeek Harness, Antigravity), shown as a bottom sheet:
+ * Searchable model list shared by every agent (Claude Code, DeepSeek, Antigravity), shown as a bottom sheet:
  * title + "N available for <provider>", refresh, search, then one card per model. Typing an id that is not in the list
  * offers it as a custom model, so models the lists do not know yet stay usable.
  */
@@ -126,7 +126,11 @@ fun ModelPickerDialog(
                     ModelRow(
                         label = option.labelRes?.let { stringResource(it) } ?: option.label,
                         id = option.id,
-                        badge = option.badge,
+                        badge = when (option.badge) {
+                            "latest" -> stringResource(R.string.model_badge_latest)
+                            "fast" -> stringResource(R.string.model_badge_fast)
+                            else -> option.badge
+                        },
                         selected = option.id == selectedId,
                         onClick = { onSelect(option.id) },
                     )

@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
+import com.nextcraft.forge.model.StarterTemplate
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 import androidx.compose.ui.res.stringResource
@@ -113,12 +114,13 @@ import androidx.compose.foundation.layout.imePadding
 @Composable
 internal fun NewProjectDialog(
     onDismiss: () -> Unit,
-    onCreate: (name: String, description: String, isAndroid: Boolean, template: AndroidTemplate) -> Unit,
+    onCreate: (name: String, description: String, isAndroid: Boolean, template: AndroidTemplate, starter: StarterTemplate) -> Unit,
 ) {
     var name by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
     var isAndroid by rememberSaveable { mutableStateOf(false) }
     var template by rememberSaveable { mutableStateOf(AndroidTemplate.COMPOSE) }
+    var starter by rememberSaveable { mutableStateOf(StarterTemplate.EMPTY) }
 
     AlertDialog(
         modifier = Modifier.forgePopIn(),
@@ -156,12 +158,20 @@ internal fun NewProjectDialog(
                         onSelect = { template = AndroidTemplate.entries[it] },
                         modifier = Modifier.padding(horizontal = 0.dp),
                     )
+                } else {
+                    // Non-Android starter: an empty workspace, or a Go app that builds for Windows and Linux.
+                    ForgePillTabs(
+                        items = StarterTemplate.entries.map { it.label },
+                        selectedIndex = StarterTemplate.entries.indexOf(starter),
+                        onSelect = { starter = StarterTemplate.entries[it] },
+                        modifier = Modifier.padding(horizontal = 0.dp),
+                    )
                 }
             }
         },
         confirmButton = {
             Button(
-                onClick = { onCreate(name, description, isAndroid, template) },
+                onClick = { onCreate(name, description, isAndroid, template, starter) },
                 enabled = name.isNotBlank(),
                 shape = RoundedCornerShape(100),
             ) { Text(stringResource(R.string.files_create), fontWeight = FontWeight.SemiBold) }

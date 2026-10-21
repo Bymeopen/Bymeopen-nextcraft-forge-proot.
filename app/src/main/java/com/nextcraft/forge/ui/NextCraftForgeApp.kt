@@ -57,6 +57,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -192,6 +193,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
     // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
+    val glassBackdrop = rememberForgeBackdrop(enabled = LocalForgeThemeTokens.current.isGlass)
+    CompositionLocalProvider(LocalForgeBackdrop provides glassBackdrop) {
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
@@ -241,6 +244,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             }
         },
     ) { innerPadding ->
+        // The Glass bar blurs whatever is drawn in this layer; the canvas is repeated inside it so the layer is opaque.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .forgeGlassSource(glassBackdrop)
+                .then(if (glassBackdrop != null) Modifier.background(LocalForgeThemeTokens.current.canvasBrush) else Modifier),
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -248,6 +258,16 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                 // statusBarsPadding() here doubled the top gap.
                 .padding(innerPadding),
         ) {
+            // Plain confirmations ("all agents are up to date") clear themselves so they do not follow people from
+            // screen to screen. Errors and notices that offer an action stay until read, acted on or dismissed.
+            val bannerKey = state.bannerMessage
+            val bannerClears = state.bannerAction == null && (bannerKey as? UiText.Res)?.id in transientBanners
+            LaunchedEffect(bannerKey, bannerClears) {
+                if (bannerKey != null && bannerClears) {
+                    kotlinx.coroutines.delay(8_000)
+                    viewModel.dismissBanner()
+                }
+            }
             state.bannerMessage?.asString()?.let { banner ->
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
@@ -354,7 +374,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 )
                                 Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                                     when (sidePane) {
-                                        ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                                        ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel, chatId = state.activeChatId)
                                         ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                                         else -> FilesAndDiffScreen(state = state, viewModel = viewModel)
                                     }
@@ -367,13 +387,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                                 AgentScreen(state = state, viewModel = viewModel)
                             }
                             ProjectPane.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
-                            ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
+                            ProjectPane.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel, chatId = state.activeChatId)
                             ProjectPane.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
                         }
                     }
                     ForgeTab.AGENT -> AgentConfigScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
-                    ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
+                    ForgeTab.FILES -> FileManagerScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
                     ForgeTab.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
@@ -385,10 +405,14 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.CICD -> CiCdScreen(viewModel = viewModel)
                     ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
                     ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
+                    ForgeTab.CODE_VIEWER -> CodeViewerScreen(state = state, viewModel = viewModel)
+                    ForgeTab.REA -> ReaScreen(state = state, viewModel = viewModel)
                 }
             }
             }
         }
+        }
+    }
     }
 
     if (showGitHubDialog) {
@@ -403,10 +427,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     if (showNewProjectDialog) {
         NewProjectDialog(
             onDismiss = { showNewProjectDialog = false },
-            onCreate = { name, desc, isAndroid, template ->
-                viewModel.createProject(name, desc, isAndroid, template)
+            onCreate = { name, desc, isAndroid, template, starter ->
+                viewModel.createProject(name, desc, isAndroid, template, starter)
                 showNewProjectDialog = false
             },
         )
     }
 }
+
+/** Banners that only confirm something; everything else (errors, blocked actions, offers) stays on screen. */
+private val transientBanners = setOf(R.string.msg_agents_up_to_date, R.string.msg_imported, R.string.msg_queue_discarded)

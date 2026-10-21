@@ -69,7 +69,7 @@ enum class AgentKind(
     ),
     DEEPSEEK_HARNESS(
         "deepseek-harness",
-        "DeepSeek Harness",
+        "DeepSeek",
         "Official DeepSeek coding agent · API-key providers",
         "26.8 MB",
     ),
@@ -82,6 +82,8 @@ enum class AgentKind(
     ;
 
     companion object {
+        fun fromStoredOrNull(value: String?): AgentKind? = entries.firstOrNull { it.stableId == value || it.name == value }
+
         fun fromStored(value: String?): AgentKind = entries.firstOrNull {
             it.stableId == value || it.name == value
         } ?: CLAUDE_CODE
@@ -126,7 +128,7 @@ fun inferredDshApiForUrl(baseUrl: String): String {
     }
 }
 
-/** Resolves the protocol DeepSeek Harness will actually use for this saved profile. */
+/** Resolves the protocol DeepSeek will actually use for this saved profile. */
 fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): ProviderProtocol {
     if (agent != AgentKind.DEEPSEEK_HARNESS || profile.kind !in DSH_PROTOCOL_PROVIDERS) {
         return profile.kind.protocol
@@ -172,6 +174,12 @@ data class ProviderProfile(
 enum class ProjectKind { PROJECT, QUICK_PROJECT }
 
 enum class ProjectType { GENERAL, ANDROID }
+
+/** Starter files for a non-Android project. */
+enum class StarterTemplate(val label: String) {
+    EMPTY("Empty"),
+    GO("Go (Windows/Linux)"),
+}
 
 enum class AndroidTemplate(val label: String) {
     COMPOSE("Jetpack Compose"),
@@ -249,6 +257,15 @@ data class WorkspaceEntry(
     val sizeBytes: Long = 0,
     /** Null until the directory's direct children have been counted off the UI thread. */
     val childCount: Int? = null,
+    /** Last-modified time in epoch millis; 0 when unknown. */
+    val modifiedMillis: Long = 0L,
+)
+
+/** The direct children of one workspace folder, as the file manager shows them. */
+data class WorkspaceDirListing(
+    val entries: List<WorkspaceEntry>,
+    /** True when the folder has more entries than [entries] holds. */
+    val truncated: Boolean = false,
 )
 
 enum class RiskLevel { SAFE, REVIEW, HIGH }
@@ -350,6 +367,8 @@ data class ChatMessage(
     val attachments: List<ChatAttachment> = emptyList(),
     val workItems: List<ActivityItem> = emptyList(),
     val workedMillis: Long = 0L,
+    /** [AgentKind.stableId] of the agent that wrote this reply; null for user messages and replies saved before routing. */
+    val agent: String? = null,
 )
 
 data class ChatAttachment(
@@ -365,6 +384,8 @@ data class ProjectChat(
     val title: String = "New chat",
     val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis(),
+    /** True when the chat works in its own branch (a clone of the project) and merges into it explicitly. */
+    val isolated: Boolean = false,
 )
 
 enum class DiffLineType { CONTEXT, ADDITION, DELETION, INFO }

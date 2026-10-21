@@ -8,6 +8,9 @@ import com.nextcraft.forge.model.ChatAttachment
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
+import com.nextcraft.forge.model.PromptRule
+import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutingConfig
 import com.nextcraft.forge.model.ProjectKind
 import com.nextcraft.forge.model.ProjectType
 import com.nextcraft.forge.model.ProviderKind
@@ -45,6 +48,50 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("agent_kind", AgentKind.CLAUDE_CODE.stableId) ?: AgentKind.CLAUDE_CODE.stableId
         set(value) { preferences.edit().putString("agent_kind", value).apply() }
 
+    /** Multi-agent routing of chat messages (see [RoutingConfig]); absent = single agent, as before. */
+    var routing: RoutingConfig
+        get() {
+            val order = preferences.getString("routing_agents", null)?.split(',')?.mapNotNull { AgentKind.fromStoredOrNull(it) }.orEmpty()
+            return RoutingConfig(
+                mode = RouteMode.fromStored(preferences.getString("routing_mode", null)),
+                agents = order.ifEmpty { AgentKind.entries }.distinct(),
+                weights = preferences.getString("routing_weights", null)?.split(',')?.mapNotNull { pair ->
+                    val (id, weight) = pair.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+                    val agent = AgentKind.fromStoredOrNull(id) ?: return@mapNotNull null
+                    weight.toIntOrNull()?.let { agent to it }
+                }?.toMap().orEmpty(),
+                rules = runCatching {
+                    val array = org.json.JSONArray(preferences.getString("routing_rules", "[]"))
+                    (0 until array.length()).mapNotNull { index ->
+                        val item = array.getJSONObject(index)
+                        val agent = AgentKind.fromStoredOrNull(item.optString("agent")) ?: return@mapNotNull null
+                        val words = item.optJSONArray("keywords")?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
+                        if (words.isEmpty()) null else PromptRule(words, agent)
+                    }
+                }.getOrDefault(emptyList()),
+            )
+        }
+        set(value) {
+            preferences.edit()
+                .putString("routing_mode", value.mode.stableId)
+                .putString("routing_agents", value.agents.joinToString(",") { it.stableId })
+                .putString(
+                    "routing_rules",
+                    org.json.JSONArray().apply {
+                        value.rules.forEach { rule ->
+                            put(org.json.JSONObject().put("agent", rule.agent.stableId).put("keywords", org.json.JSONArray(rule.keywords)))
+                        }
+                    }.toString(),
+                )
+                .putString("routing_weights", value.weights.entries.joinToString(",") { "${it.key.stableId}:${it.value}" })
+                .apply()
+        }
+
+    /** Messages routed so far; the rotation position of [RouteMode.BALANCED]. */
+    var routeCounter: Int
+        get() = preferences.getInt("routing_counter", 0)
+        set(value) { preferences.edit().putInt("routing_counter", value).apply() }
+
     /** Agent chosen for the initial runtime installation; used as the leading UI tab. */
     var primaryAgentKind: String
         get() = preferences.getString("primary_agent_kind", "") ?: ""
@@ -53,6 +100,16 @@ class AppPreferences(private val context: Context) {
     var antigravityModel: String
         get() = preferences.getString("agent_antigravity_model", "") ?: ""
         set(value) { preferences.edit().putString("agent_antigravity_model", value).apply() }
+
+    /** Email of the signed-in Claude account, remembered so the account card shows it before `claude auth status` answers. */
+    var claudeAccountEmail: String
+        get() = preferences.getString("claude_account_email", "") ?: ""
+        set(value) { preferences.edit().putString("claude_account_email", value).apply() }
+
+    /** Claude Code effort level (low/medium/high/xhigh/max); empty keeps the model's own default. */
+    var claudeEffort: String
+        get() = preferences.getString("agent_claude_effort", "") ?: ""
+        set(value) { preferences.edit().putString("agent_claude_effort", value).apply() }
 
     var antigravityEffort: String
         get() = preferences.getString("agent_antigravity_effort", "high") ?: "high"
@@ -74,6 +131,11 @@ class AppPreferences(private val context: Context) {
     var autoSyncGitHub: Boolean
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
+
+    /** Adds a note about the `rea` toolkit to chat messages that concern binaries. Off by default: nothing extra is sent. */
+    var reaChatHint: Boolean
+        get() = preferences.getBoolean("rea_chat_hint", false)
+        set(value) { preferences.edit().putBoolean("rea_chat_hint", value).apply() }
 
     /** Whether high-risk tool executions prompt for interactive approval instead of immediate rejection. */
     var interactiveHighRiskApprovals: Boolean
@@ -112,7 +174,7 @@ class AppPreferences(private val context: Context) {
         return "agent_conversation_${version}${agent.stableId}_${projectId}_$chatId"
     }
 
-    /** Pinned dsh version recorded when DeepSeek Harness was installed. */
+    /** Pinned dsh version recorded when DeepSeek was installed. */
     var dshVersion: String
         get() = preferences.getString("dsh_version", "") ?: ""
         set(value) { preferences.edit().putString("dsh_version", value).apply() }
@@ -411,6 +473,7 @@ class AppPreferences(private val context: Context) {
                 put("title", chat.title)
                 put("createdAtMillis", chat.createdAtMillis)
                 put("updatedAtMillis", chat.updatedAtMillis)
+                put("isolated", chat.isolated)
             })
         }
         writeAtomically(File(projectDir, "index.json"), arr.toString())
@@ -433,6 +496,7 @@ class AppPreferences(private val context: Context) {
                             title = obj.optString("title", "Chat"),
                             createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
                             updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
+                            isolated = obj.optBoolean("isolated", false),
                         )
                     }.getOrNull()
                 }.sortedByDescending { it.updatedAtMillis }
@@ -500,6 +564,7 @@ class AppPreferences(private val context: Context) {
                     }
                 })
                 put("workedMillis", m.workedMillis)
+                m.agent?.let { put("agent", it) }
                 put("workItems", JSONArray().apply {
                     m.workItems.forEach { item ->
                         put(JSONObject().apply {
@@ -567,6 +632,7 @@ class AppPreferences(private val context: Context) {
                 }
             }.orEmpty(),
             workedMillis = obj.optLong("workedMillis", 0L),
+            agent = obj.optString("agent", "").ifBlank { null },
             workItems = obj.optJSONArray("workItems")?.let { workItems ->
                 (0 until workItems.length()).mapNotNull { index ->
                     runCatching {
