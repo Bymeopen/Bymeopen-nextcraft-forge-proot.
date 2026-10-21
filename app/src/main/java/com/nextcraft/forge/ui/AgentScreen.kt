@@ -192,6 +192,7 @@ fun AgentScreen(
     var usageOpen by rememberSaveable { mutableStateOf(false) }
     var renameOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var routeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var branchSheetOpen by rememberSaveable { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
@@ -510,12 +511,18 @@ fun AgentScreen(
             onStop = viewModel::stopActiveTask,
             modelChipLabel = chatModelChipLabel(state),
             onModelChip = { modelSheetOpen = true },
+            routeChipLabel = routeModeLabel(state.routing.mode),
+            onRouteChip = { routeSheetOpen = true },
         )
     }
     }
 
     if (usageOpen) ChatUsageSheet(state = state, onDismiss = { usageOpen = false })
     if (branchSheetOpen) BranchSheet(state = state, viewModel = viewModel, chatId = state.activeChatId, onDismiss = { branchSheetOpen = false })
+    if (routeSheetOpen) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshReadyAgents() }
+        ChatRoutingSheet(state = state, viewModel = viewModel, onDismiss = { routeSheetOpen = false })
+    }
     if (modelSheetOpen) ChatModelSheet(state = state, viewModel = viewModel, onDismiss = { modelSheetOpen = false })
     if (renameOpen) {
         RenameChatDialog(
@@ -662,6 +669,18 @@ internal fun ChatMessageCard(
             ToolStepGroup(message.workItems)
         } else {
             message.workItems.forEach { item -> ToolCallRow(item) }
+        }
+        // With several agents in one chat, each reply says who wrote it.
+        message.agent?.let { id ->
+            AgentKind.fromStoredOrNull(id)?.let { agent ->
+                Text(
+                    text = agent.displayTitle(),
+                    fontSize = ForgeType.secondary,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                )
+            }
         }
         if (message.workedMillis > 0L) {
             Text(
