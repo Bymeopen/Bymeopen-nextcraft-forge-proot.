@@ -116,13 +116,15 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                         }
                         if (on && routing.mode == RouteMode.BALANCED) {
                             val weight = routing.weightOf(agent)
-                            val total = enabled.sumOf { routing.weightOf(it) }.takeIf { it > 0 } ?: 1
+                            // The share is among the agents that can actually answer; the others get nothing until they are set up.
+                            val pool = enabled.filter { it in state.readyAgents }.ifEmpty { enabled }
+                            val total = pool.sumOf { routing.weightOf(it) }.takeIf { it > 0 } ?: 1
                             val lessLabel = stringResource(R.string.route_weight_less, agent.displayTitle())
                             IconButton(onClick = { viewModel.setRouteWeight(agent, weight - 1) }, enabled = weight > 0) {
                                 Text("−", fontSize = ForgeType.screenTitle, modifier = Modifier.semantics { contentDescription = lessLabel })
                             }
                             Text(
-                                text = stringResource(R.string.route_share_percent, weight * 100 / total),
+                                text = stringResource(R.string.route_share_percent, if (agent in pool) weight * 100 / total else 0),
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.widthIn(min = 44.dp),
                                 textAlign = TextAlign.Center,
