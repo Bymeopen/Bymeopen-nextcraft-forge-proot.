@@ -98,7 +98,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -433,7 +435,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _backgroundPrompts = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Fires once, when the runtime setup is first started: the Activity then asks for notifications and the battery exemption. */
+    val backgroundPrompts: SharedFlow<Unit> = _backgroundPrompts
+
+    private fun requestBackgroundPromptsOnce() {
+        // The Activity marks the prompts as shown once it actually displays them, so a missed emission is retried.
+        if (!preferences.backgroundPromptsShown) _backgroundPrompts.tryEmit(Unit)
+    }
+
     fun startRuntimeSetup() {
+        requestBackgroundPromptsOnce()
         val current = _state.value
         val stacksCsv = current.selectedDevStacks.joinToString(",") { it.name }
         preferences.selectedDevStacks = current.selectedDevStacks.map { it.name }.toSet()
@@ -541,6 +554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun installCoreWith(stacks: Set<DevStack>, agent: AgentKind) {
         if (_state.value.setupSnapshot.status == RuntimeSetupStatus.RUNNING) return
+        requestBackgroundPromptsOnce()
         _state.update { it.copy(setupScope = SetupScope.RUNTIME) }
         startServiceSafely(
             getApplication(),
