@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
+import com.nextcraft.forge.runtime.BranchStatus
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
@@ -129,6 +130,7 @@ enum class ForgeTab(val title: String) {
     ROM("ROM Studio"),
     CHECKPOINTS("Checkpoints"),
     CODE_VIEWER("Code viewer"),
+    REA("REA"),
 }
 
 enum class SetupScope { RUNTIME, AGENT }
@@ -155,7 +157,10 @@ data class ForgeUiState(
     val chats: List<ProjectChat> = emptyList(),
     val activeChatId: String = "main",
     val messages: List<ChatMessage> = emptyList(),
+    /** True while any agent turn runs (workspace-wide operations stay blocked); see [activeChatRunning] for the open chat. */
     val sessionRunning: Boolean = false,
+    /** Chats of the active project whose agent turn is running right now. */
+    val runningChatIds: Set<String> = emptySet(),
     val activeStatusLine: UiText? = null,
     val pendingToolRequest: ToolRequest? = null,
     val changedItems: List<ChangeItem> = emptyList(),
@@ -196,6 +201,13 @@ data class ForgeUiState(
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
+    val claudeEffort: String = "",
+    /** Branch status of the chats that work in their own branch, by chat id. */
+    val branchStatus: Map<String, BranchStatus> = emptyMap(),
+    /** Chats with a branch operation (merge, update, diff) in progress. */
+    val branchBusy: Set<String> = emptySet(),
+    /** Last diff text loaded for a branch (chat id to text). */
+    val branchDiff: Map<String, String> = emptyMap(),
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
@@ -211,9 +223,13 @@ data class ForgeUiState(
     val retryPrompt: RetryPrompt? = null,
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
-) {
+)
+ {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
+
+    /** True while the open chat has its own agent turn running (drives its Stop button, status line and composer). */
+    val activeChatRunning: Boolean get() = activeChatId in runningChatIds
 }
 
 /** [chatId] keeps the offer in the chat where the failure happened. */

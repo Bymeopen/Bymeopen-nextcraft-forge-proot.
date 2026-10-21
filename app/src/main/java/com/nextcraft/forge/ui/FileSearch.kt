@@ -90,8 +90,11 @@ internal fun FileSearchBar(
                 placeholder = { Text(stringResource(R.string.files_search_hint), color = scheme.onSurfaceVariant.copy(alpha = 0.6f), maxLines = 1) },
                 keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Search),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                colors = TextFieldDefaults.textFieldColors(
-                    containerColor = Color.Transparent,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    errorContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     disabledIndicatorColor = Color.Transparent,

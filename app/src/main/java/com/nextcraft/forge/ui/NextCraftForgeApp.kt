@@ -383,7 +383,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     }
                     ForgeTab.AGENT -> AgentConfigScreen(state = state, viewModel = viewModel)
                     ForgeTab.TOOLS -> ToolsScreen(onOpen = viewModel::selectTab)
-                    ForgeTab.FILES -> FilesAndDiffScreen(state = state, viewModel = viewModel)
+                    ForgeTab.FILES -> FileManagerScreen(state = state, viewModel = viewModel)
                     ForgeTab.TERMINAL -> TerminalScreen(state = state, viewModel = viewModel)
                     ForgeTab.ANDROID -> AndroidBuildScreen(state = state, viewModel = viewModel)
                     ForgeTab.PREVIEW -> WebPreviewScreen(state = state, viewModel = viewModel)
@@ -396,6 +396,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
                     ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
                     ForgeTab.CODE_VIEWER -> CodeViewerScreen(state = state, viewModel = viewModel)
+                    ForgeTab.REA -> ReaScreen(state = state, viewModel = viewModel)
                 }
             }
             }
@@ -414,8 +415,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     if (showNewProjectDialog) {
         NewProjectDialog(
             onDismiss = { showNewProjectDialog = false },
-            onCreate = { name, desc, isAndroid, template ->
-                viewModel.createProject(name, desc, isAndroid, template)
+            onCreate = { name, desc, isAndroid, template, starter ->
+                viewModel.createProject(name, desc, isAndroid, template, starter)
                 showNewProjectDialog = false
             },
         )

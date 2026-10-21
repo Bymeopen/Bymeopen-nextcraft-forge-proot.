@@ -460,7 +460,7 @@ private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
             )
         },
         confirmButton = {
-            Button(onClick = { onClone(url) }, enabled = url.isNotBlank()) {
+            Button(onClick = { onClone(url) }, enabled = FieldValidation.isHttpUrl(url)) {
                 Text(stringResource(R.string.projects_clone))
             }
         },
