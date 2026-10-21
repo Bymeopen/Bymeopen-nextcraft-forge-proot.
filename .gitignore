@@ -21,3 +21,8 @@ attachments/
 
 # Runtime bundles produced by scripts/runtime-bundles (published as release assets, not committed)
 dist/
+
+# Python bytecode (REA package and its tests)
+__pycache__/
+*.pyc
+.pytest_cache/

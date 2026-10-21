@@ -163,6 +163,8 @@ dependencies {
     // ZstdCompressorInputStream needs zstd-jni at runtime; rootfs bundles are .tar.zst.
     implementation("com.github.luben:zstd-jni:1.5.5-6@aar")
     testImplementation("junit:junit:4.13.2")
+    // The real org.json: the android.jar stubs do nothing in unit tests (used by the REA result parser test).
+    testImplementation("org.json:json:20240303")
     if (project.hasProperty("forgeScreenshots")) {
         testImplementation("org.robolectric:robolectric:4.12.2")
         testImplementation("androidx.compose.ui:ui-test-junit4")

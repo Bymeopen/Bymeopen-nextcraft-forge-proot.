@@ -130,6 +130,7 @@ enum class ForgeTab(val title: String) {
     ROM("ROM Studio"),
     CHECKPOINTS("Checkpoints"),
     CODE_VIEWER("Code viewer"),
+    REA("REA"),
 }
 
 enum class SetupScope { RUNTIME, AGENT }

@@ -35,6 +35,18 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+  rea:
+    name: REA Python package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - name: REA tests
+        run: PYTHONPATH=app/src/main/assets/rea python -m pytest rea-tests -q
+
   scripts:
     name: Shell scripts
     runs-on: ubuntu-latest

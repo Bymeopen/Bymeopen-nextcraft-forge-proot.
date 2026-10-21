@@ -180,6 +180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Developer tools (Tools tab). Each owns its state flow and runs its commands in the chroot.
     val diagnostics = DiagnosticsController(application)
+    val rea = com.nextcraft.forge.runtime.ReaController(application)
     val buildMatrix = BuildMatrixController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
     val cicd = CiCdController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
     val ssh = SshController(application)
