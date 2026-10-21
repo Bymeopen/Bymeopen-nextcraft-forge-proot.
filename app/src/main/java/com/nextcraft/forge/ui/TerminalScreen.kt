@@ -395,6 +395,9 @@ internal fun TerminalKeyRow(
         TerminalKey("Alt", stringResource(R.string.terminal_key_alt), enabled, active = modifiers.alt) { modifiers.alt = !modifiers.alt }
         TerminalKey("Shift", stringResource(R.string.terminal_key_shift), enabled, active = modifiers.shift) { modifiers.shift = !modifiers.shift }
         TerminalKey("Enter", stringResource(R.string.terminal_key_enter), enabled) { enter() }
+        TerminalKey("^C", stringResource(R.string.terminal_key_interrupt), enabled) {
+            liveView()?.inputCodePoint('c'.code, true, false)
+        }
         TerminalKey("↑", stringResource(R.string.terminal_key_up), enabled) { press(KeyEvent.KEYCODE_DPAD_UP) }
         TerminalKey("↓", stringResource(R.string.terminal_key_down), enabled) { press(KeyEvent.KEYCODE_DPAD_DOWN) }
         TerminalKey("←", stringResource(R.string.terminal_key_left), enabled) { press(KeyEvent.KEYCODE_DPAD_LEFT) }
@@ -403,9 +406,6 @@ internal fun TerminalKeyRow(
         TerminalKey("End", stringResource(R.string.terminal_key_end), enabled) { press(KeyEvent.KEYCODE_MOVE_END) }
         TerminalKey("PgUp", stringResource(R.string.terminal_key_pgup), enabled) { press(KeyEvent.KEYCODE_PAGE_UP) }
         TerminalKey("PgDn", stringResource(R.string.terminal_key_pgdn), enabled) { press(KeyEvent.KEYCODE_PAGE_DOWN) }
-        TerminalKey("^C", stringResource(R.string.terminal_key_interrupt), enabled) {
-            liveView()?.inputCodePoint('c'.code, true, false)
-        }
         listOf('-', '/', '|', '~').forEach { symbol ->
             TerminalKey(symbol.toString(), symbol.toString(), enabled) { type(symbol) }
         }
