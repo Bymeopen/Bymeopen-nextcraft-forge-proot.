@@ -185,15 +185,18 @@ internal fun ForgeBottomBar(
     val pillEdge = scheme.primary.copy(alpha = 0.30f)
     val pillShape = RoundedCornerShape(if (floating) 100 else 22)
 
+    // Glass on Android 12+: the bar blurs and refracts the screen behind it; otherwise the translucent surface below.
+    val backdrop = LocalForgeBackdrop.current.takeIf { floating }
     Surface(
         shape = shape,
-        color = tokens.bottomBarContainerColor,
+        color = if (backdrop != null) Color.Transparent else tokens.bottomBarContainerColor,
         contentColor = scheme.onSurface,
         border = if (floating) tokens.cardBorderStroke else null,
         shadowElevation = if (floating) 12.dp else 0.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(outerPadding),
+            .padding(outerPadding)
+            .forgeGlassSurface(backdrop, tokens.bottomBarContainerColor),
     ) {
         Column(modifier = Modifier.navigationBarsPadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)

@@ -57,6 +57,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -192,6 +193,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
     // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
+    val glassBackdrop = rememberForgeBackdrop(enabled = LocalForgeThemeTokens.current.isGlass)
+    CompositionLocalProvider(LocalForgeBackdrop provides glassBackdrop) {
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = Color.Transparent,
@@ -241,6 +244,13 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             }
         },
     ) { innerPadding ->
+        // The Glass bar blurs whatever is drawn in this layer; the canvas is repeated inside it so the layer is opaque.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .forgeGlassSource(glassBackdrop)
+                .then(if (glassBackdrop != null) Modifier.background(LocalForgeThemeTokens.current.canvasBrush) else Modifier),
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -401,6 +411,8 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
             }
             }
         }
+        }
+    }
     }
 
     if (showGitHubDialog) {
