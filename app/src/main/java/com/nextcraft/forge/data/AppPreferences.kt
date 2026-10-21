@@ -8,6 +8,8 @@ import com.nextcraft.forge.model.ChatAttachment
 import com.nextcraft.forge.model.ChatMessage
 import com.nextcraft.forge.model.Project
 import com.nextcraft.forge.model.ProjectChat
+import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutingConfig
 import com.nextcraft.forge.model.ProjectKind
 import com.nextcraft.forge.model.ProjectType
 import com.nextcraft.forge.model.ProviderKind
@@ -44,6 +46,27 @@ class AppPreferences(private val context: Context) {
     var agentKind: String
         get() = preferences.getString("agent_kind", AgentKind.CLAUDE_CODE.stableId) ?: AgentKind.CLAUDE_CODE.stableId
         set(value) { preferences.edit().putString("agent_kind", value).apply() }
+
+    /** Multi-agent routing of chat messages (see [RoutingConfig]); absent = single agent, as before. */
+    var routing: RoutingConfig
+        get() {
+            val order = preferences.getString("routing_agents", null)?.split(',')?.mapNotNull { AgentKind.fromStoredOrNull(it) }.orEmpty()
+            return RoutingConfig(
+                mode = RouteMode.fromStored(preferences.getString("routing_mode", null)),
+                agents = order.ifEmpty { AgentKind.entries }.distinct(),
+            )
+        }
+        set(value) {
+            preferences.edit()
+                .putString("routing_mode", value.mode.stableId)
+                .putString("routing_agents", value.agents.joinToString(",") { it.stableId })
+                .apply()
+        }
+
+    /** Messages routed so far; the rotation position of [RouteMode.BALANCED]. */
+    var routeCounter: Int
+        get() = preferences.getInt("routing_counter", 0)
+        set(value) { preferences.edit().putInt("routing_counter", value).apply() }
 
     /** Agent chosen for the initial runtime installation; used as the leading UI tab. */
     var primaryAgentKind: String
@@ -512,6 +535,7 @@ class AppPreferences(private val context: Context) {
                     }
                 })
                 put("workedMillis", m.workedMillis)
+                m.agent?.let { put("agent", it) }
                 put("workItems", JSONArray().apply {
                     m.workItems.forEach { item ->
                         put(JSONObject().apply {
@@ -579,6 +603,7 @@ class AppPreferences(private val context: Context) {
                 }
             }.orEmpty(),
             workedMillis = obj.optLong("workedMillis", 0L),
+            agent = obj.optString("agent", "").ifBlank { null },
             workItems = obj.optJSONArray("workItems")?.let { workItems ->
                 (0 until workItems.length()).mapNotNull { index ->
                     runCatching {
