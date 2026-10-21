@@ -714,6 +714,7 @@
     <string name="msg_subscription_models">Login langganan: model berasal dari Claude Code, tanpa permintaan katalog.</string>
     <string name="msg_claude_cli_verified">✓ Claude Code terverifikasi: %1$s</string>
     <string name="msg_claude_cli_unverified">✕ Pemeriksaan Claude Code gagal: %1$s</string>
+    <string name="msg_anthropic_key_missing">✕ Belum ada kunci API untuk Anthropic API. Tambahkan di Kredensial, atau ganti penyedia ke Claude subscription lalu masuk dengan Claude.</string>
     <string name="msg_runtime_not_installed">Runtime Linux belum terpasang.</string>
     <plurals name="chat_steps">
         <item quantity="other">%d langkah</item>

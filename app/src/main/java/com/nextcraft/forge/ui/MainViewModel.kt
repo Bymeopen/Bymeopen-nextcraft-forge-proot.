@@ -2747,6 +2747,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(apiBusy = false, apiStatusMessage = text) }
                 return@launch
             }
+            // Anthropic API with no key: the Messages API can only answer "x-api-key header is required". When a
+            // Claude login exists, verify through Claude Code instead; otherwise say what to add.
+            if (_state.value.agentKind == AgentKind.CLAUDE_CODE && profile.kind == ProviderKind.ANTHROPIC && apiKey.isBlank()) {
+                val loggedIn = withContext(Dispatchers.IO) { installer.hasClaudeLoginCredential() }
+                val text = if (loggedIn && _state.value.runtimeInstalled) {
+                    runCatching { claudeRuntime.hello(profile, 45_000L) }.fold(
+                        onSuccess = { UiText.res(R.string.msg_claude_cli_verified, it.take(80)) },
+                        onFailure = { UiText.res(R.string.msg_claude_cli_unverified, (it.message ?: it.javaClass.simpleName).take(200)) },
+                    )
+                } else {
+                    UiText.res(R.string.msg_anthropic_key_missing)
+                }
+                _state.update { it.copy(apiBusy = false, apiStatusMessage = text) }
+                return@launch
+            }
             var res = providerApi.validate(
                 baseUrl = profile.resolvedBaseUrl,
                 model = profile.model,

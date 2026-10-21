@@ -726,6 +726,7 @@
     <string name="msg_subscription_models">Subscription login: models come from Claude Code, no catalog request needed.</string>
     <string name="msg_claude_cli_verified">✓ Claude Code verified: %1$s</string>
     <string name="msg_claude_cli_unverified">✕ Claude Code check failed: %1$s</string>
+    <string name="msg_anthropic_key_missing">✕ No API key saved for Anthropic API. Add one under Credentials, or switch the provider to Claude subscription and sign in with Claude.</string>
     <string name="msg_runtime_not_installed">The Linux runtime is not installed yet.</string>
     <plurals name="chat_steps">
         <item quantity="one">%d step</item>
