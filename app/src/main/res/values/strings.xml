@@ -1240,4 +1240,6 @@
     <string name="settings_rea_chat_hint">Tell the agent about REA</string>
     <string name="settings_rea_chat_hint_subtitle">Off by default. When on, chat messages about binaries (apk, elf, firmware) also tell the agent that the rea command exists. Nothing extra is sent while this is off.</string>
     <string name="chat_menu_rea">REA (analyze binaries)</string>
+    <string name="rea_progress_line">%1$d%% · %2$s</string>
+    <string name="rea_progress_speed">%1$.1f MB received · %2$.1f MB/s (device network traffic)</string>
 </resources>
