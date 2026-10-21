@@ -153,6 +153,45 @@ for bionic_dir in /system /apex /vendor /product; do
     fi
 done
 
+# Opt-in view of the Android root under /android. Off unless the app-side file runtime/android-root holds "ro" or
+# "rw"; it sits outside the rootfs, so the guest cannot switch it on or upgrade ro to rw itself.
+ANDROID_ROOT_MODE=$(cat "$(dirname "$ROOTFS")/android-root" 2>/dev/null | tr -d ' \n\r')
+mount_android_view() {
+    local src="$1"
+    local dst="$ROOTFS/android$1"
+    [ -d "$src" ] || return 0
+    mkdir -p "$dst"
+    is_mounted "$dst" && return 0
+    mount -o bind "$src" "$dst" 2>/dev/null || return 0
+    # Same propagation rule as mount_bionic: a copy that stays a peer would let umount hit the real mount.
+    if ! make_slave "$dst"; then
+        umount "$dst" 2>/dev/null || true
+        echo "Warning: skipped /android$src: mount propagation cannot be changed" >&2
+        return 0
+    fi
+    awk -v prefix="$src/" 'index($2, prefix) == 1 { print $2 }' /proc/mounts | sort | while read -r sub; do
+        target="$dst${sub#"$src"}"
+        [ -d "$sub" ] && [ -d "$target" ] || continue
+        is_mounted "$target" && continue
+        if mount -o bind "$sub" "$target" 2>/dev/null && ! make_slave "$target"; then
+            umount "$target" 2>/dev/null || true
+        fi
+    done
+    if [ "$ANDROID_ROOT_MODE" = "ro" ]; then
+        # Read-only must cover every submount too, otherwise /android/data/media etc. stay writable.
+        awk -v prefix="$dst" 'index($2, prefix) == 1 { print $2 }' /proc/mounts | sort | while read -r m; do
+            mount -o remount,bind,ro "$m" 2>/dev/null || echo "Warning: $m is still writable" >&2
+        done
+    fi
+}
+case "$ANDROID_ROOT_MODE" in
+    ro|rw)
+        for android_dir in /data /storage /mnt /metadata /cache /odm /system_ext /vendor /product /system /apex; do
+            mount_android_view "$android_dir"
+        done
+        ;;
+esac
+
 mkdir -p "$HOST_WORKSPACE" "$HOST_BRIDGE"
 if [ "$HOST_WORKSPACE" != "$ROOTFS$GUEST_WORKSPACE" ]; then
     mount_dynamic_bind "$HOST_WORKSPACE" "$ROOTFS$GUEST_WORKSPACE"
