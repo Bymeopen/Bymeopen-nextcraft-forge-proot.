@@ -13,6 +13,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -37,6 +43,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
+import com.nextcraft.forge.runtime.ReaState
+import com.nextcraft.forge.runtime.ReaController
 import com.nextcraft.forge.runtime.ReaAnalysis
 import com.nextcraft.forge.runtime.ReaCheck
 
@@ -170,6 +178,13 @@ fun ReaScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 enabled = installed && !rea.busy,
                 modifier = Modifier.fillMaxWidth(),
             )
+            OutlinedButton(
+                shape = RoundedCornerShape(100),
+                onClick = viewModel.rea::installOptionalTools,
+                enabled = installed && !rea.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(stringResource(R.string.rea_install_optional)) }
+            Text(stringResource(R.string.rea_install_optional_hint), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
             rea.mode?.let { mode ->
                 Text(
                     text = stringResource(R.string.rea_mode, reaModeLabel(mode)),
@@ -183,6 +198,62 @@ fun ReaScreen(state: ForgeUiState, viewModel: MainViewModel) {
             }
             rea.checks.forEach { check -> ReaCheckRow(check) }
         }
+
+        ToolSectionLabel(stringResource(R.string.rea_section_learn))
+        ToolCard {
+            val done = rea.lessons.count { it.exerciseDone }
+            if (rea.lessons.isEmpty()) {
+                Text(stringResource(R.string.rea_learn_hint), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+            } else {
+                Text(
+                    stringResource(R.string.rea_learn_progress, done, rea.lessons.size),
+                    fontSize = ForgeType.control,
+                    fontWeight = FontWeight.SemiBold,
+                    color = tokens.accentText,
+                )
+            }
+            ForgePrimaryButton(
+                text = stringResource(if (rea.lessons.isEmpty()) R.string.rea_learn_open else R.string.rea_learn_refresh),
+                onClick = viewModel.rea::loadLessons,
+                enabled = installed && !rea.busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            var lastStage = 0
+            rea.lessons.forEach { lesson ->
+                if (lesson.stage != lastStage) {
+                    lastStage = lesson.stage
+                    Text(
+                        stringResource(R.string.rea_learn_stage, lesson.stage, lesson.stageName),
+                        fontSize = ForgeType.caption,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clickable(enabled = !rea.busy, role = Role.Button) { viewModel.rea.openLesson(lesson.n) },
+                ) {
+                    Text(
+                        text = numbered(lesson.n, lesson.title),
+                        fontSize = ForgeType.rowTitle,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val quiz = if (lesson.quizBest != null) " ${lesson.quizBest}/${lesson.quizTotal}" else ""
+                    Text(
+                        text = (if (lesson.exerciseDone) "✅" else "") + quiz,
+                        fontSize = ForgeType.secondary,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    if (rea.lesson != null) {
+        ReaLessonSheet(rea = rea, controller = viewModel.rea, onDismiss = viewModel.rea::closeLesson)
     }
 
     if (pickerOpen) {
@@ -266,6 +337,141 @@ private fun ReaAnalysisCards(analysis: ReaAnalysis, onDisassemble: (String) -> U
                 placeholder = "",
             )
         }
+    }
+}
+
+/** "3. Title": a list number in front of text that already comes from the lesson data. */
+private fun numbered(n: Int, text: String): String = "$n. $text"
+
+/** One lesson: theory, diagram, the exercise with an answer check, the quiz, and the answer key behind a confirmation. */
+@Composable
+private fun ReaLessonSheet(rea: ReaState, controller: ReaController, onDismiss: () -> Unit) {
+    val lesson = rea.lesson ?: return
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalForgeThemeTokens.current
+    var answer by rememberSaveable(lesson.n) { mutableStateOf("") }
+    var hintShown by rememberSaveable(lesson.n) { mutableStateOf(false) }
+    var confirmReveal by remember(lesson.n) { mutableStateOf(false) }
+    // One 1-based pick per question (0 = not answered yet); reset whenever a new quiz is loaded.
+    val picks = remember(lesson.n, rea.quiz) { mutableStateListOf<Int>().apply { repeat(rea.quiz?.size ?: 0) { add(0) } } }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = tokens.cardContainerColor,
+    ) {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = ForgeSpace.card)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(stringResource(R.string.rea_learn_stage, lesson.n, lesson.stageName), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
+            Text(lesson.title, fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
+            Text(lesson.theory, fontSize = ForgeType.control)
+            Text(lesson.diagram, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace)
+
+            Text(stringResource(R.string.rea_lesson_task), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold)
+            Text(lesson.task, fontSize = ForgeType.control)
+            if (lesson.requires.isNotEmpty()) {
+                Text(stringResource(R.string.rea_lesson_requires, lesson.requires.joinToString(", ")), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
+            }
+            if (lesson.hasExercise) {
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = { controller.startExercise(lesson.n) },
+                    enabled = !rea.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(if (lesson.started) R.string.rea_lesson_prepare_again else R.string.rea_lesson_prepare)) }
+                lesson.exerciseDir?.let {
+                    Text(stringResource(R.string.rea_lesson_folder, it), fontSize = ForgeType.caption, fontFamily = FontFamily.Monospace, color = scheme.onSurfaceVariant)
+                }
+            }
+            if (hintShown) {
+                Text(lesson.hint, fontSize = ForgeType.secondary, color = tokens.accentText)
+            } else {
+                ForgeTextButton(onClick = { hintShown = true }) { Text(stringResource(R.string.rea_lesson_show_hint)) }
+            }
+            ForgeTextField(
+                value = answer,
+                onValueChange = { answer = it.take(300) },
+                kind = ForgeFieldKind.IDENTIFIER,
+                label = { Text(stringResource(R.string.rea_lesson_answer_label)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ForgePrimaryButton(
+                text = stringResource(R.string.rea_lesson_check),
+                onClick = { controller.checkAnswer(lesson.n, answer) },
+                enabled = answer.isNotBlank() && !rea.busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            rea.checkResult?.let { result ->
+                Text(
+                    (if (result.correct) "✅ " else "❌ ") + result.message,
+                    fontSize = ForgeType.control,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (result.correct) tokens.accentText else scheme.error,
+                )
+            }
+            if (lesson.exerciseDone) Text(stringResource(R.string.rea_lesson_done), fontSize = ForgeType.secondary, color = tokens.accentText)
+
+            Text(stringResource(R.string.rea_lesson_quiz), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            val quiz = rea.quiz
+            if (quiz == null) {
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = { controller.loadQuiz(lesson.n) },
+                    enabled = !rea.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.rea_lesson_quiz_start)) }
+            } else {
+                quiz.forEachIndexed { qi, question ->
+                    Text(numbered(qi + 1, question.text), fontSize = ForgeType.control, fontWeight = FontWeight.Medium)
+                    question.options.forEachIndexed { oi, option ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .clickable(role = Role.RadioButton) { if (qi < picks.size) picks[qi] = oi + 1 }
+                                .forgeSelected(qi < picks.size && picks[qi] == oi + 1),
+                        ) {
+                            RadioButton(selected = qi < picks.size && picks[qi] == oi + 1, onClick = null)
+                            Text(option, fontSize = ForgeType.control, modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+                }
+                ForgePrimaryButton(
+                    text = stringResource(R.string.rea_lesson_quiz_grade),
+                    onClick = { controller.gradeQuiz(lesson.n, picks.toList()) },
+                    enabled = picks.isNotEmpty() && picks.all { it > 0 } && !rea.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                rea.quizResult?.let { result ->
+                    Text(
+                        stringResource(R.string.rea_lesson_quiz_score, result.score, result.total) + " · " +
+                            stringResource(if (result.passed) R.string.rea_lesson_quiz_passed else R.string.rea_lesson_quiz_retry),
+                        fontSize = ForgeType.control,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (result.passed) tokens.accentText else scheme.error,
+                    )
+                }
+            }
+
+            rea.revealedAnswer?.let { Text(stringResource(R.string.rea_lesson_answer_is, it), fontSize = ForgeType.control, fontWeight = FontWeight.SemiBold) }
+            ForgeTextButton(onClick = { confirmReveal = true }, enabled = !rea.busy) { Text(stringResource(R.string.rea_lesson_reveal)) }
+        }
+    }
+    if (confirmReveal) {
+        AlertDialog(
+            onDismissRequest = { confirmReveal = false },
+            title = { Text(stringResource(R.string.rea_lesson_reveal_title)) },
+            text = { Text(stringResource(R.string.rea_lesson_reveal_message)) },
+            confirmButton = {
+                ForgeTextButton(onClick = { confirmReveal = false; controller.revealAnswer(lesson.n) }) { Text(stringResource(R.string.rea_lesson_reveal)) }
+            },
+            dismissButton = { ForgeTextButton(onClick = { confirmReveal = false }) { Text(stringResource(R.string.projects_cancel)) } },
+        )
     }
 }
 

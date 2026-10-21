@@ -32,6 +32,13 @@ data class ReaState(
     /** Markdown report written by `rea report` (path relative to the project, and its text). */
     val reportPath: String? = null,
     val reportMarkdown: String? = null,
+    /** Learn mode: lesson list, the open lesson, its quiz, and the last answer check. */
+    val lessons: List<ReaLesson> = emptyList(),
+    val lesson: ReaLessonDetail? = null,
+    val quiz: List<ReaQuizQuestion>? = null,
+    val quizResult: ReaQuizResult? = null,
+    val checkResult: ReaCheckResult? = null,
+    val revealedAnswer: String? = null,
 )
 
 /**
@@ -100,7 +107,24 @@ class ReaController(context: Context) {
         }
     }
 
-    fun runDoctor() = launchTask(R.string.rea_checking) {
+    fun runDoctor() = launchTask(R.string.rea_checking) { refreshDoctor() }
+
+    /** Installs the optional tools (strace, ltrace, qemu-user, binwalk, unicorn, frida) and then re-runs the doctor. */
+    fun installOptionalTools() = launchTask(R.string.rea_installing_optional) {
+        val result = runner.run(
+            workspaceDir = runner.toolWorkspace(TOOL_SLUG),
+            slug = TOOL_SLUG,
+            command = optionalToolsScript(),
+            timeoutMillis = 30 * 60_000L,
+            onChunk = ::appendLog,
+        )
+        refreshDoctor()
+        mutable.update {
+            it.copy(message = if (result.ok) UiText.res(R.string.rea_optional_done) else UiText.res(R.string.rea_optional_failed))
+        }
+    }
+
+    private suspend fun refreshDoctor() {
         val result = runner.run(
             workspaceDir = runner.toolWorkspace(TOOL_SLUG),
             slug = TOOL_SLUG,
@@ -216,11 +240,91 @@ class ReaController(context: Context) {
         }
     }
 
+    // --- Learn mode: `rea learn ...` runs in the tool workspace; progress lives in /root/.rea/progress.json ----------------
+
+    private suspend fun learn(args: String): ReaResponse? {
+        val result = runner.run(
+            workspaceDir = runner.toolWorkspace(TOOL_SLUG),
+            slug = TOOL_SLUG,
+            command = "rea learn $args --json",
+            timeoutMillis = 3 * 60_000L,
+        )
+        val response = ReaJson.parse(result.output)
+        if (response == null) appendLog(result.output)
+        return response
+    }
+
+    private suspend fun refreshLessons() {
+        val response = learn("list")
+        mutable.update { if (response?.ok == true) it.copy(lessons = response.lessons()) else it.copy(message = failureMessage(response)) }
+    }
+
+    private suspend fun refreshLesson(n: Int) {
+        val response = learn("show $n")
+        mutable.update { if (response?.ok == true) it.copy(lesson = response.lessonDetail()) else it.copy(message = failureMessage(response)) }
+    }
+
+    fun loadLessons() = launchTask(R.string.rea_loading_lessons) {
+        refreshLessons()
+        mutable.update { it.copy(message = if (it.lessons.isEmpty()) it.message else null) }
+    }
+
+    fun openLesson(n: Int) = launchTask(R.string.rea_loading_lessons) {
+        mutable.update { it.copy(quiz = null, quizResult = null, checkResult = null, revealedAnswer = null) }
+        refreshLesson(n)
+        mutable.update { it.copy(message = null) }
+    }
+
+    fun closeLesson() {
+        mutable.update { it.copy(lesson = null, quiz = null, quizResult = null, checkResult = null, revealedAnswer = null) }
+    }
+
+    fun startExercise(n: Int) = launchTask(R.string.rea_preparing_exercise) {
+        val response = learn("start $n")
+        if (response?.ok == true) refreshLesson(n)
+        mutable.update { it.copy(message = if (response?.ok == true) null else failureMessage(response)) }
+    }
+
+    fun checkAnswer(n: Int, answer: String) = launchTask(R.string.rea_checking_answer) {
+        val response = learn("check $n ${ChrootRunner.quote(answer.trim())}")
+        val result = response?.takeIf { it.ok }?.checkResult()
+        mutable.update { it.copy(checkResult = result, message = if (result != null) null else failureMessage(response)) }
+        if (result != null) {
+            refreshLesson(n)
+            refreshLessons()
+        }
+    }
+
+    fun loadQuiz(n: Int) = launchTask(R.string.rea_loading_lessons) {
+        val response = learn("quiz $n")
+        mutable.update {
+            if (response?.ok == true) it.copy(quiz = response.quizQuestions(), quizResult = null, message = null)
+            else it.copy(message = failureMessage(response))
+        }
+    }
+
+    /** [choices] are the 1-based options picked for each question, in order. */
+    fun gradeQuiz(n: Int, choices: List<Int>) = launchTask(R.string.rea_checking_answer) {
+        val response = learn("quiz $n --answers ${choices.joinToString(",")}")
+        val result = response?.takeIf { it.ok }?.quizResult()
+        mutable.update { it.copy(quizResult = result, message = if (result != null) null else failureMessage(response)) }
+        if (result != null) refreshLessons()
+    }
+
+    fun revealAnswer(n: Int) = launchTask(R.string.rea_checking_answer) {
+        val response = learn("answer $n")
+        val text = response?.takeIf { it.ok }?.revealedAnswer()
+        mutable.update { it.copy(revealedAnswer = text, message = if (text != null) null else failureMessage(response)) }
+        if (text != null) refreshLesson(n)
+    }
+
     private fun appendLog(chunk: String) {
         mutable.update { it.copy(log = (it.log + chunk).takeLast(MAX_LOG_CHARS)) }
     }
 
     private fun readInstalledVersion(): String? = runCatching {
+        // /root can be locked to root after an apt install in the chroot; without access the marker looks missing.
+        if (!File(RuntimeInstaller.rootfsDir(appContext), "root").canExecute()) RuntimeInstaller(appContext).ensureAppAccess()
         File(RuntimeInstaller.rootfsDir(appContext), "root/.pocket-rea-version").takeIf { it.isFile }?.readText()?.trim()
     }.getOrNull()?.takeIf { it.isNotEmpty() }
 
@@ -241,7 +345,7 @@ class ReaController(context: Context) {
 
     companion object {
         /** Must equal `__version__` in the Python package (a unit test checks it). */
-        const val REA_VERSION = "0.5.0"
+        const val REA_VERSION = "0.8.0"
         private const val TOOL_SLUG = "rea"
         private const val ASSET_ROOT = "rea"
         private const val MAX_LOG_CHARS = 60_000
@@ -262,6 +366,26 @@ class ReaController(context: Context) {
                 add("--count 80")
             }
         }.joinToString(" ")
+
+        /**
+         * Optional tools for the dynamic phases. Each step may fail without stopping the next one (a missing package
+         * must not block unicorn). unicorn comes from apt when the release has it, otherwise from pip.
+         */
+        internal fun optionalToolsScript(): String = """
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq >/dev/null 2>&1 || true
+            apt-get install -y -qq strace ltrace qemu-user binwalk || echo "Peringatan: sebagian alat apt gagal dipasang."
+            if ! python3 -c "import unicorn" >/dev/null 2>&1; then
+              apt-get install -y -qq python3-unicorn >/dev/null 2>&1 \
+                || { apt-get install -y -qq python3-pip && python3 -m pip install --break-system-packages unicorn; } \
+                || echo "Peringatan: unicorn gagal dipasang."
+            fi
+            if ! python3 -c "import frida" >/dev/null 2>&1; then
+              { apt-get install -y -qq python3-pip && python3 -m pip install --break-system-packages frida; } \
+                || echo "Peringatan: frida gagal dipasang (opsional)."
+            fi
+            true
+        """.trimIndent()
 
         internal fun installScript(): String = """
             set -e

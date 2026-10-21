@@ -194,9 +194,20 @@ def run_doctor(workdir: str = ".", extra: list[Callable[[], Check]] | None = Non
         check_python_module("lief", "lief", "Opsional: pip install lief"),
         check_python_module("unicorn", "unicorn", "Opsional (emulasi): pip install unicorn"),
         check_python_module("keystone", "keystone-engine", "Opsional: pip install keystone-engine"),
+        check_python_module("frida", "frida", "Opsional (hook fungsi): pip install frida"),
         check_memory(),
         check_disk(workdir),
     ]
     for extra_check in extra or []:
         checks.append(extra_check())
+    return determine_mode(checks), checks
+
+
+def quick_mode() -> tuple[str, list[Check]]:
+    """Mode dinamis tanpa uji penuh doctor: hanya ptrace, gdb, dan qemu (dipakai ``rea run --mode auto``)."""
+    checks = [
+        check_ptrace(),
+        check_tool("gdb", "gdb", "gdb", ["--version"], "apt install gdb"),
+        check_tool("qemu", "qemu-aarch64", "qemu-aarch64", ["--version"], "apt install qemu-user"),
+    ]
     return determine_mode(checks), checks

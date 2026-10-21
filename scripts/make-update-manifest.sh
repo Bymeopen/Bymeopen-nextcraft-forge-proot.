@@ -17,7 +17,7 @@ NOTES="${6:-}"
 REPO="${NEXTCRAFT_REPO:-bymeopen/nextcraft-forge}"
 OUT="${NEXTCRAFT_OUT_DIR:-$(dirname "$APK")}/update-manifest.json"
 # Optional: the applicationId the APK installs as. The app ignores a manifest meant for another package (for example
-# the side-by-side ".x" build versus the real app) instead of offering an update it would have to reject.
+# an older side-by-side build) instead of offering an update it would have to reject.
 PACKAGE="${NEXTCRAFT_PACKAGE:-}"
 
 [[ -f "$APK" ]] || { echo "APK not found: $APK" >&2; exit 1; }

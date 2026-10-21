@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from typing import Sequence
 
@@ -15,13 +16,19 @@ from .analysis import entropy as entropy_mod
 from .analysis import strings as strings_mod
 from .analysis import xrefs as xrefs_mod
 from .analysis.code import decode, defined_functions
-from .capability import FAIL, OK, WARN, run_doctor
+from .capability import FAIL, MODE_EMULATED, MODE_FULL, OK, WARN, quick_mode, run_doctor
+from .dynamic import frida_runner as frida_mod
+from .dynamic import gdb as gdb_mod
+from .dynamic import qemu as qemu_mod
+from .dynamic import strace as strace_mod
+from .emulation import unicorn_runner as emu_mod
 from .identify import identify
 from .integrations import decompile as decompile_mod
+from .learn import engine as learn_mod
 from .parsers import apk as apk_mod
 from .parsers import elf as elf_mod
 from .report.markdown import build_report
-from .result import E_BAD_FORMAT, E_INTERNAL, E_USAGE, ReaError, Result, emit_json, failure
+from .result import E_BAD_FORMAT, E_INTERNAL, E_MISSING_DEP, E_NOT_SUPPORTED, E_USAGE, ReaError, Result, emit_json, failure
 
 _NOTICE = (
     "REA hanya untuk penggunaan yang sah: software milik sendiri, CTF, crackme, interoperabilitas, riset keamanan "
@@ -108,6 +115,211 @@ def _decompile(args: argparse.Namespace) -> Result:
     if not args.json:
         print(f"{data['tool']}: {data['files']} berkas di {data['output_dir']} ({data['seconds']} detik)", file=sys.stderr)
     return Result(command="decompile", data=data)
+
+
+def _emu(args: argparse.Namespace) -> Result:
+    identify(args.file)  # galat berkas yang konsisten dengan perintah lain
+    data = emu_mod.emulate(
+        args.file,
+        arch=args.arch,
+        func=args.func,
+        start=emu_mod.parse_int(args.start) if args.start else None,
+        end=emu_mod.parse_int(args.end) if args.end else None,
+        base=emu_mod.parse_int(args.base) if args.base else emu_mod.RAW_BASE,
+        regs=[emu_mod.parse_reg(r) for r in args.reg or []],
+        mems=[emu_mod.parse_mem(m) for m in args.mem or []],
+        dumps=[emu_mod.parse_dump(d) for d in args.dump or []],
+        max_insns=args.max_insns,
+        timeout_ms=args.timeout_ms,
+    )
+    result = Result(command="emu", data=data)
+    if data["stop"] not in ("returned", "reached_end"):
+        result.warnings.append(f"Emulasi berhenti: {data['stop']}" + (f" ({data['detail']})" if data["detail"] else ""))
+    if not args.json:
+        print(f"{data['arch']}  mulai 0x{data['start']:x}  {data['instructions']} instruksi  berhenti: {data['stop']}", file=sys.stderr)
+        for name, value in data["registers"].items():
+            if value:
+                print(f"  {name:4} 0x{value:x}", file=sys.stderr)
+        for dump in data["dumps"]:
+            shown = dump["ascii"] if dump["ascii"] is not None else f"({dump['error']})"
+            print(f"  [0x{dump['addr']:x}+{dump['size']}] {shown}", file=sys.stderr)
+    return result
+
+
+def _learn(args: argparse.Namespace) -> Result:
+    action = args.learn_action
+    if action == "list":
+        data = learn_mod.list_lessons()
+        if not args.json:
+            stage = 0
+            for row in data["lessons"]:
+                if row["stage"] != stage:
+                    stage = row["stage"]
+                    print(f"\nTahap {stage}: {row['stage_name']}", file=sys.stderr)
+                mark = "✅" if row["exercise_done"] else "  "
+                quiz = f"  kuis {row['quiz']['best']}/{row['quiz']['total']}" if row["quiz"] else ""
+                print(f" {mark} {row['n']:>2}. {row['title']}{quiz}", file=sys.stderr)
+            print(f"\n{data['exercises_done']} dari {data['total']} latihan selesai. Mulai: rea learn show 1", file=sys.stderr)
+    elif action == "show":
+        data = learn_mod.show(args.number)
+        if not args.json:
+            print(f"Pelajaran {data['n']}: {data['title']}  (tahap {data['stage']}: {data['stage_name']})\n", file=sys.stderr)
+            print(data["theory"] + "\n\n" + data["diagram"] + "\n", file=sys.stderr)
+            print("Latihan: " + data["task"], file=sys.stderr)
+            if data["has_exercise"]:
+                print(f"Siapkan: rea learn start {data['n']}", file=sys.stderr)
+            print(f"Jawab:   rea learn check {data['n']} <jawaban>      Kuis: rea learn quiz {data['n']}", file=sys.stderr)
+    elif action == "start":
+        data = learn_mod.start(args.number)
+        if not args.json:
+            print(f"Folder latihan: {data['dir']}", file=sys.stderr)
+            if data["program"]:
+                print(f"Program: {data['program']}", file=sys.stderr)
+            print("Tugas: " + data["task"], file=sys.stderr)
+    elif action == "check":
+        data = learn_mod.check(args.number, args.answer)
+        if not args.json:
+            print(("✅ " if data["correct"] else "❌ ") + data["message"], file=sys.stderr)
+            if data["hint"]:
+                print("Petunjuk: " + data["hint"], file=sys.stderr)
+    elif action == "quiz":
+        chosen = None
+        if args.answers is not None:
+            try:
+                chosen = [int(part) for part in args.answers.split(",")]
+            except ValueError as error:
+                raise ReaError(E_USAGE, "--answers harus angka dipisah koma.", "Contoh: --answers 2,1") from error
+        data = learn_mod.quiz(args.number, chosen)
+        if not args.json:
+            if chosen is None:
+                for number, question in enumerate(data["questions"], 1):
+                    print(f"{number}. {question['text']}", file=sys.stderr)
+                    for index, option in enumerate(question["options"], 1):
+                        print(f"   {index}) {option}", file=sys.stderr)
+                print(f"Jawab: rea learn quiz {args.number} --answers " + ",".join("?" for _ in data["questions"]), file=sys.stderr)
+            else:
+                print(f"Skor {data['score']}/{data['total']}: {'lulus' if data['passed'] else 'ulangi pelajarannya'}", file=sys.stderr)
+    elif action == "answer":
+        data = learn_mod.reveal_answer(args.number)
+        if not args.json:
+            print("Jawaban: " + " / ".join(data["answers"]) + "\n" + data["explanation"], file=sys.stderr)
+    elif action == "reset":
+        data = learn_mod.reset(args.number)
+        if not args.json:
+            print("Progres direset.", file=sys.stderr)
+    else:
+        raise ReaError(E_USAGE, f"Aksi learn tidak dikenal: {action}", "rea learn --help")
+    return Result(command="learn", data=data)
+
+
+def _stop_text(stop: dict) -> str:
+    kind = stop.get("kind")
+    if kind == "stopped":
+        return f"berhenti dengan sinyal {stop.get('signal')}"
+    if kind == "exited":
+        return f"program selesai, kode keluar {stop.get('code')}"
+    if kind == "killed":
+        return f"program dihentikan sinyal {stop.get('signal')}"
+    return f"stop reply tak dikenal ({stop.get('raw', '')})"
+
+
+def _print_registers(registers: dict, names: tuple = ()) -> None:
+    for name, value in registers.items():
+        if names and name not in names:
+            continue
+        print(f"  {name:6} 0x{value:x}", file=sys.stderr)
+
+
+def _run_emu(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = qemu_mod.run_emulated(
+        args.file,
+        port=args.port,
+        breakpoints=args.break_at or [],
+        program_args=prog_args,
+        run_to_end=args.run_to_end,
+        timeout=args.timeout or qemu_mod.DEFAULT_TIMEOUT,
+    )
+    result.data, result.mode = data, MODE_EMULATED
+    if not args.json:
+        pc_name = {"aarch64": "pc", "arm": "pc", "x86_64": "rip", "386": "eip"}[data["arch"]]
+        pc = data["registers"].get(pc_name)
+        print(f"Tersambung ke gdbstub {data['tool']} port {data['port']}  arsitektur {data['arch']}", file=sys.stderr)
+        where = f"  {pc_name}=0x{pc:x}" if pc is not None and data["stop"].get("kind") == "stopped" else ""
+        print(f"Status: {_stop_text(data['stop'])}{where}", file=sys.stderr)
+        for item in data["breakpoints"]:
+            print(f"  breakpoint {item['spec']} @0x{item['addr']:x}: {'kena' if item['hit'] else 'tidak kena'}", file=sys.stderr)
+        if data["output"]:
+            print("Keluaran program:\n" + data["output"], file=sys.stderr)
+
+
+def _run_gdb(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = gdb_mod.debug(
+        args.file,
+        prog_args,
+        breakpoints=args.break_at or [],
+        examines=[gdb_mod.parse_examine(e) for e in args.examine or []],
+        timeout=args.timeout or gdb_mod.DEFAULT_TIMEOUT,
+    )
+    result.data, result.mode = data, MODE_FULL
+    for item in data["breakpoints"]:
+        if not item["set"]:
+            result.warnings.append(f"Breakpoint {item['spec']!r} tidak dikenali gdb (simbol tidak ada).")
+    if not args.json:
+        if data["stopped"]:
+            print("Berhenti di program (gdb). Register penting:", file=sys.stderr)
+            _print_registers(data["registers"], ("rip", "pc", "sp", "rsp", "rax", "x0", "x1", "x30"))
+            for frame in data["backtrace"][:10]:
+                print(f"  #{frame['level']} {frame['function']}({frame['args']}) {frame['source'] or ''}", file=sys.stderr)
+            for mem in data["memory"]:
+                print(f"  [{mem['spec']}] {mem['hex'] or mem['error']}", file=sys.stderr)
+        elif data["exit"] is not None:
+            print(f"Program selesai tanpa berhenti (kode {data['exit']['code']}).", file=sys.stderr)
+        if data["program_output"]:
+            print("Keluaran program:\n" + data["program_output"], file=sys.stderr)
+
+
+def _run_strace(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = strace_mod.trace(args.file, prog_args, trace_filter=args.trace, timeout=args.timeout or strace_mod.DEFAULT_TIMEOUT)
+    result.data, result.mode = data, MODE_FULL
+    if data["timed_out"]:
+        result.warnings.append("Waktu habis; jejak mungkin tidak lengkap.")
+    if not args.json:
+        print(f"{data['total']} syscall; keluar: {data['exit']}", file=sys.stderr)
+        for item in data["summary"][:10]:
+            print(f"  {item['name']:16} {item['count']}", file=sys.stderr)
+        for path in data["files"][:10]:
+            print(f"  berkas: {path}", file=sys.stderr)
+
+
+def _run_frida(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = frida_mod.hook(args.file, prog_args, args.hook or [], timeout=args.timeout or frida_mod.DEFAULT_TIMEOUT)
+    result.data, result.mode = data, MODE_FULL
+    for spec in data["unresolved"]:
+        result.warnings.append(f"Hook {spec!r} tidak ditemukan (bukan simbol terekspor atau simbol debug).")
+    if not args.json:
+        print(f"Frida {data['frida_version']}: {len(data['hooked'])} hook terpasang, {len(data['calls'])} panggilan", file=sys.stderr)
+        for call in data["calls"][:20]:
+            print(f"  {call['fn']}({', '.join(call['args'][:3])})" + (f"  \"{call['str0']}\"" if "str0" in call else ""), file=sys.stderr)
+
+
+def _run(args: argparse.Namespace) -> Result:
+    identify(args.file)
+    mode = args.mode
+    prog_args = shlex.split(args.args or "")
+    result = Result(command="run")
+    if mode == "auto":
+        import shutil
+
+        best, _ = quick_mode()
+        if best == MODE_FULL:
+            mode = "frida" if args.hook else "gdb" if args.break_at or not shutil.which("strace") else "strace"
+        elif best == MODE_EMULATED:
+            mode = "emu"
+            result.warnings.append("ptrace atau gdb tidak tersedia; memakai QEMU gdbstub (emu).")
+        else:
+            raise ReaError(E_MISSING_DEP, "Tidak ada mode dinamis yang bisa dipakai (ptrace/gdb/qemu tidak ada).", "Pasang: apt install gdb qemu-user, atau pakai `rea analyze` (statis).")
+    {"emu": _run_emu, "gdb": _run_gdb, "strace": _run_strace, "frida": _run_frida}[mode](args, prog_args, result)
+    return result
 
 
 def _cfg_for(path: str, symbol: str | None) -> dict:
@@ -256,10 +468,12 @@ def build_parser() -> argparse.ArgumentParser:
         ("apk", "ringkasan APK: manifest, izin, DEX, tanda tangan"),
         ("dex", "daftar class dari DEX atau APK"),
         ("decompile", "dekompilasi APK/DEX dengan jadx atau apktool"),
+        ("emu", "emulasi satu fungsi atau potongan kode (Unicorn)"),
+        ("run", "jalankan program di QEMU user-mode dengan gdbstub"),
     ):
         command = sub.add_parser(name, help=helptext)
         command.add_argument("--json", action="store_true", help="keluaran JSON di baris terakhir stdout")
-        if name in ("id", "analyze", "report", "apk", "dex", "decompile"):
+        if name in ("id", "analyze", "report", "apk", "dex", "decompile", "emu", "run"):
             command.add_argument("file", help="berkas yang diperiksa")
         if name == "analyze":
             command.add_argument("--strings", action="store_true", help="ekstrak string ASCII dan UTF-16")
@@ -279,9 +493,51 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "decompile":
             command.add_argument("--tool", default="auto", choices=["auto", "jadx", "apktool"], help="alat dekompilasi")
             command.add_argument("-o", "--output", help="folder keluaran (default .rea/<nama>.<alat>)")
+        if name == "emu":
+            command.add_argument("--arch", help="arsitektur untuk berkas mentah: arm64, arm, x86_64, x86")
+            command.add_argument("--func", help="nama fungsi di ELF yang dijalankan")
+            command.add_argument("--start", metavar="ALAMAT", help="alamat awal (ELF: alamat virtual; mentah: alamat dalam --base)")
+            command.add_argument("--end", metavar="ALAMAT", help="berhenti di alamat ini (default: saat fungsi kembali)")
+            command.add_argument("--base", metavar="ALAMAT", help="alamat muat untuk berkas mentah")
+            command.add_argument("--reg", action="append", metavar="NAMA=NILAI", help="nilai awal register (boleh berulang)")
+            command.add_argument("--mem", action="append", metavar="ALAMAT:HEX", help="tulis byte ke memori sebelum jalan (boleh berulang)")
+            command.add_argument("--dump", action="append", metavar="ALAMAT:PANJANG", help="tampilkan memori setelah selesai (boleh berulang)")
+            command.add_argument("--max-insns", type=int, default=emu_mod.DEFAULT_MAX_INSNS, help="batas instruksi")
+            command.add_argument("--timeout-ms", type=int, default=emu_mod.DEFAULT_TIMEOUT_MS, help="batas waktu emulasi (ms)")
+        if name == "run":
+            command.add_argument("--mode", default="auto", choices=["auto", "emu", "gdb", "strace", "frida"], help="mode eksekusi; auto memilih gdb/strace/frida bila ptrace jalan, selain itu emu")
+            command.add_argument("--port", type=int, help="port gdbstub (default: acak)")
+            command.add_argument("--break", dest="break_at", action="append", metavar="ALAMAT|FUNGSI", help="breakpoint (boleh berulang)")
+            command.add_argument("--args", help="argumen program, dalam satu string")
+            command.add_argument("--run-to-end", action="store_true", help="lanjutkan sampai program selesai dan tangkap keluarannya")
+            command.add_argument("--timeout", type=float, default=None, help="batas waktu (detik; default tergantung mode)")
+            command.add_argument("--trace", metavar="FILTER", help="filter syscall untuk strace, mis. file, network, openat,read")
+            command.add_argument("--examine", action="append", metavar="ALAMAT:PANJANG", help="gdb: baca memori saat berhenti, mis. $sp:32 (boleh berulang)")
+            command.add_argument("--hook", action="append", metavar="SIMBOL|ALAMAT", help="frida: pasang hook pada fungsi (boleh berulang)")
         if name == "report":
             command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
             command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")
+    learn = sub.add_parser("learn", help="mode belajar: pelajaran, latihan pada biner, dan kuis")
+    actions = learn.add_subparsers(dest="learn_action", required=True)
+    for action, helptext in (
+        ("list", "daftar pelajaran dan progres"),
+        ("show", "teori, diagram, dan tugas satu pelajaran"),
+        ("start", "siapkan (kompilasi) biner latihan"),
+        ("check", "periksa jawaban latihan"),
+        ("quiz", "kuis pilihan ganda"),
+        ("answer", "tampilkan kunci jawaban"),
+        ("reset", "hapus progres (semua atau satu pelajaran)"),
+    ):
+        sub_action = actions.add_parser(action, help=helptext)
+        sub_action.add_argument("--json", action="store_true", help="keluaran JSON di baris terakhir stdout")
+        if action in ("show", "start", "check", "quiz", "answer"):
+            sub_action.add_argument("number", type=int, help="nomor pelajaran")
+        if action == "reset":
+            sub_action.add_argument("number", type=int, nargs="?", help="nomor pelajaran (kosong = semua)")
+        if action == "check":
+            sub_action.add_argument("answer", help="jawabanmu")
+        if action == "quiz":
+            sub_action.add_argument("--answers", help="pilihan tiap pertanyaan, dipisah koma (mis. 2,1)")
     return parser
 
 
@@ -292,7 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_request:
         # argparse sudah mencetak pesan ke stderr; --version dan --help keluar dengan 0.
         return int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
-    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile}
+    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile, "emu": _emu, "run": _run, "learn": _learn}
     _show_notice_once()
     try:
         result = handlers[args.command](args)

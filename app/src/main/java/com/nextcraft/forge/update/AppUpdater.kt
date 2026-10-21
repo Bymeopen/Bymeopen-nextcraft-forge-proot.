@@ -54,7 +54,7 @@ class AppUpdater(
                 }
             }
             val root = JSONObject(body)
-            // A manifest for another package (e.g. the ".x" side-by-side build) is not an update for this app.
+            // A manifest for another package is not an update for this app (older side-by-side builds used com.nextcraft.forge.x).
             root.stringOrEmpty("packageName").takeIf { it.isNotBlank() }?.let { if (it != context.packageName) return null }
             val versionCode = root.optLong("versionCode")
             if (versionCode <= currentVersionCode()) return null

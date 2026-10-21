@@ -87,14 +87,20 @@ internal fun ChatTopBar(
             Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.agent_project_chats), tint = scheme.onSurface)
         }
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(
-                text = activeChat?.displayTitle() ?: stringResource(R.string.agent_title),
-                modifier = Modifier.forgeHeading(),
-                fontSize = ForgeType.cardTitle,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // The spinner sits right after the title while this chat works (it replaces the sliding bar under the header).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = activeChat?.displayTitle() ?: stringResource(R.string.agent_title),
+                    modifier = Modifier.weight(1f, fill = false).forgeHeading(),
+                    fontSize = ForgeType.cardTitle,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (state.activeChatRunning) {
+                    CircularProgressIndicator(modifier = Modifier.padding(start = 8.dp).size(14.dp), strokeWidth = 2.dp)
+                }
+            }
             Text(
                 text = listOfNotNull(state.activeProject?.name, state.agentKind.displayTitle()).joinToString(" · "),
                 fontSize = ForgeType.secondary,
@@ -102,10 +108,6 @@ internal fun ChatTopBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        }
-        if (state.activeChatRunning) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            Spacer(modifier = Modifier.width(4.dp))
         }
         // Changes made by the agent: opens the workspace diff.
         IconButton(onClick = onOpenChanges) {
