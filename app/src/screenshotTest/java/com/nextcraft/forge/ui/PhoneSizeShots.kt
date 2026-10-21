@@ -395,7 +395,7 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
                 WorkspaceFolderList(
                     entries = fmEntries(), loading = false, atRoot = false, truncated = false, selectedPath = null, selecting = false,
                     selectedPaths = mutableListOf(), enabled = true, onOpenFolder = {}, onSelectFile = {}, onNewFileIn = {}, onNewFolderIn = {},
-                    onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onInstallApk = {}, onDelete = {},
+                    onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onAnalyzeWithRea = {}, onInstallApk = {}, onDelete = {},
                     modifier = Modifier.weight(1f),
                 )
                 ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
@@ -420,7 +420,7 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
                 WorkspaceFolderList(
                     entries = result.entries.filter { it.path in result.matches }, loading = false, atRoot = false, truncated = false, selectedPath = null,
                     selecting = false, selectedPaths = mutableListOf(), enabled = true, onOpenFolder = {}, onSelectFile = {}, onNewFileIn = {},
-                    onNewFolderIn = {}, onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onInstallApk = {}, onDelete = {},
+                    onNewFolderIn = {}, onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onAnalyzeWithRea = {}, onInstallApk = {}, onDelete = {},
                     modifier = Modifier.weight(1f),
                 )
                 ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
