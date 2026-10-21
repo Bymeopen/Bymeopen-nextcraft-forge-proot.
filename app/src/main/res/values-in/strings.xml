@@ -876,6 +876,24 @@
     <string name="capture_done">%1$d gambar layar dilampirkan</string>
     <string name="capture_failed">Tidak dapat menangkap layar</string>
     <string name="projects_status_working">Agen bekerja</string>
+    <string name="fm_title">Pengelola file</string>
+    <plurals name="fm_workspaces_count">
+        <item quantity="other">%d workspace</item>
+    </plurals>
+    <string name="fm_workspace_active">Aktif</string>
+    <string name="fm_workspaces_empty_title">Belum ada workspace</string>
+    <string name="fm_workspaces_empty_message">Buat proyek di Proyek dan foldernya akan muncul di sini.</string>
+    <string name="fm_folder_empty">Folder ini kosong</string>
+    <plurals name="fm_items_count">
+        <item quantity="other">%d item</item>
+    </plurals>
+    <string name="fm_meta">%1$s · %2$s</string>
+    <string name="fm_sort">Urutkan dan tampilan</string>
+    <string name="fm_sort_name">Nama</string>
+    <string name="fm_sort_modified">Terakhir diubah</string>
+    <string name="fm_sort_size">Ukuran</string>
+    <string name="fm_show_hidden">Tampilkan file tersembunyi</string>
+    <string name="fm_truncated">Menampilkan %1$d item pertama dari folder ini</string>
     <string name="err_ws_read">Tidak bisa membaca berkas proyek</string>
     <string name="err_ws_revert_file">Tidak bisa membatalkan %1$s</string>
     <string name="err_ws_keep_file">Tidak bisa menyimpan %1$s</string>

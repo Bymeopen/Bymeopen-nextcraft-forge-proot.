@@ -284,7 +284,7 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        Column(modifier = Modifier.animateItemPlacement(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatMessageCard(
                                 message = message,
                                 agentName = state.agentKind.displayTitle(),
