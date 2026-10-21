@@ -1227,4 +1227,8 @@
     <string name="route_move_up">Move %1$s up</string>
     <string name="route_failover_notice">Continuing with %1$s</string>
     <string name="route_none_ready">No agent in the list is ready; using the selected agent.</string>
+    <string name="route_weight_less">Lower share of %1$s</string>
+    <string name="route_weight_more">Raise share of %1$s</string>
+    <string name="route_share_percent">%1$d%%</string>
+    <string name="route_equal_split">Equal split (50/50 with two agents)</string>
 </resources>

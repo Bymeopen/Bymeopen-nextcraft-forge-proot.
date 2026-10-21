@@ -53,6 +53,30 @@ class AgentRouterTest {
     }
 
     @Test
+    fun balancedHonoursWeightsAndInterleaves() {
+        val two = listOf(AgentKind.CLAUDE_CODE, AgentKind.DEEPSEEK_HARNESS)
+        val ready = two.toSet()
+        val cfg = RoutingConfig(RouteMode.BALANCED, two, mapOf(AgentKind.CLAUDE_CODE to 2, AgentKind.DEEPSEEK_HARNESS to 1))
+        val picks = (0 until 6).map { AgentRouter.route("x", cfg, AgentKind.CLAUDE_CODE, ready, it)!!.agent }
+        assertEquals(4, picks.count { it == AgentKind.CLAUDE_CODE })
+        assertEquals(2, picks.count { it == AgentKind.DEEPSEEK_HARNESS })
+        // Never three of the same in a row for 2:1.
+        assertFalse(picks.windowed(3).any { w -> w.all { it == w[0] } })
+    }
+
+    @Test
+    fun fiftyFiftyAlternatesAndZeroWeightIsSkipped() {
+        val two = listOf(AgentKind.CLAUDE_CODE, AgentKind.DEEPSEEK_HARNESS)
+        val ready = two.toSet()
+        val equal = RoutingConfig(RouteMode.BALANCED, two, mapOf(AgentKind.CLAUDE_CODE to 5, AgentKind.DEEPSEEK_HARNESS to 5))
+        val picks = (0 until 4).map { AgentRouter.route("x", equal, AgentKind.CLAUDE_CODE, ready, it)!!.agent }
+        assertEquals(setOf(AgentKind.CLAUDE_CODE, AgentKind.DEEPSEEK_HARNESS), picks.take(2).toSet())
+        assertEquals(picks.take(2), picks.drop(2))
+        val skipped = RoutingConfig(RouteMode.BALANCED, two, mapOf(AgentKind.CLAUDE_CODE to 0, AgentKind.DEEPSEEK_HARNESS to 3))
+        assertTrue((0 until 5).all { AgentRouter.route("x", skipped, AgentKind.CLAUDE_CODE, ready, it)!!.agent == AgentKind.DEEPSEEK_HARNESS })
+    }
+
+    @Test
     fun onlyFailoverAndBalancedFailOver() {
         assertTrue(AgentRouter.failsOver(RouteMode.FAILOVER))
         assertTrue(AgentRouter.failsOver(RouteMode.BALANCED))

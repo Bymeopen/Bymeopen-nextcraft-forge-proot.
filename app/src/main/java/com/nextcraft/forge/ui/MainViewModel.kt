@@ -1169,6 +1169,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** [agents] is the priority/rotation order; an agent left out of the list is not used by Failover or Balanced. */
     fun setRouteAgents(agents: List<AgentKind>) = updateRouting(_state.value.routing.copy(agents = agents.distinct()))
 
+    /** Balanced mode: [weight] (0..9) is the agent's share of messages relative to the others; equal weights are 50/50. */
+    fun setRouteWeight(agent: AgentKind, weight: Int) {
+        val current = _state.value.routing
+        updateRouting(current.copy(weights = current.weights + (agent to weight.coerceIn(0, RoutingConfig.MAX_WEIGHT))))
+    }
+
+    /** Balanced mode: every agent weighs the same (50/50 with two agents). */
+    fun resetRouteWeights() = updateRouting(_state.value.routing.copy(weights = emptyMap()))
+
     private fun updateRouting(config: RoutingConfig) {
         preferences.routing = config
         _state.update { it.copy(routing = config) }

@@ -54,12 +54,18 @@ class AppPreferences(private val context: Context) {
             return RoutingConfig(
                 mode = RouteMode.fromStored(preferences.getString("routing_mode", null)),
                 agents = order.ifEmpty { AgentKind.entries }.distinct(),
+                weights = preferences.getString("routing_weights", null)?.split(',')?.mapNotNull { pair ->
+                    val (id, weight) = pair.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+                    val agent = AgentKind.fromStoredOrNull(id) ?: return@mapNotNull null
+                    weight.toIntOrNull()?.let { agent to it }
+                }?.toMap().orEmpty(),
             )
         }
         set(value) {
             preferences.edit()
                 .putString("routing_mode", value.mode.stableId)
                 .putString("routing_agents", value.agents.joinToString(",") { it.stableId })
+                .putString("routing_weights", value.weights.entries.joinToString(",") { "${it.key.stableId}:${it.value}" })
                 .apply()
         }
 

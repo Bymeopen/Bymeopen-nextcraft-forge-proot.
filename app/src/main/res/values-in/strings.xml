@@ -1208,4 +1208,8 @@
     <string name="route_move_up">Naikkan %1$s</string>
     <string name="route_failover_notice">Dilanjutkan oleh %1$s</string>
     <string name="route_none_ready">Tidak ada agen di daftar yang siap; memakai agen terpilih.</string>
+    <string name="route_weight_less">Kurangi porsi %1$s</string>
+    <string name="route_weight_more">Naikkan porsi %1$s</string>
+    <string name="route_share_percent">%1$d%%</string>
+    <string name="route_equal_split">Bagi rata (50/50 untuk dua agen)</string>
 </resources>

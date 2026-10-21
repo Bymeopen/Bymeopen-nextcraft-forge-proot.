@@ -6,14 +6,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -23,10 +27,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutingConfig
 
 /** Short label of a routing mode, shown on the composer chip. */
 @Composable
@@ -100,6 +106,22 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                                 color = if (ready) scheme.onSurfaceVariant else scheme.error,
                             )
                         }
+                        if (on && routing.mode == RouteMode.BALANCED) {
+                            val weight = routing.weightOf(agent)
+                            val total = enabled.sumOf { routing.weightOf(it) }.takeIf { it > 0 } ?: 1
+                            IconButton(onClick = { viewModel.setRouteWeight(agent, weight - 1) }, enabled = weight > 0) {
+                                Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.route_weight_less, agent.displayTitle()))
+                            }
+                            Text(
+                                text = stringResource(R.string.route_share_percent, weight * 100 / total),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.widthIn(min = 44.dp),
+                                textAlign = TextAlign.Center,
+                            )
+                            IconButton(onClick = { viewModel.setRouteWeight(agent, weight + 1) }, enabled = weight < RoutingConfig.MAX_WEIGHT) {
+                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.route_weight_more, agent.displayTitle()))
+                            }
+                        }
                         if (on && index > 0) {
                             IconButton(onClick = {
                                 val moved = enabled.toMutableList()
@@ -121,6 +143,11 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                                 if (next.isNotEmpty()) viewModel.setRouteAgents(next)
                             },
                         )
+                    }
+                }
+                if (routing.mode == RouteMode.BALANCED) {
+                    OutlinedButton(onClick = viewModel::resetRouteWeights, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.route_equal_split))
                     }
                 }
             }
