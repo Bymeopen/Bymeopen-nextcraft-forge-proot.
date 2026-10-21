@@ -7,6 +7,7 @@ lalu menutup atau melepas proses. Yang diuji nyata adalah koneksi dan stop reply
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -57,6 +58,40 @@ def qemu_binary(machine: str) -> str:
     return path
 
 
+_WORD = {"aarch64": 8, "x86_64": 8, "arm": 4, "386": 4}
+_AT_ENTRY = 9
+
+
+def _read_auxv(client: GdbClient, machine: str, timeout: float) -> dict[int, int]:
+    """Vektor auxv guest lewat ``qXfer:auxv:read``; ``AT_ENTRY`` adalah entry program yang sebenarnya (sudah dengan bias)."""
+    word = _WORD[machine]
+    data = b""
+    for _ in range(16):
+        reply = client.request(f"qXfer:auxv:read::{len(data):x},400", timeout)
+        if reply[:1] not in ("l", "m"):
+            return {}
+        data += reply[1:].encode("latin-1")
+        if reply[0] == "l":
+            break
+    return {
+        int.from_bytes(data[i : i + word], "little"): int.from_bytes(data[i + word : i + 2 * word], "little")
+        for i in range(0, len(data) - 2 * word + 1, 2 * word)
+    }
+
+
+def _load_bias(client: GdbClient, machine: str, entry: int, timeout: float) -> tuple[int, str]:
+    """Selisih alamat muat dan alamat di berkas ELF. Berhenti pertama QEMU ada di ld.so untuk program dinamis, jadi PC
+    awal tidak bisa dipakai; auxv (AT_ENTRY) benar untuk program statis, PIE, dan dinamis."""
+    at_entry = _read_auxv(client, machine, timeout).get(_AT_ENTRY)
+    if at_entry:
+        return at_entry - entry, "auxv"
+    offsets = client.request("qOffsets", timeout)
+    match = re.match(r"Text=([0-9a-fA-F]+)", offsets)
+    if match:
+        return int(match[1], 16), "qOffsets"
+    return 0, "none"
+
+
 def _resolve_break(spec: str, symbols: list[dict[str, Any]], bias: int) -> int:
     spec = spec.strip()
     try:
@@ -104,8 +139,8 @@ def run_emulated(
         registers = parse_registers(client.request("g", timeout), layout)
         pc_name = _PC[machine]
         pc = registers.get(pc_name)
-        # Program PIE dimuat di alamat lain daripada e_entry; selisihnya dipakai untuk simbol dan breakpoint.
-        bias = (pc - entry) if pc is not None and entry else 0
+        # Program PIE dimuat di alamat lain daripada di berkas ELF; selisihnya dipakai untuk simbol dan breakpoint.
+        bias, bias_source = _load_bias(client, machine, entry, timeout)
         result: dict[str, Any] = {
             "mode": "emu",
             "connected": True,
@@ -114,6 +149,7 @@ def run_emulated(
             "arch": machine,
             "entry": entry + bias,
             "bias": bias,
+            "bias_source": bias_source,
             "supported": features[:200],
             "stop": first,
             "registers": registers,

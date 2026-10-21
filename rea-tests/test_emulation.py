@@ -210,17 +210,24 @@ def test_client_times_out_instead_of_hanging():
 
 
 def qemu_cases():
+    # (id, kompilator, flag, qemu, variabel lingkungan). PIE dinamis seperti biner di HP: berhenti pertama QEMU ada di ld.so.
     return [
-        ("x86_64", "gcc", ["-static", "-O0"], "qemu-x86_64"),
-        ("aarch64", "aarch64-linux-gnu-gcc", ["-static", "-O0"], "qemu-aarch64"),
+        ("x86_64", "gcc", ["-static", "-O0"], "qemu-x86_64", {}),
+        ("aarch64", "aarch64-linux-gnu-gcc", ["-static", "-O0"], "qemu-aarch64", {}),
+        ("x86_64-pie", "gcc", ["-O0", "-pie"], "qemu-x86_64", {"QEMU_LD_PREFIX": "/"}),
+        ("aarch64-pie", "aarch64-linux-gnu-gcc", ["-O0", "-pie"], "qemu-aarch64", {"QEMU_LD_PREFIX": "/usr/aarch64-linux-gnu"}),
     ]
 
 
 @pytest.fixture(params=qemu_cases(), ids=lambda c: c[0])
-def hello_static(request, tmp_path_factory):
-    arch, compiler, flags, qemu = request.param
+def hello_static(request, tmp_path_factory, monkeypatch):
+    arch, compiler, flags, qemu, env = request.param
     if not shutil.which(qemu):
         pytest.skip(f"{qemu} tidak ada")
+    if env.get("QEMU_LD_PREFIX", "/") != "/" and not os.path.isdir(env["QEMU_LD_PREFIX"]):
+        pytest.skip("pustaka cross tidak ada")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
     return arch, build(tmp_path_factory, f"hello_{arch}", HELLO_C, compiler, *flags)
 
 
@@ -231,7 +238,14 @@ def test_run_connects_to_the_gdbstub_and_reads_registers(hello_static):
     result = run_emulated(path)
     assert result["connected"] is True
     assert result["stop"] == {"kind": "stopped", "signal": 5}
-    assert result["registers"]["pc" if arch == "aarch64" else "rip"] == result["entry"]
+    assert result["bias_source"] == "auxv"
+    if arch.endswith("pie"):
+        # Alamat muat PIE berbeda dari berkas, dan program dinamis mulai di ld.so, bukan di entry-nya.
+        assert result["bias"] != 0
+        assert result["registers"]["pc" if arch.startswith("aarch64") else "rip"] != result["entry"]
+    else:
+        assert result["bias"] == 0
+        assert result["registers"]["pc" if arch.startswith("aarch64") else "rip"] == result["entry"]
 
 
 def test_breakpoint_on_a_function_is_hit_and_the_program_finishes(hello_static):
