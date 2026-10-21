@@ -2335,6 +2335,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectTab(ForgeTab.TERMINAL)
     }
 
+    /** Files row menu: picks [relativePath] as the target of the REA screen and opens it. */
+    fun analyzeWithRea(relativePath: String) {
+        rea.selectTarget(relativePath)
+        selectTab(ForgeTab.REA)
+    }
+
     /** Runs [command] in the active project's folder (from chat: the snippet belongs to that project). */
     fun runTerminalCommandInProject(command: String) = queueTerminalInput(command, inProject = true)
 

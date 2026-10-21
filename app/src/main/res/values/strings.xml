@@ -821,6 +821,8 @@
     <string name="diag_battery">Battery</string>
     <string name="diag_root">Root access</string>
     <string name="diag_linux">Linux runtime</string>
+    <string name="files_analyze_rea">Analyze with REA</string>
+    <string name="diag_rea">REA</string>
     <string name="diag_rootfs">Rootfs</string>
     <string name="diag_stacks">Stacks</string>
     <string name="diag_agents">Agents</string>
@@ -1134,7 +1136,7 @@
     <string name="rea_removing">Removing REA…</string>
     <string name="rea_install_optional">Install optional tools</string>
     <string name="rea_installing_optional">Installing optional tools…</string>
-    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk (apt), unicorn and frida. Needs internet; qemu-user is large.</string>
+    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio (apt), unicorn and frida. Needs internet; qemu-user is large.</string>
     <string name="rea_optional_done">Optional tools installed. The check below is up to date.</string>
     <string name="rea_optional_failed">Some optional tools could not be installed. See the output above.</string>
     <string name="rea_section_learn">Learn</string>

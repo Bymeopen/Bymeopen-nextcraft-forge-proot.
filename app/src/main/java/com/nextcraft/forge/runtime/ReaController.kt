@@ -109,7 +109,7 @@ class ReaController(context: Context) {
 
     fun runDoctor() = launchTask(R.string.rea_checking) { refreshDoctor() }
 
-    /** Installs the optional tools (strace, ltrace, qemu-user, binwalk, unicorn, frida) and then re-runs the doctor. */
+    /** Installs the optional tools (strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio, unicorn, frida) and then re-runs the doctor. */
     fun installOptionalTools() = launchTask(R.string.rea_installing_optional) {
         val result = runner.run(
             workspaceDir = runner.toolWorkspace(TOOL_SLUG),
@@ -345,7 +345,7 @@ class ReaController(context: Context) {
 
     companion object {
         /** Must equal `__version__` in the Python package (a unit test checks it). */
-        const val REA_VERSION = "0.8.0"
+        const val REA_VERSION = "0.9.0"
         private const val TOOL_SLUG = "rea"
         private const val ASSET_ROOT = "rea"
         private const val MAX_LOG_CHARS = 60_000
@@ -374,7 +374,7 @@ class ReaController(context: Context) {
         internal fun optionalToolsScript(): String = """
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq >/dev/null 2>&1 || true
-            apt-get install -y -qq strace ltrace qemu-user binwalk || echo "Peringatan: sebagian alat apt gagal dipasang."
+            apt-get install -y -qq strace ltrace qemu-user binwalk squashfs-tools cpio || echo "Peringatan: sebagian alat apt gagal dipasang."
             if ! python3 -c "import unicorn" >/dev/null 2>&1; then
               apt-get install -y -qq python3-unicorn >/dev/null 2>&1 \
                 || { apt-get install -y -qq python3-pip && python3 -m pip install --break-system-packages unicorn; } \
