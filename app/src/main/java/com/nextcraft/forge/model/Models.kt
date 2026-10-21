@@ -69,7 +69,7 @@ enum class AgentKind(
     ),
     DEEPSEEK_HARNESS(
         "deepseek-harness",
-        "DeepSeek Harness",
+        "DeepSeek",
         "Official DeepSeek coding agent · API-key providers",
         "26.8 MB",
     ),

@@ -2765,7 +2765,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
-            label = "DeepSeek Harness",
+            label = "DeepSeek",
             fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
             sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
             compressedBytes = 28_066_921L,
