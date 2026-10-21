@@ -896,4 +896,17 @@
     <string name="agent_intelligence_title">Mode kecerdasan aktif</string>
     <string name="agent_intelligence_active">Aktif: %1$s · %2$s</string>
     <string name="agent_claude_effort_auto">Otomatis</string>
+    <string name="chat_menu_changes">Tinjau perubahan</string>
+    <string name="chat_menu_more">Lainnya</string>
+    <string name="chat_menu_rename">Ganti nama</string>
+    <string name="chat_menu_usage">Penggunaan</string>
+    <string name="chat_menu_clear">Bersihkan percakapan</string>
+    <string name="chat_rename_title">Ganti nama obrolan</string>
+    <string name="chat_rename_save">Simpan</string>
+    <string name="chat_usage_title">Penggunaan</string>
+    <string name="chat_usage_context">Jendela konteks</string>
+    <string name="chat_usage_percent">%1$d%% terpakai</string>
+    <string name="chat_usage_used">Sekitar %1$s dari %2$s token (perkiraan)</string>
+    <string name="chat_usage_note">Batas paket diatur di akun Claude-mu.</string>
+    <string name="chat_model_sheet_title">Model dan upaya</string>
 </resources>

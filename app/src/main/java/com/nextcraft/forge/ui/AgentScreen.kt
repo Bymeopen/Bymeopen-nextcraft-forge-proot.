@@ -184,16 +184,29 @@ fun AgentScreen(
         }
     }
 
+    val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+    var usageOpen by rememberSaveable { mutableStateOf(false) }
+    var renameOpen by rememberSaveable { mutableStateOf(false) }
+    var modelSheetOpen by rememberSaveable { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            androidx.compose.material3.ModalDrawerSheet {
+                ChatDrawerContent(state = state, viewModel = viewModel, onClose = { scope.launch { drawerState.close() } })
+            }
+        },
+    ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        AgentHeader(
+        ChatTopBar(
             state = state,
-            onBack = { viewModel.projectBack() },
-            onRun = { viewModel.selectTab(ForgeTab.ANDROID) },
-            onSelectChat = viewModel::openChat,
-            onCreateChat = { viewModel.createChat() },
-            onDeleteChat = viewModel::deleteChat,
-            onSelectAgent = viewModel::selectAgent,
-            onClearChat = viewModel::clearActiveChat,
+            onOpenDrawer = { scope.launch { drawerState.open() } },
+            onOpenChanges = { viewModel.selectProjectPane(ProjectPane.FILES) },
+            onRename = { renameOpen = true },
+            onUsage = { usageOpen = true },
+            onClear = viewModel::clearActiveChat,
+            onDelete = { viewModel.deleteChat(state.activeChatId) },
         )
 
         if (state.agentKind == AgentKind.ANTIGRAVITY &&
@@ -480,132 +493,24 @@ fun AgentScreen(
                 viewModel.sendPrompt(text)
             },
             onStop = viewModel::stopActiveTask,
+            modelChipLabel = chatModelChipLabel(state),
+            onModelChip = { modelSheetOpen = true },
         )
     }
-}
-
-/** Large title + action pill (agent switcher, new chat) and pill tabs for the chats of the project. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun AgentHeader(
-    state: ForgeUiState,
-    onBack: () -> Unit,
-    onRun: () -> Unit,
-    onSelectChat: (String) -> Unit,
-    onCreateChat: () -> Unit,
-    onDeleteChat: (String) -> Unit,
-    onSelectAgent: (AgentKind) -> Unit,
-    onClearChat: () -> Unit,
-) {
-    var chatsOpen by rememberSaveable { mutableStateOf(false) }
-    val scheme = MaterialTheme.colorScheme
-    val activeChat = state.chats.firstOrNull { it.id == state.activeChatId }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 4.dp, end = 14.dp, top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Back to Projects: the project name is the title, so this header reads as "inside a project".
-        IconButton(onClick = onBack) {
-            Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.a11y_back), tint = scheme.onSurface)
-        }
-        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(
-                text = state.activeProject?.name ?: stringResource(R.string.agent_title),
-                modifier = Modifier.forgeHeading(),
-                fontSize = ForgeType.screenTitle,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOfNotNull(state.agentKind.displayTitle(), activeChat?.displayTitle()).joinToString(" · "),
-                fontSize = ForgeType.secondary,
-                color = scheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        IconButton(onClick = { chatsOpen = true }) {
-            ForgeIcon(glyph = ForgeGlyph.HISTORY, tint = scheme.onSurface, size = 22.dp, description = stringResource(R.string.agent_project_chats))
-        }
     }
 
-    if (chatsOpen) {
-        ProjectChatsDialog(
-            state = state,
-            onDismiss = { chatsOpen = false },
-            onCreateChat = {
-                chatsOpen = false
-                onCreateChat()
+    if (usageOpen) ChatUsageSheet(state = state, onDismiss = { usageOpen = false })
+    if (modelSheetOpen) ChatModelSheet(state = state, viewModel = viewModel, onDismiss = { modelSheetOpen = false })
+    if (renameOpen) {
+        RenameChatDialog(
+            initial = state.chats.firstOrNull { it.id == state.activeChatId }?.title.orEmpty(),
+            onDismiss = { renameOpen = false },
+            onSave = {
+                viewModel.renameChat(state.activeChatId, it)
+                renameOpen = false
             },
-            onSelectChat = {
-                chatsOpen = false
-                onSelectChat(it)
-            },
-            onDeleteChat = onDeleteChat,
         )
     }
-}
-
-/** "Project chats": one primary New chat action, then every chat of the project with the current one checked. */
-@Composable
-private fun ProjectChatsDialog(
-    state: ForgeUiState,
-    onDismiss: () -> Unit,
-    onCreateChat: () -> Unit,
-    onSelectChat: (String) -> Unit,
-    onDeleteChat: (String) -> Unit,
-) {
-    val tokens = LocalForgeThemeTokens.current
-    val scheme = MaterialTheme.colorScheme
-    AlertDialog(
-        modifier = Modifier.forgePopIn(),
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(22.dp),
-        containerColor = tokens.cardContainerColor,
-        title = { Text(stringResource(R.string.agent_project_chats), fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ForgePrimaryButton(
-                    text = stringResource(R.string.agent_new_chat),
-                    onClick = onCreateChat,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                state.chats.forEach { chat ->
-                    val current = chat.id == state.activeChatId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (current) scheme.primary.copy(alpha = 0.12f) else tokens.cardElevatedColor)
-                            .clickable(role = Role.Button) { onSelectChat(chat.id) }
-                            .padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
-                            .height(48.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(chat.displayTitle(), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (current) {
-                                Text(stringResource(R.string.agent_current_chat), fontSize = ForgeType.caption, color = scheme.onSurfaceVariant)
-                            }
-                        }
-                        if (current) {
-                            Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected), tint = scheme.primary)
-                        } else if (state.chats.size > 1) {
-                            IconButton(onClick = { onDeleteChat(chat.id) }) {
-                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.agent_delete_chat), tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            ForgeTextButton(onClick = onDismiss) { Text(stringResource(R.string.agent_close)) }
-        },
-    )
 }
 
 @Composable

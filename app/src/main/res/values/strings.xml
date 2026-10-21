@@ -912,4 +912,17 @@
     <string name="agent_intelligence_title">Active intelligence</string>
     <string name="agent_intelligence_active">Active: %1$s · %2$s</string>
     <string name="agent_claude_effort_auto">Auto</string>
+    <string name="chat_menu_changes">Review changes</string>
+    <string name="chat_menu_more">More</string>
+    <string name="chat_menu_rename">Rename</string>
+    <string name="chat_menu_usage">Usage</string>
+    <string name="chat_menu_clear">Clear conversation</string>
+    <string name="chat_rename_title">Rename chat</string>
+    <string name="chat_rename_save">Save</string>
+    <string name="chat_usage_title">Usage</string>
+    <string name="chat_usage_context">Context window</string>
+    <string name="chat_usage_percent">%1$d%% used</string>
+    <string name="chat_usage_used">About %1$s of %2$s tokens (estimate)</string>
+    <string name="chat_usage_note">Plan limits are managed in your Claude account.</string>
+    <string name="chat_model_sheet_title">Model and effort</string>
 </resources>

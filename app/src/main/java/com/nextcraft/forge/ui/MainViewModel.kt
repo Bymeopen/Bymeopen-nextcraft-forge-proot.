@@ -929,6 +929,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Renames a chat of the open project; a renamed chat keeps its name (it is no longer auto-titled). */
+    fun renameChat(chatId: String, title: String) {
+        val project = _state.value.activeProject ?: return
+        val clean = title.trim().take(60)
+        if (clean.isEmpty()) return
+        val updated = _state.value.chats.map { if (it.id == chatId) it.copy(title = clean) else it }
+        preferences.saveProjectChats(project.id, updated)
+        _state.update { it.copy(chats = updated) }
+    }
+
     fun clearActiveChat() {
         if (runs.containsKey(_state.value.activeChatId)) return
         val project = _state.value.activeProject ?: return
@@ -1531,7 +1541,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openProject(projectId: String) = leaveOpenFile {
         selectProject(projectId)
         if (_state.value.activeProjectId == projectId) {
-            _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CHATS, projectPane = ProjectPane.CHAT) }
+            _state.update { it.copy(activeTab = ForgeTab.PROJECTS, projectView = ProjectView.CONVERSATION, projectPane = ProjectPane.CHAT) }
         }
     }
 
@@ -1568,8 +1578,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (!paneBesideChat) return true
         }
         val next = when (_state.value.projectView) {
-            ProjectView.CONVERSATION -> ProjectView.CHATS
-            ProjectView.CHATS -> ProjectView.LIST
+            // The chat list is a drawer inside the conversation now, so Back leaves the project.
+            ProjectView.CONVERSATION, ProjectView.CHATS -> ProjectView.LIST
             ProjectView.LIST -> return false
         }
         _state.update { it.copy(projectView = next) }
