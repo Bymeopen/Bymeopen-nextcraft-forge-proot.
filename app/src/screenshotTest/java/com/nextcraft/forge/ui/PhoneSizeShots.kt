@@ -375,6 +375,45 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
         }
         save("onboarding")
     }
+    @Test
+    fun filesSearch() {
+        fun d(path: String) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), true, path.count { it == '/' }, childCount = 2)
+        fun f(path: String, size: Long = 2048) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), false, path.count { it == '/' }, size)
+        val all = listOf(d("app"), d("app/src"), f("app/src/Main.kt"), d("app/src/util"), f("app/src/util/Strings.kt"), f("build.gradle.kts"), d("docs"), f("docs/main-guide.md"), f("README.md"))
+        val result = searchWorkspaceEntries(all, "main")
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FilesHeaderCard(selecting = false, selectedCount = 0, enabled = true, onNewFile = {}, onNewFolder = {}, onUpload = {}, onToggleSelect = {}, onRefresh = {}, searching = true, onToggleSearch = {})
+                FileSearchBar(query = "main", onQueryChange = {}, resultCount = result.matches.size)
+                WorkspaceTreeList(
+                    entries = all, selectedPath = null, selecting = false, selectedPaths = mutableListOf(), enabled = true,
+                    onSelectFile = {}, onNewFileIn = {}, onNewFolderIn = {}, onUploadIn = {}, onRename = {}, onSaveCopy = {},
+                    onEditInTerminal = {}, onInstallApk = {}, onDelete = {}, modifier = Modifier.weight(1f), search = result,
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesSearch")
+    }
+
+    @Test
+    fun filesSearchEmpty() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FileSearchBar(query = "zzz", onQueryChange = {}, resultCount = 0)
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.SEARCH,
+                    title = androidx.compose.ui.res.stringResource(com.nextcraft.forge.R.string.files_search_empty_title),
+                    message = androidx.compose.ui.res.stringResource(com.nextcraft.forge.R.string.files_search_empty_message, "zzz"),
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesSearchEmpty")
+    }
 }
 
 @Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")

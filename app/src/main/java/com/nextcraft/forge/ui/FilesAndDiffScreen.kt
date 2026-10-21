@@ -61,6 +61,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -95,6 +96,8 @@ fun FilesAndDiffScreen(
     var selecting by remember { mutableStateOf(false) }
     val selectedPaths = remember { mutableStateListOf<String>() }
     var uploadDir by rememberSaveable { mutableStateOf("") }
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     val uploadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) viewModel.importFilesToWorkspace(uris, uploadDir)
     }
@@ -144,6 +147,12 @@ fun FilesAndDiffScreen(
                 if (!selecting) selectedPaths.clear()
             },
             onRefresh = { state.activeProject?.let { viewModel.refreshWorkspaceFilesAndChanges(it.id) } },
+            searching = searching,
+            onToggleSearch = {
+                searching = !searching
+                if (!searching) searchQuery = ""
+                mode = "files"
+            },
         )
         val modes = listOf("files", "editor", "diff")
         ForgePillTabs(
@@ -158,7 +167,21 @@ fun FilesAndDiffScreen(
 
         when (mode) {
             "files" -> Column(modifier = Modifier.weight(1f)) {
-                WorkspaceTreeList(
+                val search = remember(state.workspaceFiles, searchQuery, searching) {
+                    if (searching && searchQuery.isNotBlank()) searchWorkspaceEntries(state.workspaceFiles, searchQuery) else null
+                }
+                if (searching) {
+                    FileSearchBar(query = searchQuery, onQueryChange = { searchQuery = it }, resultCount = search?.matches?.size)
+                }
+                if (search != null && search.entries.isEmpty()) {
+                    ForgeEmptyState(
+                        glyph = ForgeGlyph.SEARCH,
+                        title = stringResource(R.string.files_search_empty_title),
+                        message = stringResource(R.string.files_search_empty_message, searchQuery.trim()),
+                        modifier = Modifier.weight(1f),
+                    )
+                } else WorkspaceTreeList(
+                    search = search,
                     entries = state.workspaceFiles,
                     selectedPath = state.selectedFilePath,
                     selecting = selecting,
@@ -281,7 +304,7 @@ fun FilesAndDiffScreen(
 
 /** Card header for the explorer: title, "+" menu (new file / folder / upload), select-for-download, refresh. */
 @Composable
-private fun FilesHeaderCard(
+internal fun FilesHeaderCard(
     selecting: Boolean,
     selectedCount: Int,
     enabled: Boolean,
@@ -290,6 +313,8 @@ private fun FilesHeaderCard(
     onUpload: () -> Unit,
     onToggleSelect: () -> Unit,
     onRefresh: () -> Unit,
+    searching: Boolean = false,
+    onToggleSearch: () -> Unit = {},
 ) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
@@ -312,6 +337,12 @@ private fun FilesHeaderCard(
                 fontSize = ForgeType.cardTitle,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
+            )
+            ForgeGlyphPillIcon(
+                glyph = ForgeGlyph.SEARCH,
+                description = stringResource(R.string.files_search),
+                onClick = onToggleSearch,
+                tint = if (searching) scheme.primary else scheme.onSurface,
             )
             Box {
                 ForgePillIcon(
@@ -354,7 +385,7 @@ private fun FilesHeaderCard(
 }
 
 @Composable
-private fun WorkspaceTreeList(
+internal fun WorkspaceTreeList(
     entries: List<WorkspaceEntry>,
     selectedPath: String?,
     selecting: Boolean,
@@ -370,6 +401,7 @@ private fun WorkspaceTreeList(
     onInstallApk: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
+    search: FileSearchResult? = null,
 ) {
     if (entries.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -390,7 +422,8 @@ private fun WorkspaceTreeList(
     val childCounts = remember(entries) {
         entries.filter { it.depth > 0 }.groupingBy { it.path.substringBeforeLast('/') }.eachCount()
     }
-    val visible = entries.filter { e ->
+    // While searching every folder on the way to a match is open; the collapsed state returns when the search ends.
+    val visible = search?.entries ?: entries.filter { e ->
         var parent = e.path.substringBeforeLast('/', "")
         var ok = true
         while (ok && parent.isNotEmpty()) {
@@ -406,7 +439,9 @@ private fun WorkspaceTreeList(
     ) {
         items(visible, key = { it.path }) { entry ->
             val isSelected = entry.path == selectedPath
-            val isOpen = entry.path !in collapsed
+            val isOpen = search != null || entry.path !in collapsed
+            // Folders that are only on the way to a match are drawn quieter than the matches themselves.
+            val dim = search != null && entry.path !in search.matches
             var menuOpen by remember { mutableStateOf(false) }
             val checked = entry.path in selectedPaths
             Column {
@@ -415,6 +450,7 @@ private fun WorkspaceTreeList(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (isSelected) scheme.onSurface.copy(alpha = 0.08f) else Color.Transparent)
+                        .alpha(if (dim) 0.6f else 1f)
                         .clickable(role = Role.Button) {
                             when {
                                 selecting -> if (checked) selectedPaths.remove(entry.path) else selectedPaths.add(entry.path)
