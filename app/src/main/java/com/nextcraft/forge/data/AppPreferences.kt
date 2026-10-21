@@ -54,6 +54,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("agent_antigravity_model", "") ?: ""
         set(value) { preferences.edit().putString("agent_antigravity_model", value).apply() }
 
+    /** Claude Code effort level (low/medium/high/xhigh/max); empty keeps the model's own default. */
+    var claudeEffort: String
+        get() = preferences.getString("agent_claude_effort", "") ?: ""
+        set(value) { preferences.edit().putString("agent_claude_effort", value).apply() }
+
     var antigravityEffort: String
         get() = preferences.getString("agent_antigravity_effort", "high") ?: "high"
         set(value) { preferences.edit().putString("agent_antigravity_effort", value).apply() }

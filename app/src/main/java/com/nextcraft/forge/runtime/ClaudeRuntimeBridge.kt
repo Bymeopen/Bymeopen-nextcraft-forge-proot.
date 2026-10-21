@@ -95,6 +95,9 @@ class ClaudeRuntimeBridge(
     private val autoApproveAllTools: () -> Boolean = {
         runCatching { com.nextcraft.forge.data.AppPreferences(context).autoApproveAllTools }.getOrDefault(true)
     },
+    private val claudeEffort: () -> String = {
+        runCatching { com.nextcraft.forge.data.AppPreferences(context).claudeEffort }.getOrDefault("")
+    },
     private val interactiveHighRiskApprovals: () -> Boolean = {
         runCatching { com.nextcraft.forge.data.AppPreferences(context).interactiveHighRiskApprovals }.getOrDefault(true)
     },
@@ -204,6 +207,7 @@ class ClaudeRuntimeBridge(
                 authToken = secret,
                 localGatewayUrl = formatGateway?.url ?: openRouterGateway?.url,
                 useStoredLogin = storedLogin,
+                claudeEffort = claudeEffort(),
             )
             Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}")
             Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
@@ -361,9 +365,11 @@ class ClaudeRuntimeBridge(
         val secret = if (storedLogin) "" else secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         check(secret.isNotBlank() || storedLogin) { "Not signed in to Claude." }
         val installed = installer.installedRuntime()
-        val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
+        // chroot-exec.sh bind-mounts this directory once and keeps the mount: deleting it after a test left a stale mount
+        // ("current working directory was deleted"), so it is created once and only emptied, never removed.
+        val probeDir = File(context.filesDir, "runtime-probes/claude-check").apply { mkdirs() }
         val outputFile = File(context.cacheDir, "claude-hello-${System.nanoTime()}.log")
-        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, useStoredLogin = storedLogin)
+        val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, useStoredLogin = storedLogin, claudeEffort = claudeEffort())
         val command = listOf(
             launch.executable,
             "-p", "Reply with exactly: ok",
@@ -377,7 +383,7 @@ class ClaudeRuntimeBridge(
             probeDir,
             launch.environment,
             command,
-            guestWorkspacePath = "/workspace/claude-hello",
+            guestWorkspacePath = "/workspace/claude-check",
             emulateHardLinks = false,
             outputFile = outputFile,
         )
@@ -403,7 +409,7 @@ class ClaudeRuntimeBridge(
             runCatching { process.destroy() }
             runCatching { if (process.isAlive) process.destroyForcibly() }
             runCatching { outputFile.delete() }
-            runCatching { probeDir.deleteRecursively() }
+            runCatching { probeDir.listFiles()?.forEach { it.deleteRecursively() } }
             Log.d("ClaudeBridge", "Connection test took ${android.os.SystemClock.elapsedRealtime() - startedAt} ms")
         }
     }

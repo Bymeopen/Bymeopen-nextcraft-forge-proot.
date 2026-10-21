@@ -883,4 +883,12 @@
     <string name="err_ws_revert">Tidak bisa membatalkan perubahan</string>
     <string name="rt_msg_preparing_default">Menyiapkan ruang kerja pribadi Anda</string>
     <string name="chat_composer_hint">Tulis pesan…</string>
+    <string name="agent_claude_effort">Upaya (effort)</string>
+    <string name="agent_claude_effort_hint">Mengatur seberapa dalam Claude berpikir sebelum menjawab. Makin tinggi makin lambat dan makin banyak memakai kuota.</string>
+    <string name="agent_claude_effort_default">Default (ditentukan model)</string>
+    <string name="agent_claude_effort_low">Rendah</string>
+    <string name="agent_claude_effort_medium">Sedang</string>
+    <string name="agent_claude_effort_high">Tinggi</string>
+    <string name="agent_claude_effort_xhigh">Sangat tinggi</string>
+    <string name="agent_claude_effort_max">Maksimum</string>
 </resources>

@@ -62,6 +62,8 @@ internal fun providerPresetModels(kind: ProviderKind): List<ModelOption> = when 
         ModelOption("sonnet", "Claude Sonnet", "latest"),
         ModelOption("opus", "Claude Opus", "latest"),
         ModelOption("haiku", "Claude Haiku", "fast"),
+        ModelOption("sonnet[1m]", "Claude Sonnet (1M context)", "1M"),
+        ModelOption("opus[1m]", "Claude Opus (1M context)", "1M"),
         ModelOption("opusplan", "Opus plans, Sonnet builds", labelRes = com.nextcraft.forge.R.string.model_opusplan),
     )
     ProviderKind.LLM_ROUTER -> listOf(

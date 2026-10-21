@@ -166,6 +166,9 @@ internal fun List<ChatMessage>.recentWithinCharacterBudget(maxCharacters: Int): 
 internal fun localServerPlaceholderKey(profile: ProviderProfile): String =
     if (profile.kind == ProviderKind.CUSTOM) "no-key-required" else ""
 
+/** Effort levels Claude Code accepts in CLAUDE_CODE_EFFORT_LEVEL. */
+val CLAUDE_EFFORT_LEVELS = listOf("low", "medium", "high", "xhigh", "max")
+
 object RuntimeLaunchConfigBuilder {
     fun build(
         profile: ProviderProfile,
@@ -176,6 +179,8 @@ object RuntimeLaunchConfigBuilder {
          * so no token is passed. (A token in CLAUDE_CODE_OAUTH_TOKEN is never refreshed and expires within hours.)
          */
         useStoredLogin: Boolean = false,
+        /** Claude Code effort level; blank or unknown values leave the CLI's default. */
+        claudeEffort: String = "",
     ): RuntimeLaunchConfig {
         val cleanToken = authToken?.trim().orEmpty()
         val isClaudeOAuthToken = cleanToken.startsWith("sk-ant-oat")
@@ -233,6 +238,7 @@ object RuntimeLaunchConfigBuilder {
                 environment["ANTHROPIC_MODEL"] = "claude-sonnet-4-6"
             }
         }
+        claudeEffort.trim().lowercase().takeIf { it in CLAUDE_EFFORT_LEVELS }?.let { environment["CLAUDE_CODE_EFFORT_LEVEL"] = it }
         val runtimeModel = environment["ANTHROPIC_MODEL"] ?: profile.model
         if (useClaudeOAuth) {
             if (cleanToken.isNotBlank()) {

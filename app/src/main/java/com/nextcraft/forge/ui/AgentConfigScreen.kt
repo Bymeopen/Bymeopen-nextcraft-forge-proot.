@@ -257,9 +257,6 @@ fun AgentConfigScreen(
                 }
             }
             if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (statusText.isNotBlank()) {
-                Text(text = statusText, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp))
-            }
             var modelOpen by rememberSaveable(agent) { mutableStateOf(false) }
             var credentialsOpen by rememberSaveable(agent) { mutableStateOf(false) }
             val activeKey = state.savedApiKeys.firstOrNull { it.isActive }
@@ -306,15 +303,37 @@ fun AgentConfigScreen(
                                 )
                             }
                         }
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::validateProviderConnection,
-                            enabled = !state.apiBusy,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                        ) { Text(stringResource(R.string.settings_validate)) }
                     }
                 }
                 ThinDivider()
+                if (agent == AgentKind.CLAUDE_CODE) {
+                    var effortOpen by rememberSaveable(agent) { mutableStateOf(false) }
+                    AgentDisclosureRow(
+                        icon = ForgeGlyph.REFRESH,
+                        title = stringResource(R.string.agent_claude_effort),
+                        subtitle = claudeEffortLabel(state.claudeEffort),
+                        expanded = effortOpen,
+                        onToggle = { effortOpen = !effortOpen },
+                    ) {
+                        Column {
+                            Text(
+                                text = stringResource(R.string.agent_claude_effort_hint),
+                                fontSize = ForgeType.secondary,
+                                color = scheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp),
+                            )
+                            (listOf("") + CLAUDE_EFFORT_LEVELS).forEach { level ->
+                                RadioRow(
+                                    title = claudeEffortLabel(level),
+                                    subtitle = null,
+                                    selected = state.claudeEffort == level,
+                                    onClick = { viewModel.setClaudeEffort(level) },
+                                )
+                            }
+                        }
+                    }
+                    ThinDivider()
+                }
                 AgentDisclosureRow(
                     icon = ForgeGlyph.LOCK,
                     title = stringResource(R.string.agent_credentials),
@@ -384,6 +403,30 @@ fun AgentConfigScreen(
                         )
                     }
                 }
+            }
+            // Same connection test as Antigravity: one button under the card, result coloured below it.
+            OutlinedButton(
+                shape = RoundedCornerShape(100),
+                onClick = viewModel::validateProviderConnection,
+                enabled = !state.apiBusy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            ) {
+                ForgeIcon(glyph = ForgeGlyph.REFRESH, tint = scheme.primary, size = 18.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.agent_test_connection))
+            }
+            if (statusText.isNotBlank()) {
+                val themeTokens = LocalForgeThemeTokens.current
+                Text(
+                    text = statusText,
+                    fontSize = ForgeType.secondary,
+                    color = when {
+                        statusText.startsWith("✓") -> themeTokens.successText
+                        statusText.startsWith("✕") -> themeTokens.dangerText
+                        else -> scheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
             }
             if (showModelPicker) {
                 ModelPickerDialog(
@@ -494,3 +537,16 @@ private fun AgentDisclosureRow(
         }
     }
 }
+
+/** Label for a Claude Code effort level; "" is the model default. */
+@Composable
+private fun claudeEffortLabel(level: String): String = stringResource(
+    when (level) {
+        "low" -> R.string.agent_claude_effort_low
+        "medium" -> R.string.agent_claude_effort_medium
+        "high" -> R.string.agent_claude_effort_high
+        "xhigh" -> R.string.agent_claude_effort_xhigh
+        "max" -> R.string.agent_claude_effort_max
+        else -> R.string.agent_claude_effort_default
+    },
+)

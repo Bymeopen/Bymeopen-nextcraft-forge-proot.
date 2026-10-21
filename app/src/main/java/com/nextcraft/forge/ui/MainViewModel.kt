@@ -63,6 +63,7 @@ import com.nextcraft.forge.runtime.RootfsRepair
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.RuntimeInstaller
+import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
 import com.nextcraft.forge.runtime.RuntimeLaunchConfigBuilder
 import com.nextcraft.forge.runtime.AgentUpdateInfo
 import com.nextcraft.forge.runtime.RuntimeSetupController
@@ -336,6 +337,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
+                    claudeEffort = preferences.claudeEffort,
                 )
             }
             val savedGitHubToken = vault.get("GITHUB_TOKEN").orEmpty()
@@ -3269,6 +3271,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutoSyncGitHub(enabled: Boolean) {
         preferences.autoSyncGitHub = enabled
         _state.update { it.copy(autoSyncGitHub = enabled) }
+    }
+
+    /** Saves the Claude Code effort level ("" = model default); it reaches the CLI as CLAUDE_CODE_EFFORT_LEVEL. */
+    fun setClaudeEffort(level: String) {
+        val clean = level.trim().lowercase().takeIf { it in CLAUDE_EFFORT_LEVELS } ?: ""
+        preferences.claudeEffort = clean
+        _state.update { it.copy(claudeEffort = clean) }
     }
 
     fun setAntigravityConfig(model: String, effort: String) {

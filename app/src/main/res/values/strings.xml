@@ -899,4 +899,12 @@
     <string name="err_ws_revert">Could not revert the changes</string>
     <string name="rt_msg_preparing_default">Preparing your private coding workspace</string>
     <string name="chat_composer_hint">Message…</string>
+    <string name="agent_claude_effort">Effort</string>
+    <string name="agent_claude_effort_hint">Controls how much Claude thinks before answering. Higher is slower and uses more of your plan.</string>
+    <string name="agent_claude_effort_default">Default (model decides)</string>
+    <string name="agent_claude_effort_low">Low</string>
+    <string name="agent_claude_effort_medium">Medium</string>
+    <string name="agent_claude_effort_high">High</string>
+    <string name="agent_claude_effort_xhigh">Extra high</string>
+    <string name="agent_claude_effort_max">Max</string>
 </resources>

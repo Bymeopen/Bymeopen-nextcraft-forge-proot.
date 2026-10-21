@@ -196,6 +196,7 @@ data class ForgeUiState(
     val autoSyncGitHub: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
+    val claudeEffort: String = "",
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
