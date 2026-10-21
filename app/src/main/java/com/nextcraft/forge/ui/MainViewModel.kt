@@ -320,17 +320,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptySet()
             }
-            val firstProject = projects.first()
+            // No project is possible: the user may have deleted them all.
+            val firstProject = projects.firstOrNull()
             configureAllProjectRoots(projects)
-            val chats = preferences.loadProjectChats(firstProject.id)
+            val chats = firstProject?.let { preferences.loadProjectChats(it.id) }.orEmpty()
             val activeChatId = chats.firstOrNull()?.id ?: "main"
-            val messages = preferences.loadMessages(firstProject.id, activeChatId)
+            val messages = firstProject?.let { preferences.loadMessages(it.id, activeChatId) }.orEmpty()
             val loadedProfile = preferences.loadProvider(vault, savedAgent)
             val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
             val keys = vault.list(profile.kind.name)
             val initialBuildRecord = withContext(Dispatchers.IO) {
-                val ws = checkpoints.ensureWorkspace(firstProject.id)
-                val androidRoot = findAndroidProjectRoot(ws)
+                val ws = firstProject?.let { checkpoints.ensureWorkspace(it.id) }
+                val androidRoot = ws?.let { findAndroidProjectRoot(it) }
                 val existingApk = androidRoot?.let { findDebugApk(it) }
                 if (existingApk != null) {
                     AndroidBuildRecord(
@@ -356,7 +357,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     routing = preferences.routing,
                     themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
                     projects = projects,
-                    activeProjectId = firstProject.id,
+                    activeProjectId = firstProject?.id.orEmpty(),
                     chats = chats,
                     activeChatId = activeChatId,
                     messages = messages,
@@ -386,16 +387,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            refreshWorkspaceFilesAndChanges(firstProject.id)
+            firstProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
         }
     }
 
     private suspend fun loadOrCreateDefaultProject(): List<Project> = withContext(Dispatchers.IO) {
         val existing = preferences.loadProjects()
         if (existing.isNotEmpty()) {
+            preferences.defaultProjectSeeded = true
             existing.forEach { checkpoints.ensureWorkspace(it.id) }
             return@withContext existing
         }
+        // The sandbox is created once, on a clean install; projects the user deleted are not brought back.
+        if (preferences.defaultProjectSeeded) return@withContext emptyList()
         val defaultProject = Project(
             name = "Forge Sandbox",
             description = "Default workspace inside Ubuntu ARM64 Root Chroot",
@@ -415,6 +419,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val list = listOf(defaultProject)
         preferences.saveProjects(list)
+        preferences.defaultProjectSeeded = true
         list
     }
 
@@ -827,7 +832,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val currentProjects = _state.value.projects
-        if (currentProjects.size <= 1) return
         val index = currentProjects.indexOfFirst { it.id == projectId }
         if (index < 0) return
         val removed = currentProjects[index]
@@ -842,7 +846,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _state.update { it.copy(projects = updated, undoDelete = ProjectUndo(removed.id, removed.name)) }
         if (_state.value.activeProjectId == projectId) {
-            selectProject(updated.first().id)
+            if (updated.isNotEmpty()) {
+                selectProject(updated.first().id)
+            } else {
+                // The last project is gone: leave the project context empty (the Projects screen offers a new one).
+                _state.update {
+                    it.copy(
+                        activeProjectId = "",
+                        chats = emptyList(),
+                        activeChatId = "main",
+                        messages = emptyList(),
+                        selectedFilePath = null,
+                        selectedFileContent = "",
+                        selectedFileDirty = false,
+                    )
+                }
+            }
         }
     }
 
@@ -856,6 +875,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         preferences.saveProjects(restored)
         _state.update { it.copy(projects = restored, undoDelete = null) }
+        // Undoing the deletion of the only project: open it again.
+        if (_state.value.activeProjectId.isBlank()) selectProject(pending.project.id)
     }
 
     /** The Snackbar was dismissed or timed out on its own; the deletion stays pending until its window ends. */

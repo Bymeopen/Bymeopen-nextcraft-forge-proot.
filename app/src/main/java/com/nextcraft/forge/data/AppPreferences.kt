@@ -132,6 +132,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
 
+    /** True once the default "Forge Sandbox" project was created (or projects existed), so deleting all projects sticks. */
+    var defaultProjectSeeded: Boolean
+        get() = preferences.getBoolean("default_project_seeded", false)
+        set(value) { preferences.edit().putBoolean("default_project_seeded", value).apply() }
+
     /** Adds a note about the `rea` toolkit to chat messages that concern binaries. Off by default: nothing extra is sent. */
     var reaChatHint: Boolean
         get() = preferences.getBoolean("rea_chat_hint", false)
