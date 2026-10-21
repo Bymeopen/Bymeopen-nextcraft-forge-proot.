@@ -53,8 +53,46 @@ data class AgentUpdateInfo(
     val latestVersion: String,
 )
 
+/** The pinned dsh, or a newer one left by a later app build: an older app must not reinstall (downgrade) it. */
 internal fun isSupportedDshVersion(version: String): Boolean =
-    version == RuntimeInstaller.DSH_VERSION
+    version == RuntimeInstaller.DSH_VERSION || isAgentVersionNewer(version, RuntimeInstaller.DSH_VERSION)
+
+/** True when [candidate] is a newer agent version than [current] (numeric parts, then pre-release tags). */
+internal fun isAgentVersionNewer(candidate: String, current: String): Boolean {
+    fun numericParts(value: String) = value.substringBefore('-').substringBefore('+')
+        .split('.')
+        .map { it.toIntOrNull() ?: 0 }
+    val left = numericParts(candidate)
+    val right = numericParts(current)
+    for (index in 0 until maxOf(left.size, right.size)) {
+        val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
+        if (comparison != 0) return comparison > 0
+    }
+    val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
+    val currentPreTag = current.substringBefore('+').substringAfter('-', "")
+    if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
+        // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
+        return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
+    }
+    // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
+    val candidateIds = candidatePreTag.split('.')
+    val currentIds = currentPreTag.split('.')
+    for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
+        val candidateId = candidateIds.getOrNull(index)
+        val currentId = currentIds.getOrNull(index)
+        if (candidateId == null) return false
+        if (currentId == null) return true
+        val candidateNum = candidateId.toIntOrNull()
+        val currentNum = currentId.toIntOrNull()
+        val comparison = if (candidateNum != null && currentNum != null) {
+            candidateNum.compareTo(currentNum)
+        } else {
+            candidateId.compareTo(currentId)
+        }
+        if (comparison != 0) return comparison > 0
+    }
+    return false
+}
 
 enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPLETED, COMPLETED }
 
@@ -797,41 +835,7 @@ class RuntimeInstaller(private val context: Context) {
         fetchText("https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_arm64.json"),
     )
 
-    private fun isVersionNewer(candidate: String, current: String): Boolean {
-        fun numericParts(value: String) = value.substringBefore('-').substringBefore('+')
-            .split('.')
-            .map { it.toIntOrNull() ?: 0 }
-        val left = numericParts(candidate)
-        val right = numericParts(current)
-        for (index in 0 until maxOf(left.size, right.size)) {
-            val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
-            if (comparison != 0) return comparison > 0
-        }
-        val candidatePreTag = candidate.substringBefore('+').substringAfter('-', "")
-        val currentPreTag = current.substringBefore('+').substringAfter('-', "")
-        if (candidatePreTag.isEmpty() || currentPreTag.isEmpty()) {
-            // A release (no pre-release tag) always outranks a pre-release of the same numeric version.
-            return currentPreTag.isNotEmpty() && candidatePreTag.isEmpty()
-        }
-        // Same numeric version, both pre-release (e.g. "rc.1" vs "rc.2"): compare identifiers in order.
-        val candidateIds = candidatePreTag.split('.')
-        val currentIds = currentPreTag.split('.')
-        for (index in 0 until maxOf(candidateIds.size, currentIds.size)) {
-            val candidateId = candidateIds.getOrNull(index)
-            val currentId = currentIds.getOrNull(index)
-            if (candidateId == null) return false
-            if (currentId == null) return true
-            val candidateNum = candidateId.toIntOrNull()
-            val currentNum = currentId.toIntOrNull()
-            val comparison = if (candidateNum != null && currentNum != null) {
-                candidateNum.compareTo(currentNum)
-            } else {
-                candidateId.compareTo(currentId)
-            }
-            if (comparison != 0) return comparison > 0
-        }
-        return false
-    }
+    private fun isVersionNewer(candidate: String, current: String): Boolean = isAgentVersionNewer(candidate, current)
 
     private fun migrateLegacyClaudeMarker() {
         if (claudeMarker.isFile) return
@@ -878,6 +882,7 @@ class RuntimeInstaller(private val context: Context) {
         require(claudeMarker.readTextOrNull() == CLAUDE_BUNDLED_VERSION) {
             "The Claude Code runtime bundle is incomplete"
         }
+        upgradeAfterBundledInstall(AgentKind.CLAUDE_CODE, onProgress)
     }
 
     private suspend fun ensureAgyInstalled(
@@ -898,6 +903,30 @@ class RuntimeInstaller(private val context: Context) {
         agyMarker.writeText(AGY_VERSION)
         require(isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             "Antigravity CLI installation is incomplete"
+        }
+        upgradeAfterBundledInstall(AgentKind.ANTIGRAVITY, onProgress)
+    }
+
+    /**
+     * The APK bundles a fixed agent version, which can be older than what the user already ran: after a rootfs
+     * rebuild or a reinstall of the app, installing the bundle would silently downgrade the agent. Move it straight
+     * to the newest release instead. Best effort: offline or a failed download keeps the bundled version.
+     */
+    private suspend fun upgradeAfterBundledInstall(
+        agent: AgentKind,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        runCatching {
+            val update = checkAgentUpdates()[agent] ?: return
+            val runtime = installedRuntime()
+            when (agent) {
+                AgentKind.CLAUDE_CODE -> updateClaude(runtime, update.latestVersion, onProgress)
+                AgentKind.ANTIGRAVITY -> updateAgy(runtime, update.latestVersion, onProgress)
+                AgentKind.DEEPSEEK_HARNESS -> Unit
+            }
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            Log.w("RuntimeInstaller", "Kept the bundled ${agent.title}; updating to the latest release failed", error)
         }
     }
 
