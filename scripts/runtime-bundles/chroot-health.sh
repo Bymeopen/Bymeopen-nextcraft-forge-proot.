@@ -32,6 +32,11 @@ done
 # Bionic tools need the APEX modules mounted under /apex (see docs/RUNTIME_KNOWN_ISSUES.md #1).
 check "apex submounts"    'n=$(grep -c " /apex/" /proc/mounts); echo "$n submount"; [ "$n" -gt 0 ]'
 check "linker64"          't=$(readlink -f /system/bin/linker64) && test -e "$t" && echo "$t"'
+# Host directories bound into the guest are an exposure: they must be read-only so a guest process cannot change the
+# phone's system partitions (see docs/RUNTIME_KNOWN_ISSUES.md). /vendor and /product are optional on some devices.
+for m in /system /apex /vendor /product; do
+  check "ro $m"           "grep ' $m ' /proc/mounts | head -1 | awk '{split(\$4,o,\",\"); for(i in o) if(o[i]==\"ro\") ok=1; print \$4; exit !ok}'"
+done
 
 echo "== Jaringan"
 check "DNS"               'getent hosts archive.ubuntu.com'
