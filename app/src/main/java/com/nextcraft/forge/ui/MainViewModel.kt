@@ -24,6 +24,7 @@ import com.nextcraft.forge.model.ProjectType
 import com.nextcraft.forge.model.StarterTemplate
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.ProviderProfile
+import com.nextcraft.forge.model.PromptRule
 import com.nextcraft.forge.model.RouteMode
 import com.nextcraft.forge.model.RoutingConfig
 import com.nextcraft.forge.model.RoutedMessage
@@ -1169,6 +1170,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** [agents] is the priority/rotation order; an agent left out of the list is not used by Failover or Balanced. */
     fun setRouteAgents(agents: List<AgentKind>) = updateRouting(_state.value.routing.copy(agents = agents.distinct()))
+
+    /** Balanced mode: [weight] (0..9) is the agent's share of messages relative to the others; equal weights are 50/50. */
+    fun setRouteWeight(agent: AgentKind, weight: Int) {
+        val current = _state.value.routing
+        updateRouting(current.copy(weights = current.weights + (agent to weight.coerceIn(0, RoutingConfig.MAX_WEIGHT))))
+    }
+
+    /** Adds a rule: messages containing one of the comma-separated [keywords] go to [agent]. Returns false for no keywords. */
+    fun addRouteRule(keywords: String, agent: AgentKind): Boolean {
+        val words = PromptRule.parseKeywords(keywords)
+        if (words.isEmpty()) return false
+        val current = _state.value.routing
+        updateRouting(current.copy(rules = current.rules + PromptRule(words, agent)))
+        return true
+    }
+
+    fun removeRouteRule(index: Int) {
+        val current = _state.value.routing
+        if (index in current.rules.indices) updateRouting(current.copy(rules = current.rules.filterIndexed { i, _ -> i != index }))
+    }
+
+    /** Balanced mode: every agent weighs the same (50/50 with two agents). */
+    fun resetRouteWeights() = updateRouting(_state.value.routing.copy(weights = emptyMap()))
 
     private fun updateRouting(config: RoutingConfig) {
         preferences.routing = config

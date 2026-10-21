@@ -20,11 +20,32 @@ enum class RouteMode(val stableId: String) {
     }
 }
 
+/** A message containing any of [keywords] (case-insensitive) goes to [agent], when that agent is ready. */
+data class PromptRule(val keywords: List<String>, val agent: AgentKind) {
+    fun matches(text: String): Boolean = keywords.any { it.isNotBlank() && text.contains(it, ignoreCase = true) }
+
+    companion object {
+        /** "test, unit tests" gives ["test", "unit tests"]; blanks and duplicates are dropped. */
+        fun parseKeywords(input: String): List<String> =
+            input.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+    }
+}
+
 /** [agents] is the priority order used by [RouteMode.FAILOVER] and the rotation order of [RouteMode.BALANCED]. */
 data class RoutingConfig(
     val mode: RouteMode = RouteMode.SINGLE,
     val agents: List<AgentKind> = AgentKind.entries,
-)
+    /** Share of the messages [RouteMode.BALANCED] gives each agent; an agent without an entry weighs 1 (equal shares). */
+    val weights: Map<AgentKind, Int> = emptyMap(),
+    /** Content rules, checked in order after an @agent tag and before the mode's own choice. */
+    val rules: List<PromptRule> = emptyList(),
+) {
+    fun weightOf(agent: AgentKind): Int = (weights[agent] ?: 1).coerceIn(0, MAX_WEIGHT)
+
+    companion object {
+        const val MAX_WEIGHT = 9
+    }
+}
 
 /** The agent a message goes to and the text to send it (an `@agent` tag is removed). */
 data class RoutedMessage(val agent: AgentKind, val text: String, val tagged: Boolean)
@@ -64,15 +85,44 @@ internal object AgentRouter {
         parseTag(text)?.let { (agent, rest) ->
             if (agent in ready && agent !in tried && rest.isNotEmpty()) return RoutedMessage(agent, rest, tagged = true)
         }
+        if (config.mode != RouteMode.SINGLE) {
+            config.rules.firstOrNull { it.agent in ready && it.agent !in tried && it.matches(text) }?.let {
+                return RoutedMessage(it.agent, text, tagged = false)
+            }
+        }
         val candidates = config.agents.filter { it in ready && it !in tried }
         val agent = when (config.mode) {
             RouteMode.SINGLE, RouteMode.MANUAL -> selected.takeIf { it !in tried && (config.mode == RouteMode.SINGLE || it in ready) }
                 ?: if (config.mode == RouteMode.MANUAL) candidates.firstOrNull() else null
             RouteMode.FAILOVER -> candidates.firstOrNull()
-            RouteMode.BALANCED -> candidates.takeIf { it.isNotEmpty() }?.let { it[Math.floorMod(counter, it.size)] }
+            RouteMode.BALANCED -> balancedPick(candidates, config, counter)
         } ?: return null
         return RoutedMessage(agent, text, tagged = false)
     }
+
+    /**
+     * Smooth weighted round robin: with weights 1:1 the agents alternate (50/50), with 2:1 the sequence is A A B, and
+     * shares are spread through the sequence instead of arriving in blocks. Deterministic in [counter], so a restart
+     * continues where it stopped. An agent with weight 0 is skipped; if all weigh 0 they share equally.
+     */
+    private fun balancedPick(candidates: List<AgentKind>, config: RoutingConfig, counter: Int): AgentKind? {
+        if (candidates.isEmpty()) return null
+        var weights = candidates.map { config.weightOf(it) }
+        if (weights.all { it == 0 }) weights = candidates.map { 1 }
+        val divisor = weights.filter { it > 0 }.reduce { a, b -> gcd(a, b) }
+        val w = weights.map { it / divisor }
+        val total = w.sum()
+        val current = IntArray(candidates.size)
+        var pick = 0
+        repeat(Math.floorMod(counter, total) + 1) {
+            for (i in current.indices) current[i] += w[i]
+            pick = current.indices.filter { w[it] > 0 }.maxByOrNull { current[it] } ?: 0
+            current[pick] -= total
+        }
+        return candidates[pick]
+    }
+
+    private tailrec fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
 
     /** True when a failed turn may be retried on another agent. */
     fun failsOver(mode: RouteMode): Boolean = mode == RouteMode.FAILOVER || mode == RouteMode.BALANCED

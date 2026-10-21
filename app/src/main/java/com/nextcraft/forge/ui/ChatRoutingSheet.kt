@@ -6,27 +6,41 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.RouteMode
+import com.nextcraft.forge.model.RoutingConfig
 
 /** Short label of a routing mode, shown on the composer chip. */
 @Composable
@@ -100,6 +114,23 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                                 color = if (ready) scheme.onSurfaceVariant else scheme.error,
                             )
                         }
+                        if (on && routing.mode == RouteMode.BALANCED) {
+                            val weight = routing.weightOf(agent)
+                            val total = enabled.sumOf { routing.weightOf(it) }.takeIf { it > 0 } ?: 1
+                            val lessLabel = stringResource(R.string.route_weight_less, agent.displayTitle())
+                            IconButton(onClick = { viewModel.setRouteWeight(agent, weight - 1) }, enabled = weight > 0) {
+                                Text("−", fontSize = ForgeType.screenTitle, modifier = Modifier.semantics { contentDescription = lessLabel })
+                            }
+                            Text(
+                                text = stringResource(R.string.route_share_percent, weight * 100 / total),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.widthIn(min = 44.dp),
+                                textAlign = TextAlign.Center,
+                            )
+                            IconButton(onClick = { viewModel.setRouteWeight(agent, weight + 1) }, enabled = weight < RoutingConfig.MAX_WEIGHT) {
+                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.route_weight_more, agent.displayTitle()))
+                            }
+                        }
                         if (on && index > 0) {
                             IconButton(onClick = {
                                 val moved = enabled.toMutableList()
@@ -123,7 +154,53 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                         )
                     }
                 }
+                if (routing.mode == RouteMode.BALANCED) {
+                    OutlinedButton(onClick = viewModel::resetRouteWeights, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.route_equal_split))
+                    }
+                }
+                RouteRulesSection(routing = routing, viewModel = viewModel)
             }
         }
     }
+}
+
+/** Rules on the content of the prompt: "these words go to this agent". Checked after an @agent tag, before the mode. */
+@Composable
+private fun RouteRulesSection(routing: RoutingConfig, viewModel: MainViewModel) {
+    val scheme = MaterialTheme.colorScheme
+    var words by rememberSaveable { mutableStateOf("") }
+    var agentIndex by rememberSaveable { mutableIntStateOf(0) }
+    val agents = AgentKind.entries
+    Text(stringResource(R.string.route_rules_title), fontSize = ForgeType.cardTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+    Text(stringResource(R.string.route_rules_hint), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+    routing.rules.forEachIndexed { index, rule ->
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(rule.keywords.joinToString(", "), fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.route_rule_goes_to, rule.agent.displayTitle()), fontSize = ForgeType.secondary, color = scheme.primary)
+            }
+            IconButton(onClick = { viewModel.removeRouteRule(index) }) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.route_rule_delete))
+            }
+        }
+    }
+    ForgeTextField(
+        kind = ForgeFieldKind.TEXT, imeAction = ImeAction.Done,
+        value = words,
+        onValueChange = { words = it },
+        label = { Text(stringResource(R.string.route_rule_keywords)) },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    ForgePillTabs(
+        items = agents.map { it.displayTitle() },
+        selectedIndex = agentIndex,
+        onSelect = { agentIndex = it },
+    )
+    ForgePrimaryButton(
+        text = stringResource(R.string.route_rule_add),
+        onClick = { if (viewModel.addRouteRule(words, agents[agentIndex])) words = "" },
+        enabled = words.isNotBlank(),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

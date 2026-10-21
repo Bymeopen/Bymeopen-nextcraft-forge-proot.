@@ -1208,4 +1208,14 @@
     <string name="route_move_up">Naikkan %1$s</string>
     <string name="route_failover_notice">Dilanjutkan oleh %1$s</string>
     <string name="route_none_ready">Tidak ada agen di daftar yang siap; memakai agen terpilih.</string>
+    <string name="route_weight_less">Kurangi porsi %1$s</string>
+    <string name="route_weight_more">Naikkan porsi %1$s</string>
+    <string name="route_share_percent">%1$d%%</string>
+    <string name="route_equal_split">Bagi rata (50/50 untuk dua agen)</string>
+    <string name="route_rules_title">Aturan menurut isi prompt</string>
+    <string name="route_rules_hint">Pesan yang memuat salah satu kata diarahkan ke agen itu (semua mode kecuali Tunggal). Tag @agen tetap menang.</string>
+    <string name="route_rule_goes_to">Ke %1$s</string>
+    <string name="route_rule_delete">Hapus aturan</string>
+    <string name="route_rule_keywords">Kata, pisahkan dengan koma</string>
+    <string name="route_rule_add">Tambah aturan</string>
 </resources>
