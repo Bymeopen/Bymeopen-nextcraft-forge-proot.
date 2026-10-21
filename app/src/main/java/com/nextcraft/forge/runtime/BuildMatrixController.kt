@@ -148,6 +148,8 @@ class BuildMatrixController(
                             mutable.update { it.copy(log = appendLog(it.log, chunk)) }
                         }
                     }
+                    // runCatching also swallows cancellation; rethrow so Stop really stops the matrix.
+                    result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
                     val ok = result.getOrNull()?.ok == true
                     val note = when {
                         result.isFailure -> "✕ ${result.exceptionOrNull()?.message ?: "failed to start"}\n"

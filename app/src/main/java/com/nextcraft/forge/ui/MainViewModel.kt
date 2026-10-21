@@ -718,7 +718,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
-            val newProject = withContext(Dispatchers.IO) {
+            val newProject = runCatching { withContext(Dispatchers.IO) {
                 val slug = reserveProjectSlug(projectSlug(cleanName))
                 val project = Project(
                     name = cleanName,
@@ -743,6 +743,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
                 }
                 project
+            } }.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _state.update { it.copy(bannerMessage = UiText.Raw(error.message ?: error.javaClass.simpleName)) }
+                return@launch
             }
             val updated = listOf(newProject) + _state.value.projects
             preferences.saveProjects(updated)

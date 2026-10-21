@@ -159,7 +159,7 @@ internal class OpenRouterRoutingGateway(
         allowRetry: Boolean,
     ): Boolean {
         val currentKey = activeApiKey
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add)
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).also(upstreamConnections::add).apply { instanceFollowRedirects = false }
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000

@@ -172,11 +172,11 @@ fun AgentScreen(
                 // A chat that just loaded jumps straight to its end; only new messages animate.
                 val firstLoad = previousMessageCount == 0
                 previousMessageCount = state.messages.size
-                if (firstLoad) listState.scrollToItem(lastIdx) else listState.animateScrollToItem(lastIdx)
+                if (firstLoad) listState.scrollToItem(lastIdx, Int.MAX_VALUE) else listState.animateScrollToItem(lastIdx)
             } else {
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                 if (lastVisible >= lastIdx - 1) {
-                    listState.scrollToItem(lastIdx)
+                    listState.scrollToItem(lastIdx, Int.MAX_VALUE)
                 }
             }
         } else {
