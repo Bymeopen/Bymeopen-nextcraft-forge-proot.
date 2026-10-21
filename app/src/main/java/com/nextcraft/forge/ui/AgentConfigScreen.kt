@@ -56,7 +56,6 @@ import com.nextcraft.forge.R
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.ProviderKind
 import com.nextcraft.forge.model.providersForAgent
-import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
 
 /**
@@ -243,6 +242,7 @@ fun AgentConfigScreen(
             // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
             if (agent == AgentKind.CLAUDE_CODE) {
                 ClaudeAccountCard(viewModel)
+                ClaudeIntelligenceCard(state = state, viewModel = viewModel, onOpenModelPicker = { showModelPicker = true })
             }
 
             // Model & access: a heading with Discover, then the model row and the credentials row.
@@ -307,34 +307,6 @@ fun AgentConfigScreen(
                     }
                 }
                 ThinDivider()
-                if (agent == AgentKind.CLAUDE_CODE) {
-                    var effortOpen by rememberSaveable(agent) { mutableStateOf(false) }
-                    AgentDisclosureRow(
-                        icon = ForgeGlyph.REFRESH,
-                        title = stringResource(R.string.agent_claude_effort),
-                        subtitle = claudeEffortLabel(state.claudeEffort),
-                        expanded = effortOpen,
-                        onToggle = { effortOpen = !effortOpen },
-                    ) {
-                        Column {
-                            Text(
-                                text = stringResource(R.string.agent_claude_effort_hint),
-                                fontSize = ForgeType.secondary,
-                                color = scheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp),
-                            )
-                            (listOf("") + CLAUDE_EFFORT_LEVELS).forEach { level ->
-                                RadioRow(
-                                    title = claudeEffortLabel(level),
-                                    subtitle = null,
-                                    selected = state.claudeEffort == level,
-                                    onClick = { viewModel.setClaudeEffort(level) },
-                                )
-                            }
-                        }
-                    }
-                    ThinDivider()
-                }
                 AgentDisclosureRow(
                     icon = ForgeGlyph.LOCK,
                     title = stringResource(R.string.agent_credentials),
@@ -538,16 +510,3 @@ private fun AgentDisclosureRow(
         }
     }
 }
-
-/** Label for a Claude Code effort level; "" is the model default. */
-@Composable
-private fun claudeEffortLabel(level: String): String = stringResource(
-    when (level) {
-        "low" -> R.string.agent_claude_effort_low
-        "medium" -> R.string.agent_claude_effort_medium
-        "high" -> R.string.agent_claude_effort_high
-        "xhigh" -> R.string.agent_claude_effort_xhigh
-        "max" -> R.string.agent_claude_effort_max
-        else -> R.string.agent_claude_effort_default
-    },
-)

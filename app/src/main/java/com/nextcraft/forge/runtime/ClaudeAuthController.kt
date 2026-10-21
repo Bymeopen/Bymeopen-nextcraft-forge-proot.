@@ -75,6 +75,27 @@ class ClaudeAuthController(
         }
     }
 
+    /**
+     * Fills in the account email of a login that was already on disk (an earlier session, or `claude auth login` in
+     * the terminal): the email is otherwise only read right after signing in from this screen. The remembered value is
+     * shown at once and replaced by what `claude auth status` reports.
+     */
+    suspend fun loadAccountEmail() = withContext(Dispatchers.IO) {
+        if (!hasCredential()) return@withContext
+        val prefs = com.nextcraft.forge.data.AppPreferences(context)
+        fun show(email: String) {
+            val current = mutableState.value
+            if (current.status == ClaudeAuthStatus.SIGNED_IN || current.status == ClaudeAuthStatus.SIGNED_OUT) {
+                mutableState.value = current.copy(accountEmail = email)
+            }
+        }
+        prefs.claudeAccountEmail.takeIf { it.isNotBlank() }?.let(::show)
+        readAccountEmail()?.let {
+            prefs.claudeAccountEmail = it
+            show(it)
+        }
+    }
+
     suspend fun beginLogin(mode: ClaudeLoginMode, email: String = "") = withContext(Dispatchers.IO) {
         if (!loginStarting.compareAndSet(false, true)) return@withContext
         try {
@@ -205,6 +226,7 @@ class ClaudeAuthController(
                         lastCredentialCheck = now
                         if ((exited || looksDone || mutableState.value.status == ClaudeAuthStatus.COMPLETING) && hasCredential()) {
                             val account = readAccountEmail()
+                            account?.let { com.nextcraft.forge.data.AppPreferences(context).claudeAccountEmail = it }
                             mutableState.value = ClaudeAuthState(
                                 ClaudeAuthStatus.SIGNED_IN,
                                 message = account?.let { UiText.res(R.string.rt_auth_connected_as, it) } ?: UiText.res(R.string.rt_auth_claude_connected),
@@ -309,6 +331,7 @@ class ClaudeAuthController(
             output.delete()
             if (hasCredential()) throw UiTextException(UiText.res(R.string.rt_auth_claude_signout_incomplete))
             onSignedInChanged(false)
+            com.nextcraft.forge.data.AppPreferences(context).claudeAccountEmail = ""
             mutableState.value = ClaudeAuthState(message = UiText.res(R.string.rt_auth_claude_signed_out))
         } catch (error: Throwable) {
             mutableState.value = previous.copy(message = error.toUiText(R.string.rt_auth_claude_signout_failed))

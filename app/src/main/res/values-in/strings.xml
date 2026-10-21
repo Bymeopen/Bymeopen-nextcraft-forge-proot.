@@ -893,4 +893,7 @@
     <string name="agent_claude_effort_max">Maksimum</string>
     <string name="msg_parallel_queued">Terlalu banyak chat yang bekerja atau memori hampir penuh. Pesanmu diantre dan dikirim otomatis.</string>
     <string name="msg_chat_needs_approval">Chat "%1$s" menunggu persetujuanmu.</string>
+    <string name="agent_intelligence_title">Mode kecerdasan aktif</string>
+    <string name="agent_intelligence_active">Aktif: %1$s · %2$s</string>
+    <string name="agent_claude_effort_auto">Otomatis</string>
 </resources>

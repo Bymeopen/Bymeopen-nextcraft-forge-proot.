@@ -54,6 +54,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("agent_antigravity_model", "") ?: ""
         set(value) { preferences.edit().putString("agent_antigravity_model", value).apply() }
 
+    /** Email of the signed-in Claude account, remembered so the account card shows it before `claude auth status` answers. */
+    var claudeAccountEmail: String
+        get() = preferences.getString("claude_account_email", "") ?: ""
+        set(value) { preferences.edit().putString("claude_account_email", value).apply() }
+
     /** Claude Code effort level (low/medium/high/xhigh/max); empty keeps the model's own default. */
     var claudeEffort: String
         get() = preferences.getString("agent_claude_effort", "") ?: ""
