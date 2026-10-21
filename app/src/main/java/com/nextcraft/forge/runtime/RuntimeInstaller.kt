@@ -3134,11 +3134,34 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             child_status=0
             exec 3<&0
             forward_signal() {
-                kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+                if [ -n "${'$'}SETSID" ]; then
+                    kill "-${'$'}1" -- "-${'$'}child" 2>/dev/null || true
+                else
+                    kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+                fi
+            }
+
+            # Non-interactive runs (agents, builds) get their own session, so every process they spawn shares one process group
+            # that can be ended with the command. Interactive terminals keep the controlling tty and are left alone.
+            SETSID=""
+            if [ ! -t 0 ] && command -v setsid >/dev/null 2>&1; then
+                SETSID="setsid"
+            fi
+
+            # Ends whatever the command left behind (a dev server, a watcher, a daemonised helper): TERM, a short grace period, KILL.
+            reap_group() {
+                [ -n "${'$'}SETSID" ] || return 0
+                kill -s TERM -- "-${'$'}child" 2>/dev/null || return 0
+                local i=0
+                while [ "${'$'}i" -lt 10 ] && kill -0 -- "-${'$'}child" 2>/dev/null; do
+                    sleep 0.2
+                    i=${'$'}((i + 1))
+                done
+                kill -s KILL -- "-${'$'}child" 2>/dev/null || true
             }
 
             exec 9>&-
-            ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
+            ${'$'}SETSID ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
                 GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
                 /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &
             child=${'$'}!
@@ -3151,6 +3174,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 wait "${'$'}child" || child_status=${'$'}?
                 kill -0 "${'$'}child" 2>/dev/null || break
             done
+            reap_group
             exit "${'$'}child_status"
         """.trimIndent() + "\n"
 

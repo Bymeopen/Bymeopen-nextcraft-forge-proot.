@@ -74,6 +74,7 @@ internal fun ChatTopBar(
     onDelete: () -> Unit,
     onBranch: () -> Unit,
     onEnableBranch: () -> Unit,
+    onOpenRea: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     var menuOpen by rememberSaveable { mutableStateOf(false) }
@@ -143,6 +144,7 @@ internal fun ChatTopBar(
                         )
                     }
                 }
+                DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_rea)) }, onClick = { menuOpen = false; onOpenRea() })
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.chat_menu_clear)) },
                     enabled = !state.activeChatRunning,
