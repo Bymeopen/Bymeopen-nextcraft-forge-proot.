@@ -258,11 +258,3 @@ def test_run_without_qemu_explains_what_to_install(run_rea, hello_static):
     payload = json.loads(out.stdout.strip().splitlines()[-1])
     assert payload["error"]["code"] == "missing_dependency"
     assert "qemu-user" in payload["error"]["hint"]
-
-
-def test_run_modes_of_phase_six_are_refused_clearly(run_rea, hello_static):
-    _, path = hello_static
-    out = run_rea("run", path, "--mode", "strace", "--json")
-    payload = json.loads(out.stdout.strip().splitlines()[-1])
-    assert payload["error"]["code"] == "not_supported"
-    assert "--mode emu" in payload["error"]["hint"]

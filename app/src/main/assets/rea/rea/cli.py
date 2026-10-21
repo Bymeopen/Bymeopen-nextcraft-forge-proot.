@@ -16,8 +16,11 @@ from .analysis import entropy as entropy_mod
 from .analysis import strings as strings_mod
 from .analysis import xrefs as xrefs_mod
 from .analysis.code import decode, defined_functions
-from .capability import FAIL, OK, WARN, run_doctor
+from .capability import FAIL, MODE_EMULATED, MODE_FULL, OK, WARN, quick_mode, run_doctor
+from .dynamic import frida_runner as frida_mod
+from .dynamic import gdb as gdb_mod
 from .dynamic import qemu as qemu_mod
+from .dynamic import strace as strace_mod
 from .emulation import unicorn_runner as emu_mod
 from .identify import identify
 from .integrations import decompile as decompile_mod
@@ -153,28 +156,23 @@ def _stop_text(stop: dict) -> str:
     return f"stop reply tak dikenal ({stop.get('raw', '')})"
 
 
-def _run(args: argparse.Namespace) -> Result:
-    identify(args.file)
-    mode = args.mode
-    if mode in ("gdb", "strace", "frida"):
-        raise ReaError(E_NOT_SUPPORTED, f"Mode {mode} belum tersedia (fase 6).", "Pakai --mode emu (QEMU gdbstub), yang tidak butuh ptrace.")
-    result = Result(command="run")
-    if mode == "auto":
-        import shutil
+def _print_registers(registers: dict, names: tuple = ()) -> None:
+    for name, value in registers.items():
+        if names and name not in names:
+            continue
+        print(f"  {name:6} 0x{value:x}", file=sys.stderr)
 
-        if not any(shutil.which(name) for name in ("qemu-aarch64", "qemu-x86_64", "qemu-arm", "qemu-i386")):
-            raise ReaError(E_MISSING_DEP, "Tidak ada mode dinamis yang bisa dipakai: qemu-user belum terpasang.", "Pasang: apt install qemu-user, atau pakai `rea analyze` (statis).")
-        result.warnings.append("Mode auto memilih emu (QEMU gdbstub); gdb/strace/Frida baru tersedia di fase 6.")
+
+def _run_emu(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
     data = qemu_mod.run_emulated(
         args.file,
         port=args.port,
         breakpoints=args.break_at or [],
-        program_args=shlex.split(args.args or ""),
+        program_args=prog_args,
         run_to_end=args.run_to_end,
-        timeout=args.timeout,
+        timeout=args.timeout or qemu_mod.DEFAULT_TIMEOUT,
     )
-    result.data = data
-    result.mode = "emulated-dynamic"
+    result.data, result.mode = data, MODE_EMULATED
     if not args.json:
         pc_name = {"aarch64": "pc", "arm": "pc", "x86_64": "rip", "386": "eip"}[data["arch"]]
         pc = data["registers"].get(pc_name)
@@ -185,6 +183,75 @@ def _run(args: argparse.Namespace) -> Result:
             print(f"  breakpoint {item['spec']} @0x{item['addr']:x}: {'kena' if item['hit'] else 'tidak kena'}", file=sys.stderr)
         if data["output"]:
             print("Keluaran program:\n" + data["output"], file=sys.stderr)
+
+
+def _run_gdb(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = gdb_mod.debug(
+        args.file,
+        prog_args,
+        breakpoints=args.break_at or [],
+        examines=[gdb_mod.parse_examine(e) for e in args.examine or []],
+        timeout=args.timeout or gdb_mod.DEFAULT_TIMEOUT,
+    )
+    result.data, result.mode = data, MODE_FULL
+    for item in data["breakpoints"]:
+        if not item["set"]:
+            result.warnings.append(f"Breakpoint {item['spec']!r} tidak dikenali gdb (simbol tidak ada).")
+    if not args.json:
+        if data["stopped"]:
+            print("Berhenti di program (gdb). Register penting:", file=sys.stderr)
+            _print_registers(data["registers"], ("rip", "pc", "sp", "rsp", "rax", "x0", "x1", "x30"))
+            for frame in data["backtrace"][:10]:
+                print(f"  #{frame['level']} {frame['function']}({frame['args']}) {frame['source'] or ''}", file=sys.stderr)
+            for mem in data["memory"]:
+                print(f"  [{mem['spec']}] {mem['hex'] or mem['error']}", file=sys.stderr)
+        elif data["exit"] is not None:
+            print(f"Program selesai tanpa berhenti (kode {data['exit']['code']}).", file=sys.stderr)
+        if data["program_output"]:
+            print("Keluaran program:\n" + data["program_output"], file=sys.stderr)
+
+
+def _run_strace(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = strace_mod.trace(args.file, prog_args, trace_filter=args.trace, timeout=args.timeout or strace_mod.DEFAULT_TIMEOUT)
+    result.data, result.mode = data, MODE_FULL
+    if data["timed_out"]:
+        result.warnings.append("Waktu habis; jejak mungkin tidak lengkap.")
+    if not args.json:
+        print(f"{data['total']} syscall; keluar: {data['exit']}", file=sys.stderr)
+        for item in data["summary"][:10]:
+            print(f"  {item['name']:16} {item['count']}", file=sys.stderr)
+        for path in data["files"][:10]:
+            print(f"  berkas: {path}", file=sys.stderr)
+
+
+def _run_frida(args: argparse.Namespace, prog_args: list[str], result: Result) -> None:
+    data = frida_mod.hook(args.file, prog_args, args.hook or [], timeout=args.timeout or frida_mod.DEFAULT_TIMEOUT)
+    result.data, result.mode = data, MODE_FULL
+    for spec in data["unresolved"]:
+        result.warnings.append(f"Hook {spec!r} tidak ditemukan (bukan simbol terekspor atau simbol debug).")
+    if not args.json:
+        print(f"Frida {data['frida_version']}: {len(data['hooked'])} hook terpasang, {len(data['calls'])} panggilan", file=sys.stderr)
+        for call in data["calls"][:20]:
+            print(f"  {call['fn']}({', '.join(call['args'][:3])})" + (f"  \"{call['str0']}\"" if "str0" in call else ""), file=sys.stderr)
+
+
+def _run(args: argparse.Namespace) -> Result:
+    identify(args.file)
+    mode = args.mode
+    prog_args = shlex.split(args.args or "")
+    result = Result(command="run")
+    if mode == "auto":
+        import shutil
+
+        best, _ = quick_mode()
+        if best == MODE_FULL:
+            mode = "frida" if args.hook else "gdb" if args.break_at or not shutil.which("strace") else "strace"
+        elif best == MODE_EMULATED:
+            mode = "emu"
+            result.warnings.append("ptrace atau gdb tidak tersedia; memakai QEMU gdbstub (emu).")
+        else:
+            raise ReaError(E_MISSING_DEP, "Tidak ada mode dinamis yang bisa dipakai (ptrace/gdb/qemu tidak ada).", "Pasang: apt install gdb qemu-user, atau pakai `rea analyze` (statis).")
+    {"emu": _run_emu, "gdb": _run_gdb, "strace": _run_strace, "frida": _run_frida}[mode](args, prog_args, result)
     return result
 
 
@@ -371,12 +438,15 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--max-insns", type=int, default=emu_mod.DEFAULT_MAX_INSNS, help="batas instruksi")
             command.add_argument("--timeout-ms", type=int, default=emu_mod.DEFAULT_TIMEOUT_MS, help="batas waktu emulasi (ms)")
         if name == "run":
-            command.add_argument("--mode", default="auto", choices=["auto", "emu", "gdb", "strace", "frida"], help="mode eksekusi (default auto)")
+            command.add_argument("--mode", default="auto", choices=["auto", "emu", "gdb", "strace", "frida"], help="mode eksekusi; auto memilih gdb/strace/frida bila ptrace jalan, selain itu emu")
             command.add_argument("--port", type=int, help="port gdbstub (default: acak)")
             command.add_argument("--break", dest="break_at", action="append", metavar="ALAMAT|FUNGSI", help="breakpoint (boleh berulang)")
             command.add_argument("--args", help="argumen program, dalam satu string")
             command.add_argument("--run-to-end", action="store_true", help="lanjutkan sampai program selesai dan tangkap keluarannya")
-            command.add_argument("--timeout", type=float, default=qemu_mod.DEFAULT_TIMEOUT, help="batas waktu per langkah (detik)")
+            command.add_argument("--timeout", type=float, default=None, help="batas waktu (detik; default tergantung mode)")
+            command.add_argument("--trace", metavar="FILTER", help="filter syscall untuk strace, mis. file, network, openat,read")
+            command.add_argument("--examine", action="append", metavar="ALAMAT:PANJANG", help="gdb: baca memori saat berhenti, mis. $sp:32 (boleh berulang)")
+            command.add_argument("--hook", action="append", metavar="SIMBOL|ALAMAT", help="frida: pasang hook pada fungsi (boleh berulang)")
         if name == "report":
             command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
             command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")

@@ -66,6 +66,7 @@ class ReaResultTest {
         val script = ReaController.optionalToolsScript()
         assertTrue(script.contains("apt-get install -y -qq strace ltrace qemu-user binwalk"))
         assertTrue(script.contains("python3-unicorn"))
+        assertTrue(script.contains("pip install --break-system-packages frida"))
         assertTrue(script.contains("pip install --break-system-packages unicorn"))
         // `set -e` would let one missing package block unicorn.
         assertTrue(!script.contains("set -e"))
