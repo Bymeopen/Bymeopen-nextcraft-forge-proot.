@@ -76,6 +76,34 @@ def build_report(data: dict[str, Any], generated_at: _dt.datetime | None = None,
             lines.append("_Tidak ada string dengan skor menarik._")
         lines.append("")
 
+    entropy = data.get("entropy")
+    if entropy:
+        mp = entropy["map"]
+        lines += ["## Entropi", "", f"`{mp['spark']}`  (blok {mp['block_size']} bayt; {mp['high_blocks']} blok berentropi tinggi)", ""]
+        if entropy["sections"]:
+            lines += ["| Section | Ukuran | Entropi |", "|---|---|---|"]
+            lines += [f"| {_cell(r['name'])} | {r['size']} | {r['entropy']:.2f}{' ⚠️' if r['high'] else ''} |" for r in entropy["sections"]]
+            lines.append("")
+
+    graph = data.get("cfg")
+    if graph:
+        lines += [f"## CFG: {graph['function']}", "", f"{len(graph['blocks'])} blok, {graph['back_edges']} back-edge (loop).", "", "```", graph["ascii"], "```", ""]
+
+    xrefs = data.get("xrefs")
+    if xrefs:
+        lines += [f"## Call graph ({xrefs['functions_scanned']} fungsi)", ""]
+        if xrefs["call_graph"]:
+            lines += [f"- {_code(caller)} → " + ", ".join(_code(c) for c in callees) for caller, callees in list(xrefs["call_graph"].items())[:MAX_FUNCTIONS]]
+        else:
+            lines.append("_Tidak ada pemanggilan langsung._")
+        lines.append("")
+        if xrefs["strings"]:
+            lines += ["### String dan fungsi yang memakainya", "", "| String | Fungsi |", "|---|---|"]
+            for row in xrefs["strings"][:MAX_STRINGS]:
+                users = ", ".join(sorted({r["function"] for r in row["refs"]}))
+                lines.append(f"| {_code(row['text'][:80])} | {_cell(users)} |")
+            lines.append("")
+
     code = data.get("disasm")
     if code:
         lines += [f"## Disassembly: {code['function'] or '?'} @ `0x{code['address']:x}`", "", "```asm"]

@@ -9,8 +9,12 @@ import sys
 from typing import Sequence
 
 from . import __version__
+from .analysis import cfg as cfg_mod
 from .analysis import disasm as disasm_mod
+from .analysis import entropy as entropy_mod
 from .analysis import strings as strings_mod
+from .analysis import xrefs as xrefs_mod
+from .analysis.code import decode, defined_functions
 from .capability import FAIL, OK, WARN, run_doctor
 from .identify import identify
 from .parsers import elf as elf_mod
@@ -72,6 +76,25 @@ def _parse_address(text: str) -> int:
         raise ReaError(E_USAGE, f"Alamat tidak valid: {text}", "Contoh: --addr 0x401136") from error
 
 
+def _cfg_for(path: str, symbol: str | None) -> dict:
+    """CFG da fungsi ``symbol`` (default ``main``, atau titik masuk bila biner tidak punya simbol)."""
+    from .parsers.elf import function_symbols, open_elf
+    from .result import E_SYMBOL
+
+    with open(path, "rb") as handle:
+        elf = open_elf(handle)
+        functions = function_symbols(elf)
+        wanted = symbol or "main"
+        match = next((f for f in functions if f["name"] == wanted), None)
+        if match is not None:
+            code = decode(elf, handle, function=match)
+        elif not symbol:
+            code = decode(elf, handle, address=elf.header["e_entry"], name="entry")
+        else:
+            raise ReaError(E_SYMBOL, f"Simbol tidak ditemukan: {symbol}", "Biner mungkin di-strip; pakai `rea analyze --disasm` tanpa nama untuk titik masuk.")
+    return cfg_mod.build_cfg(code)
+
+
 def _analyze(args: argparse.Namespace) -> Result:
     info = identify(args.file)
     data: dict = {"identify": info}
@@ -83,10 +106,27 @@ def _analyze(args: argparse.Namespace) -> Result:
         raise ReaError(E_BAD_FORMAT, f"Disassembly belum mendukung berkas {info['type']}.", "Saat ini hanya ELF (fase 2).")
     else:
         result.warnings.append(f"Parser untuk {info['type']} belum tersedia; hanya identifikasi dan string.")
+    needs_elf = args.cfg is not None or args.xrefs
+    if needs_elf and not is_elf:
+        raise ReaError(E_BAD_FORMAT, f"CFG dan xref belum mendukung berkas {info['type']}.", "Saat ini hanya ELF.")
     if args.strings:
         data["strings"] = strings_mod.extract(
             args.file, min_len=args.min_len, max_items=args.max_strings, only_interesting=args.interesting
         )
+    if args.entropy:
+        data["entropy"] = {
+            "map": entropy_mod.entropy_map(args.file),
+            "sections": entropy_mod.section_entropy(args.file, data["elf"]["sections"]) if is_elf else [],
+        }
+    if args.cfg is not None:
+        graph = _cfg_for(args.file, args.cfg or None)
+        if not args.dot:
+            graph.pop("dot", None)
+        data["cfg"] = graph
+    if args.xrefs:
+        pool = strings_mod.extract(args.file, max_items=3000)["strings"]
+        data["xrefs"] = xrefs_mod.analyze_xrefs(args.file, pool)
+        result.warnings += data["xrefs"].pop("warnings")
     if args.disasm is not None or args.addr is not None:
         address = _parse_address(args.addr) if args.addr is not None else None
         symbol = None if address is not None or args.disasm == "" else args.disasm
@@ -110,6 +150,16 @@ def _report(args: argparse.Namespace) -> Result:
     else:
         data["missing"].append(f"Parser untuk {info['type']} belum tersedia; laporan hanya berisi identifikasi dan string.")
     data["strings"] = strings_mod.extract(args.file, max_items=500)
+    data["entropy"] = {
+        "map": entropy_mod.entropy_map(args.file),
+        "sections": entropy_mod.section_entropy(args.file, data["elf"]["sections"]) if info["type"] == "ELF" else [],
+    }
+    if info["type"] == "ELF":
+        try:
+            data["cfg"] = _cfg_for(args.file, None)
+            data["xrefs"] = xrefs_mod.analyze_xrefs(args.file, strings_mod.extract(args.file, max_items=3000)["strings"])
+        except ReaError as error:
+            data["missing"].append(f"CFG dan xref dilewati: {error.message}")
     text = build_report(data, notes=args.notes or "")
     out = args.output or os.path.join(".rea", os.path.basename(args.file) + ".report.md")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -135,6 +185,24 @@ def _print_analysis(data: dict) -> None:
         print(f"\n{len(found['strings'])} string (total {found['total']}):", file=sys.stderr)
         for item in found["strings"]:
             print(f"  {item['offset']:08x} [{item['score']}] {item['text']}", file=sys.stderr)
+    graph = data.get("cfg")
+    if graph:
+        print(f"\nCFG {graph['function']} ({len(graph['blocks'])} blok, {graph['back_edges']} back-edge):", file=sys.stderr)
+        print(graph["ascii"], file=sys.stderr)
+        if graph.get("dot"):
+            print(graph["dot"], file=sys.stderr)
+    xr = data.get("xrefs")
+    if xr:
+        print(f"\nCall graph ({xr['functions_scanned']} fungsi):", file=sys.stderr)
+        for caller, callees in xr["call_graph"].items():
+            print(f"  {caller} -> {', '.join(callees)}", file=sys.stderr)
+        for row in xr["strings"]:
+            print(f"  \"{row['text'][:60]}\" dipakai oleh " + ", ".join(sorted({r['function'] for r in row['refs']})), file=sys.stderr)
+    ent = data.get("entropy")
+    if ent:
+        print(f"\nEntropi {ent['map']['spark']}  (blok tinggi: {ent['map']['high_blocks']})", file=sys.stderr)
+        for row in ent["sections"]:
+            print(f"  {row['name']:<20} {row['entropy']:.2f}{'  ⚠️ tinggi' if row['high'] else ''}", file=sys.stderr)
     code = data.get("disasm")
     if code:
         print(f"\n{code['function'] or '?'} @ 0x{code['address']:x}:", file=sys.stderr)
@@ -164,6 +232,10 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--disasm", nargs="?", const="", metavar="FUNGSI", help="disassembly fungsi (tanpa nama: titik masuk)")
             command.add_argument("--addr", metavar="ALAMAT", help="disassembly mulai dari alamat virtual (mis. 0x401136)")
             command.add_argument("--count", type=int, default=64, help="jumlah instruksi maksimum (default 64)")
+            command.add_argument("--cfg", nargs="?", const="", metavar="FUNGSI", help="control flow graph (default main)")
+            command.add_argument("--dot", action="store_true", help="sertakan keluaran Graphviz DOT untuk --cfg")
+            command.add_argument("--xrefs", action="store_true", help="call graph dan fungsi yang memakai tiap string")
+            command.add_argument("--entropy", action="store_true", help="peta entropi per blok dan per section")
         if name == "report":
             command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
             command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")

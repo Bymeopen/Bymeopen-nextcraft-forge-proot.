@@ -20,7 +20,7 @@ def _capstone():
     return capstone
 
 
-def _engine(machine: str, little_endian: bool, thumb: bool):
+def _engine(machine: str, little_endian: bool, thumb: bool, detail: bool = False):
     cs = _capstone()
     endian = 0 if little_endian else cs.CS_MODE_BIG_ENDIAN
     table = {
@@ -33,7 +33,7 @@ def _engine(machine: str, little_endian: bool, thumb: bool):
         raise ReaError(E_NOT_SUPPORTED, f"Arsitektur {machine} belum didukung untuk disassembly.", "Didukung: x86, x86-64, arm, arm64.")
     arch, mode = table[machine]
     engine = cs.Cs(arch, mode | endian)
-    engine.detail = False
+    engine.detail = detail
     if arch == cs.CS_ARCH_X86:
         engine.syntax = cs.CS_OPT_SYNTAX_INTEL
     return engine

@@ -181,3 +181,107 @@ def test_report_builder_escapes_table_cells():
     text = build_report(data, notes="")
     assert "x|y" in text  # dalam kode inline; pipa di dalam backtick tidak merusak sel karena sudah dibungkus
     assert "`x|y'z`" in text
+
+
+LOOP_SOURCE = r'''
+#include <stdio.h>
+int sum(int n) { int s = 0; for (int i = 0; i < n; i++) s += i; return s; }
+int straight(int n) { return n * 2 + 1; }
+int main(void) { puts("hello rea"); return sum(10) + straight(3); }
+'''
+
+
+@pytest.fixture(scope="module")
+def loop_elf(tmp_path_factory):
+    compiler = shutil.which("gcc") or shutil.which("cc")
+    if not compiler:
+        pytest.skip("tidak ada kompilator C")
+    directory = tmp_path_factory.mktemp("loop")
+    (directory / "loop.c").write_text(LOOP_SOURCE)
+    subprocess.run([compiler, "-O0", "-o", str(directory / "loop"), str(directory / "loop.c")], check=True)
+    return str(directory / "loop")
+
+
+def test_cfg_of_a_loop_has_exactly_one_back_edge(loop_elf):
+    from rea.cli import _cfg_for
+
+    graph = _cfg_for(loop_elf, "sum")
+    assert graph["back_edges"] == 1
+    assert sum(1 for e in graph["edges"] if e["back"]) == 1
+    assert len(graph["blocks"]) >= 3
+    assert "loop" in graph["ascii"]
+    # Blok pertama adalah titik masuk; semua edge menunjuk blok yang ada.
+    assert graph["blocks"][0]["start"] == graph["address"]
+    assert all(0 <= e["from"] < len(graph["blocks"]) and 0 <= e["to"] < len(graph["blocks"]) for e in graph["edges"])
+    assert graph["dot"].startswith("digraph") and "loop" in graph["dot"]
+
+
+def test_cfg_without_a_loop_has_none(loop_elf):
+    from rea.cli import _cfg_for
+
+    graph = _cfg_for(loop_elf, "straight")
+    assert graph["back_edges"] == 0
+    assert len(graph["blocks"]) == 1 and graph["edges"] == []
+
+
+def test_cfg_unknown_symbol_is_a_clear_error(loop_elf):
+    from rea.cli import _cfg_for
+
+    with pytest.raises(ReaError) as error:
+        _cfg_for(loop_elf, "tidak_ada")
+    assert error.value.code == "symbol_not_found"
+
+
+def test_xrefs_link_strings_and_calls_to_functions(loop_elf):
+    import platform
+
+    from rea.analysis import xrefs
+
+    found = strings.extract(loop_elf, max_items=3000)["strings"]
+    result = xrefs.analyze_xrefs(loop_elf, found)
+    graph = result["call_graph"]
+    assert {"sum", "straight"} <= set(graph["main"])
+    if platform.machine() in ("x86_64", "aarch64"):
+        assert "puts" in graph["main"], graph  # stub PLT diberi nama impornya
+        hello = [row for row in result["strings"] if row["text"] == "hello rea"]
+        assert hello and {r["function"] for r in hello[0]["refs"]} == {"main"}
+
+
+def test_entropy_map_and_sections(loop_elf, tmp_path):
+    from rea.analysis import entropy
+
+    mapped = entropy.entropy_map(loop_elf)
+    assert mapped["blocks"] and all(0.0 <= b["entropy"] <= 8.0 for b in mapped["blocks"])
+    assert len(mapped["spark"]) <= 64
+    sections = entropy.section_entropy(loop_elf, elf.summarize(loop_elf)["sections"])
+    assert any(s["name"] == ".text" for s in sections)
+    noise = tmp_path / "noise"
+    noise.write_bytes(os.urandom(64 * 1024))
+    assert entropy.entropy_map(str(noise))["high_ratio"] > 0.9
+    assert entropy.entropy_map(str(noise), block=1024, max_blocks=8)["block_size"] == 8192  # blok diperbesar agar jumlahnya terbatas
+
+
+def test_cli_analyze_cfg_xrefs_entropy_json(run_rea, tmp_path, loop_elf):
+    done = run_rea("analyze", loop_elf, "--cfg", "sum", "--xrefs", "--entropy", "--json", cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    result = json.loads([line for line in done.stdout.splitlines() if line.startswith("{")][-1])
+    data = result["data"]
+    assert data["cfg"]["back_edges"] == 1 and "dot" not in data["cfg"]
+    assert data["xrefs"]["functions_scanned"] >= 3
+    assert data["entropy"]["map"]["blocks"]
+    with_dot = run_rea("analyze", loop_elf, "--cfg", "sum", "--dot", "--json", cwd=tmp_path)
+    assert "digraph" in json.loads([line for line in with_dot.stdout.splitlines() if line.startswith("{")][-1])["data"]["cfg"]["dot"]
+    text_only = tmp_path / "x.txt"
+    text_only.write_text("halo")
+    bad = run_rea("analyze", str(text_only), "--cfg", "--json", cwd=tmp_path)
+    assert bad.returncode == 1
+
+
+def test_report_includes_the_new_sections(loop_elf, tmp_path, run_rea):
+    out = tmp_path / "r.md"
+    done = run_rea("report", loop_elf, "-o", str(out), "--json", cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    text = out.read_text(encoding="utf-8")
+    for heading in ("## Entropi", "## CFG: main", "## Call graph"):
+        assert heading in text, heading
+    assert "sum" in text and "straight" in text
