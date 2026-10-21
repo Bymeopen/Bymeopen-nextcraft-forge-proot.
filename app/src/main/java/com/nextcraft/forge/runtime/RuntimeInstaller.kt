@@ -2010,8 +2010,8 @@ class RuntimeInstaller(private val context: Context) {
 
         // Write environment variables (including sensitive API keys/OAuth tokens) to a
         // one-time mode-0600 file inside filesDir/runtime/env and immediately unlink it
-        // inside the root shell before `exec`, so secrets NEVER appear in `ps aux` or
-        // `/proc/<pid>/cmdline` while surviving Magisk/KernelSU/APatch su environ sanitization.
+        // in the launching shell before `exec`, so secrets NEVER appear in `ps aux` or
+        // `/proc/<pid>/cmdline`.
         val runtimeEnvDir = File(runtimeDir, "env").apply {
             mkdirs()
             runCatching { Os.chmod(absolutePath, 0b111000000) } // 0700
@@ -2056,7 +2056,8 @@ class RuntimeInstaller(private val context: Context) {
             "export NEXTCRAFT_PROOT=${shellSingleQuote(RuntimeEngines.prootBinary(context).absolutePath)}; " +
                 "export NEXTCRAFT_PROOT_LOADER=${shellSingleQuote(RuntimeEngines.prootLoader(context).absolutePath)}; " +
                 "export NEXTCRAFT_PROOT_TMP=${shellSingleQuote(File(runtimeDir, "proot-tmp").apply { mkdirs() }.absolutePath)}; "
-        val suCommand = ". $quotedEnvFile; rm -f $quotedEnvFile; ${engineExports}exec " +
+        // Absolute path: the env file exports the guest PATH, under which /system/bin/sh cannot find `rm`.
+        val suCommand = ". $quotedEnvFile; /system/bin/rm -f $quotedEnvFile; ${engineExports}exec " +
             launch.joinToString(" ") { shellSingleQuote(it) }
         return envFile to suCommand
     }
@@ -2089,6 +2090,12 @@ RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
 ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
 EVENT=PermissionRequest
+# Without a live app watcher (Claude started by hand from the Terminal tab) answer nothing, so Claude Code keeps its
+# own interactive prompt instead of waiting for a decision nobody will give.
+if [ ! -f "${'$'}BRIDGE/.watcher" ]; then
+    cat > /dev/null
+    exit 0
+fi
 if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp"; then
     grep -q '"hook_event_name" *: *"PreToolUse"' "${'$'}BRIDGE/${'$'}ID.request.tmp" && EVENT=PreToolUse
     mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"
@@ -2955,7 +2962,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             if [ ! -r /sdcard ] && [ -d /storage/emulated/0 ] && [ -r /storage/emulated/0 ]; then
                 BINDS="${'$'}BINDS -b /storage/emulated/0:/sdcard"
             fi
-            if [ "${'$'}HOST_WORKSPACE" != "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" ]; then
+            # The bind list is word-split on purpose (one -b per path); a path with whitespace would be read as the command.
+case "${'$'}ROOTFS${'$'}HOST_WORKSPACE${'$'}GUEST_WORKSPACE${'$'}HOST_BRIDGE" in
+    *[[:space:]]*) echo "proot-exec: paths must not contain whitespace" >&2; exit 65 ;;
+esac
+if [ "${'$'}HOST_WORKSPACE" != "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" ]; then
                 BINDS="${'$'}BINDS -b ${'$'}HOST_WORKSPACE:${'$'}GUEST_WORKSPACE"
             fi
             BINDS="${'$'}BINDS -b ${'$'}HOST_BRIDGE:/nextcraft-bridge -b ${'$'}HOST_BRIDGE:/pocketdev-bridge -b ${'$'}HOST_BRIDGE:/pocket-bridge -b ${'$'}HOST_RESP:/pocketdev-bridge-responses"

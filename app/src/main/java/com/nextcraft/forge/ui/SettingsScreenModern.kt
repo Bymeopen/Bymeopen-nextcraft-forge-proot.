@@ -317,11 +317,11 @@ fun SettingsScreenModern(
         }
 
         // Shared storage for the guest (/sdcard): Android 11+ "All files access", granted in system settings.
-        var storageGranted by remember { mutableStateOf(hasAllFilesAccess()) }
+        var storageGranted by remember { mutableStateOf(hasAllFilesAccess(context)) }
         val storageLifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current
         androidx.compose.runtime.DisposableEffect(storageLifecycle) {
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) storageGranted = hasAllFilesAccess()
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) storageGranted = hasAllFilesAccess(context)
             }
             storageLifecycle.lifecycle.addObserver(observer)
             onDispose { storageLifecycle.lifecycle.removeObserver(observer) }
@@ -778,10 +778,23 @@ internal fun SetupProgress(state: ForgeUiState, scope: SetupScope? = null) {
 }
 
 /** Android 11+ "All files access" (MANAGE_EXTERNAL_STORAGE); older versions only need the legacy storage permission. */
-private fun hasAllFilesAccess(): Boolean =
-    android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || android.os.Environment.isExternalStorageManager()
+private fun hasAllFilesAccess(context: android.content.Context): Boolean =
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        android.os.Environment.isExternalStorageManager()
+    } else {
+        context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
 
 private fun openAllFilesAccessSettings(context: android.content.Context) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+        // Android 8–10: a runtime permission dialog, not a settings page.
+        val activity = context.findActivity()
+        if (activity != null) {
+            activity.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 0x5D)
+            return
+        }
+    }
     val intents = buildList {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             add(

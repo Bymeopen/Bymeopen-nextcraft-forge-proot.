@@ -460,18 +460,26 @@ class ClaudeRuntimeBridge(
 
     private suspend fun watchPermissionRequests(sessionId: String) {
         val bridge = File(context.filesDir, "runtime-bridge")
+        // permission-hook.sh only hands a decision to the app while this marker exists; a Claude the user starts from
+        // the Terminal tab must keep its own prompt instead of waiting on a watcher that is not running.
+        val watcherMarker = File(bridge, ".watcher")
+        runCatching { bridge.mkdirs(); watcherMarker.writeText(sessionId) }
         val handledApprovals = HashSet<String>()
-        while (kotlin.coroutines.coroutineContext.isActive) {
-            expirePendingPermissions(sessionId)
-            bridge.listFiles { file -> file.name.endsWith(".request") }.orEmpty().forEach { file ->
-                val approvalId = file.name.removeSuffix(".request")
-                if (!handledApprovals.add(approvalId)) {
-                    runCatching { file.delete() }
-                    return@forEach
+        try {
+            while (kotlin.coroutines.coroutineContext.isActive) {
+                expirePendingPermissions(sessionId)
+                bridge.listFiles { file -> file.name.endsWith(".request") }.orEmpty().forEach { file ->
+                    val approvalId = file.name.removeSuffix(".request")
+                    if (!handledApprovals.add(approvalId)) {
+                        runCatching { file.delete() }
+                        return@forEach
+                    }
+                    processPermissionRequestFile(sessionId, file)
                 }
-                processPermissionRequestFile(sessionId, file)
+                delay(50)
             }
-            delay(50)
+        } finally {
+            runCatching { watcherMarker.delete() }
         }
     }
 

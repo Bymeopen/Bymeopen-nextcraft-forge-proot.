@@ -132,6 +132,10 @@ internal class NativeSpawnProcess private constructor(
             field.getInt(process)
         }.getOrDefault(-1)
 
+        private val spawnExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "nextcraft-spawn").apply { isDaemon = true }
+        }
+
         fun start(
             argv: List<String>,
             environment: Map<String, String>,
@@ -161,15 +165,20 @@ internal class NativeSpawnProcess private constructor(
                     delegateProcess = fallback,
                 )
             }
-            val spawned = NativeSpawn.spawn(
-                argv.toTypedArray(),
-                environment.map { "${it.key}=${it.value}" }.toTypedArray(),
-                cwd,
-                outputFile.absolutePath,
-                pseudoTerminal,
-                ptyRows,
-                ptyColumns,
-            )
+            // PR_SET_PDEATHSIG fires when the *thread* that forked exits, not the process. A Dispatchers.IO worker is
+            // recycled after idling, which would SIGTERM a long-running proot mid-task, so every fork happens on one
+            // thread that lives as long as the app.
+            val spawned = spawnExecutor.submit<IntArray?> {
+                NativeSpawn.spawn(
+                    argv.toTypedArray(),
+                    environment.map { "${it.key}=${it.value}" }.toTypedArray(),
+                    cwd,
+                    outputFile.absolutePath,
+                    pseudoTerminal,
+                    ptyRows,
+                    ptyColumns,
+                )
+            }.get()
             check(spawned != null && spawned.size == 3 && spawned[0] > 0) { "Native Chroot runtime launch failed" }
             val input = ParcelFileDescriptor.AutoCloseOutputStream(ParcelFileDescriptor.adoptFd(spawned[1]))
             val masterFd = spawned[2]

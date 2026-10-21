@@ -27,15 +27,17 @@ static void close_pair(int pair[2]) {
 static void close_extra_fds(void) {
     DIR *dir = opendir("/proc/self/fd");
     if (dir != NULL) {
+        // Collect first: closing entries while readdir() walks /proc/self/fd can make it skip descriptors.
         int dir_fd = dirfd(dir);
+        int fds[4096];
+        size_t count = 0;
         struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL) {
+        while ((entry = readdir(dir)) != NULL && count < sizeof(fds) / sizeof(fds[0])) {
             int fd = atoi(entry->d_name);
-            if (fd >= 3 && fd != dir_fd) {
-                close(fd);
-            }
+            if (fd >= 3 && fd != dir_fd) fds[count++] = fd;
         }
         closedir(dir);
+        for (size_t i = 0; i < count; i++) close(fds[i]);
         return;
     }
     long max_fd = sysconf(_SC_OPEN_MAX);
