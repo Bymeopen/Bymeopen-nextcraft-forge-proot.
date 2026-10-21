@@ -774,6 +774,7 @@
     <string name="rt_auth_claude_start_failed">Could not start Claude sign-in.</string>
     <string name="rt_auth_claude_open_page">Open the sign-in page. It finishes by itself; if the browser ends on a localhost page that will not load, paste that page\'s address (or its code#state) here.</string>
     <string name="rt_auth_claude_connected">Claude account connected</string>
+    <string name="rt_auth_claude_failed_reason">Claude sign-in failed: %1$s</string>
     <string name="rt_auth_claude_failed">Claude sign-in failed.</string>
     <string name="rt_auth_claude_code_unrecognized">Paste the localhost callback address the browser ended on, or its code#state value.</string>
     <string name="rt_auth_claude_code_rejected">Claude Code rejected the code (HTTP %1$d).</string>

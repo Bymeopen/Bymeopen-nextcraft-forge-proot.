@@ -210,10 +210,14 @@ class ClaudeAuthController(
                             message = UiText.res(R.string.rt_auth_claude_open_page),
                         )
                     }
-                    if (clean.contains("authentication failed", true) || clean.contains("login failed", true) ||
-                        clean.contains("invalid code", true) || clean.contains("failed to exchange", true)
-                    ) {
-                        error("Claude sign-in failed. Start sign-in again.")
+                    val failureLine = clean.lines().lastOrNull { line ->
+                        line.contains("authentication failed", true) || line.contains("login failed", true) ||
+                            line.contains("invalid code", true) || line.contains("failed to exchange", true)
+                    }
+                    if (failureLine != null) {
+                        // The CLI's own reason (an organization without Claude Code access, a Console-only account,
+                        // a token it could not store) is the only thing that tells the user what to change.
+                        throw UiTextException(UiText.res(R.string.rt_auth_claude_failed_reason, failureLine.trim().take(240)))
                     }
                     val now = android.os.SystemClock.elapsedRealtime()
                     val exited = !running.isAlive

@@ -758,6 +758,7 @@
     <string name="rt_auth_claude_start_failed">Tidak dapat memulai proses masuk Claude.</string>
     <string name="rt_auth_claude_open_page">Buka halaman masuk. Prosesnya selesai sendiri; jika browser berhenti di halaman localhost yang tidak bisa dimuat, tempel alamat halaman itu (atau nilai code#state) di sini.</string>
     <string name="rt_auth_claude_connected">Akun Claude terhubung</string>
+    <string name="rt_auth_claude_failed_reason">Proses masuk Claude gagal: %1$s</string>
     <string name="rt_auth_claude_failed">Proses masuk Claude gagal.</string>
     <string name="rt_auth_claude_code_unrecognized">Tempel alamat callback localhost tempat browser berhenti, atau nilai code#state-nya.</string>
     <string name="rt_auth_claude_code_rejected">Claude Code menolak kode (HTTP %1$d).</string>
