@@ -661,7 +661,9 @@ internal fun ChatMessageCard(
                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
                     // 44dp: the copy button is a 48dp touch box; 32dp let it cover the end of the first lines.
                     Column(modifier = Modifier.padding(end = 44.dp)) {
-                        MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = false)
+                        // Selection (long-press, drag handles, Copy) only on a finished message: the streaming one changes
+                        // under the selection container, which is what crashed Compose before. Finished text is static.
+                        MarkdownText(markdown = message.text, color = textColor, onRunCode = onRunSnippet, selectable = !streaming)
                         if (streaming) {
                             // Blinking caret says "still arriving" without a spinner.
                             val blink = rememberBlink()
