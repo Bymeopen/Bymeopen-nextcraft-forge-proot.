@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -47,7 +48,7 @@ import kotlinx.coroutines.launch
  * redirect back to the CLI finishes it; the pasted code is only a fallback.
  */
 @Composable
-fun ClaudeAccountCard(viewModel: MainViewModel) {
+fun ClaudeAccountCard(viewModel: MainViewModel, extra: @Composable ColumnScope.() -> Unit = {}) {
     val scheme = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -170,6 +171,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel) {
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             )
+            extra()
         }
     }
 }
