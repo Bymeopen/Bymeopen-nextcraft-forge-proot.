@@ -444,7 +444,14 @@ class AntigravityRuntimeBridge(
                                 ?.let { status ->
                                     lastRetryStatus = status
                                     pushForegroundProgress(status)
-                                    eventBus.emit(RuntimeEvent.RuntimeLog(sessionId, "Antigravity", status))
+                                    eventBus.emit(
+                                        RuntimeEvent.RuntimeLog(
+                                            sessionId,
+                                            "Antigravity",
+                                            antigravityRetryReason(recentAntigravityDiagnostic(sessionStartedAtMillis))
+                                                ?.let { "$status: $it" } ?: status,
+                                        ),
+                                    )
                                 }
                         }
                         if (activeToolName == "Bash" && activeToolDetail.contains("gradle", ignoreCase = true) &&
@@ -681,6 +688,10 @@ private val ANTIGRAVITY_RETRY_LINE = Regex("""Run: attempt (\d+) failed \((.*)\)
  * The newest "Run: attempt N failed (…), retrying in Xs" line in an agy log tail, as a short status for the
  * user (agy only writes these retries to its log, never to the stream), or null when there is none.
  */
+/** The raw failure text of the newest retry line (for the runtime log), or null when there is none. */
+internal fun antigravityRetryReason(logTail: String): String? =
+    ANTIGRAVITY_RETRY_LINE.findAll(logTail).lastOrNull()?.groupValues?.get(2)?.take(200)
+
 internal fun antigravityRetryStatus(logTail: String): String? {
     val match = ANTIGRAVITY_RETRY_LINE.findAll(logTail).lastOrNull() ?: return null
     val (attempt, reason, delay) = match.destructured

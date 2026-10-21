@@ -2003,8 +2003,9 @@ class RuntimeInstaller(private val context: Context) {
             // Same two settings as proot-exec.sh, so they also reach commands that re-exec with a fresh environment.
             put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
             put("UV_USE_IO_URING", "0")
+            // Go programs under ptrace: async preemption signals interrupt network syscalls (see proot-exec.sh).
+            put("GODEBUG", "asyncpreemptoff=1")
             put("TERM", "xterm-256color")
-            put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
             putAll(environment)
         }
 
@@ -2896,6 +2897,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             # Android's app seccomp policy kills a process on io_uring_setup (SIGSYS, exit 159). libuv (Node 20+) opens
             # an io_uring by default, which took down every npm/node run; this makes it use epoll instead.
             export UV_USE_IO_URING=0
+            # Go binaries (Antigravity's agy, dsh) preempt goroutines with SIGURG many times a second. Under ptrace every
+            # signal is a tracer round trip and can interrupt an in-flight connect/read, which surfaces as random
+            # "dial tcp"/"i/o timeout" failures that never happen in a kernel chroot. Cooperative preemption only.
+            export GODEBUG="${'$'}{GODEBUG:-asyncpreemptoff=1}"
 
             BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if [ -d "${'$'}ROOTFS/root/android-sdk" ]; then

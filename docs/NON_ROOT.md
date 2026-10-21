@@ -21,7 +21,7 @@ Aplikasi ini hanya punya satu mesin: `proot` statis dari APK. Tidak ada `su`, ti
 - Bila `proot` gagal dengan pesan seccomp/ptrace, set `PROOT_NO_SECCOMP=1` di environment agen (Pengaturan → Agent).
 - `apt-get` berjalan sebagai root palsu (`-0`) tanpa sandbox seccomp apt; paket yang memakai hard link ditangani `--link2symlink`.
 - Seccomp aplikasi Android membunuh proses yang memanggil `io_uring_setup` (SIGSYS, exit 159). libuv di Node 20+ memakainya
-  secara default, jadi `UV_USE_IO_URING=0` dan `GLIBC_TUNABLES=glibc.pthread.rseq=0` selalu diekspor ke guest.
+  secara default, jadi `UV_USE_IO_URING=0`, `GODEBUG=asyncpreemptoff=1` (Go binaries such as agy: SIGURG preemption under ptrace interrupts network syscalls) dan `GLIBC_TUNABLES=glibc.pthread.rseq=0` selalu diekspor ke guest.
 - Claude Code dipasang dan diperbarui hanya dari npm `2.1.112`; cek pembaruan tidak pernah menawarkan rilis Bun yang lebih baru.
 - Hook izin didaftarkan sebagai `PreToolUse` (dengan `permissionDecision`) selain `PermissionRequest`: di 2.1.112 mode headless
   (`-p`) tidak memanggil `PermissionRequest`, sehingga setiap perintah berakhir "This command requires approval".
