@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,7 +29,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-abstract class PhoneSizeShots(private val label: String) {
+abstract class PhoneSizeShots(private val label: String, private val theme: String = "dark") {
     @get:Rule val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     private fun save(scenario: String) {
@@ -43,7 +44,7 @@ abstract class PhoneSizeShots(private val label: String) {
 
     @Composable
     private fun Frame(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-        NextCraftForgeTheme("dark") {
+        NextCraftForgeTheme(theme) {
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Spacer(modifier = Modifier.height(32.dp)) // status bar
@@ -302,6 +303,117 @@ abstract class PhoneSizeShots(private val label: String) {
         }
         save("code-viewer")
     }
+    @Test
+    fun tabsAndStatus() {
+        val now = System.currentTimeMillis()
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                ForgePillTabs(items = listOf("Explorer (4)", "nextcraft-forge-dmesg.txt", "Perubahan", "Riwayat"), selectedIndex = 1, onSelect = {})
+                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(horizontal = 14.dp).weight(1f)) {
+                    ProjectRow(
+                        project = com.nextcraft.forge.model.Project(name = "Aplikasi Batrei", description = "Ruang kerja pemrograman umum", language = "Multibahasa", slug = "aplikasi-batrei", updatedAtMillis = now - 120_000),
+                        active = true, locked = false, canDelete = true, onOpen = {}, onDelete = {}, onRename = {}, changedCount = 3, running = true,
+                    )
+                }
+                ForgeBottomBar(navEntries, ForgeTab.PROJECTS, changedCount = 3, agentRunning = true, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("tabsStatus")
+    }
+    @Test
+    fun composerStates() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "Claude Code", onBack = {}, actions = {
+                    ForgeGlyphPillIcon(ForgeGlyph.HISTORY, "history", onClick = {})
+                })
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {}
+                QuickActionRow(listOf(
+                    QuickChip("Jelaskan struktur proyek ini", ForgeGlyph.SPARK) {},
+                    QuickChip("Cari dan perbaiki error build", ForgeGlyph.BUILD) {},
+                    QuickChip("Tambahkan fitur baru: ", ForgeGlyph.PLUS) {},
+                ))
+                ChatComposer("", {}, "Claude Code", running = false, canSend = false, captureEnabled = true, onAttachCamera = {}, onAttachFile = {}, onCapture = {}, onSend = {}, onStop = {})
+                ChatComposer("Tambahkan tombol hapus di daftar tugas lalu jalankan semua tes sekarang juga", {}, "Claude Code", running = false, canSend = true, captureEnabled = true, onAttachCamera = {}, onAttachFile = {}, onCapture = {}, onSend = {}, onStop = {})
+                ChatComposer("", {}, "Claude Code", running = true, canSend = false, captureEnabled = true, onAttachCamera = {}, onAttachFile = {}, onCapture = {}, onSend = {}, onStop = {})
+                ForgeBottomBar(projectEntries, ForgeTab.AGENT, changedCount = 0, agentRunning = true, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("composer")
+    }
+
+    @Test
+    fun terminalBottom() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "/workspace/aplikasi-batrei \u00B7 Ubuntu root chroot", onBack = {}, actions = {
+                    ForgeGlyphPillIcon(ForgeGlyph.FILE, "copy", onClick = {})
+                    ForgeGlyphPillIcon(ForgeGlyph.TRASH, "clear", onClick = {})
+                })
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp)
+                        .background(LocalForgeThemeTokens.current.terminalBackground, androidx.compose.foundation.shape.RoundedCornerShape(14.dp)),
+                ) {}
+                TerminalKeyRow(modifiers = TerminalModifierKeys(), holder = TerminalViewHolder(), enabled = true)
+                TerminalCommandBar(enabled = true, onSend = {})
+                ForgeBottomBar(projectEntries, ForgeTab.TERMINAL, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("terminal")
+    }
+
+    @Test
+    fun onboarding() {
+        rule.setContent {
+            NextCraftForgeTheme(theme) {
+                RuntimeOnboardingScreen(
+                    state = ForgeUiState(),
+                    onToggleStack = {}, onStartSetup = {}, onPauseSetup = {}, onRepairRootfs = {}, onRefreshStatus = {}, onEnterWorkspaceAnyway = {},
+                )
+            }
+        }
+        save("onboarding")
+    }
+    @Test
+    fun filesSearch() {
+        fun d(path: String) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), true, path.count { it == '/' }, childCount = 2)
+        fun f(path: String, size: Long = 2048) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), false, path.count { it == '/' }, size)
+        val all = listOf(d("app"), d("app/src"), f("app/src/Main.kt"), d("app/src/util"), f("app/src/util/Strings.kt"), f("build.gradle.kts"), d("docs"), f("docs/main-guide.md"), f("README.md"))
+        val result = searchWorkspaceEntries(all, "main")
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FilesHeaderCard(selecting = false, selectedCount = 0, enabled = true, onNewFile = {}, onNewFolder = {}, onUpload = {}, onToggleSelect = {}, onRefresh = {}, searching = true, onToggleSearch = {})
+                FileSearchBar(query = "main", onQueryChange = {}, resultCount = result.matches.size)
+                WorkspaceTreeList(
+                    entries = all, selectedPath = null, selecting = false, selectedPaths = mutableListOf(), enabled = true,
+                    onSelectFile = {}, onNewFileIn = {}, onNewFolderIn = {}, onUploadIn = {}, onRename = {}, onSaveCopy = {},
+                    onEditInTerminal = {}, onInstallApk = {}, onDelete = {}, modifier = Modifier.weight(1f), search = result,
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesSearch")
+    }
+
+    @Test
+    fun filesSearchEmpty() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FileSearchBar(query = "zzz", onQueryChange = {}, resultCount = 0)
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.SEARCH,
+                    title = androidx.compose.ui.res.stringResource(com.nextcraft.forge.R.string.files_search_empty_title),
+                    message = androidx.compose.ui.res.stringResource(com.nextcraft.forge.R.string.files_search_empty_message, "zzz"),
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesSearchEmpty")
+    }
 }
 
 @Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")
@@ -309,3 +421,7 @@ abstract class PhoneSizeShots(private val label: String) {
 @Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class Shots667 : PhoneSizeShots("6.67in-393x873")
 @Config(sdk = [34], qualifiers = "in-w412dp-h915dp-xxhdpi") class Shots68 : PhoneSizeShots("6.8in-412x915")
 @Config(sdk = [34], qualifiers = "in-w440dp-h956dp-xxhdpi") class Shots69 : PhoneSizeShots("6.9in-440x956")
+
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsWhite : PhoneSizeShots("white-393x873", "white")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsGlass : PhoneSizeShots("glass-393x873", "glass")
+@Config(sdk = [34], qualifiers = "in-w932dp-h430dp-land-xxhdpi") class ShotsLandscape : PhoneSizeShots("land-932x430")

@@ -9,16 +9,6 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
-/**
- * Deletes this file or directory tree without following symlinks. Kotlin's deleteRecursively() descends into a
- * symlinked directory, so a link an agent made to another project would delete that project's files.
- */
-internal fun java.io.File.deleteRecursivelyNoFollow(): Boolean {
-    val isLink = java.nio.file.Files.isSymbolicLink(toPath())
-    if (!isLink && isDirectory) listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
-    return delete() || (!exists() && !java.nio.file.Files.isSymbolicLink(toPath()))
-}
-
 /** Reads at most [maxBytes] from the start of a file without requiring newer Android APIs. */
 internal fun File.readHeadBytes(maxBytes: Int): ByteArray {
     if (!isFile || maxBytes <= 0) return ByteArray(0)
@@ -202,4 +192,14 @@ internal class InotifyLogTailer(
     companion object {
         private const val MAX_TAIL_LINE_BYTES = 512 * 1024
     }
+}
+
+/**
+ * Deletes this file or directory tree without following symlinks. Kotlin's deleteRecursively() descends into a
+ * symlinked directory, so a link an agent made to another project would delete that project's files.
+ */
+internal fun java.io.File.deleteRecursivelyNoFollow(): Boolean {
+    val isLink = java.nio.file.Files.isSymbolicLink(toPath())
+    if (!isLink && isDirectory) listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
+    return delete() || (!exists() && !java.nio.file.Files.isSymbolicLink(toPath()))
 }

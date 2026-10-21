@@ -46,6 +46,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -337,7 +339,7 @@ fun ForgePillIcon(
     Box(
         modifier = modifier
             .forgePressScale(interaction, pressedScale = 0.88f)
-            .size(width = 44.dp, height = 38.dp)
+            .size(width = 48.dp, height = 48.dp) // 48 dp is the minimum touch target
             .clip(RoundedCornerShape(100))
             .clickable(interactionSource = interaction, indication = androidx.compose.material.ripple.rememberRipple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -363,10 +365,13 @@ fun ForgePillTabs(
     longPressLabel: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val scroll = rememberScrollState()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            // The fade at a cut edge tells the reader there are more tabs to scroll to.
+            .forgeFadingEdges(scroll, scheme.background)
+            .horizontalScroll(scroll)
             .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
     ) {
@@ -431,3 +436,26 @@ fun rememberReduceMotion(): Boolean {
         ) == 0f
     }
 }
+
+/**
+ * Fades the edge of a horizontally scrolling row into [background] wherever more content continues past it. A plain
+ * gradient drawn over the content: no offscreen layer or blend mode, so it renders the same on every device.
+ */
+fun Modifier.forgeFadingEdges(scroll: androidx.compose.foundation.ScrollState, background: Color, width: Dp = 28.dp): Modifier = this
+    .drawWithContent {
+        drawContent()
+        val w = width.toPx()
+        if (scroll.value > 0) {
+            drawRect(
+                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(background, Color.Transparent), startX = 0f, endX = w),
+                size = Size(w, size.height),
+            )
+        }
+        if (scroll.value < scroll.maxValue) {
+            drawRect(
+                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Transparent, background), startX = size.width - w, endX = size.width),
+                topLeft = Offset(size.width - w, 0f),
+                size = Size(w, size.height),
+            )
+        }
+    }

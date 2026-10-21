@@ -125,6 +125,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
+    /**
+     * Text for state that is built outside Compose. The in-app language is applied only to Activity contexts, so the
+     * plain application context would follow the system language instead; this wraps it with the chosen one.
+     */
+    private fun str(@androidx.annotation.StringRes id: Int, vararg args: Any): String =
+        LocaleHelper.wrapContext(getApplication<Application>()).getString(id, *args)
+
+    /** A known English sentence from a lower layer in the app language; anything else unchanged. */
+    private fun localizeMsg(raw: String): String = MessageText.localize(LocaleHelper.wrapContext(getApplication<Application>()), raw)
+
+    /** A failure's own text (translated when it is a known sentence), else the generic "unknown error". */
+    private fun errText(err: Throwable): String = err.message?.let(::localizeMsg) ?: str(R.string.msg_unknown_error)
+
+    private fun quantity(@androidx.annotation.PluralsRes id: Int, count: Int): String =
+        LocaleHelper.wrapContext(getApplication<Application>()).resources.getQuantityString(id, count, count)
+
     /** True when Claude runs on the user's subscription login (no key, or the OAuth token read from the credentials file). */
     private fun isClaudeSubscriptionLogin(profile: ProviderProfile, apiKey: String): Boolean =
         profile.kind == ProviderKind.CLAUDE && (apiKey.isBlank() || apiKey.startsWith("sk-ant-oat"))
@@ -312,7 +328,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         stage = AndroidBuildStage.COMPLETE,
                         apkPath = existingApk.absolutePath,
                         apkSizeBytes = existingApk.length(),
-                        message = getApplication<Application>().getString(R.string.build_existing_apk, existingApk.name, existingApk.length() / 1024),
+                        message = str(R.string.build_existing_apk, existingApk.name, existingApk.length() / 1024),
                     )
                 } else {
                     AndroidBuildRecord()
@@ -581,11 +597,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     installer.ensureChrootScripts()
                     RuntimeEngines.invalidate()
-                    if (installer.isRuntimeAccessAvailable()) "PRoot engine and supervisor script verified." else "PRoot binary missing from the APK; reinstall the app."
-                }.getOrElse { "Runtime repair note: ${it.message}" }
+                    if (installer.isRuntimeAccessAvailable()) {
+                        UiText.res(R.string.mt_repair_ok)
+                    } else {
+                        UiText.res(R.string.mt_repair_incomplete)
+                    }
+                }.getOrElse { UiText.res(R.string.msg_repair_note, it.message.orEmpty()) }
             }
             refreshRuntimeStatus()
-            _state.update { it.copy(bannerMessage = UiText.Raw(result)) }
+            _state.update { it.copy(bannerMessage = result) }
         }
     }
 
@@ -671,7 +691,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             stage = AndroidBuildStage.COMPLETE,
                             apkPath = existingApk.absolutePath,
                             apkSizeBytes = existingApk.length(),
-                            message = getApplication<Application>().getString(R.string.build_existing_apk, existingApk.name, existingApk.length() / 1024),
+                            message = str(R.string.build_existing_apk, existingApk.name, existingApk.length() / 1024),
                         )
                     } else {
                         AndroidBuildRecord()
@@ -702,9 +722,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
-                        if (isAndroid) "Android (${androidTemplate.label}) project" else getApplication<Application>().getString(R.string.project_general_desc)
+                        if (isAndroid) "Android (${androidTemplate.label}) project" else "General coding workspace"
                     },
-                    language = if (isAndroid) "Kotlin" else getApplication<Application>().getString(R.string.project_lang_multi),
+                    language = if (isAndroid) "Kotlin" else "Multi-language",
                     slug = slug,
                     type = if (isAndroid) ProjectType.ANDROID else ProjectType.GENERAL,
                     androidTemplate = if (isAndroid) androidTemplate else null,
@@ -1192,7 +1212,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is RuntimeEvent.PermissionDenied -> {
                 // Say so in the chat instead of failing the session: the agent receives the refusal and carries on.
                 appendAssistantText(
-                    "\n\n" + getApplication<Application>().getString(
+                    "\n\n" + str(
                         R.string.msg_permission_denied,
                         event.toolName,
                         event.reason.take(300),
@@ -1217,7 +1237,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             is RuntimeEvent.SessionFailed -> {
                 // The bridges report a user stop in English; show it in the app language.
-                val reason = if (event.reason == "Stopped by user") getApplication<Application>().getString(R.string.agent_stopped_by_user) else event.reason
+                val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 appendAssistantText("\n\n[$reason]")
                 offerRetry()
                 _state.value.activeProject?.let { finishAgentTurn(it.id) }
@@ -1278,7 +1298,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val elapsed = (now - msg.createdAt.toEpochMilli()).coerceAtLeast(0L)
                 msg.copy(
                     id = UUID.randomUUID().toString(),
-                    text = msg.text.ifBlank { getApplication<Application>().getString(R.string.agent_task_finished) },
+                    text = msg.text.ifBlank { str(R.string.agent_task_finished) },
                     workedMillis = elapsed,
                 )
             } else {
@@ -1333,7 +1353,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshWorkspaceFilesAndChanges(projectId: String) {
         val requestId = ++workspaceRefreshRequest
         viewModelScope.launch {
-            val (entries, changes) = workspaceIo("Could not read the project files") {
+            val (entries, changes) = workspaceIo(str(R.string.err_ws_read)) {
                 val ws = checkpoints.ensureWorkspace(projectId)
                 val rootCanonical = runCatching { ws.canonicalFile.toPath() }.getOrNull()
                 val ignored = setOf(".git", ".gradle", "build", "node_modules", "__pycache__")
@@ -1562,7 +1582,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         val path = _state.value.selectedFilePath ?: return
         if (!_state.value.selectedFileEditable) {
-            _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_file_readonly, path)) }
+            _state.update { it.copy(fileSavedBanner = str(R.string.msg_file_readonly, path)) }
             return
         }
         val content = _state.value.selectedFileContent
@@ -1584,7 +1604,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         it.selectedFileDirty
                     },
-                    fileSavedBanner = if (saved) getApplication<Application>().getString(R.string.msg_file_saved_path, path) else getApplication<Application>().getString(R.string.msg_file_save_failed_path, path),
+                    fileSavedBanner = if (saved) str(R.string.msg_file_saved_path, path) else str(R.string.msg_file_save_failed_path, path),
                 )
             }
             refreshWorkspaceFilesAndChanges(project.id)
@@ -1664,7 +1684,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val copied = withContext(Dispatchers.IO) { copyUrisIntoWorkspace(project.id, uris, dir) }
             if (copied.isNotEmpty()) {
-                _state.update { it.copy(fileSavedBanner = getApplication<Application>().resources.getQuantityString(R.plurals.msg_files_uploaded, copied.size, copied.size)) }
+                _state.update { it.copy(fileSavedBanner = quantity(R.plurals.msg_files_uploaded, copied.size)) }
                 refreshWorkspaceFilesAndChanges(project.id)
             }
         }
@@ -1807,7 +1827,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _state.update {
                 it.copy(
-                    fileSavedBanner = if (count >= 0) getApplication<Application>().resources.getQuantityString(R.plurals.msg_zip_saved, count, count) else getApplication<Application>().getString(R.string.msg_zip_failed),
+                    fileSavedBanner = if (count >= 0) quantity(R.plurals.msg_zip_saved, count) else str(R.string.msg_zip_failed),
                 )
             }
         }
@@ -1856,11 +1876,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             selectedFilePath = null,
                             selectedFileContent = "",
                             selectedFileDirty = false,
-                            fileSavedBanner = getApplication<Application>().getString(R.string.msg_file_deleted, cleanPath),
+                            fileSavedBanner = str(R.string.msg_file_deleted, cleanPath),
                         )
                     }
                 } else {
-                    _state.update { it.copy(fileSavedBanner = getApplication<Application>().getString(R.string.msg_file_deleted, cleanPath)) }
+                    _state.update { it.copy(fileSavedBanner = str(R.string.msg_file_deleted, cleanPath)) }
                 }
                 refreshWorkspaceFilesAndChanges(project.id)
             }
@@ -1871,7 +1891,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not revert $path") {
+            workspaceIo(str(R.string.err_ws_revert_file, path)) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertFile(project.id, ws, path)
             } ?: return@launch
@@ -1887,7 +1907,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not keep $path") {
+            workspaceIo(str(R.string.err_ws_keep_file, path)) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.acceptFile(project.id, ws, path)
             } ?: return@launch
@@ -1899,7 +1919,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not keep the changes") { checkpoints.acceptAll(project.id) } ?: return@launch
+            workspaceIo(str(R.string.err_ws_keep)) { checkpoints.acceptAll(project.id) } ?: return@launch
             refreshWorkspaceFilesAndChanges(project.id)
         }
     }
@@ -1908,7 +1928,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         viewModelScope.launch {
-            workspaceIo("Could not revert the changes") {
+            workspaceIo(str(R.string.err_ws_revert)) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 checkpoints.revertLatestTurn(project.id, ws)
             } ?: return@launch
@@ -2206,7 +2226,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     stage = AndroidBuildStage.PREPARING,
                     action = if (installAfterBuild) AndroidAction.BUILD_AND_RUN else AndroidAction.BUILD,
                     startedAtMillis = startedAt,
-                    message = getApplication<Application>().getString(R.string.build_running_gradle, task),
+                    message = str(R.string.build_running_gradle, task),
                     log = "",
                 ),
             )
@@ -2216,8 +2236,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Intent(getApplication(), RuntimeExecutionService::class.java)
                 .setAction(RuntimeExecutionService.ACTION_START)
                 .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
-                .putExtra(RuntimeExecutionService.EXTRA_TITLE, "Building Android APK")
-                .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "Running $task in ${project.name}")
+                .putExtra(RuntimeExecutionService.EXTRA_TITLE_RES, R.string.notif_building_apk)
+                .putExtra(RuntimeExecutionService.EXTRA_DETAIL_RES, R.string.notif_running_task_in)
+                .putExtra(RuntimeExecutionService.EXTRA_DETAIL_ARGS, arrayOf(task, project.name))
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
         val buildStopHook: () -> Unit = {
@@ -2317,10 +2338,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         apkPath = finalApk?.absolutePath,
                         apkSizeBytes = finalApk?.length(),
                         message = when {
-                            cancelled -> "Build cancelled by user."
-                            succeeded && finalApk != null -> "APK ready: ${finalApk.name} (${finalApk.length() / 1024} KB)"
-                            succeeded -> "Gradle $task completed."
-                            else -> issues.firstOrNull()?.detail ?: "Build failed (exit $exitCode)"
+                            cancelled -> str(R.string.build_cancelled_by_user)
+                            succeeded && finalApk != null -> str(R.string.build_apk_ready, finalApk.name, finalApk.length() / 1024)
+                            succeeded -> str(R.string.build_gradle_completed, task)
+                            else -> issues.firstOrNull()?.detail?.let(::localizeMsg) ?: str(R.string.build_failed_exit, exitCode)
                         },
                         issues = issues,
                     ),
@@ -2340,11 +2361,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
                         .putExtra(
-                            RuntimeExecutionService.EXTRA_DETAIL,
+                            RuntimeExecutionService.EXTRA_DETAIL_RES,
                             when {
-                                cancelled -> "Android build cancelled"
-                                succeeded -> "Android build succeeded"
-                                else -> "Android build failed"
+                                cancelled -> R.string.notif_build_cancelled
+                                succeeded -> R.string.notif_build_succeeded
+                                else -> R.string.notif_build_failed
                             },
                         ),
                 )
@@ -2380,7 +2401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     androidBuild = it.androidBuild.copy(
                         stage = AndroidBuildStage.INSTALLING,
-                        message = getApplication<Application>().getString(R.string.build_installing_apk, apkFile.name),
+                        message = str(R.string.build_installing_apk, apkFile.name),
                     ),
                 )
             }
@@ -2392,7 +2413,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         launchAfterInstall = true,
                     )
                     null
-                }.getOrElse { err -> err.message ?: getApplication<Application>().getString(R.string.build_apk_install_failed) }
+                }.getOrElse { err -> err.message ?: str(R.string.build_apk_install_failed) }
             }
             if (errorMsg != null) {
                 _state.update {
@@ -2459,7 +2480,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             available = false,
                             running = false,
                             packageName = pkg,
-                            message = getApplication<Application>().getString(R.string.logcat_permission_required),
+                            message = str(R.string.logcat_permission_required),
                         ),
                     )
                 }
@@ -2471,7 +2492,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         available = true,
                         running = true,
                         packageName = pkg,
-                        message = getApplication<Application>().getString(R.string.logcat_streaming, pkg),
+                        message = str(R.string.logcat_streaming, pkg),
                     ),
                 )
             }
@@ -2513,7 +2534,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 it.copy(
                                     androidLogcat = it.androidLogcat.copy(
                                         running = false,
-                                        message = getApplication<Application>().getString(R.string.logcat_ended, pkg),
+                                        message = str(R.string.logcat_ended, pkg),
                                     ),
                                 )
                             }
@@ -2527,7 +2548,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             androidLogcat = it.androidLogcat.copy(
                                 running = false,
-                                message = err.message ?: "Could not attach logcat to $pkg (is the app installed?)",
+                                message = err.message ?: str(R.string.logcat_attach_failed, pkg),
                             ),
                         )
                     }
@@ -2541,7 +2562,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeLogcatProcess = null
         activeLogcatJob?.cancel()
         _state.update {
-            it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = getApplication<Application>().getString(R.string.logcat_paused)))
+            it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = str(R.string.logcat_paused)))
         }
     }
 
@@ -2697,7 +2718,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update {
                         it.copy(
                             apiBusy = false,
-                            apiStatusMessage = UiText.Raw(listOfNotNull(res.message, res.providerMessage).joinToString(" — ")),
+                            apiStatusMessage = UiText.Raw(listOfNotNull(res.message, res.providerMessage).joinToString(" — ") { localizeMsg(it) }),
                         )
                     }
                 }
@@ -2717,7 +2738,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val probe = if (_state.value.runtimeInstalled) {
                     runCatching { claudeRuntime.hello(profile, 45_000L) }
                 } else {
-                    Result.failure(IllegalStateException(getApplication<Application>().getString(R.string.msg_runtime_not_installed)))
+                    Result.failure(IllegalStateException(str(R.string.msg_runtime_not_installed)))
                 }
                 val text = probe.fold(
                     onSuccess = { UiText.res(R.string.msg_claude_cli_verified, it.take(80)) },
@@ -2742,12 +2763,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ) {
                 val cliProbe = runCatching { claudeRuntime.hello(profile, 45_000L) }.getOrNull()
                 if (!cliProbe.isNullOrBlank()) {
-                    res = ConnectionValidation.Success("Claude Code CLI verified (${cliProbe.take(80)})")
+                    res = ConnectionValidation.Success(str(R.string.msg_cli_verified_paren, cliProbe.take(80)))
                 }
             }
             val msg = when (res) {
-                is ConnectionValidation.Success -> "✓ ${res.message}"
-                is ConnectionValidation.Failure -> "✕ ${res.label}: ${res.message} ${res.providerMessage.orEmpty()}".trim()
+                is ConnectionValidation.Success -> "✓ ${localizeMsg(res.message)}"
+                is ConnectionValidation.Failure -> "✕ ${localizeMsg(res.label)}: ${localizeMsg(res.message)} ${res.providerMessage?.let(::localizeMsg).orEmpty()}".trim()
             }
             _state.update { it.copy(apiBusy = false, apiStatusMessage = UiText.Raw(msg)) }
         }
@@ -2762,7 +2783,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching { githubClient.requestDeviceCode(cleanId) }
             }
             val deviceCode = codeResult.getOrElse { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_error, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_error, errText(err))) }
                 return@launch
             }
             githubClientId = cleanId
@@ -2833,7 +2854,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 githubLogin = login,
                                 githubDeviceCode = null,
                                 githubRepos = repos,
-                                githubStatusMessage = UiText.res(R.string.msg_gh_connected, login.ifBlank { getApplication<Application>().getString(R.string.msg_gh_user) }, repos.size),
+                                githubStatusMessage = UiText.res(R.string.msg_gh_connected, login.ifBlank { str(R.string.msg_gh_user) }, repos.size),
                             )
                         }
                         return@coroutineScope
@@ -2897,7 +2918,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_token_error, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_token_error, errText(err))) }
             }
         }
     }
@@ -2983,7 +3004,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_create_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_create_failed, errText(err))) }
             }
         }
     }
@@ -3048,13 +3069,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     githubStatusMessage = result.fold(
                         onSuccess = { out ->
                             val lastLine = out.lines().lastOrNull { l -> l.isNotBlank() }
-                                ?: getApplication<Application>().getString(R.string.msg_gh_up_to_date)
+                                ?: str(R.string.msg_gh_up_to_date)
                             UiText.res(R.string.msg_gh_pulled, lastLine)
                         },
                         onFailure = { err ->
                             UiText.res(
                                 R.string.msg_gh_pull_failed,
-                                err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error),
+                                errText(err),
                             )
                         },
                     ),
@@ -3111,7 +3132,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_clone_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))) }
+                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_clone_failed, errText(err))) }
             }
         }
     }
@@ -3129,7 +3150,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val project = Project(
                     name = identity.displayName,
                     description = "Quick project",
-                    language = getApplication<Application>().getString(R.string.project_lang_multi),
+                    language = "Multi-language",
                     slug = identity.slug,
                     kind = ProjectKind.QUICK_PROJECT,
                 )
@@ -3188,7 +3209,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val project = Project(
                         name = cleanName,
                         description = "Imported from $displayName",
-                        language = getApplication<Application>().getString(R.string.project_lang_multi),
+                        language = "Multi-language",
                         slug = slug,
                     )
                     val ws = checkpoints.ensureWorkspace(project.id)
@@ -3241,7 +3262,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_imported, newProject.name)) }
                 leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
-                val failed = UiText.res(R.string.msg_import_failed, (err.message ?: getApplication<Application>().getString(R.string.msg_unknown_error)))
+                val failed = UiText.res(R.string.msg_import_failed, errText(err))
                 _state.update { it.copy(bannerMessage = failed, bannerAction = BannerAction(BannerActionKind.RETRY_IMPORT, failed)) }
             }
         }
@@ -3330,16 +3351,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
                         process.destroyForcibly()
-                        error("Listing Antigravity models timed out.")
+                        throw UiTextException(UiText.res(R.string.agy_models_timeout))
                     }
                     val text = sanitizeClaudeAuthOutput(output.takeIf(File::exists)?.readText().orEmpty())
-                    check(!text.contains("sign in", ignoreCase = true)) { "Sign in to Antigravity first." }
+                    if (text.contains("sign in", ignoreCase = true)) throw UiTextException(UiText.res(R.string.agy_sign_in_first))
                     text.lineSequence()
                         .mapNotNull { line -> line.trim().split(Regex("\\s+"), limit = 2).firstOrNull() }
                         .filter { it.matches(Regex("[a-z0-9][a-z0-9._-]+")) }
                         .distinct()
                         .toList()
-                        .also { check(it.isNotEmpty()) { "Antigravity returned no models." } }
+                        .also { if (it.isEmpty()) throw UiTextException(UiText.res(R.string.agy_no_models)) }
                 } finally {
                     output.delete()
                 }
@@ -3350,7 +3371,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onFailure = { error ->
                         current.copy(
                             antigravityModelsLoading = false,
-                            apiStatusMessage = UiText.Raw(error.message ?: "Could not load Antigravity models."),
+                            apiStatusMessage = error.toUiText(R.string.agy_models_failed),
                         )
                     },
                 )
@@ -3369,7 +3390,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun checkForAppUpdates(manifestUrlOverride: String = "") {
         if (_state.value.checkingAppUpdate) return
         viewModelScope.launch {
-            _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = getApplication<Application>().getString(R.string.upd_checking)) }
+            _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = str(R.string.upd_checking)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }
             }
@@ -3381,12 +3402,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     updateInfo = info,
                     updateStatusMessage = when {
                         error is NoPublishedReleaseException ->
-                            getApplication<Application>().getString(R.string.upd_no_release)
+                            str(R.string.upd_no_release)
                         error is java.net.UnknownHostException || error is java.net.SocketTimeoutException ->
-                            getApplication<Application>().getString(R.string.upd_no_internet)
-                        error != null -> getApplication<Application>().getString(R.string.upd_check_failed, error.message ?: getApplication<Application>().getString(R.string.upd_network_error))
-                        info != null -> getApplication<Application>().getString(R.string.upd_available, info.versionName, info.versionCode)
-                        else -> getApplication<Application>().getString(R.string.upd_up_to_date)
+                            str(R.string.upd_no_internet)
+                        error != null -> str(R.string.upd_check_failed, error.message?.let(::localizeMsg) ?: str(R.string.upd_network_error))
+                        info != null -> str(R.string.upd_available, info.versionName, info.versionCode)
+                        else -> str(R.string.upd_up_to_date)
                     },
                 )
             }
@@ -3397,7 +3418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val info = _state.value.updateInfo ?: return
         if (_state.value.updateProgress != null) return
         viewModelScope.launch {
-            _state.update { it.copy(updateProgress = 0f, updateStatusMessage = getApplication<Application>().getString(R.string.upd_downloading, info.versionName)) }
+            _state.update { it.copy(updateProgress = 0f, updateStatusMessage = str(R.string.upd_downloading, info.versionName)) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     var lastReported = -1
@@ -3409,9 +3430,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             lastReported = step
                             val mb = "%.1f".format(downloaded / 1_048_576.0)
                             val msg = if (fraction != null) {
-                                getApplication<Application>().getString(R.string.upd_progress_total, info.versionName, mb, "%.1f".format(total / 1_048_576.0))
+                                str(R.string.upd_progress_total, info.versionName, mb, "%.1f".format(total / 1_048_576.0))
                             } else {
-                                getApplication<Application>().getString(R.string.upd_progress, info.versionName, mb)
+                                str(R.string.upd_progress, info.versionName, mb)
                             }
                             _state.update { it.copy(updateProgress = fraction ?: 0f, updateStatusMessage = msg) }
                         }
@@ -3424,9 +3445,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess {
-                _state.update { it.copy(updateProgress = null, updateStatusMessage = getApplication<Application>().getString(R.string.upd_installing, info.versionName)) }
+                _state.update { it.copy(updateProgress = null, updateStatusMessage = str(R.string.upd_installing, info.versionName)) }
             }.onFailure { err ->
-                _state.update { it.copy(updateProgress = null, updateStatusMessage = getApplication<Application>().getString(R.string.upd_install_failed, err.message.orEmpty())) }
+                _state.update { it.copy(updateProgress = null, updateStatusMessage = str(R.string.upd_install_failed, err.message?.let(::localizeMsg).orEmpty())) }
             }
         }
     }

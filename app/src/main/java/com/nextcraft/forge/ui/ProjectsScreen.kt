@@ -153,6 +153,8 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
+                        changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
+                        running = state.sessionRunning && project.id == state.activeProjectId,
                         // MainViewModel.selectProject ignores switches while active tasks run.
                         locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
@@ -168,6 +170,8 @@ fun ProjectsScreen(
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
+                        changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
+                        running = state.sessionRunning && project.id == state.activeProjectId,
                         locked = busy && project.id != state.activeProjectId,
                         canDelete = canDelete,
                         onOpen = { onOpenProject(project.id) },
@@ -490,6 +494,8 @@ internal fun ProjectRow(
     onOpen: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
+    changedCount: Int = 0,
+    running: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
@@ -550,6 +556,22 @@ internal fun ProjectRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Live state for the open project: the agent is working, or edits wait for review.
+                if (running || changedCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (running) {
+                            ProjectStatusPill(stringResource(R.string.projects_status_working), ForgeGlyph.SPARK, LocalForgeThemeTokens.current.warningText)
+                        }
+                        if (changedCount > 0) {
+                            ProjectStatusPill(quantityStringResource(R.plurals.chat_files_changed, changedCount, changedCount), ForgeGlyph.FILE, scheme.primary)
+                        }
+                    }
+                }
             }
             Box {
                 IconButton(onClick = { menuOpen = true }, enabled = !locked) {
@@ -638,13 +660,41 @@ private fun Project.subtitle(): String = when {
     else -> stringResource(R.string.projects_general)
 }
 
-/** Projects saved by older builds store English defaults; show them in the current language. */
+/**
+ * Project text is stored in English (the defaults a project is created with) and translated when drawn, so it follows
+ * the app language even after the language is changed. Text the user typed is shown as written.
+ */
 @Composable
-private fun Project.localizedDescription(): String = when (description) {
-    "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
-    "General coding workspace" -> stringResource(R.string.project_general_desc)
-    else -> description
+private fun Project.localizedDescription(): String = when {
+    description == "Default workspace inside Ubuntu ARM64 Root Chroot" -> stringResource(R.string.project_default_sandbox_desc)
+    description == "General coding workspace" -> stringResource(R.string.project_general_desc)
+    description == "Quick project" -> stringResource(R.string.project_quick_desc)
+    else -> {
+        val imported = Regex("^Imported from (.+)$").matchEntire(description)
+        val android = Regex("^Android \\((.+)\\) project$").matchEntire(description)
+        when {
+            imported != null -> stringResource(R.string.project_imported_desc, imported.groupValues[1])
+            android != null -> stringResource(R.string.project_android_desc, android.groupValues[1])
+            else -> description
+        }
+    }
 }
 
 @Composable
 private fun Project.localizedLanguage(): String = if (language == "Multi-language") stringResource(R.string.project_lang_multi) else language
+
+/** Small status capsule on a project card: glyph plus words, so colour is never the only signal. */
+@Composable
+private fun ProjectStatusPill(text: String, glyph: ForgeGlyph, tint: androidx.compose.ui.graphics.Color) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100))
+            .background(tint.copy(alpha = 0.12f))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ForgeIcon(glyph, tint = tint, size = 12.dp)
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(text, fontSize = ForgeType.caption, color = tint, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}

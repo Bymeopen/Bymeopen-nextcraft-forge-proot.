@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package com.nextcraft.forge.ui
 
@@ -48,10 +48,29 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
 import com.nextcraft.forge.R
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.ChangeItem
@@ -252,7 +271,8 @@ private fun ChangedFileRow(
                 } else {
                     DiffCodeView(lines = change.diffLines, path = change.path, previewLines = DIFF_PREVIEW_LINES)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                // Wraps instead of scrolling: with four actions the last one ("Batalkan") was cut off at 393dp.
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     TextButton(onClick = { onEditInTerminal(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.files_edit_in_terminal)) }
                     TextButton(onClick = { onOpenFile(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_open_in_files)) }
                     TextButton(onClick = { onKeepFile(change.path) }, enabled = enabled, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_keep)) }
@@ -275,10 +295,12 @@ internal fun QuickActionRow(chips: List<QuickChip>, modifier: Modifier = Modifie
     if (chips.isEmpty()) return
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalForgeThemeTokens.current
+    val scroll = rememberScrollState()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .forgeFadingEdges(scroll, scheme.background)
+            .horizontalScroll(scroll)
             .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -402,6 +424,130 @@ internal fun ToolApprovalContent(request: ToolRequest, onApprove: () -> Unit, on
                 },
                 modifier = Modifier.weight(1f).heightIn(min = 52.dp),
             ) { Text(stringResource(R.string.agent_approve_execution), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+/** The one-line composer capsule: attach menu, message field, and a round send/stop button. */
+@Composable
+internal fun ChatComposer(
+    promptInput: String,
+    onPromptChange: (String) -> Unit,
+    agentName: String,
+    running: Boolean,
+    canSend: Boolean,
+    captureEnabled: Boolean,
+    onAttachCamera: () -> Unit,
+    onAttachFile: () -> Unit,
+    onCapture: () -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val tokens = LocalForgeThemeTokens.current
+    var attachMenuOpen by remember { mutableStateOf(false) }
+    val composerLabel = stringResource(R.string.agent_message_placeholder, agentName)
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = tokens.cardContainerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = tokens.cardBorderStroke,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Attach: photos or any file; it lands in attachments/ inside the workspace.
+            Box {
+                IconButton(onClick = { attachMenuOpen = true }) {
+                    ForgeIcon(glyph = ForgeGlyph.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 22.dp, description = stringResource(R.string.agent_attach))
+                }
+                DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.agent_attach_camera)) },
+                        onClick = { attachMenuOpen = false; onAttachCamera() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.agent_attach_file)) },
+                        onClick = { attachMenuOpen = false; onAttachFile() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.capture_menu)) },
+                        enabled = captureEnabled,
+                        onClick = { attachMenuOpen = false; onCapture() },
+                    )
+                }
+            }
+            TextField(
+                value = promptInput,
+                onValueChange = onPromptChange,
+                placeholder = {
+                    Text(
+                        stringResource(R.string.chat_composer_hint),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                // The short hint fits a 360dp phone; TalkBack still hears which agent the message goes to.
+                modifier = Modifier.weight(1f).semantics { contentDescription = composerLabel },
+                maxLines = 5,
+                // Enter stays a newline (messages are multi-line); send is the round button.
+                keyboardOptions = ForgeFieldKind.TEXT.keyboardOptions(ImeAction.Default),
+                colors = TextFieldDefaults.textFieldColors(
+                    containerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
+            )
+            val haptics = LocalHapticFeedback.current
+            val reduceMotion = rememberReduceMotion()
+            val sendScale by animateFloatAsState(
+                targetValue = if (running || canSend) 1f else 0.86f,
+                animationSpec = if (reduceMotion) snap() else ForgeMotion.springSnappy(),
+                label = "sendScale",
+            )
+            val sendBg by animateColorAsState(
+                targetValue = when {
+                    canSend -> MaterialTheme.colorScheme.primary
+                    running -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                },
+                animationSpec = if (reduceMotion) snap() else tween(ForgeMotion.FADE_MS),
+                label = "sendBg",
+            )
+            Box(
+                modifier = Modifier
+                    .forgeMinTouch()
+                    .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(sendBg)
+                    .clickable(
+                        enabled = running || canSend,
+                        role = Role.Button,
+                        onClickLabel = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
+                    ) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        // While the agent works, sending queues the message; stop is available when nothing is typed.
+                        if (canSend) onSend() else if (running) onStop()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (running && !canSend) Icons.Default.Close else Icons.Default.KeyboardArrowUp,
+                    contentDescription = stringResource(if (running && !canSend) R.string.agent_stop else R.string.agent_send),
+                    tint = when {
+                        canSend -> MaterialTheme.colorScheme.onPrimary
+                        running -> MaterialTheme.colorScheme.onError
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }

@@ -25,6 +25,7 @@ internal object RuntimeText {
         "Updating Ubuntu packages inside Root Chroot…" to R.string.rt_msg_update_ubuntu,
         "Linux chroot runtime is ready" to R.string.rt_msg_chroot_ready,
         "Runtime setup paused" to R.string.rt_msg_setup_paused,
+        "Preparing your private coding workspace" to R.string.rt_msg_preparing_default,
         "Runtime setup could not complete." to R.string.rt_msg_setup_failed,
         "Your Ubuntu ARM64 chroot environment and coding tools are ready." to R.string.rt_msg_env_ready,
         "✓ Setup completed successfully" to R.string.rt_msg_log_done,

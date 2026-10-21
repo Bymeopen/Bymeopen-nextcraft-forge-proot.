@@ -160,7 +160,7 @@ class ClaudeAuthController(
             )
             if (spawned !is NativeSpawnProcess) {
                 runCatching { spawned.destroyForcibly() }
-                error("Unsupported Claude authentication process")
+                throw UiTextException(UiText.res(R.string.rt_auth_unsupported_process))
             }
             spawned
         } catch (error: Throwable) {
@@ -181,7 +181,7 @@ class ClaudeAuthController(
             RandomAccessFile(running.outputFile, "r").use { file ->
                 while (true) {
                     if (generation != loginGeneration.get()) break
-                    if (android.os.SystemClock.elapsedRealtime() > deadline) error("Sign-in timed out. Start sign-in again.")
+                    if (android.os.SystemClock.elapsedRealtime() > deadline) throw UiTextException(UiText.res(R.string.rt_auth_timeout))
                     val available = running.outputFile.length() - offset
                     if (available > 0) {
                         val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
@@ -233,7 +233,7 @@ class ClaudeAuthController(
                         }
                     }
                     if (exited && running.outputFile.length() <= offset) {
-                        error("Claude sign-in ended before completing (code ${runCatching { running.exitValue() }.getOrDefault(-1)}).")
+                        throw UiTextException(UiText.res(R.string.rt_auth_claude_ended, runCatching { running.exitValue() }.getOrDefault(-1)))
                     }
                     delay(120)
                 }
@@ -288,7 +288,7 @@ class ClaudeAuthController(
         val value = code.trim()
         if (value.isBlank()) throw UiTextException(UiText.res(R.string.rt_auth_claude_code_empty))
         try {
-            val running = process ?: error("Sign-in session is not active. Start sign-in again.")
+            val running = process ?: throw UiTextException(UiText.res(R.string.rt_auth_session_inactive))
             if (!running.isAlive) throw UiTextException(UiText.res(R.string.rt_auth_session_expired))
             val callback = buildCallbackUrl(value, mutableState.value.authorizationUrl)
                 ?: throw UiTextException(UiText.res(R.string.rt_auth_claude_code_unrecognized))

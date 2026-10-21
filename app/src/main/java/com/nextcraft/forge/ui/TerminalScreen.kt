@@ -77,7 +77,7 @@ private val quickCommands = listOf(
 )
 
 /** The TerminalView currently on screen, shared with the key row (plain holder: it is never read during composition). */
-private class TerminalViewHolder {
+internal class TerminalViewHolder {
     var view: TerminalView? = null
 }
 
@@ -103,6 +103,8 @@ fun TerminalScreen(
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
     val prefs = remember { context.getSharedPreferences("forge_terminal", android.content.Context.MODE_PRIVATE) }
+    var hintSeen by remember { mutableStateOf(prefs.getBoolean(HINT_SEEN_KEY, false)) }
+    val dismissHint = { if (!hintSeen) { hintSeen = true; prefs.edit().putBoolean(HINT_SEEN_KEY, true).apply() } }
     val viewClient = remember {
         ForgeTerminalViewClient(
             modifiers = modifiers,
@@ -190,6 +192,16 @@ fun TerminalScreen(
                     )
                 }
             }
+            if (session != null && !finished && !hintSeen) {
+                // Shown until the first command is sent; it does not take touches, the terminal below stays usable.
+                Text(
+                    text = stringResource(R.string.terminal_empty_hint),
+                    color = tokens.terminalText.copy(alpha = 0.6f),
+                    fontSize = ForgeType.secondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                )
+            }
             if (session != null && finished) {
                 Surface(
                     color = scheme.surface,
@@ -226,7 +238,7 @@ fun TerminalScreen(
             // The shell starts in the home folder; this jumps into the open project's folder.
             state.activeProject?.let { project ->
                 AssistChip(
-                    onClick = { viewModel.terminalProjectDir()?.let { dir -> viewModel.runTerminalCommand("cd " + com.nextcraft.forge.runtime.shellSingleQuote(dir)) } },
+                    onClick = { dismissHint(); viewModel.terminalProjectDir()?.let { dir -> viewModel.runTerminalCommand("cd " + com.nextcraft.forge.runtime.shellSingleQuote(dir)) } },
                     enabled = ready,
                     shape = RoundedCornerShape(100),
                     label = { Text(stringResource(R.string.terminal_go_to_project, project.name), fontSize = ForgeType.caption, maxLines = 1) },
@@ -234,7 +246,7 @@ fun TerminalScreen(
             }
             quickCommands.forEach { cmd ->
                 AssistChip(
-                    onClick = { viewModel.runTerminalCommand(cmd) },
+                    onClick = { dismissHint(); viewModel.runTerminalCommand(cmd) },
                     enabled = ready,
                     shape = RoundedCornerShape(100),
                     label = {
@@ -252,12 +264,12 @@ fun TerminalScreen(
 
         // Command line pinned last, so it floats right above the keyboard (the layout is lifted by
         // imePadding). Text goes to the running program plus Enter.
-        TerminalCommandBar(enabled = session != null, onSend = viewModel::runTerminalCommand)
+        TerminalCommandBar(enabled = session != null, onSend = { dismissHint(); viewModel.runTerminalCommand(it) })
     }
 }
 
 @Composable
-private fun TerminalCommandBar(enabled: Boolean, onSend: (String) -> Unit) {
+internal fun TerminalCommandBar(enabled: Boolean, onSend: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     val send = {
         if (text.isNotBlank()) {
@@ -334,7 +346,7 @@ private fun TerminalEmulatorView(
 
 /** Esc, Tab, Ctrl/Alt (armed for the next key), arrows, paging and the symbols that are buried on a phone keyboard. */
 @Composable
-private fun TerminalKeyRow(
+internal fun TerminalKeyRow(
     modifiers: TerminalModifierKeys,
     holder: TerminalViewHolder,
     enabled: Boolean,
@@ -356,10 +368,12 @@ private fun TerminalKeyRow(
         view.inputCodePoint(char.code, modifiers.consumeCtrl(), modifiers.consumeAlt())
     }
 
+    val keyScroll = rememberScrollState()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .forgeFadingEdges(keyScroll, MaterialTheme.colorScheme.background)
+            .horizontalScroll(keyScroll)
             .padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -417,3 +431,4 @@ private fun TerminalKey(
 }
 
 private const val TEXT_SIZE_KEY = "text_size_px"
+private const val HINT_SEEN_KEY = "hint_seen"
