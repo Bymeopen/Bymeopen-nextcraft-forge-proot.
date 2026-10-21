@@ -165,7 +165,7 @@ class ReaController(context: Context) {
 
     companion object {
         /** Must equal `__version__` in the Python package (a unit test checks it). */
-        const val REA_VERSION = "0.1.0"
+        const val REA_VERSION = "0.2.0"
         private const val TOOL_SLUG = "rea"
         private const val ASSET_ROOT = "rea"
         private const val MAX_LOG_CHARS = 60_000
@@ -182,6 +182,10 @@ class ReaController(context: Context) {
               apt-get update -qq
               apt-get install -y -qq python3
             fi
+            # Libraries for ELF parsing and disassembly (REA 0.2): from apt, so no pip or venv is needed. If they cannot
+            # be installed the analysis commands say so and `rea doctor` shows what is missing.
+            apt-get update -qq >/dev/null 2>&1 || true
+            apt-get install -y -qq python3-capstone python3-pyelftools || echo "Peringatan: capstone/pyelftools gagal dipasang."
             rm -rf /opt/rea/lib/rea
             mkdir -p /opt/rea/lib /usr/local/bin
             cp -a /workspace/rea/stage/rea /opt/rea/lib/rea

@@ -14,6 +14,10 @@ E_FILE_NOT_FOUND = "file_not_found"
 E_NOT_A_FILE = "not_a_file"
 E_PERMISSION = "permission_denied"
 E_USAGE = "usage"
+E_MISSING_DEP = "missing_dependency"
+E_NOT_SUPPORTED = "not_supported"
+E_SYMBOL = "symbol_not_found"
+E_BAD_FORMAT = "bad_format"
 E_INTERNAL = "internal"
 
 
