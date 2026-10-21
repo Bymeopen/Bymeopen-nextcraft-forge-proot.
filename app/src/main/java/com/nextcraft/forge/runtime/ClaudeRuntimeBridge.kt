@@ -484,8 +484,9 @@ class ClaudeRuntimeBridge(
     }
 
     /**
-     * Responses live in a sibling directory that the chroot mounts read-only, so the guest can
-     * request a decision but cannot write its own approval next to the request.
+     * Responses live in a sibling directory. Under PRoot every bind is read-write and the guest runs as the app's
+     * own UID, so this is a tidy separation, not a trust boundary: an agent that can already run shell commands
+     * could write a response itself. The risk classifier and the user's approval remain the actual control.
      */
     private fun responseFile(request: File, approvalId: String): File {
         val requestDir = request.parentFile ?: File(".")

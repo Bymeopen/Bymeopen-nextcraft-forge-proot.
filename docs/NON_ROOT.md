@@ -52,3 +52,11 @@ Dua keputusan di baliknya:
 untuk `/proc/loadavg`, `/proc/stat`, `/proc/uptime`, `/proc/version`, `/proc/vmstat`, beberapa `/proc/sys/*`, dan `/sys/fs/selinux`
 kosong bila Android menyembunyikannya dari aplikasi. Android hanya mengizinkan eksekusi dari `nativeLibraryDir`, karena itu biner
 dikemas sebagai native library (`jniLibs.useLegacyPackaging = true`).
+
+## Claude Code versions
+
+The npm release 2.1.112 (the last one shipping `cli.js` for Node) is installed first. "Check for updates" then offers the
+official release binary from `downloads.claude.ai` (a Bun build, SHA-256 from its manifest). It is staged next to the
+npm symlink and must pass `claude --version` under PRoot; if Android's seccomp policy still kills it, the npm install
+is restored and that version is recorded in `.pocket-claude-unsupported-version` so it is not offered again until a
+newer release appears.

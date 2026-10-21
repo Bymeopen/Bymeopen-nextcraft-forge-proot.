@@ -85,6 +85,8 @@ class RuntimeInstaller(private val context: Context) {
     private val coreReadyMarker = File(rootfs, ".pocket-runtime-ready")
     private val nextcraftReadyMarker = File(rootfs, ".nextcraft-runtime-ready")
     private val claudeMarker = File(rootfs, ".pocket-claude-version")
+    /** Official Claude Code release that failed its `--version` check under PRoot on this device. */
+    private val claudeUnsupportedMarker = File(rootfs, ".pocket-claude-unsupported-version")
     private val bundledClaudeMarker = File(rootfs, ".pocket-bundled-claude-version")
     private val rootfsMarker = File(rootfs, ".pocket-rootfs-version")
     private val languageToolsMarker = File(rootfs, ".pocket-language-tools-version")
@@ -378,10 +380,11 @@ class RuntimeInstaller(private val context: Context) {
         return when (agent) {
             AgentKind.CLAUDE_CODE -> {
                 migrateLegacyClaudeMarker()
-                // /usr/local/bin/claude is an absolute symlink into the guest (npm install); resolved from the host it
-                // points outside the rootfs, so check the npm entry point itself instead of following the link.
-                isInstalled() && File(rootfs, CLAUDE_NPM_CLI_GUEST_PATH.removePrefix("/")).isFile &&
-                    !claudeMarker.readTextOrNull().isNullOrBlank()
+                // Either the official binary at /usr/local/bin/claude (a regular file) or the npm fallback, where that
+                // path is an absolute symlink into the guest that resolves outside the rootfs from the host, so the
+                // npm entry point is checked directly instead of following the link.
+                isInstalled() && !claudeMarker.readTextOrNull().isNullOrBlank() &&
+                    (isOfficialClaudeBinaryInstalled() || File(rootfs, CLAUDE_NPM_CLI_GUEST_PATH.removePrefix("/")).isFile)
             }
             AgentKind.DEEPSEEK_HARNESS -> isInstalled() &&
                 File(rootfs, "usr/local/lib/dsh/node_modules/.bin/dsh").isFile &&
@@ -390,6 +393,12 @@ class RuntimeInstaller(private val context: Context) {
                 File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() &&
                 !agyMarker.readTextOrNull().isNullOrBlank()
         }
+    }
+
+    /** True when /usr/local/bin/claude is the official (Bun) binary rather than the symlink to the npm install. */
+    private fun isOfficialClaudeBinaryInstalled(): Boolean {
+        val claude = File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/"))
+        return claude.isFile && !java.nio.file.Files.isSymbolicLink(claude.toPath()) && claude.length() > 1_000_000L
     }
 
     val dshVersion: String get() = dshMarker.readTextOrNull().orEmpty()
@@ -556,11 +565,19 @@ class RuntimeInstaller(private val context: Context) {
     suspend fun checkAgentUpdates(): Map<AgentKind, AgentUpdateInfo> {
         val installed = installedAgentVersions()
         return buildMap {
-            // Claude Code is pinned to CLAUDE_NPM_VERSION on PRoot (newer releases are Bun binaries that die with
-            // SIGSYS in the app sandbox), so a newer npm version is never offered: updateClaude would only refuse it.
+            // The official release is offered unless this device already proved that exact version cannot run under
+            // PRoot (updateClaude records it); the pinned npm release remains the floor.
             installed[AgentKind.CLAUDE_CODE]?.let { current ->
-                if (isVersionNewer(CLAUDE_NPM_VERSION, current)) {
-                    put(AgentKind.CLAUDE_CODE, AgentUpdateInfo(current, CLAUDE_NPM_VERSION))
+                val latest = runCatching {
+                    JSONObject(fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest")).getString("version")
+                }.getOrNull()?.takeIf { CLAUDE_VERSION_PATTERN.matches(it) }
+                val unsupported = claudeUnsupportedMarker.readTextOrNull()?.trim()
+                when {
+                    latest != null && isVersionNewer(latest, current) && latest != unsupported ->
+                        put(AgentKind.CLAUDE_CODE, AgentUpdateInfo(current, latest))
+                    isVersionNewer(CLAUDE_NPM_VERSION, current) ->
+                        put(AgentKind.CLAUDE_CODE, AgentUpdateInfo(current, CLAUDE_NPM_VERSION))
+                    else -> Unit
                 }
             }
             installed[AgentKind.DEEPSEEK_HARNESS]?.let { current ->
@@ -628,11 +645,69 @@ class RuntimeInstaller(private val context: Context) {
         expectedVersion: String,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        // Only the pinned npm release is ever offered (see checkAgentUpdates); anything else cannot run under PRoot.
-        check(expectedVersion == CLAUDE_NPM_VERSION) {
-            "Claude Code stays at $CLAUDE_NPM_VERSION on the PRoot engine: newer releases are Bun binaries that Android's app sandbox cannot run."
+        if (expectedVersion == CLAUDE_NPM_VERSION) {
+            installClaudeViaNpm(runtime.chrootExec, 0.05f, onProgress)
+            return
         }
-        installClaudeViaNpm(runtime.chrootExec, 0.05f, onProgress)
+        installOfficialClaude(runtime, expectedVersion, onProgress)
+    }
+
+    /**
+     * Installs the official Claude Code binary (a Bun build) from Anthropic's release server, exactly as the chroot
+     * engine does. Under PRoot the binary may still die on a syscall Android's app policy traps; the `--version`
+     * check catches that, the npm install is restored, and the version is recorded so it is not offered again.
+     */
+    private suspend fun installOfficialClaude(
+        runtime: InstalledRuntime,
+        expectedVersion: String,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        check(CLAUDE_VERSION_PATTERN.matches(expectedVersion)) { "Invalid Claude Code version" }
+        val latest = JSONObject(fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest")).getString("version")
+        check(latest == expectedVersion) { "A newer Claude Code release is available. Refresh updates and try again." }
+        val base = "https://downloads.claude.ai/claude-code-releases/$latest"
+        val manifest = JSONObject(fetchText("$base/manifest.json"))
+        val checksum = manifest.getJSONObject("platforms").getJSONObject("linux-arm64").getString("checksum")
+        val downloaded = File(downloads, "claude-$latest")
+        val claudeDownloadLabel = "Downloading Claude Code $latest…"
+        downloadVerified("$base/linux-arm64/claude", downloaded, checksum) { bytes, total ->
+            val ratio = if (total > 0L) bytes.toFloat() / total else 0f
+            onProgress(RuntimeInstallProgress(claudeDownloadLabel, ratio * 0.9f, bytes, total.takeIf { it > 0L }, event = RuntimeInstallEvent.DOWNLOAD))
+        }
+        val claude = File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/"))
+        claude.parentFile?.mkdirs()
+        val staged = File(claude.parentFile, ".claude-$latest.installing")
+        val previousVersion = claudeMarker.readTextOrNull()
+        try {
+            replaceBinaryWithRollback(
+                target = claude,
+                install = {
+                    try {
+                        downloaded.copyTo(staged, overwrite = true)
+                        Os.chmod(staged.absolutePath, 0b111101101)
+                        Os.rename(staged.absolutePath, claude.absolutePath)
+                    } catch (e: Throwable) {
+                        staged.delete()
+                        throw e
+                    }
+                },
+                verify = { verifyGuest(runtime.chrootExec, "$CLAUDE_GUEST_PATH --version", "Claude Code $latest cannot run under PRoot on this device") },
+            )
+        } catch (e: Throwable) {
+            // The previous binary or npm symlink is back in place; remember that this release is a no-go here.
+            runCatching { claudeUnsupportedMarker.writeText(latest) }
+            if (previousVersion != null) runCatching { claudeMarker.writeText(previousVersion) }
+            throw IllegalStateException(
+                "Claude Code $latest cannot run under PRoot on this device (${e.message}). " +
+                    "The installed version was kept; the npm release $CLAUDE_NPM_VERSION remains available.",
+                e,
+            )
+        } finally {
+            downloaded.delete()
+        }
+        claudeUnsupportedMarker.delete()
+        claudeMarker.writeText(latest)
+        onProgress(RuntimeInstallProgress("Installed Claude Code $latest (official binary)", 0.995f))
     }
 
     private suspend fun updateAgy(
