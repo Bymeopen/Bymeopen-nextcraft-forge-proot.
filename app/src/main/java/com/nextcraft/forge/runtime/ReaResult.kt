@@ -187,9 +187,6 @@ data class ReaCheckResult(val correct: Boolean, val message: String, val hint: S
 
 private fun JSONObject.stringOrNull(key: String): String? = if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
 
-private fun JSONArray?.objects(): List<JSONObject> =
-    if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
-
 private fun JSONArray?.strings(): List<String> =
     if (this == null) emptyList() else (0 until length()).map { optString(it) }
 
