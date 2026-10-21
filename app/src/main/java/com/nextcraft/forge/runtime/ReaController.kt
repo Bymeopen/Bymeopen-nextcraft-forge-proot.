@@ -345,7 +345,7 @@ class ReaController(context: Context) {
 
     companion object {
         /** Must equal `__version__` in the Python package (a unit test checks it). */
-        const val REA_VERSION = "0.7.0"
+        const val REA_VERSION = "0.8.0"
         private const val TOOL_SLUG = "rea"
         private const val ASSET_ROOT = "rea"
         private const val MAX_LOG_CHARS = 60_000

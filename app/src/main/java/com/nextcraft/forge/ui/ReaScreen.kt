@@ -237,7 +237,7 @@ fun ReaScreen(state: ForgeUiState, viewModel: MainViewModel) {
                         .clickable(enabled = !rea.busy, role = Role.Button) { viewModel.rea.openLesson(lesson.n) },
                 ) {
                     Text(
-                        text = "${lesson.n}. ${lesson.title}",
+                        text = numbered(lesson.n, lesson.title),
                         fontSize = ForgeType.rowTitle,
                         modifier = Modifier.weight(1f),
                     )
@@ -340,6 +340,9 @@ private fun ReaAnalysisCards(analysis: ReaAnalysis, onDisassemble: (String) -> U
     }
 }
 
+/** "3. Title": a list number in front of text that already comes from the lesson data. */
+private fun numbered(n: Int, text: String): String = "$n. $text"
+
 /** One lesson: theory, diagram, the exercise with an answer check, the quiz, and the answer key behind a confirmation. */
 @Composable
 private fun ReaLessonSheet(rea: ReaState, controller: ReaController, onDismiss: () -> Unit) {
@@ -423,14 +426,15 @@ private fun ReaLessonSheet(rea: ReaState, controller: ReaController, onDismiss: 
                 ) { Text(stringResource(R.string.rea_lesson_quiz_start)) }
             } else {
                 quiz.forEachIndexed { qi, question ->
-                    Text("${qi + 1}. ${question.text}", fontSize = ForgeType.control, fontWeight = FontWeight.Medium)
+                    Text(numbered(qi + 1, question.text), fontSize = ForgeType.control, fontWeight = FontWeight.Medium)
                     question.options.forEachIndexed { oi, option ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 48.dp)
-                                .clickable(role = Role.RadioButton) { if (qi < picks.size) picks[qi] = oi + 1 },
+                                .clickable(role = Role.RadioButton) { if (qi < picks.size) picks[qi] = oi + 1 }
+                                .forgeSelected(qi < picks.size && picks[qi] == oi + 1),
                         ) {
                             RadioButton(selected = qi < picks.size && picks[qi] == oi + 1, onClick = null)
                             Text(option, fontSize = ForgeType.control, modifier = Modifier.padding(start = 8.dp))

@@ -126,8 +126,9 @@ class ReaAnalysisTest {
 }
 
 class ReaLearnParsingTest {
+    // ReaJson reads one line, as the CLI prints it; the samples below are wrapped for readability only.
     private fun parse(data: String, command: String = "learn") =
-        ReaJson.parse("""{"schema":1,"command":"$command","ok":true,"data":$data,"warnings":[],"error":null}""")!!
+        ReaJson.parse("""{"schema":1,"command":"$command","ok":true,"data":${data.replace("\n", "")},"warnings":[],"error":null}""")!!
 
     @Test
     fun parsesTheLessonListWithProgress() {
