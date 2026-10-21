@@ -822,6 +822,7 @@
     <string name="diag_installed">installed</string>
     <string name="diag_not_installed">not installed</string>
     <string name="diag_none">none</string>
+    <string name="tool_battery_unrestrict">Allow background runs (battery)</string>
     <string name="diag_health_failed">Health check failed</string>
     <string name="diag_charging_value">%1$s · charging</string>
     <string name="model_badge_latest">latest</string>

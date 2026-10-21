@@ -114,8 +114,7 @@ class DiagnosticsController(private val context: Context) {
                 }
             }
             runCatching {
-                val unrestricted = appContext.getSystemService(android.os.PowerManager::class.java)
-                    ?.isIgnoringBatteryOptimizations(appContext.packageName) == true
+                val unrestricted = BatteryOptimization.isUnrestricted(appContext)
                 add(UiText.Raw("Battery optimization") to UiText.Raw(if (unrestricted) "Unrestricted" else "Optimized (some ROMs stop background builds)"))
             }
             add(row(R.string.diag_linux, UiText.res(if (installed) R.string.diag_installed else R.string.diag_not_installed)))
