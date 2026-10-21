@@ -155,7 +155,10 @@ data class ForgeUiState(
     val chats: List<ProjectChat> = emptyList(),
     val activeChatId: String = "main",
     val messages: List<ChatMessage> = emptyList(),
+    /** True while any agent turn runs (workspace-wide operations stay blocked); see [activeChatRunning] for the open chat. */
     val sessionRunning: Boolean = false,
+    /** Chats of the active project whose agent turn is running right now. */
+    val runningChatIds: Set<String> = emptySet(),
     val activeStatusLine: UiText? = null,
     val pendingToolRequest: ToolRequest? = null,
     val changedItems: List<ChangeItem> = emptyList(),
@@ -212,7 +215,11 @@ data class ForgeUiState(
     val retryPrompt: RetryPrompt? = null,
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
-) {
+)
+
+/** True while the open chat has its own agent turn running (drives its Stop button, status line and composer). */
+val ForgeUiState.activeChatRunning: Boolean get() = activeChatId in runningChatIds
+ {
     val activeProject: Project?
         get() = projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
 }

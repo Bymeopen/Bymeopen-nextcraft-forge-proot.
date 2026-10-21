@@ -215,7 +215,7 @@ fun AgentScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    if (state.sessionRunning) {
+                    if (state.activeChatRunning) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
                     Row(
@@ -233,7 +233,7 @@ fun AgentScreen(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        if (state.sessionRunning) {
+                        if (state.activeChatRunning) {
                             OutlinedButton(
                                 onClick = viewModel::stopActiveTask,
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -352,7 +352,7 @@ fun AgentScreen(
         }
 
         // Composer: one capsule, attach + field + round send/stop button. The agent name is in the header.
-        val running = state.sessionRunning
+        val running = state.activeChatRunning
         val canSend = promptInput.isNotBlank() || state.pendingAttachments.isNotEmpty()
         val attachPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNotEmpty()) viewModel.attachFilesToPrompt(uris)
@@ -393,7 +393,7 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
-        val retry = state.retryPrompt?.takeIf { it.chatId == state.activeChatId && !state.sessionRunning }
+        val retry = state.retryPrompt?.takeIf { it.chatId == state.activeChatId && !state.activeChatRunning }
         if (retry != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
@@ -408,17 +408,18 @@ fun AgentScreen(
                 ForgeTextButton(onClick = viewModel::retryLastPrompt) { Text(stringResource(R.string.action_retry)) }
             }
         }
-        if (state.queuedPrompts.isNotEmpty()) {
+        val chatQueue = state.queuedPrompts.filter { it.chatId == state.activeChatId }
+        if (chatQueue.isNotEmpty()) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    stringResource(R.string.agent_queued_title, state.queuedPrompts.size),
+                    stringResource(R.string.agent_queued_title, chatQueue.size),
                     fontSize = ForgeType.caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                state.queuedPrompts.forEach { queued ->
+                chatQueue.forEach { queued ->
                     val label = queued.text.ifBlank { queued.attachments.joinToString { it.displayName } }
                     AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
                 }

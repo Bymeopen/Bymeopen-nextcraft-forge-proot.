@@ -47,8 +47,12 @@ object RuntimeTaskController {
 
     /** Stops only the task of [kind]. */
     fun stop(kind: String) {
-        val action = synchronized(this) { hooks.remove(kind) }
-        action?.invoke()
+        // Parallel chats register as "agent:<sessionId>"; stopping the kind stops all of them.
+        val actions = synchronized(this) {
+            val keys = hooks.keys.filter { it == kind || it.startsWith("$kind:") }
+            keys.mapNotNull { hooks.remove(it) }
+        }
+        actions.forEach { it() }
     }
 
     /** Stops every running task (the shared notification's Stop action, app teardown). */

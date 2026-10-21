@@ -891,4 +891,6 @@
     <string name="agent_claude_effort_high">Tinggi</string>
     <string name="agent_claude_effort_xhigh">Sangat tinggi</string>
     <string name="agent_claude_effort_max">Maksimum</string>
+    <string name="msg_parallel_queued">Terlalu banyak chat yang bekerja atau memori hampir penuh. Pesanmu diantre dan dikirim otomatis.</string>
+    <string name="msg_chat_needs_approval">Chat "%1$s" menunggu persetujuanmu.</string>
 </resources>

@@ -907,4 +907,6 @@
     <string name="agent_claude_effort_high">High</string>
     <string name="agent_claude_effort_xhigh">Extra high</string>
     <string name="agent_claude_effort_max">Max</string>
+    <string name="msg_parallel_queued">Too many chats are working or memory is low. Your message is queued and will be sent automatically.</string>
+    <string name="msg_chat_needs_approval">Chat "%1$s" is waiting for your approval.</string>
 </resources>

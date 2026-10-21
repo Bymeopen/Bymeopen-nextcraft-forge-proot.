@@ -214,7 +214,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val state: StateFlow<ForgeUiState> = _state.asStateFlow()
 
-    private var activeAgentJob: Job? = null
+    /** Agent turns in progress, by chat id (all in the active project). Only touched on the main thread. */
+    private val runs = LinkedHashMap<String, ChatRun>()
     private var activeBuildJob: Job? = null
     private var activeBuildProcess: Process? = null
     @Volatile private var activeTerminalProcess: Process? = null
@@ -222,13 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeLogcatProcess: Process? = null
     private var githubPollJob: Job? = null
     private var githubClientId: String = GitHubClient.DEFAULT_CLIENT_ID
-    /** Bridge actually running the current session; approvals must go here, not to whatever agentKind is selected now. */
-    private var activeRuntimeBridge: RuntimeBridge? = null
     private val logLineIdCounter = AtomicLong(1L)
-    /** Session whose events may touch the active chat; late events from older sessions are dropped. */
-    private val activeRuntimeSessionId = AtomicReference<String?>(null)
-    /** The session that just finished: its FilesChanged event (Claude sends it after the result) is still wanted. */
-    private val finishedRuntimeSessionId = AtomicReference<String?>(null)
 
     init {
         RuntimeSetupController.restore(application)
@@ -242,9 +237,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { dshRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { antigravityRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch { dshRuntime.events.collect { e -> runs.values.firstOrNull { it.bridge === dshRuntime }?.let { onRuntimeEvent(it, e) } } }
+        viewModelScope.launch { antigravityRuntime.events.collect { e -> runs.values.firstOrNull { it.bridge === antigravityRuntime }?.let { onRuntimeEvent(it, e) } } }
         viewModelScope.launch {
             AndroidAppInstaller.events.collect { event ->
                 val statusMsg = event.message ?: if (event.success) {
@@ -569,7 +563,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun repairRootfs() {
         // Repair force-unmounts the chroot; under a running agent its /workspace and /proc would vanish mid-turn.
-        if (_state.value.sessionRunning || activeAgentJob?.isActive == true) {
+        if (_state.value.sessionRunning || runs.isNotEmpty()) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_repair_busy)) }
             return
         }
@@ -856,21 +850,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(projects = updated) }
     }
 
+    /** Only Claude Code runs several chats at once; for the other agents the chat stays fixed while one is running. */
+    private fun chatSwitchBlocked(): Boolean =
+        _state.value.sessionRunning && _state.value.agentKind != AgentKind.CLAUDE_CODE
+
     fun selectChat(chatId: String) {
-        if (_state.value.sessionRunning) return
+        if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
-        val messages = preferences.loadMessages(project.id, chatId)
+        // A chat that is working shows its live copy, status and pending approval, not the last saved file.
+        val run = runs[chatId]
+        val messages = run?.messages ?: preferences.loadMessages(project.id, chatId)
         _state.update {
             it.copy(
                 activeChatId = chatId,
                 messages = messages,
+                activeStatusLine = run?.statusLine,
+                pendingToolRequest = run?.pendingTool,
             )
         }
     }
 
     fun createChat(title: String = "") {
-        if (_state.value.sessionRunning) return
+        if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         val nextIndex = _state.value.chats.size + 1
         val chat = ProjectChat(
@@ -884,6 +886,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chats = updatedChats,
                 activeChatId = chat.id,
                 messages = emptyList(),
+                activeStatusLine = null,
+                pendingToolRequest = null,
                 activeTab = ForgeTab.PROJECTS,
                 projectView = ProjectView.CONVERSATION,
             )
@@ -891,7 +895,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChat(chatId: String) {
-        if (_state.value.sessionRunning) return
+        if (runs.containsKey(chatId) || chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         val currentChats = _state.value.chats
         if (currentChats.size <= 1) return
@@ -911,18 +915,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             _state.value.activeChatId
         }
-        val messages = preferences.loadMessages(project.id, nextChatId)
+        val nextRun = runs[nextChatId]
+        val messages = nextRun?.messages ?: preferences.loadMessages(project.id, nextChatId)
         _state.update {
             it.copy(
                 chats = updatedChats,
                 activeChatId = nextChatId,
                 messages = messages,
+                activeStatusLine = nextRun?.statusLine,
+                pendingToolRequest = nextRun?.pendingTool,
+                queuedPrompts = it.queuedPrompts.filterNot { q -> q.chatId == chatId },
             )
         }
     }
 
     fun clearActiveChat() {
-        if (_state.value.sessionRunning) return
+        if (runs.containsKey(_state.value.activeChatId)) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
         AgentKind.entries.forEach { agent ->
@@ -941,26 +949,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val attachments = _state.value.pendingAttachments
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
-        // Also queue while the finished turn's bridge call is still unwinding, so two turns never overlap.
-        if (_state.value.sessionRunning || activeAgentJob?.isActive == true) {
-            // The agent keeps working; this message is sent automatically when its turn completes.
-            _state.update {
-                it.copy(
-                    queuedPrompts = it.queuedPrompts + QueuedPrompt(
-                        text = cleanPrompt,
-                        attachments = attachments,
-                        projectId = it.activeProject?.id,
-                        chatId = it.activeChatId,
-                    ),
-                    pendingAttachments = emptyList(),
-                )
-            }
-            return
-        }
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        _state.update { it.copy(pendingAttachments = emptyList()) }
+        val prompt = QueuedPrompt(text = cleanPrompt, attachments = attachments, projectId = project.id, chatId = chatId)
+        when {
+            // This chat is still working: the message is sent automatically when its turn completes.
+            runs.containsKey(chatId) -> enqueuePrompt(prompt)
+            !canStartAnotherRun() -> {
+                enqueuePrompt(prompt)
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
+            }
+            else -> startRun(project, chatId, prompt)
+        }
+    }
+
+    private fun enqueuePrompt(prompt: QueuedPrompt) {
+        _state.update { it.copy(queuedPrompts = it.queuedPrompts + prompt) }
+    }
+
+    /**
+     * Claude Code can work on several chats of the project at once (one bridge instance and one process per chat);
+     * the other agents keep a single run. A further run also needs free memory: each Claude process is a Node
+     * runtime, and the system kills processes when RAM runs out.
+     */
+    private fun canStartAnotherRun(): Boolean {
+        if (runs.isEmpty()) return true
+        if (_state.value.agentKind != AgentKind.CLAUDE_CODE) return false
+        if (runs.size >= MAX_PARALLEL_CHATS) return false
+        val memory = android.app.ActivityManager.MemoryInfo()
+        getApplication<Application>().getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(memory)
+        return !memory.lowMemory && memory.availMem >= MIN_FREE_BYTES_FOR_PARALLEL_RUN
+    }
+
+    private fun newClaudeBridge(project: Project): ClaudeRuntimeBridge = ClaudeRuntimeBridge(
+        context = getApplication(),
+        secretFor = ::resolveProviderSecret,
+        rotateSecretFor = ::rotateProviderSecret,
+    ).also { it.configureProjectRoot(project.id, project.rootPath) }
+
+    private fun startRun(project: Project, chatId: String, prompt: QueuedPrompt) {
+        val cleanPrompt = prompt.text
+        val attachments = prompt.attachments
         val now = System.currentTimeMillis()
-        lastSentPrompt = RetryPrompt(chatId, QueuedPrompt(text = cleanPrompt, attachments = attachments))
         val userMsg = ChatMessage(fromUser = true, text = cleanPrompt, attachments = attachments)
         // The agent sees the attachments as workspace paths it can open with its own tools.
         val agentPrompt = if (attachments.isEmpty()) {
@@ -978,7 +1009,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             text = "",
         )
         // A placeholder left behind by an abnormal end would repeat its LazyColumn key ("Key was already used" crash).
-        val historyBefore = _state.value.messages.filterNot { it.id == "streaming-assistant" }
+        val base = if (chatId == _state.value.activeChatId) _state.value.messages else preferences.loadMessages(project.id, chatId)
+        val historyBefore = base.filterNot { it.id == "streaming-assistant" }
         val updatedMessages = historyBefore + userMsg + assistantPlaceholder
         preferences.saveMessages(project.id, chatId, historyBefore + userMsg)
 
@@ -1004,27 +1036,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjectChats(project.id, updatedChats)
         preferences.saveProjects(updatedProjects)
 
+        val agent = _state.value.agentKind
+        val bridge: RuntimeBridge = when (agent) {
+            AgentKind.CLAUDE_CODE -> newClaudeBridge(project)
+            AgentKind.DEEPSEEK_HARNESS -> dshRuntime
+            AgentKind.ANTIGRAVITY -> antigravityRuntime
+        }
+        val run = ChatRun(
+            chatId = chatId,
+            projectId = project.id,
+            bridge = bridge,
+            ownsBridge = agent == AgentKind.CLAUDE_CODE,
+            lastPrompt = QueuedPrompt(text = cleanPrompt, attachments = attachments),
+        )
+        run.messages = updatedMessages
+        run.statusLine = UiText.res(R.string.agent_status_starting, agent.title)
+        runs[chatId] = run
         _state.update {
             it.copy(
                 projects = updatedProjects,
                 chats = updatedChats,
-                messages = updatedMessages,
-                sessionRunning = true,
+                messages = if (it.activeChatId == chatId) updatedMessages else it.messages,
                 retryPrompt = null,
-                activeStatusLine = UiText.res(R.string.agent_status_starting, _state.value.agentKind.title),
-                pendingToolRequest = null,
-                pendingAttachments = emptyList(),
             )
         }
+        publishRunningFlags()
+        showRunView(run)
 
-        val bridge: RuntimeBridge = when (_state.value.agentKind) {
-            AgentKind.CLAUDE_CODE -> claudeRuntime
-            AgentKind.DEEPSEEK_HARNESS -> dshRuntime
-            AgentKind.ANTIGRAVITY -> antigravityRuntime
+        // Parallel Claude runs each own their bridge, so their events are collected here and never mixed up.
+        if (run.ownsBridge) {
+            run.eventsJob = viewModelScope.launch { bridge.events.collect { onRuntimeEvent(run, it) } }
         }
-        activeRuntimeBridge = bridge
 
-        activeAgentJob = viewModelScope.launch {
+        run.job = viewModelScope.launch {
             try {
                 // A GitHub sync writes the token into the rootfs while it runs; never let an agent (root in the
                 // same chroot) start before that sync has removed it again.
@@ -1040,36 +1084,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Throwable) {
                 if (error !is CancellationException) {
                     val app = getApplication<Application>()
-                    appendAssistantText("\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
-                    offerRetry()
+                    appendAssistantText(run, "\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
+                    offerRetry(run)
                 }
-                finishAgentTurn(project.id)
+                finishRun(run)
             }
             // The bridge normally ends the turn with a SessionCompleted/SessionFailed event, but that event is dropped
             // when its session id does not match (e.g. it failed before SessionStarted), leaving the UI "running" and
-            // blocking prompts and project switching. Events are delivered asynchronously, so give the real one a
-            // moment to arrive first; finishAgentTurn is idempotent, and a newer turn is left alone.
+            // blocking prompts. Events are delivered asynchronously, so give the real one a moment to arrive first;
+            // finishRun is idempotent.
             val turnJob = coroutineContext[Job]
             viewModelScope.launch {
                 delay(AGENT_TURN_END_GRACE_MS)
-                if (activeAgentJob === turnJob) finishAgentTurn(project.id)
+                if (run.job === turnJob) finishRun(run)
+                run.eventsJob?.cancel()
             }
         }
     }
 
-    /** The prompt of the most recent turn, kept so a failed turn can be offered again. */
-    private var lastSentPrompt: RetryPrompt? = null
+    /** Mirrors a run's live state into the visible chat when it is the one on screen. */
+    private fun showRunView(run: ChatRun) {
+        if (run.chatId != _state.value.activeChatId) return
+        _state.update { it.copy(activeStatusLine = run.statusLine, pendingToolRequest = run.pendingTool) }
+    }
 
-    private fun offerRetry() {
-        _state.update { it.copy(retryPrompt = lastSentPrompt) }
+    private fun setRunStatus(run: ChatRun, line: UiText?) {
+        run.statusLine = line
+        if (run.chatId == _state.value.activeChatId) _state.update { it.copy(activeStatusLine = line) }
+    }
+
+    private fun setRunPendingTool(run: ChatRun, request: ToolRequest?) {
+        run.pendingTool = request
+        if (run.chatId == _state.value.activeChatId) _state.update { it.copy(pendingToolRequest = request) }
+    }
+
+    /** Applies [change] to the chat's messages: kept in the run, and shown when that chat is the visible one. */
+    private fun updateRunMessages(run: ChatRun, change: (List<ChatMessage>) -> List<ChatMessage>) {
+        run.messages = change(run.messages)
+        if (run.chatId == _state.value.activeChatId) _state.update { it.copy(messages = run.messages) }
+    }
+
+    private fun publishRunningFlags() {
+        val ids = runs.keys.toSet()
+        _state.update { it.copy(runningChatIds = ids, sessionRunning = ids.isNotEmpty()) }
+    }
+
+    private fun offerRetry(run: ChatRun) {
+        _state.update { it.copy(retryPrompt = RetryPrompt(run.chatId, run.lastPrompt)) }
     }
 
     /** "Try again" after a failed turn: sends the same message (and attachments) once more. */
     fun retryLastPrompt() {
         val retry = _state.value.retryPrompt ?: return
-        if (_state.value.sessionRunning || retry.chatId != _state.value.activeChatId) return
-        _state.update { it.copy(retryPrompt = null, pendingAttachments = retry.prompt.attachments) }
-        sendPrompt(retry.prompt.text)
+        val project = _state.value.activeProject ?: return
+        if (runs.containsKey(retry.chatId) || retry.chatId != _state.value.activeChatId) return
+        if (!canStartAnotherRun()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
+            return
+        }
+        _state.update { it.copy(retryPrompt = null) }
+        startRun(project, retry.chatId, retry.prompt.copy(projectId = project.id, chatId = retry.chatId))
     }
 
     /** Stops the Android build only; a running agent session keeps going. */
@@ -1083,62 +1157,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { st -> st.copy(queuedPrompts = st.queuedPrompts.filterNot { it.id == id }) }
     }
 
-    /** Sends everything queued during the finished turn as one follow-up prompt. */
+    /** Sends what was queued for each chat as one follow-up prompt, as soon as that chat is idle and a slot is free. */
     private fun dispatchQueuedPrompts() {
-        val queued = _state.value.queuedPrompts
-        if (queued.isEmpty() || _state.value.sessionRunning) return
-        val here = _state.value
-        if (queued.any { it.projectId != here.activeProject?.id || it.chatId != here.activeChatId }) {
-            // The user moved to another chat or project before the turn finished unwinding.
-            discardQueuedPrompts()
-            return
+        val queue = _state.value.queuedPrompts
+        if (queue.isEmpty()) return
+        for (chatId in queue.mapNotNull { it.chatId }.distinct()) {
+            val here = _state.value
+            val forChat = queue.filter { it.chatId == chatId }
+            val project = here.activeProject
+            if (project == null || forChat.first().projectId != project.id || here.chats.none { it.id == chatId }) {
+                // The chat or project it was typed for is gone or no longer open.
+                _state.update { st -> st.copy(queuedPrompts = st.queuedPrompts.filterNot { q -> forChat.any { it.id == q.id } }) }
+                continue
+            }
+            if (runs.containsKey(chatId)) continue
+            if (!canStartAnotherRun()) break
+            val merged = QueuedPrompt(
+                text = forChat.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n"),
+                attachments = forChat.flatMap { it.attachments },
+                projectId = project.id,
+                chatId = chatId,
+            )
+            _state.update { st -> st.copy(queuedPrompts = st.queuedPrompts.filterNot { q -> forChat.any { it.id == q.id } }) }
+            startRun(project, chatId, merged)
         }
-        val text = queued.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
-        _state.update {
-            it.copy(
-                queuedPrompts = emptyList(),
-                pendingAttachments = queued.flatMap { q -> q.attachments } + it.pendingAttachments,
+    }
+
+    /** Drops one chat's queued messages when its turn ended without completing (stopped or failed) and tells the user. */
+    private fun discardQueuedPrompts(chatId: String) {
+        if (_state.value.queuedPrompts.none { it.chatId == chatId }) return
+        _state.update { st ->
+            st.copy(
+                queuedPrompts = st.queuedPrompts.filterNot { it.chatId == chatId },
+                bannerMessage = UiText.res(R.string.msg_queue_discarded),
             )
         }
-        sendPrompt(text)
     }
 
-    /** Drops queued messages when the turn ended without completing (stopped or failed) and tells the user. */
-    private fun discardQueuedPrompts() {
-        if (_state.value.queuedPrompts.isEmpty()) return
-        _state.update { it.copy(queuedPrompts = emptyList(), bannerMessage = UiText.res(R.string.msg_queue_discarded)) }
-    }
-
-    /** Stops the agent session only; a running Android build keeps going. */
+    /** Stops the agent turn of the chat on screen only; other chats keep working and a running build keeps going. */
     fun stopActiveTask() {
-        val wasSessionRunning = _state.value.sessionRunning || activeAgentJob?.isActive == true
-        discardQueuedPrompts()
-        val pendingApproval = _state.value.pendingToolRequest
-        val bridge = activeRuntimeBridge
-        RuntimeTaskController.stop(RuntimeTaskController.AGENT)
-        val agentJob = activeAgentJob
-        agentJob?.cancel()
-        if (wasSessionRunning) {
-            _state.update { it.copy(activeStatusLine = UiText.res(R.string.agent_status_stopping), pendingToolRequest = null) }
-            // Bridge sessions run NonCancellable: keep sessionRunning until the old session really ends,
-            // otherwise a new prompt could race with it over shared bridge state.
-            viewModelScope.launch {
-                if (pendingApproval != null) {
-                    runCatching { (bridge ?: claudeRuntime).respondToApproval(pendingApproval, false) }
-                }
-                agentJob?.join()
-                activeRuntimeBridge = null
-                _state.update {
-                    it.copy(sessionRunning = false, activeStatusLine = UiText.res(R.string.agent_status_stopped), pendingToolRequest = null)
-                }
+        val run = runs[_state.value.activeChatId] ?: return
+        discardQueuedPrompts(run.chatId)
+        val pendingApproval = run.pendingTool
+        setRunStatus(run, UiText.res(R.string.agent_status_stopping))
+        setRunPendingTool(run, null)
+        // Bridge sessions run NonCancellable: the run stays registered until the old session really ends,
+        // otherwise a new prompt could race with it over shared bridge state.
+        viewModelScope.launch {
+            if (pendingApproval != null) {
+                runCatching { run.bridge.respondToApproval(pendingApproval, false) }
             }
+            if (run.ownsBridge) {
+                runCatching { run.bridge.stopActiveSession() }
+            } else {
+                RuntimeTaskController.stop(RuntimeTaskController.AGENT)
+            }
+            val job = run.job
+            job?.cancel()
+            job?.join()
+            finishRun(run, stoppedByUser = true)
+            dispatchQueuedPrompts()
         }
     }
 
     fun respondToToolRequest(approved: Boolean) {
-        val req = _state.value.pendingToolRequest ?: return
-        val bridge = activeRuntimeBridge ?: claudeRuntime
-        _state.update { it.copy(pendingToolRequest = null) }
+        val run = runs[_state.value.activeChatId]
+        val req = run?.pendingTool ?: _state.value.pendingToolRequest ?: return
+        val bridge = run?.bridge ?: claudeRuntime
+        if (run != null) setRunPendingTool(run, null) else _state.update { it.copy(pendingToolRequest = null) }
         viewModelScope.launch {
             // An unwritable response file must not crash the app; the request then expires on the agent side.
             runCatching { bridge.respondToApproval(req, approved) }.onFailure { err ->
@@ -1149,49 +1235,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun onRuntimeEvent(event: RuntimeEvent) {
+    private fun onRuntimeEvent(run: ChatRun, event: RuntimeEvent) {
         if (event is RuntimeEvent.SessionStarted) {
-            activeRuntimeSessionId.set(event.sessionId)
-        } else if (event.sessionId != activeRuntimeSessionId.get() &&
-            !(event is RuntimeEvent.FilesChanged && event.sessionId == finishedRuntimeSessionId.get())
+            run.sessionId = event.sessionId
+        } else if (event.sessionId != run.sessionId &&
+            !(event is RuntimeEvent.FilesChanged && event.sessionId == run.finishedSessionId)
         ) {
             return
         }
+        // After the turn ended only the file list of that session is still wanted (Claude sends it after the result).
+        if (run.finished && event !is RuntimeEvent.FilesChanged) return
         when (event) {
-            is RuntimeEvent.SessionStarted -> {
-                _state.update { it.copy(sessionRunning = true, activeStatusLine = UiText.res(R.string.agent_status_started)) }
-            }
-            is RuntimeEvent.AssistantDelta -> {
-                appendAssistantText(event.text)
-            }
-            is RuntimeEvent.ReasoningProgress -> {
-                _state.update { it.copy(activeStatusLine = UiText.res(R.string.agent_status_reasoning, event.estimatedTokens)) }
-            }
-            is RuntimeEvent.ReasoningSummary -> {
-                _state.update { it.copy(activeStatusLine = UiText.Raw(event.summary.take(120))) }
-            }
+            is RuntimeEvent.SessionStarted -> setRunStatus(run, UiText.res(R.string.agent_status_started))
+            is RuntimeEvent.AssistantDelta -> appendAssistantText(run, event.text)
+            is RuntimeEvent.ReasoningProgress -> setRunStatus(run, UiText.res(R.string.agent_status_reasoning, event.estimatedTokens))
+            is RuntimeEvent.ReasoningSummary -> setRunStatus(run, UiText.Raw(event.summary.take(120)))
             is RuntimeEvent.ToolStarted -> {
-                recordActivityItem(event.toolName, event.detail, isComplete = false)
-                _state.update { it.copy(activeStatusLine = UiText.Raw("${event.toolName}: ${event.detail}".take(120))) }
+                recordActivityItem(run, event.toolName, event.detail, isComplete = false)
+                setRunStatus(run, UiText.Raw("${event.toolName}: ${event.detail}".take(120)))
             }
-            is RuntimeEvent.ToolProgress -> {
-                _state.update { it.copy(activeStatusLine = UiText.Raw("${event.toolName}: ${event.detail}".take(120))) }
-            }
-            is RuntimeEvent.ToolCompleted -> {
-                recordActivityItem(event.toolName, event.summary, isComplete = true)
-            }
-            is RuntimeEvent.RuntimeLog -> {
-                _state.update { it.copy(activeStatusLine = UiText.Raw("${event.title}: ${event.detail}".take(120))) }
-            }
+            is RuntimeEvent.ToolProgress -> setRunStatus(run, UiText.Raw("${event.toolName}: ${event.detail}".take(120)))
+            is RuntimeEvent.ToolCompleted -> recordActivityItem(run, event.toolName, event.summary, isComplete = true)
+            is RuntimeEvent.RuntimeLog -> setRunStatus(run, UiText.Raw("${event.title}: ${event.detail}".take(120)))
             is RuntimeEvent.ToolRequested -> {
-                _state.update { it.copy(pendingToolRequest = event.request) }
+                setRunPendingTool(run, event.request)
+                if (run.chatId != _state.value.activeChatId) {
+                    // The approval dialog belongs to the chat it came from: tell the user which chat is waiting.
+                    val title = _state.value.chats.firstOrNull { it.id == run.chatId }?.title.orEmpty()
+                    _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_chat_needs_approval, title)) }
+                }
             }
-            is RuntimeEvent.ToolApproved, is RuntimeEvent.ToolRejected -> {
-                _state.update { it.copy(pendingToolRequest = null) }
-            }
+            is RuntimeEvent.ToolApproved, is RuntimeEvent.ToolRejected -> setRunPendingTool(run, null)
             is RuntimeEvent.PermissionDenied -> {
                 // Say so in the chat instead of failing the session: the agent receives the refusal and carries on.
                 appendAssistantText(
+                    run,
                     "\n\n" + getApplication<Application>().getString(
                         R.string.msg_permission_denied,
                         event.toolName,
@@ -1200,36 +1278,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             is RuntimeEvent.FilesChanged -> {
-                _state.update { it.copy(changedItems = event.changes) }
-                _state.value.activeProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+                if (_state.value.activeProjectId == run.projectId) {
+                    _state.update { it.copy(changedItems = event.changes) }
+                    refreshWorkspaceFilesAndChanges(run.projectId)
+                }
             }
-            is RuntimeEvent.PreviewStarted -> {
-                _state.update { it.copy(previewUrl = event.url) }
-            }
+            is RuntimeEvent.PreviewStarted -> _state.update { it.copy(previewUrl = event.url) }
             is RuntimeEvent.SessionCompleted -> {
-                _state.value.activeProject?.let { finishAgentTurn(it.id) }
+                finishRun(run)
                 // Wait for the bridge call to fully unwind so the next turn cannot race its shared state.
-                val finishedJob = activeAgentJob
                 viewModelScope.launch {
-                    finishedJob?.join()
+                    run.job?.join()
                     dispatchQueuedPrompts()
                 }
             }
             is RuntimeEvent.SessionFailed -> {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") getApplication<Application>().getString(R.string.agent_stopped_by_user) else event.reason
-                appendAssistantText("\n\n[$reason]")
-                offerRetry()
-                _state.value.activeProject?.let { finishAgentTurn(it.id) }
-                discardQueuedPrompts()
+                appendAssistantText(run, "\n\n[$reason]")
+                offerRetry(run)
+                finishRun(run)
+                discardQueuedPrompts(run.chatId)
+                viewModelScope.launch {
+                    run.job?.join()
+                    dispatchQueuedPrompts()
+                }
             }
         }
     }
 
-    private fun appendAssistantText(delta: String) {
+    private fun appendAssistantText(run: ChatRun, delta: String) {
         if (delta.isEmpty()) return
-        _state.update { current ->
-            val list = current.messages.toMutableList()
+        updateRunMessages(run) { messages ->
+            val list = messages.toMutableList()
             val lastIdx = list.indexOfLast { !it.fromUser }
             if (lastIdx >= 0) {
                 val prev = list[lastIdx]
@@ -1237,13 +1318,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 list += ChatMessage(fromUser = false, text = delta)
             }
-            current.copy(messages = list)
+            list
         }
     }
 
-    private fun recordActivityItem(title: String, detail: String, isComplete: Boolean) {
-        _state.update { current ->
-            val list = current.messages.toMutableList()
+    private fun recordActivityItem(run: ChatRun, title: String, detail: String, isComplete: Boolean) {
+        updateRunMessages(run) { messages ->
+            val list = messages.toMutableList()
             val lastIdx = list.indexOfLast { !it.fromUser }
             if (lastIdx >= 0) {
                 val prev = list[lastIdx]
@@ -1261,19 +1342,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 list[lastIdx] = prev.copy(workItems = items)
             }
-            current.copy(messages = list)
+            list
         }
     }
 
-    private fun finishAgentTurn(projectId: String) {
+    private fun finishRun(run: ChatRun, stoppedByUser: Boolean = false) {
         // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
-        if (!_state.value.sessionRunning) return
-        activeRuntimeBridge = null
-        // Late events of this session must not touch the next chat the user opens.
-        finishedRuntimeSessionId.set(activeRuntimeSessionId.getAndSet(null))
-        val chatId = _state.value.activeChatId
+        if (run.finished) return
+        run.finished = true
+        // Late events of this session must not touch the next turn; only its FilesChanged is still wanted.
+        run.finishedSessionId = run.sessionId
         val now = System.currentTimeMillis()
-        val finalizedMessages = _state.value.messages.map { msg ->
+        val finalizedMessages = run.messages.map { msg ->
             if (msg.id == "streaming-assistant") {
                 val elapsed = (now - msg.createdAt.toEpochMilli()).coerceAtLeast(0L)
                 msg.copy(
@@ -1285,18 +1365,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 msg
             }
         }
-        preferences.saveMessages(projectId, chatId, finalizedMessages)
+        run.messages = finalizedMessages
+        preferences.saveMessages(run.projectId, run.chatId, finalizedMessages)
+        if (runs[run.chatId] === run) runs.remove(run.chatId)
+        val visible = run.chatId == _state.value.activeChatId
         _state.update {
             it.copy(
-                messages = finalizedMessages,
-                sessionRunning = false,
-                activeStatusLine = null,
-                pendingToolRequest = null,
+                messages = if (visible) finalizedMessages else it.messages,
+                activeStatusLine = if (visible) (if (stoppedByUser) UiText.res(R.string.agent_status_stopped) else null) else it.activeStatusLine,
+                pendingToolRequest = if (visible) null else it.pendingToolRequest,
             )
         }
-        refreshWorkspaceFilesAndChanges(projectId)
-        if (preferences.autoSyncGitHub) {
-            syncProjectWithGitHub(projectId, "Sync agent changes from NextCraft Forge")
+        publishRunningFlags()
+        refreshWorkspaceFilesAndChanges(run.projectId)
+        // One sync after the last chat finished, not one per chat while others are still editing.
+        if (preferences.autoSyncGitHub && runs.isEmpty()) {
+            syncProjectWithGitHub(run.projectId, "Sync agent changes from NextCraft Forge")
         }
     }
 
@@ -3483,3 +3567,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 private const val AGENT_TURN_END_GRACE_MS = 2_000L
+
+/** How many Claude Code chats may work at the same time (each is a separate Node process in the chroot). */
+private const val MAX_PARALLEL_CHATS = 3
+
+/** Free RAM needed before another parallel run starts; below it the message waits in the queue. */
+private const val MIN_FREE_BYTES_FOR_PARALLEL_RUN = 900L * 1024 * 1024
+
+/** One agent turn in progress for a chat: its bridge, session, and the live copy of the chat it streams into. */
+private class ChatRun(
+    val chatId: String,
+    val projectId: String,
+    val bridge: RuntimeBridge,
+    /** True when [bridge] was created for this run (Claude Code); its events are collected by the run itself. */
+    val ownsBridge: Boolean,
+    val lastPrompt: QueuedPrompt,
+) {
+    var job: Job? = null
+    var eventsJob: Job? = null
+    var sessionId: String? = null
+    var finishedSessionId: String? = null
+    var messages: List<ChatMessage> = emptyList()
+    var statusLine: UiText? = null
+    var pendingTool: ToolRequest? = null
+    var finished: Boolean = false
+}
