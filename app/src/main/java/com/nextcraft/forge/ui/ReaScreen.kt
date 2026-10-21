@@ -170,6 +170,13 @@ fun ReaScreen(state: ForgeUiState, viewModel: MainViewModel) {
                 enabled = installed && !rea.busy,
                 modifier = Modifier.fillMaxWidth(),
             )
+            OutlinedButton(
+                shape = RoundedCornerShape(100),
+                onClick = viewModel.rea::installOptionalTools,
+                enabled = installed && !rea.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(stringResource(R.string.rea_install_optional)) }
+            Text(stringResource(R.string.rea_install_optional_hint), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
             rea.mode?.let { mode ->
                 Text(
                     text = stringResource(R.string.rea_mode, reaModeLabel(mode)),

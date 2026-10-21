@@ -60,6 +60,17 @@ class ReaResultTest {
         // The wrapper must pass its arguments through unchanged.
         assertTrue(script.contains("python3 -m rea \"\$@\""))
     }
+
+    @Test
+    fun theOptionalToolsScriptInstallsTheDynamicToolsAndNeverAbortsEarly() {
+        val script = ReaController.optionalToolsScript()
+        assertTrue(script.contains("apt-get install -y -qq strace ltrace qemu-user binwalk"))
+        assertTrue(script.contains("python3-unicorn"))
+        assertTrue(script.contains("pip install --break-system-packages unicorn"))
+        // `set -e` would let one missing package block unicorn.
+        assertTrue(!script.contains("set -e"))
+        assertTrue(script.trimEnd().endsWith("true"))
+    }
 }
 
 class ReaAnalysisTest {

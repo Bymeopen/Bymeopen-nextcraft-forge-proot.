@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from typing import Sequence
 
@@ -16,12 +17,14 @@ from .analysis import strings as strings_mod
 from .analysis import xrefs as xrefs_mod
 from .analysis.code import decode, defined_functions
 from .capability import FAIL, OK, WARN, run_doctor
+from .dynamic import qemu as qemu_mod
+from .emulation import unicorn_runner as emu_mod
 from .identify import identify
 from .integrations import decompile as decompile_mod
 from .parsers import apk as apk_mod
 from .parsers import elf as elf_mod
 from .report.markdown import build_report
-from .result import E_BAD_FORMAT, E_INTERNAL, E_USAGE, ReaError, Result, emit_json, failure
+from .result import E_BAD_FORMAT, E_INTERNAL, E_MISSING_DEP, E_NOT_SUPPORTED, E_USAGE, ReaError, Result, emit_json, failure
 
 _NOTICE = (
     "REA hanya untuk penggunaan yang sah: software milik sendiri, CTF, crackme, interoperabilitas, riset keamanan "
@@ -108,6 +111,81 @@ def _decompile(args: argparse.Namespace) -> Result:
     if not args.json:
         print(f"{data['tool']}: {data['files']} berkas di {data['output_dir']} ({data['seconds']} detik)", file=sys.stderr)
     return Result(command="decompile", data=data)
+
+
+def _emu(args: argparse.Namespace) -> Result:
+    identify(args.file)  # galat berkas yang konsisten dengan perintah lain
+    data = emu_mod.emulate(
+        args.file,
+        arch=args.arch,
+        func=args.func,
+        start=emu_mod.parse_int(args.start) if args.start else None,
+        end=emu_mod.parse_int(args.end) if args.end else None,
+        base=emu_mod.parse_int(args.base) if args.base else emu_mod.RAW_BASE,
+        regs=[emu_mod.parse_reg(r) for r in args.reg or []],
+        mems=[emu_mod.parse_mem(m) for m in args.mem or []],
+        dumps=[emu_mod.parse_dump(d) for d in args.dump or []],
+        max_insns=args.max_insns,
+        timeout_ms=args.timeout_ms,
+    )
+    result = Result(command="emu", data=data)
+    if data["stop"] not in ("returned", "reached_end"):
+        result.warnings.append(f"Emulasi berhenti: {data['stop']}" + (f" ({data['detail']})" if data["detail"] else ""))
+    if not args.json:
+        print(f"{data['arch']}  mulai 0x{data['start']:x}  {data['instructions']} instruksi  berhenti: {data['stop']}", file=sys.stderr)
+        for name, value in data["registers"].items():
+            if value:
+                print(f"  {name:4} 0x{value:x}", file=sys.stderr)
+        for dump in data["dumps"]:
+            shown = dump["ascii"] if dump["ascii"] is not None else f"({dump['error']})"
+            print(f"  [0x{dump['addr']:x}+{dump['size']}] {shown}", file=sys.stderr)
+    return result
+
+
+def _stop_text(stop: dict) -> str:
+    kind = stop.get("kind")
+    if kind == "stopped":
+        return f"berhenti dengan sinyal {stop.get('signal')}"
+    if kind == "exited":
+        return f"program selesai, kode keluar {stop.get('code')}"
+    if kind == "killed":
+        return f"program dihentikan sinyal {stop.get('signal')}"
+    return f"stop reply tak dikenal ({stop.get('raw', '')})"
+
+
+def _run(args: argparse.Namespace) -> Result:
+    identify(args.file)
+    mode = args.mode
+    if mode in ("gdb", "strace", "frida"):
+        raise ReaError(E_NOT_SUPPORTED, f"Mode {mode} belum tersedia (fase 6).", "Pakai --mode emu (QEMU gdbstub), yang tidak butuh ptrace.")
+    result = Result(command="run")
+    if mode == "auto":
+        import shutil
+
+        if not any(shutil.which(name) for name in ("qemu-aarch64", "qemu-x86_64", "qemu-arm", "qemu-i386")):
+            raise ReaError(E_MISSING_DEP, "Tidak ada mode dinamis yang bisa dipakai: qemu-user belum terpasang.", "Pasang: apt install qemu-user, atau pakai `rea analyze` (statis).")
+        result.warnings.append("Mode auto memilih emu (QEMU gdbstub); gdb/strace/Frida baru tersedia di fase 6.")
+    data = qemu_mod.run_emulated(
+        args.file,
+        port=args.port,
+        breakpoints=args.break_at or [],
+        program_args=shlex.split(args.args or ""),
+        run_to_end=args.run_to_end,
+        timeout=args.timeout,
+    )
+    result.data = data
+    result.mode = "emulated-dynamic"
+    if not args.json:
+        pc_name = {"aarch64": "pc", "arm": "pc", "x86_64": "rip", "386": "eip"}[data["arch"]]
+        pc = data["registers"].get(pc_name)
+        print(f"Tersambung ke gdbstub {data['tool']} port {data['port']}  arsitektur {data['arch']}", file=sys.stderr)
+        where = f"  {pc_name}=0x{pc:x}" if pc is not None and data["stop"].get("kind") == "stopped" else ""
+        print(f"Status: {_stop_text(data['stop'])}{where}", file=sys.stderr)
+        for item in data["breakpoints"]:
+            print(f"  breakpoint {item['spec']} @0x{item['addr']:x}: {'kena' if item['hit'] else 'tidak kena'}", file=sys.stderr)
+        if data["output"]:
+            print("Keluaran program:\n" + data["output"], file=sys.stderr)
+    return result
 
 
 def _cfg_for(path: str, symbol: str | None) -> dict:
@@ -256,10 +334,12 @@ def build_parser() -> argparse.ArgumentParser:
         ("apk", "ringkasan APK: manifest, izin, DEX, tanda tangan"),
         ("dex", "daftar class dari DEX atau APK"),
         ("decompile", "dekompilasi APK/DEX dengan jadx atau apktool"),
+        ("emu", "emulasi satu fungsi atau potongan kode (Unicorn)"),
+        ("run", "jalankan program di QEMU user-mode dengan gdbstub"),
     ):
         command = sub.add_parser(name, help=helptext)
         command.add_argument("--json", action="store_true", help="keluaran JSON di baris terakhir stdout")
-        if name in ("id", "analyze", "report", "apk", "dex", "decompile"):
+        if name in ("id", "analyze", "report", "apk", "dex", "decompile", "emu", "run"):
             command.add_argument("file", help="berkas yang diperiksa")
         if name == "analyze":
             command.add_argument("--strings", action="store_true", help="ekstrak string ASCII dan UTF-16")
@@ -279,6 +359,24 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "decompile":
             command.add_argument("--tool", default="auto", choices=["auto", "jadx", "apktool"], help="alat dekompilasi")
             command.add_argument("-o", "--output", help="folder keluaran (default .rea/<nama>.<alat>)")
+        if name == "emu":
+            command.add_argument("--arch", help="arsitektur untuk berkas mentah: arm64, arm, x86_64, x86")
+            command.add_argument("--func", help="nama fungsi di ELF yang dijalankan")
+            command.add_argument("--start", metavar="ALAMAT", help="alamat awal (ELF: alamat virtual; mentah: alamat dalam --base)")
+            command.add_argument("--end", metavar="ALAMAT", help="berhenti di alamat ini (default: saat fungsi kembali)")
+            command.add_argument("--base", metavar="ALAMAT", help="alamat muat untuk berkas mentah")
+            command.add_argument("--reg", action="append", metavar="NAMA=NILAI", help="nilai awal register (boleh berulang)")
+            command.add_argument("--mem", action="append", metavar="ALAMAT:HEX", help="tulis byte ke memori sebelum jalan (boleh berulang)")
+            command.add_argument("--dump", action="append", metavar="ALAMAT:PANJANG", help="tampilkan memori setelah selesai (boleh berulang)")
+            command.add_argument("--max-insns", type=int, default=emu_mod.DEFAULT_MAX_INSNS, help="batas instruksi")
+            command.add_argument("--timeout-ms", type=int, default=emu_mod.DEFAULT_TIMEOUT_MS, help="batas waktu emulasi (ms)")
+        if name == "run":
+            command.add_argument("--mode", default="auto", choices=["auto", "emu", "gdb", "strace", "frida"], help="mode eksekusi (default auto)")
+            command.add_argument("--port", type=int, help="port gdbstub (default: acak)")
+            command.add_argument("--break", dest="break_at", action="append", metavar="ALAMAT|FUNGSI", help="breakpoint (boleh berulang)")
+            command.add_argument("--args", help="argumen program, dalam satu string")
+            command.add_argument("--run-to-end", action="store_true", help="lanjutkan sampai program selesai dan tangkap keluarannya")
+            command.add_argument("--timeout", type=float, default=qemu_mod.DEFAULT_TIMEOUT, help="batas waktu per langkah (detik)")
         if name == "report":
             command.add_argument("-o", "--output", help="berkas keluaran (default .rea/<nama>.report.md)")
             command.add_argument("--notes", help="catatan analis yang disisipkan di laporan")
@@ -292,7 +390,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_request:
         # argparse sudah mencetak pesan ke stderr; --version dan --help keluar dengan 0.
         return int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
-    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile}
+    handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile, "emu": _emu, "run": _run}
     _show_notice_once()
     try:
         result = handlers[args.command](args)

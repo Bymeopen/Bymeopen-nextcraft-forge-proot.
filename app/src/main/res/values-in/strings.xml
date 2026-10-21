@@ -1111,6 +1111,11 @@
     <string name="rea_log_placeholder">Keluaran pemasangan tampil di sini.</string>
     <string name="rea_installing">Memasang REA…</string>
     <string name="rea_removing">Menghapus REA…</string>
+    <string name="rea_install_optional">Pasang alat opsional</string>
+    <string name="rea_installing_optional">Memasang alat opsional…</string>
+    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk (apt), dan unicorn. Perlu internet; qemu-user cukup besar.</string>
+    <string name="rea_optional_done">Alat opsional dipasang. Hasil pemeriksaan di bawah sudah diperbarui.</string>
+    <string name="rea_optional_failed">Sebagian alat opsional gagal dipasang. Lihat keluaran di atas.</string>
     <string name="rea_checking">Memeriksa kemampuan perangkat ini…</string>
     <string name="rea_installed">REA %1$s terpasang.</string>
     <string name="rea_install_failed">Pemasangan gagal. Lihat keluaran di atas.</string>
