@@ -262,6 +262,7 @@ fun FilesAndDiffScreen(
                     onSaveCopy = { path -> saveCopyPath = path; fileSaver.launch(path.substringAfterLast('/')) },
                     onEditInTerminal = viewModel::editInTerminal,
                     onInstallApk = viewModel::installWorkspaceApk,
+                    onAnalyzeWithRea = viewModel::analyzeWithRea,
                     onDelete = { path -> pendingDeletePath = path },
                     modifier = Modifier.weight(1f),
                 )
@@ -574,6 +575,7 @@ private fun WorkspaceFolderList(
     onSaveCopy: (String) -> Unit,
     onEditInTerminal: (String) -> Unit,
     onInstallApk: (String) -> Unit,
+    onAnalyzeWithRea: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -671,6 +673,7 @@ private fun WorkspaceFolderList(
                         }
                         if (!entry.isDirectory) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_edit_in_terminal)) }, leadingIcon = { ForgeIcon(ForgeGlyph.TERMINAL, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onEditInTerminal(entry.path) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.files_analyze_rea)) }, leadingIcon = { ForgeIcon(ForgeGlyph.SEARCH, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onAnalyzeWithRea(entry.path) })
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_save_copy)) }, leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }, onClick = { menuOpen = false; onSaveCopy(entry.path) })
                         }
                         DropdownMenuItem(text = { Text(stringResource(R.string.files_rename)) }, leadingIcon = { ForgeIcon(ForgeGlyph.EDIT, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onRename(entry.path) })

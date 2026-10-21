@@ -88,7 +88,7 @@ jobs:
           python-version: "3.12"
       - run: pip install pytest capstone pyelftools unicorn frida
       # qemu-user and the arm64 cross compiler let the gdbstub tests run for real instead of being skipped.
-      - run: sudo apt-get update && sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu gdb strace
+      - run: sudo apt-get update && sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu gdb strace squashfs-tools cpio
       - name: REA tests
         run: PYTHONPATH=app/src/main/assets/rea python -m pytest rea-tests -q
 

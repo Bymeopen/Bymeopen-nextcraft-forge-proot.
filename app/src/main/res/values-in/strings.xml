@@ -805,6 +805,8 @@
     <string name="diag_battery">Baterai</string>
     <string name="diag_root">Akses root</string>
     <string name="diag_linux">Runtime Linux</string>
+    <string name="files_analyze_rea">Analisis dengan REA</string>
+    <string name="diag_rea">REA</string>
     <string name="diag_rootfs">Rootfs</string>
     <string name="diag_stacks">Stack</string>
     <string name="diag_agents">Agen</string>
@@ -1115,7 +1117,7 @@
     <string name="rea_removing">Menghapus REA…</string>
     <string name="rea_install_optional">Pasang alat opsional</string>
     <string name="rea_installing_optional">Memasang alat opsional…</string>
-    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk (apt), unicorn, dan frida. Perlu internet; qemu-user cukup besar.</string>
+    <string name="rea_install_optional_hint">strace, ltrace, qemu-user, binwalk, squashfs-tools, cpio (apt), unicorn, dan frida. Perlu internet; qemu-user cukup besar.</string>
     <string name="rea_optional_done">Alat opsional dipasang. Hasil pemeriksaan di bawah sudah diperbarui.</string>
     <string name="rea_optional_failed">Sebagian alat opsional gagal dipasang. Lihat keluaran di atas.</string>
     <string name="rea_section_learn">Belajar</string>
