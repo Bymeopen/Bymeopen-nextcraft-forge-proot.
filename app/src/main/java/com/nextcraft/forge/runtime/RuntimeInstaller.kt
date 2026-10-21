@@ -1914,7 +1914,7 @@ class RuntimeInstaller(private val context: Context) {
 
         val spawned = try {
             NativeSpawnProcess.start(
-                argv = listOf("su", "-mm", "-c", suCommand),
+                argv = SuCompat.argv(suCommand),
                 environment = emptyMap(),
                 cwd = context.filesDir.absolutePath,
                 outputFile = outputFile,

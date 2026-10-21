@@ -106,6 +106,18 @@ class DiagnosticsController(private val context: Context) {
         return buildList {
             val root = runCatching { isRootAccessAvailable() }.getOrDefault(false)
             add(row(R.string.diag_root, UiText.res(if (root) R.string.diag_granted else R.string.diag_unavailable)))
+            if (root) {
+                runCatching { detectRomInfo() }.getOrNull()?.let { info ->
+                    add(UiText.Raw("ROM") to UiText.Raw(info.rom))
+                    add(UiText.Raw("Root manager") to UiText.Raw(info.rootManager))
+                    add(UiText.Raw("SELinux") to UiText.Raw(info.selinux))
+                }
+            }
+            runCatching {
+                val unrestricted = appContext.getSystemService(android.os.PowerManager::class.java)
+                    ?.isIgnoringBatteryOptimizations(appContext.packageName) == true
+                add(UiText.Raw("Battery optimization") to UiText.Raw(if (unrestricted) "Unrestricted" else "Optimized (some ROMs stop background builds)"))
+            }
             add(row(R.string.diag_linux, UiText.res(if (installed) R.string.diag_installed else R.string.diag_not_installed)))
             runCatching { File(rootfs, ".pocket-rootfs-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
                 ?.takeIf { it.isNotBlank() }?.let { add(row(R.string.diag_rootfs, UiText.Raw(it))) }

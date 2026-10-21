@@ -83,7 +83,8 @@ internal object RootfsRepair {
             exit 0
         """.trimIndent()
 
-        val masterCode = runRootCommand("su", "-mm", "-c", unmountScript)
+        // Without -mm support there is no separate master namespace to clean; the plain su pass below covers it.
+        val masterCode = if (SuCompat.supportsMasterMount()) runRootCommand("su", "-mm", "-c", unmountScript) else 0
         val defaultCode = runRootCommand("su", "-c", unmountScript)
         check(masterCode == 0 && defaultCode == 0) {
             "Refusing to modify or delete Chroot directory '$canonicalPath' while kernel mounts are still active (master=$masterCode, default=$defaultCode)"
