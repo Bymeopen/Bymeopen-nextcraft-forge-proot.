@@ -24,7 +24,9 @@ _EXITED = re.compile(r"\[Inferior \d+ \(process \d+\) exited (?:normally|with co
 _UNRESOLVED = re.compile(r'Function "([^"]+)" not defined')
 _NOISE = re.compile(
     r"^(Breakpoint \d+ at .*|\[Thread debugging using libthread_db enabled\]|Using host libthread_db library.*|"
-    r"warning: .*|Starting program: .*|Temporary breakpoint \d+.*|\[Inferior \d+ \(process \d+\) exited .*)\n?",
+    r"warning: .*|Starting program: .*|Temporary breakpoint \d+.*|\[Inferior \d+ \(process \d+\) exited .*|"
+    r"This GDB supports auto-downloading debuginfo.*|\s+<https?://debuginfod[^>]*>|Debuginfod has been disabled\.|"
+    r"To make this setting permanent.*)\n?",
     re.M,
 )
 _MEM_LINE = re.compile(r"^0x[0-9a-f]+(?: <[^>]*>)?:(.*)$", re.M)
@@ -38,7 +40,8 @@ def _check_spec(spec: str, what: str) -> str:
 
 
 def _commands(breakpoints: list[str], examines: list[tuple[str, int]], backtrace: bool) -> list[str]:
-    cmds = ["set pagination off", "set confirm off", "set style enabled off", "set disable-randomization on"]
+    # `set debuginfod` does not exist in old gdb; an unknown `set` only prints an error and the batch carries on.
+    cmds = ["set pagination off", "set confirm off", "set style enabled off", "set disable-randomization on", "set debuginfod enabled off"]
     for spec in breakpoints:
         cmds.append(f"break *{spec}" if spec.lower().startswith("0x") else f"break {spec}")
     cmds.append("run" if breakpoints else "starti")

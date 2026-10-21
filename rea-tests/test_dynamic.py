@@ -105,6 +105,20 @@ def test_gdb_output_parsers():
     assert gdb_mod.parse_examine("$sp:16") == ("$sp", 16)
 
 
+def test_gdb_startup_noise_is_not_program_output():
+    head = (
+        "This GDB supports auto-downloading debuginfo from the following URLs:\n"
+        "  <https://debuginfod.ubuntu.com>\n"
+        "Debuginfod has been disabled.\n"
+        "To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.\n"
+        "Breakpoint 1 at 0x1157: file hello.c, line 2.\n"
+        "[Thread debugging using libthread_db enabled]\n"
+        "real output\n"
+    )
+    assert gdb_mod._NOISE.sub("", head).strip() == "real output"
+    assert "set debuginfod enabled off" in gdb_mod._commands([], [], False)
+
+
 @pytest.mark.parametrize("spec", ["add; shell id", "$(id)", "-ex", "a" * 200])
 def test_gdb_rejects_dangerous_breakpoint_specs(hello, spec):
     with pytest.raises(ReaError) as error:
