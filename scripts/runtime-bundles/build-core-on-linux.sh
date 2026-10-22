@@ -55,8 +55,8 @@ guest "printf 'APT::Sandbox::User \"root\";\nAcquire::Retries \"3\";\n' > /etc/a
 guest "printf 'nameserver $DNS_SERVER\n' > /etc/resolv.conf; apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y upgrade"
 guest "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates curl wget unzip zip xz-utils zstd jq ripgrep"
 
-# 3. Node.js v24.19.0 ARM64, verified against the official SHASUMS256.txt.
-guest 'set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp
+# 3. Node.js v24.22.1 ARM64, verified against the official SHASUMS256.txt.
+guest 'set -e; NODE_VERSION=v24.22.1; NODE_FILE=node-${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp
 curl -fsSLO https://nodejs.org/dist/${NODE_VERSION}/${NODE_FILE}
 curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt | grep "  ${NODE_FILE}" | sha256sum -c -
 mkdir -p /usr/local/lib/nodejs; tar -xzf ${NODE_FILE} -C /usr/local/lib/nodejs

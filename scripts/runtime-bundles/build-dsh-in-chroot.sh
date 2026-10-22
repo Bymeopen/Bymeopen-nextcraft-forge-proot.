@@ -16,7 +16,7 @@ set -euo pipefail
 # npm resolves the dependency ranges of @deepseek-ai/dsh at build time, so a rebuild on a later day can pick newer
 # dependency versions and produce a different archive. Pin the result by its SHA-256 in RuntimeInstaller.
 CORE_ROOTFS="${NEXTCRAFT_CORE_ROOTFS:?Set NEXTCRAFT_CORE_ROOTFS to an extracted Core bundle rootfs}"
-DSH_VERSION="${NEXTCRAFT_DSH_VERSION:-0.1.2-rc.1}"
+DSH_VERSION="${NEXTCRAFT_DSH_VERSION:-0.2.1-rc.2}"
 BUNDLE_VERSION="${NEXTCRAFT_DSH_BUNDLE_VERSION:-2026.10.1}"
 DNS_SERVER="${NEXTCRAFT_DNS:-1.1.1.1}"
 EXTRA_CA_FILE="${NEXTCRAFT_EXTRA_CA_FILE:-}"

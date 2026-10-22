@@ -54,8 +54,32 @@ data class AgentUpdateInfo(
 )
 
 /** The pinned dsh, or a newer one left by a later app build: an older app must not reinstall (downgrade) it. */
+private val FS_PROMISES_IMPORT = Regex("""import \{([^}]*)\} from "node:fs/promises";""")
+
+/**
+ * Swaps DeepSeek's hard-link publication for COPYFILE_EXCL (`copyFile(src, dst, 1)`): Android's app data filesystem
+ * refuses link(2) inside the chroot. Adds `copyFile` to the `node:fs/promises` import whatever else it lists, so new
+ * DeepSeek releases that reorder that import still match. Returns the source unchanged when already patched, or null
+ * when the expected call or import is missing.
+ */
+internal fun patchDshSource(source: String, callBefore: String, callAfter: String): String? {
+    val import = FS_PROMISES_IMPORT.find(source) ?: return null
+    val names = import.groupValues[1].split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    val hasCopyFile = "copyFile" in names
+    if (callAfter in source && hasCopyFile) return source
+    if (callBefore !in source) return null
+    val withImport = if (hasCopyFile) source else source.replaceRange(
+        import.range,
+        "import { ${(names + "copyFile").sorted().joinToString(", ")} } from \"node:fs/promises\";",
+    )
+    return withImport.replace(callBefore, callAfter)
+}
+
+/** Oldest DeepSeek release the compatibility patch still handles; installs since then keep working without a reinstall. */
+private const val MIN_DSH_VERSION = "0.1.2-rc.1"
+
 internal fun isSupportedDshVersion(version: String): Boolean =
-    version == RuntimeInstaller.DSH_VERSION || isAgentVersionNewer(version, RuntimeInstaller.DSH_VERSION)
+    version == MIN_DSH_VERSION || isAgentVersionNewer(version, MIN_DSH_VERSION)
 
 /** True when [candidate] is a newer agent version than [current] (numeric parts, then pre-release tags). */
 internal fun isAgentVersionNewer(candidate: String, current: String): Boolean {
@@ -1003,36 +1027,20 @@ class RuntimeInstaller(private val context: Context) {
             dshRoot,
             "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js",
         )
+        patchDshHardLinkPublication(persistence, callBefore = "await link(tmp, finalPath);", callAfter = "await copyFile(tmp, finalPath, 1);")
         patchDshHardLinkPublication(
-            file = persistence,
-            importBefore = "import { link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            importAfter = "import { copyFile, link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            callBefore = "await link(tmp, finalPath);",
-            callAfter = "await copyFile(tmp, finalPath, 1);",
-        )
-        patchDshHardLinkPublication(
-            file = localFs,
-            importBefore = "import { chmod, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
-            importAfter = "import { chmod, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
+            localFs,
             callBefore = "await linkFile(tempPath, absolutePath);",
             callAfter = "await copyFile(tempPath, absolutePath, 1);",
         )
     }
 
-    private fun patchDshHardLinkPublication(
-        file: File,
-        importBefore: String,
-        importAfter: String,
-        callBefore: String,
-        callAfter: String,
-    ) {
+    private fun patchDshHardLinkPublication(file: File, callBefore: String, callAfter: String) {
         check(file.isFile) { "DeepSeek compatibility file is missing: ${file.name}" }
-        var source = file.readText()
-        if (callAfter in source && importAfter in source) return
-        check(callBefore in source && importBefore in source) {
-            "Installed DeepSeek source is not compatible with this NextCraft Forge build"
-        }
-        source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
+        val original = file.readText()
+        val source = patchDshSource(original, callBefore, callAfter)
+            ?: error("Installed DeepSeek source is not compatible with this NextCraft build")
+        if (source == original) return
         val staging = File(file.parentFile, "${file.name}.tmp")
         staging.writeText(source)
         if (!staging.renameTo(file)) {
@@ -2804,7 +2812,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val AGY_VERSION = "1.1.27"
+        private const val AGY_VERSION = "1.4.5"
         const val CORE_MISSING_MESSAGE =
             "The base Ubuntu runtime (Core) is not installed or is incomplete. Run the runtime setup first, then retry."
         private const val GITHUB_CLI_VERSION = "2.100.0"
@@ -2826,7 +2834,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val LEGACY_ROOTFS_PYTHON_MESSAGE =
             "Python needs the Ubuntu 24.04 runtime. This runtime is still on Ubuntu 20.04: reinstall the runtime " +
                 "(Settings → Runtime), then install Python again."
-        private const val NODE_VERSION = "v24.19.0"
+        private const val NODE_VERSION = "v24.22.1"
         private const val NODE_ARM64_SHA256 = "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f"
         private const val COMPOSER_VERSION = "2.10.3"
         private const val COMPOSER_SHA256 = "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
@@ -2884,15 +2892,15 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             }
         """.trimIndent() + "\n"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
-        const val DSH_VERSION = "0.1.2-rc.1"
-        private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
+        const val DSH_VERSION = "0.2.1-rc.2"
+        private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v2"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
             fileName = "nextcraft-core-arm64-2026.10.2.tar.zst",
             sha256 = "a30617f2c16bdb46c403d6cfd67d1f5ae14790c897a2ed2ac49749c891b340e1",
             compressedBytes = 74_058_301L,
         )
-        private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
+        private const val CLAUDE_BUNDLED_VERSION = "2.1.308"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",

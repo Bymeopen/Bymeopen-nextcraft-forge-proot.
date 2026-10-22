@@ -4,10 +4,10 @@ set -euo pipefail
 # Build a portable NextCraft Forge overlay from Google's checksum-pinned official
 # Antigravity CLI release. The archive contains only the executable and version
 # marker: no OAuth credentials, settings, conversations, projects, or device data.
-VERSION="${NEXTCRAFT_AGY_VERSION:-1.1.27}"
+VERSION="${NEXTCRAFT_AGY_VERSION:-1.4.5}"
 BUNDLE_VERSION="${NEXTCRAFT_AGY_BUNDLE_VERSION:-2026.09.1}"
-SOURCE_URL="${NEXTCRAFT_AGY_URL:-https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz}"
-SOURCE_SHA512="${NEXTCRAFT_AGY_SHA512:-ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9}"
+SOURCE_URL="${NEXTCRAFT_AGY_URL:-https://storage.googleapis.com/antigravity-public/antigravity-cli/1.4.5-4952523841339392/linux-arm/cli_linux_arm64.tar.gz}"
+SOURCE_SHA512="${NEXTCRAFT_AGY_SHA512:-cf60004b48015a2737dcb56ce11227fef3a722f2e9329c13318e290951e350c395118bd8680c1042b2fdee9d2ead05fb84bb2596fa2d0012a44bc068655d34eb}"
 if [ ${#SOURCE_SHA512} -ne 128 ]; then
   echo "ERROR: SOURCE_SHA512 must be exactly 128 hex characters" >&2
   exit 1

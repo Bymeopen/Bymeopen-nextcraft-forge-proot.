@@ -8,7 +8,7 @@ set -euo pipefail
 ADB_SERIAL="${ADB_SERIAL:-}"
 PACKAGE="${NEXTCRAFT_PACKAGE:-com.nextcraft.forge}"
 VERSION="${NEXTCRAFT_DSH_BUNDLE_VERSION:-2026.09.1}"
-DSH_VERSION="${NEXTCRAFT_DSH_VERSION:-0.1.2-rc.1}"
+DSH_VERSION="${NEXTCRAFT_DSH_VERSION:-0.2.1-rc.2}"
 ARCHIVE="nextcraft-dsh-arm64-${VERSION}.tar.zst"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
