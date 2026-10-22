@@ -22,7 +22,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import com.nextcraft.forge.data.AppPreferences
+import com.nextcraft.forge.runtime.BatteryOptimization
 import com.nextcraft.forge.ui.AppStrings
 import com.nextcraft.forge.ui.LocalForgeThemeTokens
 import com.nextcraft.forge.ui.LocaleHelper
@@ -38,7 +43,20 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { _ ->
         viewModel.refreshRuntimeStatus()
+        if (chainBatteryPrompt) {
+            chainBatteryPrompt = false
+            requestBatteryExemption()
+        }
     }
+
+    private val batteryLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { _ ->
+        viewModel.diagnostics.refresh()
+    }
+
+    /** Set while the notification prompt is on screen so the battery prompt follows it, not overlaps it. */
+    private var chainBatteryPrompt = false
 
     private var appliedLanguage = "system"
 
@@ -51,7 +69,13 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
-        requestNotificationPermissionIfNeeded()
+        // First-time users are asked when they start the runtime setup; existing installs keep the old behaviour.
+        if (AppPreferences(this).runtimeSetupComplete) requestNotificationPermissionIfNeeded()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.backgroundPrompts.collect { requestBackgroundPrompts() }
+            }
+        }
 
         setContent {
             val state by viewModel.state.collectAsState()
@@ -107,17 +131,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun needsNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+
     private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            val granted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                runCatching {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            }
+        if (needsNotificationPermission()) {
+            runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
         }
+    }
+
+    /** Notifications first (the runtime reports progress there), then the battery exemption, each at most once. */
+    private fun requestBackgroundPrompts() {
+        val preferences = AppPreferences(this)
+        if (preferences.backgroundPromptsShown) return
+        preferences.backgroundPromptsShown = true
+        if (needsNotificationPermission()) {
+            chainBatteryPrompt = true
+            val launched = runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }.isSuccess
+            if (launched) return
+            chainBatteryPrompt = false
+        }
+        requestBatteryExemption()
+    }
+
+    private fun requestBatteryExemption() {
+        if (BatteryOptimization.isUnrestricted(this)) return
+        BatteryOptimization.launch(this) { batteryLauncher.launch(it) }
     }
 }
