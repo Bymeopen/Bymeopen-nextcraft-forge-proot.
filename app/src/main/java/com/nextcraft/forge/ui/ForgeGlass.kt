@@ -1,5 +1,13 @@
 package com.nextcraft.forge.ui
 
+import androidx.compose.ui.unit.Dp
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material3.MaterialTheme
 import android.os.Build
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -62,5 +70,48 @@ internal fun Modifier.forgeGlassSurface(backdrop: LayerBackdrop?, tint: Color): 
             // Soft top sheen so the bar reads as glass rather than a flat tinted pane.
             drawRect(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.Transparent)))
         },
+    )
+}
+
+/**
+ * Container colour for modal bottom sheets. A sheet covers the screen, so unlike a card it must never let the content
+ * behind it show through: the Glass card colour is translucent by design, which made sheets unreadable there. Glass
+ * uses [GlassFloatingSurface], opaque and darker than the page; the other themes keep the card colour.
+ */
+@Composable
+internal fun forgeSheetColor(): Color {
+    val tokens = LocalForgeThemeTokens.current
+    return if (tokens.isGlass) GlassFloatingSurface else tokens.cardContainerColor
+}
+
+/** How many floating sheets are open. The root blurs the page behind them in Glass while this is above zero. */
+internal val LocalForgeSheetDepth = staticCompositionLocalOf<MutableIntState?> { null }
+
+/** Blur radius of the page behind an open sheet in Glass; below Android 12 there is no RenderEffect, so no blur. */
+internal val GlassSheetBlur = 18.dp
+
+/**
+ * The one way to show a modal bottom sheet. Opaque colour from [forgeSheetColor], and while it is open the page behind
+ * it is blurred in Glass (frosted, nothing shows through or piles up under the sheet's text).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ForgeModalSheet(
+    onDismissRequest: () -> Unit,
+    sheetState: SheetState,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val depth = LocalForgeSheetDepth.current
+    DisposableEffect(depth) {
+        depth?.let { it.intValue += 1 }
+        onDispose { depth?.let { it.intValue -= 1 } }
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
+        containerColor = forgeSheetColor(),
+        contentColor = contentColor,
+        content = content,
     )
 }

@@ -46,10 +46,9 @@ internal fun ConnectorsSheet(state: ForgeUiState, viewModel: MainViewModel, onDi
     var tab by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(Unit) { viewModel.loadConnectors() }
 
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
     ) {
         LazyColumn(
             modifier = Modifier.padding(horizontal = ForgeSpace.card),

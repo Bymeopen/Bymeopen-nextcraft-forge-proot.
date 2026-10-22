@@ -272,6 +272,9 @@ private val GlassInnerBorderBrush = Brush.linearGradient(
 )
 
 // Diagonal indigo-to-violet wash: gives the translucent surfaces something coloured to show through.
+/** Opaque, darker than every stop of the Glass wash: the colour of sheets, dialogs and menus in Glass. */
+internal val GlassFloatingSurface = Color(0xFF000D0B)
+
 internal val GlassCanvasColors = listOf(Color(0xFF001411), Color(0xFF00202E), Color(0xFF000F0D))
 
 private val GlassCosmicCanvasBrush = Brush.linearGradient(colors = GlassCanvasColors)
@@ -517,10 +520,18 @@ fun NextCraftForgeTheme(
         LocalTextSelectionColors provides tokens.selectionColors,
     ) {
         // Dialogs, sheets and menus read the surfaceContainer roles; map them to the card surfaces so every
-        // AlertDialog, bottom sheet and dropdown matches the cards. Glass keeps the default: its card colour is
-        // translucent and a see-through dialog is unreadable over the scrim.
+        // AlertDialog, bottom sheet and dropdown matches the cards. Glass uses its own opaque, darker floating colour:
+        // its card colour is translucent and a see-through dialog is unreadable over the scrim.
         val themedScheme = if (tokens.isGlass) {
-            colorScheme
+            // Floating layers (sheets, dialogs, menus) are the darkest thing on screen and fully opaque, so they
+            // read as lifted off the page instead of as another see-through card.
+            colorScheme.copy(
+                surfaceContainerLowest = GlassFloatingSurface,
+                surfaceContainerLow = GlassFloatingSurface,
+                surfaceContainer = GlassFloatingSurface,
+                surfaceContainerHigh = GlassFloatingSurface,
+                surfaceContainerHighest = GlassFloatingSurface,
+            )
         } else {
             colorScheme.copy(
                 surfaceContainerHigh = tokens.cardContainerColor,

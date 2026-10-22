@@ -1,5 +1,7 @@
 package com.nextcraft.forge.ui
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.sp
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
@@ -236,8 +238,13 @@ abstract class NextCraftScreenshots(private val label: String, private val theme
     fun approval() {
         rule.setContent {
             Frame {
-                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {}
-                androidx.compose.material3.Surface(color = LocalForgeThemeTokens.current.cardContainerColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+                // Text behind the sheet: a see-through sheet shows it mixed into the sheet's own text (the Glass bug).
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    androidx.compose.foundation.layout.Column(modifier = Modifier.padding(16.dp)) {
+                        repeat(18) { Text("Daftar pesan error mentah $it: bash: /nextcraft-bridge/../opt/pocket", fontSize = 13.sp) }
+                    }
+                }
+                androidx.compose.material3.Surface(color = forgeSheetColor(), shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), modifier = Modifier.offset(y = (-360).dp)) {
                     androidx.compose.foundation.layout.Column(modifier = Modifier.padding(top = 20.dp)) {
                         ToolApprovalContent(
                             request = com.nextcraft.forge.model.ToolRequest(
