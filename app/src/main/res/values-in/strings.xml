@@ -1358,4 +1358,25 @@
     <string name="chat_video_play">Putar video</string>
     <string name="chat_video_missing">Berkas video tidak ada di workspace.</string>
     <string name="chat_video_no_player">Tidak ada aplikasi di perangkat ini yang bisa memutar video.</string>
+    <string name="chat_menu_schedule">Tugas terjadwal</string>
+    <string name="schedule_title">Tugas terjadwal</string>
+    <string name="schedule_channel">Tugas terjadwal</string>
+    <plurals name="schedule_due_notification">
+        <item quantity="one">%d tugas terjadwal menunggu. Buka aplikasi untuk menjalankannya.</item>
+        <item quantity="other">%d tugas terjadwal menunggu. Buka aplikasi untuk menjalankannya.</item>
+    </plurals>
+    <string name="schedule_empty">Belum ada pewaktu di chat ini. Tambah di bawah, atau ketik /loop 30m prompt Anda.</string>
+    <string name="schedule_by_you">Tiap %1$s · sudah jalan %2$d kali</string>
+    <string name="schedule_by_agent">Dibuat agen · tiap %1$s · sudah jalan %2$d kali</string>
+    <string name="schedule_delete">Hapus</string>
+    <string name="schedule_prompt_label">Prompt yang diulang</string>
+    <string name="schedule_hint">Berjalan selama aplikasi aktif di latar dan proyek ini terbuka; jika tidak, notifikasi memberi tahu ada tugas menunggu. Minimal 5 menit.</string>
+    <string name="schedule_add">Tambah</string>
+    <string name="schedule_close">Tutup</string>
+    <string name="schedule_added">Pewaktu ditambahkan: tiap %1$s</string>
+    <string name="schedule_cleared">Pewaktu chat ini dihapus</string>
+    <string name="schedule_usage">Pakai /loop 30m prompt Anda (5m sampai 7d) atau /loop off</string>
+    <string name="schedule_agent_changed">Agen mengubah pewaktu chat ini</string>
+    <string name="settings_schedule_agent">Izinkan agen menjadwalkan tugas</string>
+    <string name="settings_schedule_agent_subtitle">Agen boleh mengulang atau memantau sesuatu dengan menambah pewaktu ke chat (maks 3 per chat).</string>
 </resources>

@@ -180,6 +180,13 @@ fun SettingsScreenModern(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             ForgeToggleRow(
+                title = stringResource(R.string.settings_schedule_agent),
+                subtitle = stringResource(R.string.settings_schedule_agent_subtitle),
+                checked = state.scheduleEnabled,
+                onCheckedChange = viewModel::setScheduleEnabled,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
                 title = stringResource(R.string.settings_auto_approve_all_tools),
                 subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
                 checked = state.autoApproveAllTools,
