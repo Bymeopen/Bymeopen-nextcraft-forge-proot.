@@ -605,11 +605,10 @@ internal fun WorkspaceFolderList(
     if (entries.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (!loading) {
-                Text(
-                    text = stringResource(if (atRoot) R.string.files_workspace_is_empty_use else R.string.fm_folder_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = scheme.onSurfaceVariant,
-                    modifier = Modifier.padding(24.dp),
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.FOLDER,
+                    title = stringResource(if (atRoot) R.string.files_empty_title else R.string.fm_folder_empty),
+                    message = if (atRoot) stringResource(R.string.files_workspace_is_empty_use) else null,
                 )
             }
         }
