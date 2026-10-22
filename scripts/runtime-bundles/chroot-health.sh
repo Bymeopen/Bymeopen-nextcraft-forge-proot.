@@ -19,6 +19,19 @@ check() {
   fi
 }
 
+# check_optional NAME COMMAND: like check, but a failure prints SKIP and is not counted as an error.
+check_optional() {
+  local name="$1"
+  shift
+  local out
+  if out=$(timeout 60 bash -c "$*" 2>&1); then
+    printf 'OK   %-22s %s\n' "$name" "$(printf '%s' "$out" | head -1 | cut -c1-70)"
+    pass=$((pass + 1))
+  else
+    printf 'SKIP %-22s not installed (optional)\n' "$name"
+  fi
+}
+
 echo "== Sistem"
 check "rootfs"            'cat /.pocket-rootfs-version'
 check "glibc"             'ldd --version | head -1'
@@ -64,7 +77,8 @@ echo "== Agen"
 check "claude"            'claude --version'
 check "dsh"               'dsh --version'
 check "agy"               '/root/.local/bin/agy --version'
-check "gh"                '/root/.local/bin/gh --version'
+# GitHub CLI is optional (installed when the person connects GitHub), so a missing gh is SKIP, not ERR.
+check_optional "gh"       '/root/.local/bin/gh --version'
 
 echo "== Python"
 check "python3"           'python3 --version'

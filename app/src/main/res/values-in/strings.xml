@@ -326,6 +326,10 @@
     <string name="tools_toolchains">Manajer toolchain</string>
     <string name="tools_toolchains_desc">Kelola compiler, SDK, dan paket bahasa</string>
     <string name="tool_copied">Tersalin</string>
+    <string name="crash_prompt_title">Aplikasi tertutup tiba-tiba</string>
+    <string name="crash_prompt_message">Sesi terakhir berakhir dengan crash. Bagikan laporannya agar bisa diperbaiki? Tidak ada yang terkirim kecuali Anda memilih aplikasi lalu mengirimnya. Laporan berisi jejak galat, versi aplikasi, dan model perangkat. Percakapan tidak disertakan, tetapi jejak galat bisa memuat nama file.</string>
+    <string name="crash_prompt_share">Bagikan laporan</string>
+    <string name="crash_prompt_later">Nanti</string>
     <string name="tool_last_crash">Laporan crash terakhir</string>
     <string name="tool_no_crash">Belum ada crash. Jika aplikasi menutup sendiri, stack trace lengkapnya muncul di sini.</string>
     <string name="a11y_selected">Dipilih</string>

@@ -20,10 +20,11 @@ internal object RootfsRepair {
      * Replaces [target] with [content] by writing beside it and renaming over it, so a symlink standing there (an
      * `apt install` puts /etc/resolv.conf back as a link into /run/systemd) is replaced rather than followed.
      * Under PRoot the app UID owns every rootfs file, so no privilege is involved; [staging] and [uid] are kept for
-     * call-site compatibility with the chroot engine.
+     * call-site compatibility with the chroot engine. [RootPathGuard] still gates the target as defense in depth.
      */
     @Suppress("UNUSED_PARAMETER")
     fun writeAsRoot(target: File, content: ByteArray, staging: File, uid: Int, mode: Int = 0b110100100): Boolean {
+        if (!RootPathGuard.isInsideAppData(target.canonicalPath)) return false
         val parent = target.parentFile ?: return false
         parent.mkdirs()
         val temp = File(parent, target.name + ".nextcraft-tmp")
