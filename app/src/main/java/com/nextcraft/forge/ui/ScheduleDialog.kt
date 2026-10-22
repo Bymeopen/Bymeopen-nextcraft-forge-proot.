@@ -11,7 +11,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,7 +62,8 @@ internal fun ScheduleDialog(state: ForgeUiState, viewModel: MainViewModel, onDis
                         TextButton(onClick = { viewModel.removeScheduledTask(task.id) }) { Text(stringResource(R.string.schedule_delete)) }
                     }
                 }
-                OutlinedTextField(
+                ForgeTextField(
+                    kind = ForgeFieldKind.TEXT, imeAction = androidx.compose.ui.text.input.ImeAction.Done,
                     value = prompt,
                     onValueChange = { prompt = it.take(ScheduleRules.MAX_PROMPT_LENGTH) },
                     label = { Text(stringResource(R.string.schedule_prompt_label)) },
