@@ -262,6 +262,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val logLineIdCounter = AtomicLong(1L)
 
     init {
+        // A project removed while its undo window was open and the app then died keeps its files; finish that wipe.
+        preferences.pendingProjectWipe?.let { id ->
+            viewModelScope.launch(Dispatchers.IO) {
+                if (preferences.loadProjects().none { it.id == id }) wipeProjectData(id)
+                preferences.pendingProjectWipe = null
+            }
+        }
         RuntimeSetupController.restore(application)
         viewModelScope.launch {
             RuntimeSetupController.snapshot.collect { snap ->
@@ -825,6 +832,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         finalizePendingDelete()
         val updated = currentProjects.filterNot { it.id == projectId }
         preferences.saveProjects(updated)
+        preferences.pendingProjectWipe = removed.id
         pendingDelete = PendingDelete(removed, index)
         pendingDeleteJob = viewModelScope.launch {
             delay(UNDO_WINDOW_MS)
@@ -841,6 +849,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val pending = pendingDelete ?: return
         pendingDeleteJob?.cancel()
         pendingDelete = null
+        preferences.pendingProjectWipe = null
         val restored = _state.value.projects.toMutableList().also {
             it.add(pending.index.coerceIn(0, it.size), pending.project)
         }
@@ -861,23 +870,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = pending.project
         synchronized(reservedSlugs) { reservedSlugs -= project.slug }
         _state.update { it.copy(undoDelete = null) }
-        viewModelScope.launch(Dispatchers.IO) { wipeProjectData(project) }
+        viewModelScope.launch(Dispatchers.IO) {
+            wipeProjectData(project)
+            preferences.pendingProjectWipe = null
+        }
     }
 
     /** Blocking: removes chats, workspace and checkpoints of [project]. Call off the main thread. */
-    private fun wipeProjectData(project: Project) {
+    private fun wipeProjectData(project: Project) = wipeProjectData(project.id)
+
+    private fun wipeProjectData(projectId: String) {
         // Each saveAgentConversation is a synchronous commit().
         runCatching {
-            preferences.loadProjectChats(project.id).forEach { chat ->
+            preferences.loadProjectChats(projectId).forEach { chat ->
                 AgentKind.entries.forEach { agent ->
-                    preferences.saveAgentConversation(agent, project.id, chat.id, null)
+                    preferences.saveAgentConversation(agent, projectId, chat.id, null)
                 }
             }
-            preferences.deleteProjectChats(project.id)
+            preferences.deleteProjectChats(projectId)
         }
         runCatching {
-            File(getApplication<Application>().filesDir, "workspaces/${project.id}").deleteRecursivelyNoFollow()
-            checkpoints.checkpointDir(project.id).deleteRecursively()
+            File(getApplication<Application>().filesDir, "workspaces/${projectId}").deleteRecursivelyNoFollow()
+            checkpoints.checkpointDir(projectId).deleteRecursively()
         }
     }
 
@@ -923,7 +937,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun createChat(title: String = "") {
         if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
-        val nextIndex = _state.value.chats.size + 1
+        // The first "Chat N" no chat uses: counting chats repeated a number after one was deleted.
+        val usedTitles = _state.value.chats.map { it.title }.toSet()
+        val nextIndex = generateSequence(_state.value.chats.size + 1) { it + 1 }.first { "Chat $it" !in usedTitles }
         val chat = ProjectChat(
             title = title.trim().ifBlank { "Chat $nextIndex" },
         )
@@ -1463,8 +1479,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Merge and update snapshot the project folder; they must not run while a chat writes in it. */
+    private fun projectFolderBusy(projectId: String): Boolean {
+        val busy = runs.values.any { it.projectId == projectId && !it.isolated }
+        if (busy) _state.update { it.copy(bannerMessage = UiText.res(R.string.repo_busy_agent)) }
+        return busy
+    }
+
     fun mergeChatBranch(chatId: String) {
         val project = _state.value.activeProject ?: return
+        if (projectFolderBusy(project.id)) return
         val title = _state.value.chats.firstOrNull { it.id == chatId }?.title.orEmpty()
         withBranchBusy(chatId) {
             val result = branchLock(chatId).withLock {
@@ -1484,6 +1508,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateChatBranchFromMain(chatId: String) {
         val project = _state.value.activeProject ?: return
+        if (projectFolderBusy(project.id)) return
         withBranchBusy(chatId) {
             val result = branchLock(chatId).withLock { chatBranches.updateFromMain(project, chatId) }
             val message = when (result) {
@@ -1672,7 +1697,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 projects = updatedProjects,
                 chats = updatedChats,
                 messages = if (it.activeChatId == chatId) updatedMessages else it.messages,
-                retryPrompt = null,
+                retryPrompts = it.retryPrompts - chatId,
             )
         }
         publishRunningFlags()
@@ -1748,19 +1773,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun offerRetry(run: ChatRun) {
-        _state.update { it.copy(retryPrompt = RetryPrompt(run.chatId, run.lastPrompt)) }
+        _state.update { it.copy(retryPrompts = it.retryPrompts + (run.chatId to RetryPrompt(run.chatId, run.lastPrompt))) }
     }
 
     /** "Try again" after a failed turn: sends the same message (and attachments) once more. */
     fun retryLastPrompt() {
-        val retry = _state.value.retryPrompt ?: return
+        val retry = _state.value.retryPrompts[_state.value.activeChatId] ?: return
         val project = _state.value.activeProject ?: return
-        if (runs.containsKey(retry.chatId) || retry.chatId != _state.value.activeChatId) return
+        if (runs.containsKey(retry.chatId)) return
         if (!canStartAnotherRun()) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             return
         }
-        _state.update { it.copy(retryPrompt = null) }
+        _state.update { it.copy(retryPrompts = it.retryPrompts - retry.chatId) }
         startRun(project, retry.chatId, retry.prompt.copy(projectId = project.id, chatId = retry.chatId))
     }
 
@@ -2054,6 +2079,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         .maxDepth(5)
                         .filter { it != ws && !Files.isSymbolicLink(it.toPath()) }
+                        // The walk is depth-first, so cutting it at 250 hid top-level entries of big projects.
+                        // Read a bounded number, then keep the shallowest 250 (the list is sorted for display below).
+                        .take(4000)
+                        .sortedBy { f -> f.relativeTo(ws).invariantSeparatorsPath.count { it == '/' } }
                         .take(250)
                         .map { f ->
                             val rel = f.relativeTo(ws).invariantSeparatorsPath

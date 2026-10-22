@@ -232,7 +232,8 @@ data class ForgeUiState(
     /** Recovery offered with [bannerMessage]; shown only while the banner still carries the message it was made for. */
     val bannerAction: BannerAction? = null,
     /** The last message of a turn that failed (not stopped); offered as "Try again" above the composer. */
-    val retryPrompt: RetryPrompt? = null,
+    /** The last prompt of each chat whose turn failed (by chat id), so parallel failures do not overwrite each other. */
+    val retryPrompts: Map<String, RetryPrompt> = emptyMap(),
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
 )

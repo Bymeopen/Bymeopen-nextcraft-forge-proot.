@@ -23,12 +23,16 @@ internal class ForegroundSession(
     @Volatile private var startedAt = 0L
     @Volatile private var lastProgressAt = 0L
     @Volatile private var resultPosted = false
-    /** True while this session holds one of the shared foreground-notification slots. */
-    @Volatile private var counted = false
+    /**
+     * True between [start] and the finish/cancel call. The service counts one task per start and one per finish, so
+     * every started session must send exactly one finish (the service itself keeps the notification and the wake lock
+     * until the last task is done), and a session that never started must send none.
+     */
+    @Volatile private var started = false
 
     /** Marks the start of a turn: resets the timer, the progress throttle and the posted-result guard. */
     fun begin() {
-        releaseSlot()
+        started = false
         startedAt = SystemClock.elapsedRealtime()
         lastProgressAt = 0L
         resultPosted = false
@@ -40,11 +44,9 @@ internal class ForegroundSession(
     }
 
     fun start(projectName: String) {
-        // Several chats can run at once; the notification must outlive all of them, not just the first to finish.
-        if (!counted) {
-            counted = true
-            runningSessions.incrementAndGet()
-        }
+        // Several chats can run at once; the service counts the tasks and outlives all of them.
+        if (started) return
+        started = true
         RuntimeExecutionServiceContract.startForeground(context, projectName)
     }
 
@@ -61,7 +63,8 @@ internal class ForegroundSession(
     fun finish(completed: Boolean, projectName: String, detail: String) {
         if (resultPosted) return
         resultPosted = true
-        if (releaseSlot() > 0) return
+        if (!started) return
+        started = false
         RuntimeExecutionServiceContract.finishForeground(context, completed, projectName, detail, tag)
     }
 
@@ -69,27 +72,20 @@ internal class ForegroundSession(
     fun finishRes(completed: Boolean, projectName: String, @androidx.annotation.StringRes detailRes: Int, vararg args: String) {
         if (resultPosted) return
         resultPosted = true
+        if (!started) return
+        started = false
         RuntimeExecutionServiceContract.finishForegroundRes(context, completed, projectName, detailRes, arrayOf(*args), tag)
     }
 
     fun cancel() {
         if (resultPosted) return
         resultPosted = true
-        if (releaseSlot() > 0) return
+        if (!started) return
+        started = false
         RuntimeExecutionServiceContract.cancelForeground(context)
-    }
-
-    /** Gives back this session's slot (once) and returns how many other sessions still hold one. */
-    private fun releaseSlot(): Int {
-        if (counted) {
-            counted = false
-            return runningSessions.decrementAndGet().coerceAtLeast(0)
-        }
-        return runningSessions.get()
     }
 
     private companion object {
         const val PROGRESS_MIN_INTERVAL_MS = 750L
-        val runningSessions = java.util.concurrent.atomic.AtomicInteger(0)
     }
 }
