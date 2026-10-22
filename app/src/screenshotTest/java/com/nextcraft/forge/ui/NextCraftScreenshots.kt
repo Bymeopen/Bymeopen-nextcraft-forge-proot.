@@ -45,6 +45,7 @@ abstract class NextCraftScreenshots(private val label: String, private val theme
         view.draw(android.graphics.Canvas(bitmap))
         val dir = File("build/screenshots").apply { mkdirs() }
         File(dir, "$scenario-$label.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        ScreenshotBaselines.handle("$scenario-$label.png", label, bitmap)
     }
 
     @Composable

@@ -518,7 +518,9 @@ class AntigravityRuntimeBridge(
                                 eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.response))
                             }
                             resultSeen = true
-                        } else throw AntigravitySessionException(friendlyError(event.error ?: event.status))
+                        } else throw AntigravitySessionException(
+                            friendlyError(event.error ?: event.status, System.currentTimeMillis() - sessionStartedAtMillis),
+                        )
                     }
                     null -> Unit
                 }
@@ -596,7 +598,10 @@ class AntigravityRuntimeBridge(
             } else {
                 val exit = process.waitFor()
                 check(exit == 0 && resultSeen) {
-                    friendlyError(lastDiagnostic.ifBlank { "Antigravity exited with code $exit" })
+                    friendlyError(
+                        lastDiagnostic.ifBlank { "Antigravity exited with code $exit" },
+                        System.currentTimeMillis() - sessionStartedAtMillis,
+                    )
                 }
             }
             val paths = checkpoints.changedFiles(workspace, before)
@@ -617,7 +622,9 @@ class AntigravityRuntimeBridge(
                 userStopRequested -> "Stopped by user"
                 // Already classified when it was thrown; classifying the friendly text again could pick up log noise.
                 it is AntigravitySessionException -> it.message.orEmpty()
-                else -> antigravityFriendlyError(it.message.orEmpty(), diagnostic)
+                else -> antigravityFriendlyError(
+                    it.message.orEmpty(), diagnostic, System.currentTimeMillis() - sessionStartedAtMillis,
+                )
             }
             emitFailure(sessionId, message)
             if (userStopRequested) cancelForegroundRuntime()
@@ -699,7 +706,8 @@ class AntigravityRuntimeBridge(
 
     private fun cancelForegroundRuntime() = foreground.cancel()
 
-    private fun friendlyError(raw: String): String = antigravityFriendlyError(raw)
+    private fun friendlyError(raw: String, elapsedMs: Long = 0L): String =
+        antigravityFriendlyError(raw, elapsedMs = elapsedMs)
 
     private fun recentAntigravityDiagnostic(sinceMillis: Long): String = runCatching {
         val logDir = File(
@@ -714,11 +722,17 @@ class AntigravityRuntimeBridge(
     }.getOrDefault("")
 }
 
-internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): String {
+internal fun antigravityFriendlyError(
+    raw: String,
+    diagnostic: String = "",
+    elapsedMs: Long = Long.MAX_VALUE,
+): String {
     val rawValue = raw.replace(Regex("\\s+"), " ").trim()
     // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
     // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
-    return classifyAntigravityError(rawValue, allowTimeout = true)
+    // "60-minute limit" only fits a turn that really ran that long; a quick timeout is something else, show it.
+    val ranToLimit = elapsedMs >= ANTIGRAVITY_TASK_LIMIT_MS - 5 * 60_000L
+    return classifyAntigravityError(rawValue, allowTimeout = ranToLimit)
         ?: classifyAntigravityError("$rawValue ${antigravityDiagnosticSignal(diagnostic)}", allowTimeout = false)
         ?: rawValue.ifBlank { ANTIGRAVITY_GENERIC_FAILURE }.take(500)
 }
@@ -737,6 +751,8 @@ private fun antigravityDiagnosticSignal(diagnostic: String): String {
         .trim()
 }
 
+private const val ANTIGRAVITY_TASK_LIMIT_MS = 60 * 60_000L
+
 private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
     ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
         "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
@@ -753,7 +769,9 @@ private fun classifyAntigravityError(value: String, allowTimeout: Boolean): Stri
         "Your Antigravity account is out of credits. Check the account plan or wait for credits to reset."
     allowTimeout && (value.contains("timed out", true) || value.contains("timeout", true)) ->
         "Antigravity reached the 60-minute task limit. Your files were kept."
-    value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
+    // Only from agy's own error: its log mentions models routinely ("model ... not in local config, using default"),
+    // which made unrelated failures read as "model unavailable".
+    allowTimeout && value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
         "The selected Antigravity model is unavailable. Refresh models in Settings."
     else -> null
 }
@@ -826,7 +844,9 @@ private fun MutableList<String>.addAntigravitySelection(model: String, effort: S
     if (model.isNotBlank()) {
         addAll(listOf("--model", model))
     }
-    if (effort in setOf("low", "medium", "high")) {
+    // A model id that already names its effort (gemini-4-argon-high) gets no second, possibly different --effort.
+    val modelHasEffort = Regex("-(low|medium|high)$").containsMatchIn(model)
+    if (!modelHasEffort && effort in setOf("low", "medium", "high")) {
         addAll(listOf("--effort", effort))
     }
 }

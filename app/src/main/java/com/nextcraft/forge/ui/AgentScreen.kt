@@ -190,6 +190,7 @@ fun AgentScreen(
 
     val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
     var usageOpen by rememberSaveable { mutableStateOf(false) }
+    var scheduleOpen by rememberSaveable { mutableStateOf(false) }
     var renameOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheetOpen by rememberSaveable { mutableStateOf(false) }
     var routeSheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -213,6 +214,7 @@ fun AgentScreen(
             onOpenChanges = { viewModel.selectProjectPane(ProjectPane.FILES) },
             onRename = { renameOpen = true },
             onUsage = { usageOpen = true },
+            onSchedule = { scheduleOpen = true },
             onClear = viewModel::clearActiveChat,
             onDelete = { viewModel.deleteChat(state.activeChatId) },
             onBranch = {
@@ -567,6 +569,7 @@ fun AgentScreen(
     }
 
     if (usageOpen) ChatUsageSheet(state = state, onDismiss = { usageOpen = false })
+    if (scheduleOpen) ScheduleDialog(state = state, viewModel = viewModel, onDismiss = { scheduleOpen = false })
     if (branchSheetOpen) BranchSheet(state = state, viewModel = viewModel, chatId = state.activeChatId, onDismiss = { branchSheetOpen = false })
     if (routeSheetOpen) {
         androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshReadyAgents() }
