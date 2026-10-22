@@ -4619,8 +4619,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setAntigravityConfig(model: String, effort: String) {
-        val cleanModel = model.trim()
         val cleanEffort = effort.trim().ifEmpty { "high" }
+        // Ids such as gemini-4-argon-high carry the effort themselves. Picking "Medium" with that model selected must
+        // switch to gemini-4-argon-medium; otherwise the tab looked dead and agy got a model and an effort that clash.
+        val cleanModel = model.trim().let { id ->
+            val variant = id.replace(AGY_EFFORT_SUFFIX, "-$cleanEffort")
+            val known = _state.value.antigravityModels
+            if (variant != id && (known.isEmpty() || variant in known)) variant else id
+        }
         preferences.antigravityModel = cleanModel
         preferences.antigravityEffort = cleanEffort
         _state.update {
@@ -4633,7 +4639,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Picks an Antigravity model; an id ending in -low/-medium/-high also sets the matching effort. */
     fun selectAntigravityModel(model: String) {
-        val effort = Regex("-(low|medium|high)$").find(model)?.groupValues?.get(1) ?: _state.value.antigravityEffort
+        val effort = AGY_EFFORT_SUFFIX.find(model)?.groupValues?.get(1) ?: _state.value.antigravityEffort
         setAntigravityConfig(model, effort)
     }
 
@@ -4858,3 +4864,6 @@ private class ChatRun(
     /** True while the run is being stopped so that a queued message can go out at once (see steerQueuedPrompt). */
     var steering: Boolean = false
 }
+
+/** The effort part of an Antigravity model id such as gemini-4-argon-high. */
+private val AGY_EFFORT_SUFFIX = Regex("-(low|medium|high)$")
