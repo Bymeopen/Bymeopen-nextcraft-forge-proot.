@@ -78,11 +78,19 @@ class ThemeAndNavTest {
     @Test
     fun glassSheet_isOpaque_andTextReadable() {
         val scheme = ZuanGlassColorScheme
-        val sheet = scheme.surface.copy(alpha = 1f)
+        val tokens = resolveThemeTokens("glass", false).second
+        val sheet = GlassFloatingSurface
         assertEquals(1f, sheet.alpha, 0f)
         assertText("onSurface/sheet", scheme.onSurface, sheet)
         assertText("onSurfaceVariant/sheet", scheme.onSurfaceVariant, sheet)
-        assertText("accent/sheet", resolveThemeTokens("glass", false).second.accentText, sheet)
+        assertText("accent/sheet", tokens.accentText, sheet)
+        assertText("success/sheet", tokens.successText, sheet)
+        assertText("warning/sheet", tokens.warningText, sheet)
+        assertText("danger/sheet", tokens.dangerText, sheet)
+        // Lifted layers must be darker than the page they float over.
+        GlassCanvasColors.forEach {
+            assertTrue("floating surface must be darker than every canvas stop", luminance(sheet) < luminance(it))
+        }
     }
 
     /** Added/removed diff text must read on its own row tint in every theme (glass tints are translucent, so it is composited). */
