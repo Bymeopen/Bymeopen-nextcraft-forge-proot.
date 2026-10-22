@@ -1096,8 +1096,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val title = _state.value.chats.firstOrNull { it.id == chatId }?.title.orEmpty()
         withBranchBusy(chatId) {
             val result = branchLock(chatId).withLock {
-                chatBranches.commitTurn(project, chatId, "Forge: save work before merge")
-                chatBranches.mergeIntoMain(project, chatId, title)
+                val saved = chatBranches.commitTurn(project, chatId, "Forge: save work before merge")
+                // Conflict markers still in the branch must be fixed first; merging now would put them in the project.
+                if (!saved.ok && saved.output.contains("unresolved conflict")) {
+                    BranchMergeResult.Failed(saved.output.trim().takeLast(200))
+                } else {
+                    chatBranches.mergeIntoMain(project, chatId, title)
+                }
             }
             val message = when (result) {
                 BranchMergeResult.Done -> UiText.res(R.string.branch_merged)

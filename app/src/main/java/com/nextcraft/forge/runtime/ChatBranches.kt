@@ -204,6 +204,11 @@ class ChatBranches(context: Context) {
 
         private val COMMIT_SCRIPT = script("""
             cd "§C"
+            # `add -A` marks every conflicted file as resolved. After a merge that stopped on conflicts, a file that still
+            # holds conflict markers must not be committed: the markers would end up in the user's project.
+            for f in §(G diff --name-only --diff-filter=U); do
+              if grep -q '^<<<<<<< ' "§f" 2>/dev/null; then echo "unresolved conflict in §f" >&2; exit 3; fi
+            done
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "§MSG"; fi
         """)

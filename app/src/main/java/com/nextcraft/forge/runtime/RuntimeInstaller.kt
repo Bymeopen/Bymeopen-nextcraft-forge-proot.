@@ -3030,7 +3030,9 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 if is_mounted "${'$'}dst"; then
                     local prev_src=""
                     [ -f "${'$'}state_file" ] && prev_src=${'$'}(cat "${'$'}state_file" 2>/dev/null || true)
-                    if [ "${'$'}prev_src" != "${'$'}src" ]; then
+                    # A mount whose source was deleted keeps showing the dead directory (link count 0) even after the same path is
+                    # created again (a discarded and re-created chat branch, a deleted probe folder), so it must be replaced too.
+                    if [ "${'$'}prev_src" != "${'$'}src" ] || [ "${'$'}(stat -c %h "${'$'}dst" 2>/dev/null)" = 0 ]; then
                         umount "${'$'}dst" 2>/dev/null || umount -l "${'$'}dst" 2>/dev/null || true
                     fi
                 fi
