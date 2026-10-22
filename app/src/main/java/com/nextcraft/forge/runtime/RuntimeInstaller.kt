@@ -108,7 +108,7 @@ private data class RuntimeBundle(
 private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.1"
 
 /** Release hosting the Ubuntu 20.04 bundles; still serves the Android bundle and the Python 3.8 overlay. */
-private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
+private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-legacy-2026.09.4"
 
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
@@ -2902,7 +2902,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         /** Python 3.8 overlay for runtimes still on the Ubuntu 20.04 rootfs: the 3.12 overlay needs glibc 2.39. */
         private val LEGACY_PYTHON_BUNDLE = RuntimeBundle(
             label = "Python",
-            fileName = "pocketdev-python-arm64-2026.09.2.tar.zst",
+            fileName = "nextcraft-python-legacy-arm64-2026.09.2.tar.zst",
             sha256 = "6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85",
             compressedBytes = 55_419_626L,
             baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
