@@ -1389,4 +1389,7 @@
     <string name="schedule_agent_changed">Agen mengubah pewaktu chat ini</string>
     <string name="settings_schedule_agent">Izinkan agen menjadwalkan tugas</string>
     <string name="settings_schedule_agent_subtitle">Agen boleh mengulang atau memantau sesuatu dengan menambah pewaktu ke chat (maks 3 per chat).</string>
+    <string name="chg_notif_channel">Yang baru</string>
+    <string name="chg_notif_title">NextCraft Forge diperbarui</string>
+    <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil</string>
 </resources>
