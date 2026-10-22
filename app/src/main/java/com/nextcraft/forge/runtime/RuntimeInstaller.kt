@@ -107,8 +107,6 @@ private data class RuntimeBundle(
 /** Release hosting the Ubuntu 24.04 bundles built from scripts/runtime-bundles. */
 private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.1"
 
-/** Release hosting the Ubuntu 20.04 bundles; still serves the Android bundle and the Python 3.8 overlay. */
-private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-legacy-2026.09.4"
 
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
@@ -852,8 +850,11 @@ class RuntimeInstaller(private val context: Context) {
         NEXTCRAFT_CORE_TOOLS_VERSION,
     )
 
-    private fun pythonBundle(): RuntimeBundle =
-        if (rootfsMarker.readTextOrNull() == LEGACY_ROOTFS_VERSION) LEGACY_PYTHON_BUNDLE else PYTHON_BUNDLE
+    /** The Python 3.12 overlay needs glibc 2.39; an Ubuntu 20.04 runtime has to be reinstalled on 24.04 first. */
+    private fun pythonBundle(): RuntimeBundle {
+        check(rootfsMarker.readTextOrNull() != LEGACY_ROOTFS_VERSION) { LEGACY_ROOTFS_PYTHON_MESSAGE }
+        return PYTHON_BUNDLE
+    }
 
     private fun isSupportedRootfsVersion(version: String?): Boolean = version in setOf(
         ROOTFS_VERSION,
@@ -2821,6 +2822,9 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
         private const val ROOTFS_VERSION = "ubuntu-24.04.5-arm64"
         private const val LEGACY_ROOTFS_VERSION = "ubuntu-20.04.5-arm64"
+        private const val LEGACY_ROOTFS_PYTHON_MESSAGE =
+            "Python needs the Ubuntu 24.04 runtime. This runtime is still on Ubuntu 20.04: reinstall the runtime " +
+                "(Settings → Runtime), then install Python again."
         private const val NODE_VERSION = "v24.19.0"
         private const val NODE_ARM64_SHA256 = "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f"
         private const val COMPOSER_VERSION = "2.10.3"
@@ -2898,14 +2902,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             fileName = "nextcraft-python-arm64-2026.10.1.tar.zst",
             sha256 = "43a23a3e2d73e46f5c242ac4e3d8f7adef356b987559e1474e4cc9072118a7f3",
             compressedBytes = 15_053_684L,
-        )
-        /** Python 3.8 overlay for runtimes still on the Ubuntu 20.04 rootfs: the 3.12 overlay needs glibc 2.39. */
-        private val LEGACY_PYTHON_BUNDLE = RuntimeBundle(
-            label = "Python",
-            fileName = "nextcraft-python-legacy-arm64-2026.09.2.tar.zst",
-            sha256 = "6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85",
-            compressedBytes = 55_419_626L,
-            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
         )
         /** Built by scripts/runtime-bundles/build-android-bundle.sh; versions in [AndroidToolchain]. */
         private val ANDROID_BUNDLE = RuntimeBundle(

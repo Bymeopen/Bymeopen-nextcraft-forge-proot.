@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name">NextCraft Forge</string>
+    <string name="app_name">NextCraft Dev</string>
     <string name="app_tagline">Forge your dreams with AI.</string>
     <!-- UI strings extracted from Compose screens -->
     <string name="agent_stop">Stop</string>
@@ -63,7 +63,7 @@
     <string name="shell_new_workspace_project">New Workspace Project…</string>
     <string name="shell_new_project">New Project</string>
     <string name="shell_terminal">Terminal</string>
-    <string name="shell_nextcraft_forge">NextCraft Forge</string>
+    <string name="shell_nextcraft_forge">NextCraft Dev</string>
     <string name="shell_select_development_stacks_to">Select Development Stacks to Provision</string>
     <string name="shell_repair_mounts_dpkg">Repair Mounts / dpkg</string>
     <string name="shell_re_check_root">Re-check Root</string>
@@ -549,7 +549,7 @@
     <string name="upd_check_failed">Update check failed: %1$s</string>
     <string name="upd_network_error">network error</string>
     <string name="upd_available">Update available: v%1$s (%2$d)</string>
-    <string name="upd_up_to_date">NextCraft Forge is up to date.</string>
+    <string name="upd_up_to_date">NextCraft Dev is up to date.</string>
     <string name="upd_progress_total">Downloading v%1$s: %2$s / %3$s MB</string>
     <string name="upd_progress">Downloading v%1$s: %2$s MB</string>
     <string name="msg_install_antigravity_first">Install Antigravity CLI first.</string>
@@ -903,7 +903,7 @@
     <string name="rt_msg_unpack_rootfs">Unpacking Core Linux rootfs…</string>
     <string name="rt_msg_chroot_ready_short">Root Chroot runtime ready</string>
     <string name="rt_msg_ipc_bridge">Preparing runtime IPC bridge…</string>
-    <string name="rt_msg_setup_complete">NextCraft Forge Root Chroot setup complete</string>
+    <string name="rt_msg_setup_complete">NextCraft Dev Root Chroot setup complete</string>
     <string name="rt_msg_prepare_ubuntu">Preparing Ubuntu Root Chroot runtime…</string>
     <string name="rt_msg_check_files">Checking Root Chroot runtime files…</string>
     <string name="rt_msg_check_node">Checking Node.js and npm…</string>
@@ -915,7 +915,7 @@
     <string name="rt_msg_setup_failed">Runtime setup could not complete.</string>
     <string name="rt_msg_env_ready">Your Ubuntu ARM64 chroot environment and coding tools are ready.</string>
     <string name="rt_msg_log_done">✓ Setup completed successfully</string>
-    <string name="rt_msg_log_resume">— Resuming NextCraft Forge setup —</string>
+    <string name="rt_msg_log_resume">— Resuming NextCraft Dev setup —</string>
     <string name="rt_msg_log_paused">• Setup paused safely</string>
     <string name="rt_msg_downloading_amount">Downloading: %1$s</string>
     <string name="rt_msg_downloading_bundle">Downloading %1$s bundle…</string>
@@ -1288,7 +1288,7 @@
     <string name="route_single_busy">The agent can be changed once the current turn has finished.</string>
     <string name="upd_notif_channel">App updates</string>
     <string name="upd_notif_title">Update available</string>
-    <string name="upd_notif_text">NextCraft Forge %1$s is ready to install</string>
+    <string name="upd_notif_text">NextCraft Dev %1$s is ready to install</string>
     <string name="settings_update_notify">Notify me about updates</string>
     <string name="settings_update_notify_sub">Checks in the background every few hours and shows a notification once for each new build.</string>
     <string name="upd_banner_title">Update %1$s is available</string>
@@ -1411,6 +1411,6 @@
     <string name="settings_schedule_agent">Let the agent schedule tasks</string>
     <string name="settings_schedule_agent_subtitle">The agent may repeat or monitor something by adding a timer to the chat (up to 3 per chat).</string>
     <string name="chg_notif_channel">What\'s new</string>
-    <string name="chg_notif_title">NextCraft Forge updated</string>
+    <string name="chg_notif_title">NextCraft Dev updated</string>
     <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
 </resources>

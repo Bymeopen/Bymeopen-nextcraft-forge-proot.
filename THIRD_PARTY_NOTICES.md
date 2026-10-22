@@ -14,8 +14,7 @@ GPLv3 work, and their copyright and permission notice below must be kept in ever
 
 ## Mobile Harness
 - **What:** NextCraft Forge started as an adaptation of Mobile Harness (https://github.com/techjarves/Mobile-Harness);
-  parts of the app and of the runtime bundle layout derive from it. The legacy Python 3.8 runtime overlay comes from
-  its `runtime-2026.09.4` release.
+  parts of the app and of the runtime bundle layout derive from it.
 - **Licence:** MIT, reproduced below as its licence requires.
 
 ```
