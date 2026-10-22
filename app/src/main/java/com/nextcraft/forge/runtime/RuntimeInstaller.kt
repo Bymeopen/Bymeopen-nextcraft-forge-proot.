@@ -2897,16 +2897,16 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
             fileName = "nextcraft-core-arm64-2026.10.2.tar.zst",
-            sha256 = "a30617f2c16bdb46c403d6cfd67d1f5ae14790c897a2ed2ac49749c891b340e1",
-            compressedBytes = 74_058_301L,
+            sha256 = "c2dab14270aae62b21243109a5a6e75af7d0c6821fda6264b91f973e18f3ddfb",
+            compressedBytes = 74_457_771L,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.308"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
             fileName = "nextcraft-claude-arm64-2026.10.2.tar.zst",
-            sha256 = "f074f0b6e373241ecf4313f5d2d15d371b9b1ecb1b626a4e79851f6693fbd3d4",
-            compressedBytes = 75_289_759L,
+            sha256 = "cc479f683e0e581e055d6fa2c033897c1aa6e306b6c065c9cff9e65e55c8e7a4",
+            compressedBytes = 102_137_744L,
         )
         private val PYTHON_BUNDLE = RuntimeBundle(
             label = "Python",
@@ -2924,14 +2924,14 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek",
             fileName = "nextcraft-dsh-arm64-2026.10.2.tar.zst",
-            sha256 = "3193211ebdcd6ca9b91e31ec871b8702419f2758339de8739b0dd3b5b41fdbe2",
-            compressedBytes = 27_986_391L,
+            sha256 = "0036adeef3f30a7b535821e7f4594c3a296ff16f7dfbbcaec6b93bc6ef44ff25",
+            compressedBytes = 90_508_623L,
         )
         private val AGY_BUNDLE = RuntimeBundle(
             label = "Antigravity CLI",
             fileName = "nextcraft-agy-arm64-2026.10.2.tar.zst",
-            sha256 = "fd7ddece915880f59875886dbc3a39af9b0e1cad7b784ae4f548e42a286bed31",
-            compressedBytes = 41_870_033L,
+            sha256 = "0a3e344817ada663f5cb79b0b86707fd76581cef794194d31dc360ec5b5d889b",
+            compressedBytes = 48_493_274L,
         )
         private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
         private const val ENV_CLEANUP_POLL_MS = 1_000L
