@@ -663,7 +663,12 @@ internal fun WorkspaceFolderList(
                     IconButton(onClick = { menuOpen = true }, enabled = enabled && !selecting) {
                         Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.files_row_menu), tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        // The button sits at the right edge; shift the menu left so it keeps a margin to the screen edge.
+                        offset = androidx.compose.ui.unit.DpOffset((-12).dp, 0.dp),
+                    ) {
                         if (entry.isDirectory) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_new_file)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FILE, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFileIn(entry.path) })
                             DropdownMenuItem(text = { Text(stringResource(R.string.files_new_folder)) }, leadingIcon = { ForgeIcon(ForgeGlyph.FOLDER, scheme.onSurfaceVariant) }, onClick = { menuOpen = false; onNewFolderIn(entry.path) })
