@@ -355,10 +355,9 @@ private fun ReaLessonSheet(rea: ReaState, controller: ReaController, onDismiss: 
     var confirmReveal by remember(lesson.n) { mutableStateOf(false) }
     // One 1-based pick per question (0 = not answered yet); reset whenever a new quiz is loaded.
     val picks = remember(lesson.n, rea.quiz) { mutableStateListOf<Int>().apply { repeat(rea.quiz?.size ?: 0) { add(0) } } }
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = forgeSheetColor(),
     ) {
         Column(
             modifier = Modifier
@@ -481,10 +480,9 @@ private fun ReaFilePicker(files: List<com.nextcraft.forge.model.WorkspaceEntry>,
     val tokens = LocalForgeThemeTokens.current
     var query by rememberSaveable { mutableStateOf("") }
     val shown = files.filter { query.isBlank() || it.path.contains(query, ignoreCase = true) }
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = forgeSheetColor(),
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.rea_pick_file), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)

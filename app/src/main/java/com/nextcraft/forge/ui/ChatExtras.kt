@@ -340,10 +340,9 @@ internal fun ToolApprovalSheet(request: ToolRequest, onApprove: () -> Unit, onRe
         skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden },
     )
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = {},
         sheetState = sheetState,
-        containerColor = forgeSheetColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         ToolApprovalContent(request, onApprove, onReject)

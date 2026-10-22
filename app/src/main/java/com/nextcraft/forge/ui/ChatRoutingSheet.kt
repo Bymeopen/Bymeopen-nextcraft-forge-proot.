@@ -73,10 +73,9 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
     // Ordered list: enabled agents in priority order first, then the ones that are off.
     val enabled = routing.agents
     val ordered = enabled + AgentKind.entries.filterNot { it in enabled }
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = forgeSheetColor(),
     ) {
         Column(
             modifier = Modifier

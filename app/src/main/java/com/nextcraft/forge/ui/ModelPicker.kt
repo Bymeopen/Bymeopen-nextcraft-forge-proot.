@@ -70,10 +70,9 @@ fun ModelPickerDialog(
     }
     val offerCustom = needle.isNotEmpty() && options.none { it.id.equals(needle, ignoreCase = true) }
 
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = forgeSheetColor(),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 16.dp),
