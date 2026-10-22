@@ -1078,4 +1078,7 @@
     <string name="branch_card">Cabang · %1$d commit · %2$d berkas</string>
     <string name="branch_card_lines">+%1$d −%2$d</string>
     <string name="branch_open">Buka</string>
+    <string name="branch_committed">Di-commit ke branch.</string>
+    <string name="branch_commit_hint">Pesan commit</string>
+    <string name="branch_commit">Commit</string>
 </resources>

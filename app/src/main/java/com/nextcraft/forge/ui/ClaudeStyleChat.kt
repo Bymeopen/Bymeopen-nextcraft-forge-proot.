@@ -494,6 +494,25 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
                 }
             }
             item {
+                var commitMessage by rememberSaveable(chatId) { mutableStateOf("") }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = commitMessage,
+                        onValueChange = { commitMessage = it.take(100) },
+                        label = { Text(stringResource(R.string.branch_commit_hint)) },
+                        singleLine = true,
+                        enabled = !busy && !running && status.conflicts.isEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { viewModel.commitChatBranch(chatId, commitMessage); commitMessage = "" },
+                        enabled = !busy && !running && status.conflicts.isEmpty() && status.uncommitted > 0 && commitMessage.isNotBlank(),
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.branch_commit)) }
+                }
+            }
+            item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     androidx.compose.material3.OutlinedButton(
                         onClick = { viewModel.loadBranchDiff(chatId) },

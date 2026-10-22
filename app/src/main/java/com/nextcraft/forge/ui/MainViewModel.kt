@@ -933,6 +933,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteChat(chatId: String) {
         if (runs.containsKey(chatId) || chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
+        if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated != true) {
+            deleteChatNow(chatId)
+            return
+        }
+        // Deleting the chat discards its branch clone; never do that over commits that were not merged.
+        viewModelScope.launch {
+            if (branchHoldsUnmergedWork(project, chatId)) {
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
+            } else {
+                deleteChatNow(chatId)
+            }
+        }
+    }
+
+    /** True when the chat's clone exists and either has work not in the project or its state cannot be read. */
+    private suspend fun branchHoldsUnmergedWork(project: Project, chatId: String): Boolean {
+        val cloneExists = File(chatBranches.branchFor(project, chatId).cloneDir, ".git").exists()
+        if (!cloneExists) return false
+        val status = runCatching { chatBranches.status(project, chatId) }.getOrNull() ?: return true
+        return status.commits > 0 || status.uncommitted > 0 || status.conflicts.isNotEmpty()
+    }
+
+    private fun deleteChatNow(chatId: String) {
+        if (runs.containsKey(chatId) || chatSwitchBlocked()) return
+        val project = _state.value.activeProject ?: return
         val currentChats = _state.value.chats
         if (currentChats.size <= 1) return
         val updatedChats = currentChats.filterNot { it.id == chatId }
@@ -1023,16 +1048,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Back to the project folder; only when the branch holds nothing that would be lost. */
     fun disableChatBranch(chatId: String) {
         val project = _state.value.activeProject ?: return
-        val status = _state.value.branchStatus[chatId]
-        if (status != null && (status.commits > 0 || status.uncommitted > 0 || status.conflicts.isNotEmpty())) {
-            _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
-            return
-        }
         withBranchBusy(chatId) {
+            // The cached status may be missing (app restarted) or stale, so ask git again before discarding anything.
+            if (branchHoldsUnmergedWork(project, chatId)) {
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
+                return@withBranchBusy
+            }
             chatBranches.discard(project, chatId)
             val updated = _state.value.chats.map { if (it.id == chatId) it.copy(isolated = false) else it }
             preferences.saveProjectChats(project.id, updated)
             _state.update { it.copy(chats = updated, branchStatus = it.branchStatus - chatId) }
+        }
+    }
+
+    /** Commits what the chat's branch holds right now with the user's own message. */
+    fun commitChatBranch(chatId: String, message: String) {
+        val project = _state.value.activeProject ?: return
+        val clean = message.trim()
+        if (clean.isEmpty()) return
+        withBranchBusy(chatId) {
+            branchLock(chatId).withLock { chatBranches.commitNow(project, chatId, clean) }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_committed)) }
+            refreshBranchStatus(chatId)
         }
     }
 
@@ -1210,7 +1247,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chat.copy(
                     title = if (shouldRetitle) autoTitle else chat.title,
                     updatedAtMillis = now,
-                    isolated = isolated,
+                    // Never drop the flag: a chat switched to another agent keeps its branch (and its unmerged work).
+                    isolated = wasIsolated || isolated,
                 )
             } else {
                 chat

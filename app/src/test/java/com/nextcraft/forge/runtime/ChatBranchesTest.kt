@@ -60,5 +60,9 @@ class ChatBranchesTest {
             ChatBranches.parseMergeResult("RESULT=conflict\nfiles=a.kt,b.kt,\n", true),
         )
         assertTrue(ChatBranches.parseMergeResult("fatal: bad object", false) is BranchMergeResult.Failed)
+        assertEquals(
+            BranchMergeResult.Failed("git merge failed without conflicts"),
+            ChatBranches.parseMergeResult("RESULT=failed\nmsg=git merge failed without conflicts\n", true),
+        )
     }
 }

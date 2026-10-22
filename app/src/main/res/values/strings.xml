@@ -1095,4 +1095,7 @@
     <string name="branch_card">Branch · %1$d commits · %2$d files</string>
     <string name="branch_card_lines">+%1$d −%2$d</string>
     <string name="branch_open">Open</string>
+    <string name="branch_committed">Committed to the branch.</string>
+    <string name="branch_commit_hint">Commit message</string>
+    <string name="branch_commit">Commit</string>
 </resources>

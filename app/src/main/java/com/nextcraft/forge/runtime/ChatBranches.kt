@@ -73,6 +73,9 @@ class ChatBranches(context: Context) {
         git(project, chatId, COMMIT_SCRIPT, "MSG" to commitMessage(message))
     }
 
+    /** Commits the branch now with the user's own message (the turn commit uses the prompt's first line). */
+    suspend fun commitNow(project: Project, chatId: String, message: String) = commitTurn(project, chatId, message)
+
     suspend fun status(project: Project, chatId: String): BranchStatus? = withContext(Dispatchers.IO) {
         val branch = branchFor(project, chatId)
         if (!File(branch.cloneDir, ".git").exists()) return@withContext null
@@ -169,6 +172,9 @@ class ChatBranches(context: Context) {
                     lines.firstOrNull { it.startsWith("files=") }.orEmpty().removePrefix("files=")
                         .split(',').map(String::trim).filter(String::isNotEmpty),
                 )
+                lines.any { it == "RESULT=failed" } -> BranchMergeResult.Failed(
+                    lines.firstOrNull { it.startsWith("msg=") }.orEmpty().removePrefix("msg=").ifEmpty { "git failed" },
+                )
                 else -> BranchMergeResult.Failed(output.trim().takeLast(300).ifEmpty { if (ok) "Unexpected result" else "git failed" })
             }
         }
@@ -204,6 +210,8 @@ class ChatBranches(context: Context) {
 
         private val COMMIT_SCRIPT = script("""
             cd "§C"
+            # Unresolved conflicts: committing now would store the markers and close the merge. Leave it for the agent.
+            if [ -n "§(G diff --name-only --diff-filter=U)" ]; then exit 0; fi
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "§MSG"; fi
         """)
@@ -229,6 +237,11 @@ class ChatBranches(context: Context) {
 
         /** Merges the committed branch into the project; a conflict aborts the merge and leaves the project untouched. */
         private val MERGE_SCRIPT = script("""
+            if [ -n "§(G -C "§C" diff --name-only --diff-filter=U)" ]; then
+              echo RESULT=conflict
+              echo "files=§(G -C "§C" diff --name-only --diff-filter=U | tr '\n' ',')"
+              exit 0
+            fi
             cd "§M"
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "Forge: snapshot before merging a chat"; fi
@@ -237,12 +250,18 @@ class ChatBranches(context: Context) {
               echo RESULT=merged
               cd "§C"
               G fetch -q "§M" HEAD
-              G merge -q --ff-only FETCH_HEAD >/dev/null 2>&1 || true
-              G tag -f forge-base HEAD >/dev/null
+              # Only move the base when the branch really caught up; otherwise status would hide real divergence.
+              if G merge -q --ff-only FETCH_HEAD >/dev/null 2>&1; then G tag -f forge-base HEAD >/dev/null; fi
             else
-              echo RESULT=conflict
-              echo "files=§(G diff --name-only --diff-filter=U | tr '\n' ',')"
-              G merge --abort
+              FILES="§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              G merge --abort >/dev/null 2>&1 || true
+              if [ -n "§FILES" ]; then
+                echo RESULT=conflict
+                echo "files=§FILES"
+              else
+                echo RESULT=failed
+                echo "msg=git merge failed without conflicts (untracked files in the way?)"
+              fi
             fi
         """)
 
@@ -252,6 +271,11 @@ class ChatBranches(context: Context) {
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "Forge: snapshot before updating a chat"; fi
             cd "§C"
+            if [ -n "§(G diff --name-only --diff-filter=U)" ]; then
+              echo RESULT=conflict
+              echo "files=§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              exit 0
+            fi
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "Forge: save work before update"; fi
             G fetch -q "§M" HEAD
@@ -259,8 +283,15 @@ class ChatBranches(context: Context) {
             if G merge --no-edit FETCH_HEAD >/dev/null 2>&1; then
               echo RESULT=updated
             else
-              echo RESULT=conflict
-              echo "files=§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              FILES="§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              if [ -n "§FILES" ]; then
+                echo RESULT=conflict
+                echo "files=§FILES"
+              else
+                G merge --abort >/dev/null 2>&1 || true
+                echo RESULT=failed
+                echo "msg=git merge failed without conflicts (untracked files in the way?)"
+              fi
             fi
         """)
 
