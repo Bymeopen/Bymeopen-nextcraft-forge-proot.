@@ -872,7 +872,7 @@
     <string name="code_viewer_see_files">Lihat file (%1$d)</string>
     <string name="preview_open_terminal">Buka terminal</string>
     <string name="projects_buttons_hint">Proyek cepat langsung mulai tanpa mengisi apa pun. Proyek baru memungkinkan Anda memilih nama dan jenis.</string>
-    <string name="route_chip_label">Mode: %1$s</string>
+    <string name="route_chip_label">%1$s</string>
     <string name="settings_approval_title">Persetujuan alat agen</string>
     <string name="settings_approval_ask">Tanya dulu untuk perintah berisiko</string>
     <string name="settings_approval_block">Tolak perintah berisiko</string>

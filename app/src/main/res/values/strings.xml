@@ -888,7 +888,7 @@
     <string name="code_viewer_see_files">See files (%1$d)</string>
     <string name="preview_open_terminal">Open terminal</string>
     <string name="projects_buttons_hint">Quick project starts instantly with defaults. New project lets you choose the name and kind.</string>
-    <string name="route_chip_label">Mode: %1$s</string>
+    <string name="route_chip_label">%1$s</string>
     <string name="settings_approval_title">Agent tool approvals</string>
     <string name="settings_approval_ask">Ask before risky commands</string>
     <string name="settings_approval_block">Block risky commands</string>
