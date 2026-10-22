@@ -99,9 +99,9 @@ fun TerminalScreen(
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
 
-    LaunchedEffect(chatId) { viewModel.ensureTerminalSession(chatId) }
-    val session = remember(state.terminalRevision, chatId) { viewModel.currentTerminalSession(chatId) }
-    val finished = remember(state.terminalRevision, chatId) { viewModel.isTerminalFinished(chatId) }
+    LaunchedEffect(chatId, state.activeProjectId) { viewModel.ensureTerminalSession(chatId) }
+    val session = remember(state.terminalRevision, chatId, state.activeProjectId) { viewModel.currentTerminalSession(chatId) }
+    val finished = remember(state.terminalRevision, chatId, state.activeProjectId) { viewModel.isTerminalFinished(chatId) }
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
     val prefs = remember { context.getSharedPreferences("forge_terminal", android.content.Context.MODE_PRIVATE) }

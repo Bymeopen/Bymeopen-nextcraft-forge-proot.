@@ -244,6 +244,7 @@ class ReaController(context: Context) {
                 mutable.update { it.copy(message = UiText.Raw(error.message ?: error.javaClass.simpleName)) }
             } finally {
                 meter?.cancel()
+                flushPendingLog()
                 mutable.update { it.copy(busy = false) }
             }
         }
@@ -340,6 +341,15 @@ class ReaController(context: Context) {
                 progressLabel = step?.label ?: it.progressLabel,
             )
         }
+    }
+
+    /** Output that ended without a newline is still waiting in [pendingLine]; show it when the task is over. */
+    private fun flushPendingLog() {
+        val tail = pendingLine
+        if (tail.isEmpty()) return
+        pendingLine = ""
+        if (InstallProgress.parseStep(tail) != null) return
+        mutable.update { it.copy(log = (it.log + tail).takeLast(MAX_LOG_CHARS)) }
     }
 
     /** Samples the device's received bytes once a second while an install runs (TrafficStats needs no permission). */

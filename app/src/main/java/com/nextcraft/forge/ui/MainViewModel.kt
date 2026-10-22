@@ -835,6 +835,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val index = currentProjects.indexOfFirst { it.id == projectId }
         if (index < 0) return
         val removed = currentProjects[index]
+        closeProjectTerminals(removed.id)
         // A second delete inside the undo window makes the first one final.
         finalizePendingDelete()
         val updated = currentProjects.filterNot { it.id == projectId }
@@ -2421,8 +2422,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val terminals = HashMap<String, TerminalHandle>()
 
+    /** Chat ids are only unique inside a project (every project has a chat called "main"), so the key holds both. */
+    private fun terminalKey(chatId: String?): String = chatId?.let { "chat:${_state.value.activeProjectId}:$it" } ?: "main"
+
     private fun terminalHandle(chatId: String?): TerminalHandle =
-        terminals.getOrPut(chatId?.let { "chat:$it" } ?: "main") { TerminalHandle(chatId) }
+        terminals.getOrPut(terminalKey(chatId)) { TerminalHandle(chatId) }
 
     val terminalSessionClient = ForgeTerminalSessionClient(application) { session -> onTerminalSessionEnded(session) }
 
@@ -2485,9 +2489,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Ends the shell of a chat that was deleted. */
     private fun closeChatTerminal(chatId: String) {
-        terminals.remove("chat:$chatId")?.let { handle ->
+        terminals.remove(terminalKey(chatId))?.let { handle ->
             handle.pending.clear()
             handle.session?.finishIfRunning()
+        }
+    }
+
+    /** Ends every chat shell of [projectId] (its folders are about to be deleted). */
+    private fun closeProjectTerminals(projectId: String) {
+        terminals.keys.filter { it.startsWith("chat:$projectId:") }.forEach { key ->
+            terminals.remove(key)?.let { handle ->
+                handle.pending.clear()
+                handle.session?.finishIfRunning()
+            }
         }
     }
 
