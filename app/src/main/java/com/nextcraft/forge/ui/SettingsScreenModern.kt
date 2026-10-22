@@ -159,13 +159,6 @@ fun SettingsScreenModern(
             ThinDivider()
 
             ForgeToggleRow(
-                title = stringResource(R.string.settings_high_risk_command_approvals),
-                subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
-                checked = state.interactiveHighRiskApprovals,
-                onCheckedChange = viewModel::setInteractiveHighRiskApprovals,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-            ForgeToggleRow(
                 title = stringResource(R.string.settings_game_templates),
                 subtitle = stringResource(R.string.settings_game_templates_subtitle),
                 checked = state.gameTemplatesEnabled,
@@ -186,15 +179,37 @@ fun SettingsScreenModern(
                 onCheckedChange = viewModel::setScheduleEnabled,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
-            ForgeToggleRow(
+            // One choice instead of two switches that excluded each other: the app already keeps them mutually exclusive.
+            Text(
+                text = stringResource(R.string.settings_approval_title),
+                fontSize = ForgeType.secondary,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 2.dp),
+            )
+            RadioRow(
+                title = stringResource(R.string.settings_approval_ask),
+                subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
+                selected = !state.autoApproveAllTools && state.interactiveHighRiskApprovals,
+                onClick = { viewModel.setInteractiveHighRiskApprovals(true) },
+            )
+            RadioRow(
+                title = stringResource(R.string.settings_approval_block),
+                subtitle = stringResource(R.string.settings_approval_block_subtitle),
+                selected = !state.autoApproveAllTools && !state.interactiveHighRiskApprovals,
+                onClick = {
+                    viewModel.setAutoApproveAllTools(false)
+                    viewModel.setInteractiveHighRiskApprovals(false)
+                },
+            )
+            RadioRow(
                 title = stringResource(R.string.settings_auto_approve_all_tools),
                 subtitle = stringResource(R.string.settings_auto_approve_all_tools_subtitle),
-                checked = state.autoApproveAllTools,
-                onCheckedChange = viewModel::setAutoApproveAllTools,
-                modifier = Modifier.padding(horizontal = 14.dp),
+                selected = state.autoApproveAllTools,
+                onClick = { viewModel.setAutoApproveAllTools(true) },
             )
             if (state.autoApproveAllTools) {
-                // Both switches together mean nothing is ever confirmed: say so where the user is looking.
+                // Approving everything means nothing is ever confirmed: say so where the user is looking.
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.Top,

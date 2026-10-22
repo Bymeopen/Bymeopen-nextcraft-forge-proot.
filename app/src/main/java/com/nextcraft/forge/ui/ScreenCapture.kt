@@ -12,7 +12,8 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** One screen of the app to photograph: where to navigate, and the file name it is saved under. */
-internal data class CaptureStep(val name: String, val tab: ForgeTab, val pane: ProjectPane? = null)
+/** [extraSettleMs] is added to the usual wait for screens that take longer to draw (the terminal starts a shell first). */
+internal data class CaptureStep(val name: String, val tab: ForgeTab, val pane: ProjectPane? = null, val extraSettleMs: Long = 0L)
 
 /**
  * The main screens, in the order they are captured: the four panes of the open project, then the global screens.
@@ -21,7 +22,7 @@ internal data class CaptureStep(val name: String, val tab: ForgeTab, val pane: P
 internal fun appCaptureSteps(): List<CaptureStep> = listOf(
     CaptureStep("chat", ForgeTab.PROJECTS, ProjectPane.CHAT),
     CaptureStep("files", ForgeTab.PROJECTS, ProjectPane.FILES),
-    CaptureStep("terminal", ForgeTab.PROJECTS, ProjectPane.TERMINAL),
+    CaptureStep("terminal", ForgeTab.PROJECTS, ProjectPane.TERMINAL, extraSettleMs = 2500L),
     CaptureStep("preview", ForgeTab.PROJECTS, ProjectPane.PREVIEW),
     CaptureStep("projects", ForgeTab.PROJECTS),
     CaptureStep("ai-settings", ForgeTab.AGENT),

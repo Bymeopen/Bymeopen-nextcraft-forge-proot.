@@ -48,7 +48,8 @@ internal fun fileAsViewerLines(content: String): List<DiffLine> =
 @Composable
 fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
     val scheme = MaterialTheme.colorScheme
-    var showChanges by rememberSaveable { mutableStateOf(true) }
+    // Open on the files when there is nothing to review, instead of an empty "changes" tab.
+    var showChanges by rememberSaveable { mutableStateOf(state.changedItems.isNotEmpty()) }
     var openPath by rememberSaveable { mutableStateOf<String?>(null) }
     // Generated and vendored folders would bury the project's own files and make the list thousands of rows long.
     val allFiles = remember(state.workspaceFiles) {
@@ -112,7 +113,13 @@ fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
 
         if (showChanges) {
             if (state.changedItems.isEmpty()) {
-                Text(stringResource(R.string.files_no_unreviewed_checkpoint_changes), color = scheme.onSurfaceVariant, fontSize = ForgeType.control)
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.CODE,
+                    title = stringResource(R.string.code_viewer_no_changes_title),
+                    message = stringResource(R.string.files_no_unreviewed_checkpoint_changes),
+                    actionLabel = stringResource(R.string.code_viewer_see_files, files.size),
+                    onAction = { showChanges = false },
+                )
             }
             state.changedItems.forEach { change ->
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

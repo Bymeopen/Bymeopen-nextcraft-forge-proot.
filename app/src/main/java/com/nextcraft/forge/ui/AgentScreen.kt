@@ -555,7 +555,7 @@ fun AgentScreen(
             onStop = viewModel::stopActiveTask,
             modelChipLabel = chatModelChipLabel(state, primaryAgent(state)),
             onModelChip = { modelSheetOpen = true },
-            routeChipLabel = routeModeLabel(state.routing.mode),
+            routeChipLabel = stringResource(R.string.route_chip_label, routeModeLabel(state.routing.mode)),
             onRouteChip = { routeSheetOpen = true },
             onMic = {
                 if (!voice.listening) voiceBase = promptInput

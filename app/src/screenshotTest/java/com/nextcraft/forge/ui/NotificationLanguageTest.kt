@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
  * wording is checked as the user sees it, in the system language and in a different in-app language.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "in")
+@Config(sdk = [34], qualifiers = "in", application = android.app.Application::class)
 class NotificationLanguageTest {
     private val app: Application get() = RuntimeEnvironment.getApplication()
 
@@ -89,7 +89,7 @@ class NotificationLanguageTest {
 
 /** Opt-in: known English sentences really come out in Indonesian through the same paths the screens use. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "in")
+@Config(sdk = [34], qualifiers = "in", application = android.app.Application::class)
 class MessageLanguageTest {
     private val app: Application get() = RuntimeEnvironment.getApplication()
 

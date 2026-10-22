@@ -30,6 +30,8 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+// A bare Application: ForgeApplication.onCreate schedules WorkManager, which is not initialised under Robolectric.
+@Config(application = android.app.Application::class)
 abstract class NextCraftScreenshots(private val label: String, private val theme: String = "dark") {
     @get:Rule val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
