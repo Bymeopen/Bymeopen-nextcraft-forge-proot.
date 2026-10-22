@@ -106,6 +106,10 @@ class DiagnosticsController(private val context: Context) {
         return buildList {
             val engine = runCatching { installer.runtimeEngine() }.getOrNull()
             add(row(R.string.diag_root, UiText.Raw(engine?.name?.lowercase() ?: "missing")))
+            runCatching {
+                val unrestricted = BatteryOptimization.isUnrestricted(appContext)
+                add(UiText.Raw("Battery optimization") to UiText.Raw(if (unrestricted) "Unrestricted" else "Optimized (some ROMs stop background builds)"))
+            }
             add(row(R.string.diag_linux, UiText.res(if (installed) R.string.diag_installed else R.string.diag_not_installed)))
             runCatching { File(rootfs, ".pocket-rootfs-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
                 ?.takeIf { it.isNotBlank() }?.let { add(row(R.string.diag_rootfs, UiText.Raw(it))) }

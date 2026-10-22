@@ -358,6 +358,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onDeleteProject = viewModel::deleteProject,
                             onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
+                            onOpenUpdate = { viewModel.selectTab(ForgeTab.SETTINGS) },
                         )
                         ProjectView.CHATS, ProjectView.CONVERSATION -> if (splitPane) {
                             Row(modifier = Modifier.fillMaxSize()) {
@@ -408,6 +409,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                     ForgeTab.ROM -> RomStudioScreen(viewModel = viewModel)
                     ForgeTab.CHECKPOINTS -> CheckpointsScreen(state = state, viewModel = viewModel)
                     ForgeTab.CODE_VIEWER -> CodeViewerScreen(state = state, viewModel = viewModel)
+                    ForgeTab.FILE_BROWSER -> FileBrowserScreen(viewModel = viewModel)
                     ForgeTab.REA -> ReaScreen(state = state, viewModel = viewModel)
                 }
             }

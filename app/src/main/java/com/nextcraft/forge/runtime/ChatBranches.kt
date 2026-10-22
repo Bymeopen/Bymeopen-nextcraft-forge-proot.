@@ -30,6 +30,23 @@ data class BranchStatus(
     val recent: List<BranchCommit> = emptyList(),
 )
 
+/** The project's own repository (its main folder), shown in the repository panel. */
+data class ProjectRepoInfo(
+    val isRepo: Boolean = false,
+    val branch: String = "",
+    val uncommitted: Int = 0,
+    val recent: List<BranchCommit> = emptyList(),
+    /** Local branches of the project repository. */
+    val branches: List<String> = emptyList(),
+)
+
+/** Outcome of a branch operation on the project repository. */
+sealed interface RepoOpResult {
+    data object Done : RepoOpResult
+    data object Dirty : RepoOpResult
+    data class Failed(val message: String) : RepoOpResult
+}
+
 sealed interface BranchMergeResult {
     data object Done : BranchMergeResult
     data class Conflict(val files: List<String>) : BranchMergeResult
@@ -73,6 +90,34 @@ class ChatBranches(context: Context) {
         git(project, chatId, COMMIT_SCRIPT, "MSG" to commitMessage(message))
     }
 
+    /** State and latest commits of the project's own repository (not a chat branch). */
+    suspend fun repoInfo(project: Project): ProjectRepoInfo = withContext(Dispatchers.IO) {
+        val result = gitProject(project, REPO_INFO_SCRIPT)
+        if (result.ok) parseRepoInfo(result.output) else ProjectRepoInfo()
+    }
+
+    /** Commits everything in the project folder (creating the repository first when there is none). */
+    suspend fun commitProject(project: Project, message: String): ChrootResult = withContext(Dispatchers.IO) {
+        gitProject(project, COMMIT_PROJECT_SCRIPT, "MSG" to commitMessage(message))
+    }
+
+    suspend fun createBranch(project: Project, name: String): RepoOpResult = withContext(Dispatchers.IO) {
+        val clean = branchName(name) ?: return@withContext RepoOpResult.Failed("Invalid branch name")
+        parseRepoOp(gitProject(project, CREATE_BRANCH_SCRIPT, "NAME" to clean))
+    }
+
+    suspend fun switchBranch(project: Project, name: String): RepoOpResult = withContext(Dispatchers.IO) {
+        parseRepoOp(gitProject(project, SWITCH_BRANCH_SCRIPT, "NAME" to name))
+    }
+
+    /** Safe delete (`git branch -d`): refuses a branch with commits that are not merged. */
+    suspend fun deleteBranch(project: Project, name: String): RepoOpResult = withContext(Dispatchers.IO) {
+        parseRepoOp(gitProject(project, DELETE_BRANCH_SCRIPT, "NAME" to name))
+    }
+
+    /** Commits the branch now with the user's own message (the turn commit uses the prompt's first line). */
+    suspend fun commitNow(project: Project, chatId: String, message: String) = commitTurn(project, chatId, message)
+
     suspend fun status(project: Project, chatId: String): BranchStatus? = withContext(Dispatchers.IO) {
         val branch = branchFor(project, chatId)
         if (!File(branch.cloneDir, ".git").exists()) return@withContext null
@@ -104,6 +149,18 @@ class ChatBranches(context: Context) {
         val branch = branchFor(project, chatId)
         git(project, chatId, DISCARD_SCRIPT)
         WorkspaceCheckpoints.clearWorkspaceOverride(branch.pseudoProjectId)
+    }
+
+    private suspend fun gitProject(project: Project, script: String, vararg extra: Pair<String, String>): ChrootResult {
+        val main = checkpoints.ensureWorkspace(project.id)
+        val env = mapOf("FORGE_ID" to "main", "FORGE_SLUG" to project.slug) + extra.toMap()
+        return runner.run(
+            workspaceDir = main,
+            slug = project.slug,
+            command = script,
+            environment = env,
+            timeoutMillis = GIT_TIMEOUT_MS,
+        )
     }
 
     private suspend fun git(project: Project, chatId: String, script: String, vararg extra: Pair<String, String>): ChrootResult {
@@ -161,6 +218,53 @@ class ChatBranches(context: Context) {
             )
         }
 
+        /** A safe git branch name from free text, or null when nothing usable is left. */
+        fun branchName(text: String): String? {
+            val clean = text.trim().lowercase()
+                .replace(Regex("\\s+"), "-")
+                .replace(Regex("[^a-z0-9._/-]"), "")
+                .replace(Regex("[/.-]{2,}")) { it.value.first().toString() }
+                .trim('-', '/', '.')
+                .take(60)
+                .trimEnd('-', '/', '.')
+            return clean.takeIf { it.isNotEmpty() && !it.endsWith(".lock") && !it.startsWith("chat/") }
+        }
+
+        fun parseRepoOp(result: ChrootResult): RepoOpResult {
+            val lines = result.output.lineSequence().map(String::trim).toList()
+            return when {
+                lines.any { it == "RESULT=ok" } -> RepoOpResult.Done
+                lines.any { it == "RESULT=dirty" } -> RepoOpResult.Dirty
+                else -> RepoOpResult.Failed(
+                    lines.firstOrNull { it.startsWith("msg=") }?.removePrefix("msg=")
+                        ?: result.output.trim().takeLast(200).ifEmpty { "git failed" },
+                )
+            }
+        }
+
+        /** Reads the `key=value` and `C <hash> <subject>` lines REPO_INFO_SCRIPT prints. */
+        fun parseRepoInfo(output: String): ProjectRepoInfo {
+            val values = HashMap<String, String>()
+            val commits = ArrayList<BranchCommit>()
+            val branches = ArrayList<String>()
+            output.lineSequence().forEach { line ->
+                when {
+                    line.startsWith("C ") -> line.removePrefix("C ").split(' ', limit = 2).let {
+                        if (it.size == 2) commits += BranchCommit(it[0], it[1])
+                    }
+                    line.startsWith("B ") -> branches += line.removePrefix("B ").trim()
+                    '=' in line -> values[line.substringBefore('=')] = line.substringAfter('=').trim()
+                }
+            }
+            return ProjectRepoInfo(
+                isRepo = values["repo"] == "yes",
+                branch = values["branch"].orEmpty(),
+                uncommitted = values["uncommitted"]?.toIntOrNull() ?: 0,
+                recent = commits,
+                branches = branches,
+            )
+        }
+
         fun parseMergeResult(output: String, ok: Boolean): BranchMergeResult {
             val lines = output.lineSequence().map(String::trim).toList()
             return when {
@@ -168,6 +272,9 @@ class ChatBranches(context: Context) {
                 lines.any { it == "RESULT=conflict" } -> BranchMergeResult.Conflict(
                     lines.firstOrNull { it.startsWith("files=") }.orEmpty().removePrefix("files=")
                         .split(',').map(String::trim).filter(String::isNotEmpty),
+                )
+                lines.any { it == "RESULT=failed" } -> BranchMergeResult.Failed(
+                    lines.firstOrNull { it.startsWith("msg=") }.orEmpty().removePrefix("msg=").ifEmpty { "git failed" },
                 )
                 else -> BranchMergeResult.Failed(output.trim().takeLast(300).ifEmpty { if (ok) "Unexpected result" else "git failed" })
             }
@@ -202,6 +309,46 @@ class ChatBranches(context: Context) {
             fi
         """)
 
+        private val REPO_INFO_SCRIPT = script("""
+            cd "§M"
+            if [ ! -d .git ]; then echo repo=none; exit 0; fi
+            echo repo=yes
+            echo "branch=§(G rev-parse --abbrev-ref HEAD 2>/dev/null || echo -)"
+            echo "uncommitted=§(G status --porcelain | wc -l)"
+            G for-each-ref --format='B %(refname:short)' refs/heads 2>/dev/null || true
+            G log --format='C %h %s' -n 15 2>/dev/null || true
+        """)
+
+        private val CREATE_BRANCH_SCRIPT = script("""
+            cd "§M"
+            [ -d .git ] || { echo "msg=Make the first commit before creating a branch"; exit 0; }
+            if ! G check-ref-format --branch "§NAME" >/dev/null 2>&1; then echo "msg=Invalid branch name"; exit 0; fi
+            if G show-ref -q --verify "refs/heads/§NAME"; then echo "msg=That branch already exists"; exit 0; fi
+            G checkout -q -b "§NAME" && echo RESULT=ok
+        """)
+
+        /** Switching with uncommitted changes could carry or lose them; the user commits first. */
+        private val SWITCH_BRANCH_SCRIPT = script("""
+            cd "§M"
+            if [ -n "§(G status --porcelain)" ]; then echo RESULT=dirty; exit 0; fi
+            G checkout -q "§NAME" && echo RESULT=ok
+        """)
+
+        private val DELETE_BRANCH_SCRIPT = script("""
+            cd "§M"
+            if [ "§(G rev-parse --abbrev-ref HEAD)" = "§NAME" ]; then echo "msg=Switch to another branch first"; exit 0; fi
+            if OUT="§(G branch -d "§NAME" 2>&1)"; then echo RESULT=ok; else echo "msg=§(echo "§OUT" | tail -n 1)"; fi
+        """)
+
+        private val COMMIT_PROJECT_SCRIPT = script("""
+            cd "§M"
+            [ -d .git ] || G init -q -b main
+            mkdir -p .git/info
+            grep -qxF '/.forge/' .git/info/exclude 2>/dev/null || echo '/.forge/' >> .git/info/exclude
+            G add -A
+            if ! G diff --cached --quiet; then G commit -q -m "§MSG"; fi
+        """)
+
         private val COMMIT_SCRIPT = script("""
             cd "§C"
             # `add -A` marks every conflicted file as resolved. After a merge that stopped on conflicts, a file that still
@@ -234,6 +381,11 @@ class ChatBranches(context: Context) {
 
         /** Merges the committed branch into the project; a conflict aborts the merge and leaves the project untouched. */
         private val MERGE_SCRIPT = script("""
+            if [ -n "§(G -C "§C" diff --name-only --diff-filter=U)" ]; then
+              echo RESULT=conflict
+              echo "files=§(G -C "§C" diff --name-only --diff-filter=U | tr '\n' ',')"
+              exit 0
+            fi
             cd "§M"
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "Forge: snapshot before merging a chat"; fi
@@ -242,12 +394,18 @@ class ChatBranches(context: Context) {
               echo RESULT=merged
               cd "§C"
               G fetch -q "§M" HEAD
-              G merge -q --ff-only FETCH_HEAD >/dev/null 2>&1 || true
-              G tag -f forge-base HEAD >/dev/null
+              # Only move the base when the branch really caught up; otherwise status would hide real divergence.
+              if G merge -q --ff-only FETCH_HEAD >/dev/null 2>&1; then G tag -f forge-base HEAD >/dev/null; fi
             else
-              echo RESULT=conflict
-              echo "files=§(G diff --name-only --diff-filter=U | tr '\n' ',')"
-              G merge --abort
+              FILES="§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              G merge --abort >/dev/null 2>&1 || true
+              if [ -n "§FILES" ]; then
+                echo RESULT=conflict
+                echo "files=§FILES"
+              else
+                echo RESULT=failed
+                echo "msg=git merge failed without conflicts (untracked files in the way?)"
+              fi
             fi
         """)
 
@@ -257,6 +415,11 @@ class ChatBranches(context: Context) {
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "Forge: snapshot before updating a chat"; fi
             cd "§C"
+            if [ -n "§(G diff --name-only --diff-filter=U)" ]; then
+              echo RESULT=conflict
+              echo "files=§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              exit 0
+            fi
             G add -A
             if ! G diff --cached --quiet; then G commit -q -m "Forge: save work before update"; fi
             G fetch -q "§M" HEAD
@@ -264,8 +427,15 @@ class ChatBranches(context: Context) {
             if G merge --no-edit FETCH_HEAD >/dev/null 2>&1; then
               echo RESULT=updated
             else
-              echo RESULT=conflict
-              echo "files=§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              FILES="§(G diff --name-only --diff-filter=U | tr '\n' ',')"
+              if [ -n "§FILES" ]; then
+                echo RESULT=conflict
+                echo "files=§FILES"
+              else
+                G merge --abort >/dev/null 2>&1 || true
+                echo RESULT=failed
+                echo "msg=git merge failed without conflicts (untracked files in the way?)"
+              fi
             fi
         """)
 

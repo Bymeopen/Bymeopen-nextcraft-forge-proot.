@@ -2038,6 +2038,8 @@ class RuntimeInstaller(private val context: Context) {
         pseudoTerminal: Boolean = false,
         ptyRows: Int = 40,
         ptyColumns: Int = 120,
+        trustClaudeWorkspace: Boolean = true,
+        claudeMcpServers: org.json.JSONObject? = null,
     ): Process {
         val (envFile, suCommand) = prepareChrootShellCommand(
             workspace = workspace,
@@ -2046,6 +2048,8 @@ class RuntimeInstaller(private val context: Context) {
             guestCommand = guestCommand,
             chrootExec = chrootExec,
             targetRootfs = rootfs,
+            trustClaudeWorkspace = trustClaudeWorkspace,
+            claudeMcpServers = claudeMcpServers,
         )
 
         val spawned = try {
@@ -2083,6 +2087,8 @@ class RuntimeInstaller(private val context: Context) {
         guestCommand: List<String>,
         chrootExec: File = chrootExecFile,
         targetRootfs: File = rootfs,
+        trustClaudeWorkspace: Boolean = true,
+        claudeMcpServers: org.json.JSONObject? = null,
     ): Pair<File, String> {
         check(ensureRootfsCompatibilityLinks(targetRootfs)) { "Core runtime has an invalid Linux filesystem layout" }
         require(
@@ -2096,8 +2102,9 @@ class RuntimeInstaller(private val context: Context) {
         workspace.mkdirs()
         File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         writeAndroidGradleConfiguration(targetRootfs)
-        if (guestWorkspacePath != "/root") {
-            ensureWorkspaceTrust(guestWorkspacePath, environment)
+        // ~/.claude.json belongs to Claude Code; other agents never read it, so they skip the parse + fsync per launch.
+        if (trustClaudeWorkspace && guestWorkspacePath != "/root") {
+            ensureWorkspaceTrust(guestWorkspacePath, environment, claudeMcpServers)
         }
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
         File(context.filesDir, "runtime-bridge-responses").mkdirs()
@@ -2296,6 +2303,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun ensureWorkspaceTrust(
         workspacePath: String,
         environment: Map<String, String> = emptyMap(),
+        mcpServers: org.json.JSONObject? = null,
     ) = synchronized(CLAUDE_STATE_LOCK) {
         val stateFile = File(rootfs, "root/.claude.json")
         val state = if (stateFile.exists()) {
@@ -2308,28 +2316,56 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         } else {
             JSONObject()
         }
+        var changed = false
         listOf("disableAllHooks", "permissions", "hooks", "allowedTools", "autoApprove")
-            .forEach { state.remove(it) }
-        state.put("hasCompletedOnboarding", true)
-        val projects = state.optJSONObject("projects") ?: JSONObject()
-        val workspace = projects.optJSONObject(workspacePath) ?: JSONObject()
-        workspace.put("hasTrustDialogAccepted", true)
+            .forEach { if (state.has(it)) { state.remove(it); changed = true } }
+        if (!state.optBoolean("hasCompletedOnboarding", false)) {
+            state.put("hasCompletedOnboarding", true)
+            changed = true
+        }
+        val projects = state.optJSONObject("projects") ?: JSONObject().also { changed = true }
+        val workspace = projects.optJSONObject(workspacePath) ?: JSONObject().also { changed = true }
+        if (!workspace.optBoolean("hasTrustDialogAccepted", false)) {
+            workspace.put("hasTrustDialogAccepted", true)
+            changed = true
+        }
         projects.put(workspacePath, workspace)
         state.put("projects", projects)
         val apiKeySuffix = environment["ANTHROPIC_API_KEY"]?.trim()?.takeIf { it.isNotEmpty() }?.takeLast(20)
         if (!apiKeySuffix.isNullOrBlank()) {
-            val responses = state.optJSONObject("customApiKeyResponses") ?: JSONObject()
-            val approved = responses.optJSONArray("approved") ?: JSONArray()
+            val responses = state.optJSONObject("customApiKeyResponses") ?: JSONObject().also { changed = true }
+            val approved = responses.optJSONArray("approved") ?: JSONArray().also { changed = true }
             val existing = (0 until approved.length()).mapNotNull { approved.optString(it).takeIf(String::isNotBlank) }.toSet()
             if (apiKeySuffix !in existing) {
                 approved.put(apiKeySuffix)
+                changed = true
             }
             responses.put("approved", approved)
             if (responses.optJSONArray("rejected") == null) {
                 responses.put("rejected", JSONArray())
+                changed = true
             }
             state.put("customApiKeyResponses", responses)
         }
+        // Connectors the user added: the entries this app manages (prefix "forge-") follow the saved list, anything
+        // else in mcpServers (added with `claude mcp add`) is left alone.
+        if (mcpServers != null) {
+            val existing = state.optJSONObject("mcpServers") ?: JSONObject()
+            fun managed(source: JSONObject): String = source.keys().asSequence()
+                .filter { it.startsWith(McpConnector.MANAGED_PREFIX) }.sorted()
+                .joinToString("|") { key -> key + "=" + source.get(key) }
+            if (managed(existing) != managed(mcpServers)) {
+                existing.keys().asSequence().toList()
+                    .filter { it.startsWith(McpConnector.MANAGED_PREFIX) }
+                    .forEach { existing.remove(it) }
+                mcpServers.keys().forEach { key -> existing.put(key, mcpServers.get(key)) }
+                state.put("mcpServers", existing)
+                changed = true
+            }
+        }
+        // Every launch used to rewrite (and fsync) the file even when nothing changed; that is slow flash I/O and
+        // can overwrite what a running Claude session wrote in the meantime.
+        if (!changed && stateFile.exists()) return@synchronized
         writeRootfsFileAtomically(stateFile, state.toString())
     }
 

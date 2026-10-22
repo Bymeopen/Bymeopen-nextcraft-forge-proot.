@@ -39,6 +39,19 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import androidx.compose.ui.graphics.asImageBitmap
+import com.nextcraft.forge.network.GeminiImageClient
+import com.nextcraft.forge.runtime.ClaudeSkillStore
+import com.nextcraft.forge.runtime.ConnectorStore
+import com.nextcraft.forge.runtime.McpConnector
+import com.nextcraft.forge.runtime.McpNames
+import com.nextcraft.forge.runtime.McpTransport
+import com.nextcraft.forge.network.GeminiImageModels
+import com.nextcraft.forge.network.GeminiImageResult
+import com.nextcraft.forge.network.GeminiVideoClient
+import com.nextcraft.forge.network.GeminiVideoResult
+import com.nextcraft.forge.runtime.RepoOpResult
+import com.nextcraft.forge.runtime.deleteRecursivelyNoFollow
 import com.nextcraft.forge.runtime.shellSingleQuote
 import com.nextcraft.forge.network.GitHubRepository
 import com.nextcraft.forge.network.GitHubTokenPoll
@@ -111,7 +124,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -260,6 +275,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val logLineIdCounter = AtomicLong(1L)
 
     init {
+        // A project removed while its undo window was open and the app then died keeps its files; finish that wipe.
+        preferences.pendingProjectWipe?.let { id ->
+            viewModelScope.launch(Dispatchers.IO) {
+                if (preferences.loadProjects().none { it.id == id }) wipeProjectData(id)
+                preferences.pendingProjectWipe = null
+            }
+        }
         RuntimeSetupController.restore(application)
         viewModelScope.launch {
             RuntimeSetupController.snapshot.collect { snap ->
@@ -379,6 +401,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     reaChatHint = preferences.reaChatHint,
+                    updateNotifications = preferences.updateNotifications,
+                    autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
@@ -397,6 +421,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             firstProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+            silentUpdateCheck()
         }
     }
 
@@ -479,12 +504,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _backgroundPrompts = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Fires once, when the runtime setup is first started: the Activity then asks for notifications and the battery exemption. */
+    val backgroundPrompts: SharedFlow<Unit> = _backgroundPrompts
+
+    private fun requestBackgroundPromptsOnce() {
+        // The Activity marks the prompts as shown once it actually displays them, so a missed emission is retried.
+        if (!preferences.backgroundPromptsShown) _backgroundPrompts.tryEmit(Unit)
+    }
+
     fun startRuntimeSetup() {
+        requestBackgroundPromptsOnce()
         val current = _state.value
         val stacksCsv = current.selectedDevStacks.joinToString(",") { it.name }
         preferences.selectedDevStacks = current.selectedDevStacks.map { it.name }.toSet()
         preferences.agentKind = current.agentKind.stableId
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java)
                 .setAction(RuntimeSetupService.ACTION_START)
@@ -512,9 +548,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return false
     }
 
+    /** Android 8+ throws when the app is not allowed to start a foreground service (12+: also from the background). */
+    private fun startServiceSafely(context: android.content.Context, intent: Intent) {
+        runCatching { ContextCompat.startForegroundService(context, intent) }
+            .onFailure { android.util.Log.w("MainViewModel", "Could not start ${intent.component?.shortClassName}: ${it::class.simpleName}") }
+    }
+
     private fun startRuntimeOperation(scope: SetupScope, configure: Intent.() -> Unit) {
         _state.update { it.copy(setupScope = scope) }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java).apply(configure),
         )
@@ -581,8 +623,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun installCoreWith(stacks: Set<DevStack>, agent: AgentKind) {
         if (_state.value.setupSnapshot.status == RuntimeSetupStatus.RUNNING) return
+        requestBackgroundPromptsOnce()
         _state.update { it.copy(setupScope = SetupScope.RUNTIME) }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java)
                 .setAction(RuntimeSetupService.ACTION_START)
@@ -742,8 +785,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
-            val newProject = runCatching { withContext(Dispatchers.IO) {
-                val slug = reserveProjectSlug(projectSlug(cleanName))
+            var reservedSlug: String? = null
+            val newProject = try {
+                withContext(Dispatchers.IO) {
+                val slug = reserveProjectSlug(projectSlug(cleanName)).also { reservedSlug = it }
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
@@ -784,9 +829,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 project
-            } }.getOrElse { error ->
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                _state.update { it.copy(bannerMessage = UiText.Raw(error.message ?: error.javaClass.simpleName)) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Disk full or an unwritable workspace used to escape viewModelScope and crash the app, and the
+                // reserved slug stayed taken.
+                reservedSlug?.let { slug -> synchronized(reservedSlugs) { reservedSlugs -= slug } }
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_project_create_failed, e.message ?: e.javaClass.simpleName)) }
                 return@launch
             }
             val updated = listOf(newProject) + _state.value.projects
@@ -847,6 +897,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         finalizePendingDelete()
         val updated = currentProjects.filterNot { it.id == projectId }
         preferences.saveProjects(updated)
+        preferences.pendingProjectWipe = removed.id
         pendingDelete = PendingDelete(removed, index)
         pendingDeleteJob = viewModelScope.launch {
             delay(UNDO_WINDOW_MS)
@@ -873,7 +924,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         branchStatus = emptyMap(),
                         branchDiff = emptyMap(),
                         queuedPrompts = emptyList(),
-                        retryPrompt = null,
+                        retryPrompts = emptyMap(),
                     )
                 }
             }
@@ -885,6 +936,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val pending = pendingDelete ?: return
         pendingDeleteJob?.cancel()
         pendingDelete = null
+        preferences.pendingProjectWipe = null
         val restored = _state.value.projects.toMutableList().also {
             it.add(pending.index.coerceIn(0, it.size), pending.project)
         }
@@ -907,24 +959,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = pending.project
         synchronized(reservedSlugs) { reservedSlugs -= project.slug }
         _state.update { it.copy(undoDelete = null) }
-        viewModelScope.launch(Dispatchers.IO) { wipeProjectData(project) }
+        viewModelScope.launch(Dispatchers.IO) {
+            wipeProjectData(project)
+            preferences.pendingProjectWipe = null
+        }
     }
 
     /** Blocking: removes chats, workspace and checkpoints of [project]. Call off the main thread. */
-    private fun wipeProjectData(project: Project) {
+    private fun wipeProjectData(project: Project) = wipeProjectData(project.id)
+
+    private fun wipeProjectData(projectId: String) {
         // Each saveAgentConversation is a synchronous commit().
         runCatching {
-            preferences.loadProjectChats(project.id).forEach { chat ->
+            preferences.loadProjectChats(projectId).forEach { chat ->
                 AgentKind.entries.forEach { agent ->
-                    preferences.saveAgentConversation(agent, project.id, chat.id, null)
+                    preferences.saveAgentConversation(agent, projectId, chat.id, null)
                 }
             }
-            preferences.deleteProjectChats(project.id)
+            preferences.deleteProjectChats(projectId)
         }
         runCatching {
             // checkpointDir validates the id (no "/", "..", NUL) and throws before anything is deleted.
-            val checkpointDir = checkpoints.checkpointDir(project.id)
-            File(getApplication<Application>().filesDir, "workspaces/${project.id}").deleteRecursively()
+            val checkpointDir = checkpoints.checkpointDir(projectId)
+            File(getApplication<Application>().filesDir, "workspaces/${projectId}").deleteRecursivelyNoFollow()
             checkpointDir.deleteRecursively()
         }
     }
@@ -971,7 +1028,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun createChat(title: String = "") {
         if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
-        val nextIndex = _state.value.chats.size + 1
+        // The first "Chat N" no chat uses: counting chats repeated a number after one was deleted.
+        val usedTitles = _state.value.chats.map { it.title }.toSet()
+        val nextIndex = generateSequence(_state.value.chats.size + 1) { it + 1 }.first { "Chat $it" !in usedTitles }
         val chat = ProjectChat(
             title = title.trim().ifBlank { "Chat $nextIndex" },
         )
@@ -992,6 +1051,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChat(chatId: String) {
+        if (runs.containsKey(chatId) || chatSwitchBlocked()) return
+        val project = _state.value.activeProject ?: return
+        if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated != true) {
+            deleteChatNow(chatId)
+            return
+        }
+        // Deleting the chat discards its branch clone; never do that over commits that were not merged.
+        viewModelScope.launch {
+            if (branchHoldsUnmergedWork(project, chatId)) {
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
+            } else {
+                deleteChatNow(chatId)
+            }
+        }
+    }
+
+    /** True when the chat's clone exists and either has work not in the project or its state cannot be read. */
+    private suspend fun branchHoldsUnmergedWork(project: Project, chatId: String): Boolean {
+        val cloneExists = File(chatBranches.branchFor(project, chatId).cloneDir, ".git").exists()
+        if (!cloneExists) return false
+        val status = runCatching { chatBranches.status(project, chatId) }.getOrNull() ?: return true
+        return status.commits > 0 || status.uncommitted > 0 || status.conflicts.isNotEmpty()
+    }
+
+    private fun deleteChatNow(chatId: String) {
         if (runs.containsKey(chatId) || chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         val currentChats = _state.value.chats
@@ -1086,12 +1170,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Back to the project folder; only when the branch holds nothing that would be lost. */
     fun disableChatBranch(chatId: String) {
         val project = _state.value.activeProject ?: return
-        val status = _state.value.branchStatus[chatId]
-        if (status != null && (status.commits > 0 || status.uncommitted > 0 || status.conflicts.isNotEmpty())) {
-            _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
-            return
-        }
         withBranchBusy(chatId) {
+            // The cached status may be missing (app restarted) or stale, so ask git again before discarding anything.
+            if (branchHoldsUnmergedWork(project, chatId)) {
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
+                return@withBranchBusy
+            }
             chatBranches.discard(project, chatId)
             val updated = _state.value.chats.map { if (it.id == chatId) it.copy(isolated = false) else it }
             preferences.saveProjectChats(project.id, updated)
@@ -1099,8 +1183,405 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val chatImageCache = object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(24) {}
+
+    /**
+     * The image behind a chat `src`. Workspace files are read through the same path checks as the file editor (no
+     * `..`, no symlinks) from the chat's own branch first, then from the project; remote addresses are only fetched
+     * after the reader tapped them.
+     */
+    suspend fun loadChatImage(src: String): androidx.compose.ui.graphics.ImageBitmap? = withContext(Dispatchers.IO) {
+        val project = _state.value.activeProject ?: return@withContext null
+        val chatId = _state.value.activeChatId
+        val source = classifyImageSource(src, project.slug) ?: return@withContext null
+        runCatching {
+            when (source) {
+                is ChatImageSource.Data -> {
+                    val key = "data|${source.base64.length}|${source.base64.hashCode()}"
+                    chatImageCache.get(key) ?: ChatImageDecoder.decode(android.util.Base64.decode(source.base64, android.util.Base64.DEFAULT))
+                        ?.also { chatImageCache.put(key, it) }
+                }
+                is ChatImageSource.Remote -> {
+                    val key = "url|${source.url}"
+                    chatImageCache.get(key) ?: ChatImageDecoder.fetch(source.url)?.let(ChatImageDecoder::decode)
+                        ?.also { chatImageCache.put(key, it) }
+                }
+                is ChatImageSource.Workspace -> {
+                    val roots = buildList {
+                        if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) {
+                            add(chatBranches.branchFor(project, chatId).cloneDir)
+                        }
+                        add(checkpoints.ensureWorkspace(project.id))
+                    }
+                    val file = roots.firstNotNullOfOrNull { root ->
+                        runCatching { checkpoints.safeWorkspaceFile(root, source.relativePath) }.getOrNull()?.takeIf { it.isFile }
+                    } ?: return@runCatching null
+                    if (file.length() > ChatImageDecoder.MAX_BYTES) return@runCatching null
+                    val key = "file|${file.absolutePath}|${file.lastModified()}|${file.length()}"
+                    chatImageCache.get(key) ?: ChatImageDecoder.decode(file.readBytes())?.also { chatImageCache.put(key, it) }
+                }
+            }
+        }.getOrNull()
+    }
+
+    // ── Connectors (MCP) and skills for Claude Code ──────────────────────────────────────────────
+
+    private val connectorStore by lazy { ConnectorStore(getApplication()) }
+
+    private fun skillStore(): ClaudeSkillStore? = runCatching {
+        ClaudeSkillStore(File(installer.installedRuntime().rootfs, "root/.claude/skills"))
+    }.getOrNull()
+
+    fun loadConnectors() {
+        viewModelScope.launch {
+            val (connectors, skills) = withContext(Dispatchers.IO) {
+                connectorStore.list() to skillStore()?.list().orEmpty()
+            }
+            _state.update { it.copy(connectors = connectors, skills = skills) }
+        }
+    }
+
+    /** Adds or updates a connector; a blank [secret] keeps the saved one when editing and means none when new. */
+    fun saveConnector(name: String, transport: McpTransport, target: String, secretName: String, secret: String) {
+        val id = McpNames.id(name)
+        val cleanTarget = target.trim()
+        val invalid = when {
+            id == null -> R.string.connector_invalid_name
+            cleanTarget.isEmpty() -> R.string.connector_invalid_target
+            transport == McpTransport.HTTP && !com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(cleanTarget) ->
+                R.string.connector_invalid_url
+            transport == McpTransport.COMMAND && secret.isNotBlank() && !McpNames.isEnvName(secretName.trim()) ->
+                R.string.connector_invalid_env
+            else -> null
+        }
+        if (invalid != null || id == null) {
+            _state.update { it.copy(bannerMessage = UiText.res(invalid ?: R.string.connector_invalid_name)) }
+            return
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val existing = connectorStore.list().firstOrNull { it.id == id }
+                connectorStore.upsert(
+                    McpConnector(id, name.trim().take(40), transport, cleanTarget, secretName.trim(), existing?.enabled ?: true),
+                    secret.takeIf { it.isNotBlank() },
+                )
+            }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.connector_saved)) }
+            loadConnectors()
+        }
+    }
+
+    fun setConnectorEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { connectorStore.setEnabled(id, enabled) }
+            loadConnectors()
+        }
+    }
+
+    fun deleteConnector(id: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { connectorStore.delete(id) }
+            loadConnectors()
+        }
+    }
+
+    fun saveSkill(name: String, description: String, body: String) {
+        val skillName = ClaudeSkillStore.skillName(name)
+        if (skillName == null || body.isBlank()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.skill_invalid)) }
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching { skillStore()?.save(skillName, description, body) != null }.getOrDefault(false)
+            }
+            _state.update { it.copy(bannerMessage = UiText.res(if (saved) R.string.skill_saved else R.string.skill_save_failed)) }
+            loadConnectors()
+        }
+    }
+
+    fun deleteSkill(name: String) {
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) { runCatching { skillStore()?.delete(name) == true }.getOrDefault(false) }
+            if (!deleted) _state.update { it.copy(bannerMessage = UiText.res(R.string.skill_save_failed)) }
+            loadConnectors()
+        }
+    }
+
+    suspend fun loadSkillBody(name: String): String = withContext(Dispatchers.IO) { skillStore()?.body(name).orEmpty() }
+
+    // ── Image generation (Nano Banana) ───────────────────────────────────────────────────────────
+
+    private val geminiImage = GeminiImageClient()
+
+    fun hasGeminiImageKey(): Boolean = vault.contains(GeminiImageModels.KEY_ID)
+
+    fun saveGeminiImageKey(key: String) {
+        val clean = key.trim()
+        if (clean.isEmpty()) return
+        runCatching { vault.put(GeminiImageModels.KEY_ID, clean) }
+            .onFailure { _state.update { st -> st.copy(bannerMessage = UiText.res(R.string.msg_api_key_save_failed)) } }
+        _state.update { it.copy(geminiKeyVersion = it.geminiKeyVersion + 1) }
+    }
+
+    /**
+     * Creates (or, with an image attached, edits) a picture with Nano Banana, saves it in the chat's workspace under
+     * `images/` and adds it to the chat as a message.
+     */
+    fun generateImage(prompt: String, model: String) {
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        val clean = prompt.trim()
+        if (clean.isEmpty() || _state.value.imageGenerating) return
+        if (runs.containsKey(chatId)) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_busy_chat)) }
+            return
+        }
+        val key = vault.get(GeminiImageModels.KEY_ID)
+        if (key.isNullOrBlank()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_need_key)) }
+            return
+        }
+        val attachment = _state.value.pendingAttachments.firstOrNull { it.mimeType.startsWith("image/") }
+        _state.update { it.copy(imageGenerating = true, bannerMessage = UiText.res(R.string.image_working)) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val root = if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) {
+                        chatBranches.branchFor(project, chatId).cloneDir
+                    } else {
+                        checkpoints.ensureWorkspace(project.id)
+                    }
+                    val input = attachment?.let { att ->
+                        val file = checkpoints.safeWorkspaceFile(root, att.relativePath)
+                        if (file.isFile && file.length() <= ChatImageDecoder.MAX_BYTES) file.readBytes() to att.mimeType else null
+                    }
+                    when (val result = geminiImage.generate(key, model, clean, input?.first, input?.second ?: "image/png")) {
+                        is GeminiImageResult.Failure -> Result.failure(IllegalStateException(result.message))
+                        is GeminiImageResult.Success -> {
+                            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                            val name = "images/nanobanana-$stamp.${com.nextcraft.forge.network.imageExtension(result.mimeType)}"
+                            val target = checkpoints.safeWorkspaceFile(root, name)
+                            target.parentFile?.mkdirs()
+                            target.writeBytes(result.bytes)
+                            Result.success(name to result.note)
+                        }
+                    }
+                }.getOrElse { Result.failure(it) }
+            }
+            outcome.fold(
+                onSuccess = { (path, note) ->
+                    val alt = clean.replace(Regex("[\\[\\]()\\n]"), " ").take(80)
+                    val reply = ChatMessage(fromUser = false, text = "![$alt]($path)" + if (note.isNotBlank()) "\n\n$note" else "")
+                    appendLocalMessages(project.id, chatId, listOf(ChatMessage(fromUser = true, text = clean), reply))
+                    _state.update { it.copy(imageGenerating = false, pendingAttachments = if (attachment != null) emptyList() else it.pendingAttachments) }
+                    refreshWorkspaceFilesAndChanges(project.id)
+                },
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(imageGenerating = false, bannerMessage = UiText.res(R.string.image_failed, error.message ?: error.javaClass.simpleName))
+                    }
+                },
+            )
+        }
+    }
+
+    private val geminiVideo = GeminiVideoClient()
+
+    /**
+     * Creates a video clip with Gemini Omni (image-to-video when an image is attached), saves it under `videos/` in the
+     * chat's workspace and adds it to the chat. The call is synchronous on Google's side and can take minutes.
+     */
+    fun generateVideo(prompt: String, aspectRatio: String, resolution: String) {
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        val clean = prompt.trim()
+        if (clean.isEmpty() || _state.value.imageGenerating) return
+        if (runs.containsKey(chatId)) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_busy_chat)) }
+            return
+        }
+        val key = vault.get(GeminiImageModels.KEY_ID)
+        if (key.isNullOrBlank()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_need_key)) }
+            return
+        }
+        val attachment = _state.value.pendingAttachments.firstOrNull { it.mimeType.startsWith("image/") }
+        _state.update { it.copy(imageGenerating = true, bannerMessage = UiText.res(R.string.video_working)) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val root = if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) {
+                        chatBranches.branchFor(project, chatId).cloneDir
+                    } else {
+                        checkpoints.ensureWorkspace(project.id)
+                    }
+                    val input = attachment?.let { att ->
+                        val file = checkpoints.safeWorkspaceFile(root, att.relativePath)
+                        if (file.isFile && file.length() <= ChatImageDecoder.MAX_BYTES) file.readBytes() to att.mimeType else null
+                    }
+                    val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                    val name = "videos/omni-$stamp.mp4"
+                    val target = checkpoints.safeWorkspaceFile(root, name)
+                    target.parentFile?.mkdirs()
+                    when (val result = geminiVideo.generate(key, clean, target, aspectRatio, resolution, input?.first, input?.second ?: "image/png")) {
+                        is GeminiVideoResult.Failure -> Result.failure(IllegalStateException(result.message))
+                        GeminiVideoResult.Success -> Result.success(name)
+                    }
+                }.getOrElse { Result.failure(it) }
+            }
+            outcome.fold(
+                onSuccess = { path ->
+                    appendLocalMessages(project.id, chatId, listOf(ChatMessage(fromUser = true, text = clean), ChatMessage(fromUser = false, text = path)))
+                    _state.update { it.copy(imageGenerating = false, pendingAttachments = if (attachment != null) emptyList() else it.pendingAttachments) }
+                    refreshWorkspaceFilesAndChanges(project.id)
+                },
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(imageGenerating = false, bannerMessage = UiText.res(R.string.video_failed, error.message ?: error.javaClass.simpleName))
+                    }
+                },
+            )
+        }
+    }
+
+    /** The file behind a chat video `src` (same path checks and branch-first lookup as images), or null. */
+    private fun resolveChatMediaFile(src: String): java.io.File? {
+        val project = _state.value.activeProject ?: return null
+        val chatId = _state.value.activeChatId
+        val source = classifyImageSource(src, project.slug) as? ChatImageSource.Workspace ?: return null
+        val roots = buildList {
+            if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) add(chatBranches.branchFor(project, chatId).cloneDir)
+            add(checkpoints.ensureWorkspace(project.id))
+        }
+        return roots.firstNotNullOfOrNull { root ->
+            runCatching { checkpoints.safeWorkspaceFile(root, source.relativePath) }.getOrNull()?.takeIf { it.isFile }
+        }
+    }
+
+    /** A still frame of a chat video, for its card. */
+    suspend fun loadChatVideoThumbnail(src: String): androidx.compose.ui.graphics.ImageBitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            val file = resolveChatMediaFile(src) ?: return@runCatching null
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                retriever.getFrameAtTime(0)?.asImageBitmap()
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }.getOrNull()
+    }
+
+    /** Opens a chat video in the device's video player. */
+    fun openChatVideo(context: android.content.Context, src: String) {
+        val file = runCatching { resolveChatMediaFile(src) }.getOrNull()
+        if (file == null) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.chat_video_missing)) }
+            return
+        }
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                .setDataAndType(uri, "video/mp4")
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }.onFailure { _state.update { it.copy(bannerMessage = UiText.res(R.string.chat_video_no_player)) } }
+    }
+
+    /** Adds finished messages to a chat that has no agent run (they are saved like any other message). */
+    private fun appendLocalMessages(projectId: String, chatId: String, added: List<ChatMessage>) {
+        val current = if (_state.value.activeChatId == chatId) _state.value.messages else preferences.loadMessages(projectId, chatId)
+        val updated = current.filterNot { it.id == "streaming-assistant" } + added
+        preferences.saveMessages(projectId, chatId, updated)
+        if (_state.value.activeChatId == chatId) _state.update { it.copy(messages = updated) }
+    }
+
+    /** Loads the project repository and the state of every chat branch (the local pull requests). */
+    fun refreshProjectRepo() {
+        val project = _state.value.activeProject ?: return
+        _state.update { it.copy(repoBusy = true) }
+        viewModelScope.launch {
+            val info = runCatching { chatBranches.repoInfo(project) }.getOrNull()
+            _state.update { st -> st.copy(projectRepo = info ?: st.projectRepo, repoBusy = false) }
+            _state.value.chats.filter { it.isolated }.forEach { refreshBranchStatus(it.id) }
+        }
+    }
+
+    /** Runs a branch operation on the project repository; refused while a chat writes in the project folder. */
+    private fun repoBranchOp(success: Int, op: suspend (Project) -> RepoOpResult) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.repoBusy) return
+        if (runs.values.any { it.projectId == project.id && !it.isolated }) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.repo_busy_agent)) }
+            return
+        }
+        _state.update { it.copy(repoBusy = true) }
+        viewModelScope.launch {
+            val result = runCatching { op(project) }.getOrElse { RepoOpResult.Failed(it.message ?: it.javaClass.simpleName) }
+            val banner = when (result) {
+                RepoOpResult.Done -> UiText.res(success)
+                RepoOpResult.Dirty -> UiText.res(R.string.repo_branch_dirty)
+                is RepoOpResult.Failed -> UiText.res(R.string.branch_failed, result.message)
+            }
+            _state.update { it.copy(repoBusy = false, bannerMessage = banner) }
+            refreshProjectRepo()
+            if (result == RepoOpResult.Done) refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
+    fun createRepoBranch(name: String) = repoBranchOp(R.string.repo_branch_created) { chatBranches.createBranch(it, name) }
+
+    fun switchRepoBranch(name: String) = repoBranchOp(R.string.repo_branch_switched) { chatBranches.switchBranch(it, name) }
+
+    fun deleteRepoBranch(name: String) = repoBranchOp(R.string.repo_branch_deleted) { chatBranches.deleteBranch(it, name) }
+
+    /** Commits everything in the project folder with the user's message. */
+    fun commitProjectRepo(message: String) {
+        val project = _state.value.activeProject ?: return
+        val clean = message.trim()
+        if (clean.isEmpty() || _state.value.repoBusy) return
+        // A chat that works in the project folder itself may be mid-write; its files would be committed half done.
+        if (runs.values.any { it.projectId == project.id && !it.isolated }) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.repo_busy_agent)) }
+            return
+        }
+        _state.update { it.copy(repoBusy = true) }
+        viewModelScope.launch {
+            val result = runCatching { chatBranches.commitProject(project, clean) }
+            val failure = result.exceptionOrNull()?.message ?: result.getOrNull()?.takeIf { !it.ok }?.output?.trim()?.takeLast(200)
+            _state.update {
+                it.copy(
+                    repoBusy = false,
+                    bannerMessage = if (failure == null) UiText.res(R.string.repo_committed) else UiText.res(R.string.branch_failed, failure),
+                )
+            }
+            refreshProjectRepo()
+        }
+    }
+
+    /** Commits what the chat's branch holds right now with the user's own message. */
+    fun commitChatBranch(chatId: String, message: String) {
+        val project = _state.value.activeProject ?: return
+        val clean = message.trim()
+        if (clean.isEmpty()) return
+        withBranchBusy(chatId) {
+            branchLock(chatId).withLock { chatBranches.commitNow(project, chatId, clean) }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_committed)) }
+            refreshBranchStatus(chatId)
+        }
+    }
+
+    /** Merge and update snapshot the project folder; they must not run while a chat writes in it. */
+    private fun projectFolderBusy(projectId: String): Boolean {
+        val busy = runs.values.any { it.projectId == projectId && !it.isolated }
+        if (busy) _state.update { it.copy(bannerMessage = UiText.res(R.string.repo_busy_agent)) }
+        return busy
+    }
+
     fun mergeChatBranch(chatId: String) {
         val project = _state.value.activeProject ?: return
+        if (projectFolderBusy(project.id)) return
         val title = _state.value.chats.firstOrNull { it.id == chatId }?.title.orEmpty()
         withBranchBusy(chatId) {
             val result = branchLock(chatId).withLock {
@@ -1125,6 +1606,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateChatBranchFromMain(chatId: String) {
         val project = _state.value.activeProject ?: return
+        if (projectFolderBusy(project.id)) return
         withBranchBusy(chatId) {
             val result = branchLock(chatId).withLock { chatBranches.updateFromMain(project, chatId) }
             val message = when (result) {
@@ -1257,6 +1739,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val ready = withContext(Dispatchers.IO) { AgentKind.entries.filter(::agentReady).toSet() }
             _state.update { it.copy(readyAgents = ready) }
         }
+    }
+
+    /** Reads every agent's profile off the main thread (the vault is touched for the key check). */
+    fun refreshAgentProfiles() {
+        viewModelScope.launch {
+            val profiles = withContext(Dispatchers.IO) { AgentKind.entries.associateWith { agentProfile(it) } }
+            _state.update { it.copy(agentProfiles = profiles) }
+        }
+    }
+
+    /**
+     * Sets the model of [agent], which need not be the selected one: with several agents in a chat each answers with its
+     * own model. Antigravity keeps its model (and effort) globally; the others keep a profile per agent.
+     */
+    fun setAgentModel(agent: AgentKind, modelId: String) {
+        if (agent == _state.value.agentKind) {
+            updateProviderConfig(baseUrl = _state.value.providerProfile.baseUrl, model = modelId)
+        } else if (agent == AgentKind.ANTIGRAVITY) {
+            selectAntigravityModel(modelId)
+        } else {
+            val stored = preferences.loadProvider(vault, agent)
+            preferences.saveAgentProfile(stored.copy(model = modelId.trim()), agent)
+        }
+        refreshAgentProfiles()
     }
 
     private fun agentProfile(agent: AgentKind): ProviderProfile {
@@ -1392,8 +1898,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // one gets its own branch so the two cannot overwrite each other's files.
         val agentKind = agent
         val wasIsolated = _state.value.chats.firstOrNull { it.id == chatId }?.isolated == true
-        // An isolated chat stays isolated whichever agent answers (failover, tags and rules can pick a non-Claude one).
-        val isolated = wasIsolated || (agentKind == AgentKind.CLAUDE_CODE && runs.isNotEmpty())
+        // An isolated chat stays isolated whichever agent answers; auto-branch (Settings) isolates every Claude chat from its first turn.
+        val isolated = wasIsolated || (agentKind == AgentKind.CLAUDE_CODE && (runs.isNotEmpty() || preferences.autoBranchChats))
         if (isolated && !wasIsolated) _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_auto)) }
         val updatedChats = _state.value.chats.map { chat ->
             if (chat.id == chatId) {
@@ -1403,7 +1909,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chat.copy(
                     title = if (shouldRetitle) autoTitle else chat.title,
                     updatedAtMillis = now,
-                    isolated = isolated,
+                    // Never drop the flag: a chat switched to another agent keeps its branch (and its unmerged work).
+                    isolated = wasIsolated || isolated,
                 )
             } else {
                 chat
@@ -1438,7 +1945,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 projects = updatedProjects,
                 chats = updatedChats,
                 messages = if (it.activeChatId == chatId) updatedMessages else it.messages,
-                retryPrompt = null,
+                retryPrompts = it.retryPrompts - chatId,
             )
         }
         publishRunningFlags()
@@ -1518,19 +2025,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun offerRetry(run: ChatRun) {
-        _state.update { it.copy(retryPrompt = RetryPrompt(run.chatId, run.lastPrompt)) }
+        _state.update { it.copy(retryPrompts = it.retryPrompts + (run.chatId to RetryPrompt(run.chatId, run.lastPrompt))) }
     }
 
     /** "Try again" after a failed turn: sends the same message (and attachments) once more. */
     fun retryLastPrompt() {
-        val retry = _state.value.retryPrompt ?: return
+        val retry = _state.value.retryPrompts[_state.value.activeChatId] ?: return
         val project = _state.value.activeProject ?: return
-        if (runs.containsKey(retry.chatId) || retry.chatId != _state.value.activeChatId) return
+        if (runs.containsKey(retry.chatId)) return
         if (!canStartAnotherRun(tentativeAgent(retry.prompt.text))) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             return
         }
-        _state.update { it.copy(retryPrompt = null) }
+        _state.update { it.copy(retryPrompts = it.retryPrompts - retry.chatId) }
         startRun(project, retry.chatId, retry.prompt.copy(projectId = project.id, chatId = retry.chatId))
     }
 
@@ -1585,7 +2092,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Stops the agent turn of the chat on screen only; other chats keep working and a running build keeps going. */
     fun stopActiveTask() {
         val run = runs[_state.value.activeChatId] ?: return
-        discardQueuedPrompts(run.chatId)
+        stopRun(run, discardQueue = true)
+    }
+
+    /**
+     * "Steer": sends a queued message now instead of after the turn. The running turn is stopped (what it already did stays
+     * in the workspace and in the chat) and the message starts a new turn right away with the conversation so far; the other
+     * queued messages keep waiting. This works for every agent, since none of the CLIs takes a new message in the middle of a
+     * turn that was started with its prompt on stdin.
+     */
+    fun steerQueuedPrompt(id: String) {
+        val queued = _state.value.queuedPrompts.firstOrNull { it.id == id } ?: return
+        val chatId = queued.chatId ?: return
+        val project = _state.value.activeProject?.takeIf { it.id == queued.projectId && _state.value.activeChatId == chatId } ?: return
+        removeQueuedPrompt(id)
+        val prompt = queued.copy(projectId = project.id, chatId = chatId)
+        val run = runs[chatId]
+        if (run == null) {
+            if (canStartAnotherRun(tentativeAgent(prompt.text))) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
+            return
+        }
+        stopRun(run, discardQueue = false) {
+            if (!runs.containsKey(chatId)) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
+        }
+    }
+
+    private fun stopRun(run: ChatRun, discardQueue: Boolean, afterStop: (() -> Unit)? = null) {
+        run.steering = !discardQueue
+        if (discardQueue) discardQueuedPrompts(run.chatId)
         val pendingApproval = run.pendingTool
         setRunStatus(run, UiText.res(R.string.agent_status_stopping))
         setRunPendingTool(run, null)
@@ -1604,7 +2138,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             job?.cancel()
             job?.join()
             finishRun(run, stoppedByUser = true)
-            dispatchQueuedPrompts()
+            if (afterStop != null) afterStop() else dispatchQueuedPrompts()
         }
     }
 
@@ -1686,12 +2220,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
                 appendFailureReason(run, reason)
-                offerRetry(run)
+                // A run stopped by "Steer" neither offers a retry nor touches the queue: the steering message starts next.
+                if (!run.steering) offerRetry(run)
                 finishRun(run)
-                discardQueuedPrompts(run.chatId)
-                viewModelScope.launch {
-                    run.job?.join()
-                    dispatchQueuedPrompts()
+                if (!run.steering) {
+                    discardQueuedPrompts(run.chatId)
+                    viewModelScope.launch {
+                        run.job?.join()
+                        dispatchQueuedPrompts()
+                    }
                 }
             }
         }
@@ -1841,6 +2378,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         .maxDepth(5)
                         .filter { it != ws && !Files.isSymbolicLink(it.toPath()) }
+                        // The walk is depth-first, so cutting it at 250 hid top-level entries of big projects.
+                        // Read a bounded number, then keep the shallowest 250 (the list is sorted for display below).
+                        .take(4000)
+                        .sortedBy { f -> f.relativeTo(ws).invariantSeparatorsPath.count { it == '/' } }
                         .take(250)
                         .map { f ->
                             val rel = f.relativeTo(ws).invariantSeparatorsPath
@@ -2172,8 +2713,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrDefault(false)
             }
             if (ok) {
-                if (_state.value.selectedFilePath == cleanPath) {
+                // Also when a folder holding the open file was renamed: a stale path would make the next save
+                // recreate the old folder with the file in it.
+                val open = _state.value.selectedFilePath
+                if (open == cleanPath) {
                     _state.update { it.copy(selectedFilePath = newPath) }
+                } else if (open != null && open.startsWith("$cleanPath/")) {
+                    _state.update { it.copy(selectedFilePath = newPath + open.removePrefix(cleanPath)) }
                 }
                 refreshWorkspaceFilesAndChanges(project.id)
             }
@@ -2222,6 +2768,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val folder = "attachments/app-screens-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
             val added = mutableListOf<ChatAttachment>()
             try {
+                // An open keyboard hides the bottom bar and leaves a black gap in the pictures; close it first.
+                window.currentFocus?.clearFocus()
+                getApplication<Application>().getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    ?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
+                delay(KEYBOARD_CLOSE_MS)
                 appCaptureSteps().forEachIndexed { index, step ->
                     if (step.pane != null) {
                         _state.update { it.copy(projectView = ProjectView.CONVERSATION) }
@@ -2230,7 +2781,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (step.tab == ForgeTab.PROJECTS) _state.update { it.copy(projectView = ProjectView.LIST) }
                         selectTab(step.tab)
                     }
-                    delay(CAPTURE_SETTLE_MS)
+                    delay(CAPTURE_SETTLE_MS + step.extraSettleMs)
                     val bitmap = captureWindow(window) ?: return@forEachIndexed
                     val name = "%02d-%s.png".format(index + 1, step.name)
                     withContext(Dispatchers.IO) { savePng(project.id, "$folder/$name", name, bitmap) }?.let { added += it }
@@ -2370,7 +2921,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val ws = checkpoints.ensureWorkspace(project.id)
                     val target = checkpoints.safeWorkspaceFile(ws, cleanPath)
-                    target.exists() && target.deleteRecursively()
+                    target.exists() && target.deleteRecursivelyNoFollow()
                 }.getOrDefault(false)
             }
             if (deleted) {
@@ -2828,7 +3379,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeExecutionService::class.java)
                 .setAction(RuntimeExecutionService.ACTION_START)
@@ -3711,7 +4262,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         slug = slug,
                     )
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    ws.listFiles()?.forEach { it.deleteRecursively() }
+                    ws.listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
                     val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
                     try {
@@ -3724,7 +4275,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } catch (error: Throwable) {
                         // The project is never saved on failure; don't leave its workspace behind on disk.
-                        ws.deleteRecursively()
+                        ws.deleteRecursivelyNoFollow()
                         checkpoints.checkpointDir(project.id).deleteRecursively()
                         throw error
                     }
@@ -3871,7 +4422,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } ?: throw IllegalStateException("Cannot open $displayName")
                     } catch (error: Throwable) {
                         // Nothing registered this workspace yet: remove the half-extracted files and free the slug.
-                        runCatching { ws.deleteRecursively() }
+                        runCatching { ws.deleteRecursivelyNoFollow() }
                         synchronized(reservedSlugs) { reservedSlugs -= slug }
                         throw error
                     }
@@ -3926,9 +4477,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
 
+    fun setUpdateNotifications(enabled: Boolean) {
+        preferences.updateNotifications = enabled
+        _state.update { it.copy(updateNotifications = enabled) }
+        val app = getApplication<Application>()
+        if (enabled) {
+            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
+            silentUpdateCheck(force = true)
+        } else {
+            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
+        }
+    }
+
+    /**
+     * Looks for a newer build without the "checking" UI: when the app opens, and when notifications are switched on.
+     * A newer build is kept in [ForgeUiState.updateInfo] (the Projects banner and the update row read it) and announced
+     * once with a notification. Errors are ignored here; the manual check still reports them.
+     */
+    fun silentUpdateCheck(force: Boolean = false) {
+        if (!force && !preferences.updateNotifications) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSilentUpdateCheck < 60 * 60 * 1000L) return
+        lastSilentUpdateCheck = now
+        viewModelScope.launch {
+            val info = withContext(Dispatchers.IO) { runCatching { AppUpdater(getApplication()).check() }.getOrNull() } ?: return@launch
+            if (_state.value.updateInfo == null) {
+                _state.update { it.copy(updateInfo = info, updateStatusMessage = str(R.string.upd_available, info.versionName, info.versionCode)) }
+            }
+            withContext(Dispatchers.IO) { com.nextcraft.forge.update.UpdateNotifier.notifyIfNew(getApplication(), info) }
+        }
+    }
+
+    private var lastSilentUpdateCheck = 0L
+
     fun setReaChatHint(enabled: Boolean) {
         preferences.reaChatHint = enabled
         _state.update { it.copy(reaChatHint = enabled) }
+    }
+
+    fun setAutoBranchChats(enabled: Boolean) {
+        preferences.autoBranchChats = enabled
+        _state.update { it.copy(autoBranchChats = enabled) }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {
@@ -4141,6 +4730,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         /** Time for a screen to compose and draw before it is photographed. */
         const val CAPTURE_SETTLE_MS = 900L
+        const val KEYBOARD_CLOSE_MS = 500L
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
         const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }
@@ -4176,4 +4766,7 @@ private class ChatRun(
     var statusLine: UiText? = null
     var pendingTool: ToolRequest? = null
     var finished: Boolean = false
+
+    /** True while the run is being stopped so that a queued message can go out at once (see steerQueuedPrompt). */
+    var steering: Boolean = false
 }

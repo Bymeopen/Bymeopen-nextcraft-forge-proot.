@@ -43,6 +43,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -312,17 +313,24 @@ internal fun ChatUsageSheet(state: ForgeUiState, onDismiss: () -> Unit) {
     }
 }
 
+/** The agent a plain message goes to: the selected one in Single mode, otherwise the first switched-on one. */
+internal fun primaryAgent(state: ForgeUiState): AgentKind =
+    com.nextcraft.forge.model.AgentRouter.primaryAgent(state.routing, state.agentKind, state.readyAgents)
+
+private fun profileOf(state: ForgeUiState, agent: AgentKind) =
+    if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
+
 /** Short model (and effort) text for the composer chip, e.g. "Fable 5.1 Low". */
 @Composable
-internal fun chatModelChipLabel(state: ForgeUiState): String = when (state.agentKind) {
+internal fun chatModelChipLabel(state: ForgeUiState, agent: AgentKind = state.agentKind): String = when (agent) {
     AgentKind.CLAUDE_CODE -> {
-        val model = claudeModelLabel(state.providerProfile.model.ifBlank { "default" })
+        val model = claudeModelLabel(profileOf(state, agent).model.ifBlank { "default" })
             .removePrefix("Claude ").removeSuffix(" (latest)")
         val effort = state.claudeEffort.takeIf { it.isNotBlank() }?.let { claudeEffortText(it) }
         listOfNotNull(model, effort).joinToString(" ")
     }
     AgentKind.ANTIGRAVITY -> state.antigravityModel.takeIf { it.isNotBlank() }?.let(::antigravityModelLabel) ?: "Antigravity"
-    AgentKind.DEEPSEEK_HARNESS -> state.providerProfile.model.ifBlank { "DeepSeek" }
+    AgentKind.DEEPSEEK_HARNESS -> profileOf(state, agent).model.ifBlank { "DeepSeek" }
 }
 
 /** Model list and effort row opened from the composer chip. */
@@ -330,7 +338,12 @@ internal fun chatModelChipLabel(state: ForgeUiState): String = when (state.agent
 internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val agent = state.agentKind
+    // With several agents in a chat, the sheet edits the agent picked in the tabs, not only the selected one.
+    val multi = state.routing.mode != com.nextcraft.forge.model.RouteMode.SINGLE
+    var sheetAgent by remember { mutableStateOf(primaryAgent(state)) }
+    val agent = if (multi) sheetAgent else state.agentKind
+    val profile = if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
+    val discovered = if (agent == state.agentKind) state.discoveredModels else emptyList()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -338,6 +351,15 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.chat_model_sheet_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
+            if (multi) {
+                // One tab per provider: its own models and, for Claude and Antigravity, its own reasoning effort.
+                val agents = AgentKind.entries
+                ForgePillTabs(
+                    items = agents.map { it.displayTitle() },
+                    selectedIndex = agents.indexOf(agent).coerceAtLeast(0),
+                    onSelect = { sheetAgent = agents[it] },
+                )
+            }
             when (agent) {
                 AgentKind.CLAUDE_CODE -> {
                     val levels = listOf("") + CLAUDE_EFFORT_LEVELS
@@ -348,9 +370,9 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
                         onSelect = { viewModel.setClaudeEffort(levels[it]) },
                     )
                     ModelList(
-                        options = providerModelOptions(state.providerProfile.kind, state.discoveredModels, state.providerProfile.model),
-                        selectedId = state.providerProfile.model,
-                        onSelect = { id -> viewModel.updateProviderConfig(baseUrl = state.providerProfile.baseUrl, model = id) },
+                        options = providerModelOptions(profile.kind, discovered, profile.model),
+                        selectedId = profile.model,
+                        onSelect = { id -> viewModel.setAgentModel(agent, id) },
                     )
                 }
                 AgentKind.ANTIGRAVITY -> {
@@ -364,13 +386,13 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
                     ModelList(
                         options = antigravityModelOptions(state.antigravityModels, state.antigravityModel),
                         selectedId = state.antigravityModel,
-                        onSelect = viewModel::selectAntigravityModel,
+                        onSelect = { id -> viewModel.setAgentModel(AgentKind.ANTIGRAVITY, id) },
                     )
                 }
                 AgentKind.DEEPSEEK_HARNESS -> ModelList(
-                    options = providerModelOptions(state.providerProfile.kind, state.discoveredModels, state.providerProfile.model),
-                    selectedId = state.providerProfile.model,
-                    onSelect = { id -> viewModel.updateProviderConfig(baseUrl = state.providerProfile.baseUrl, model = id) },
+                    options = providerModelOptions(profile.kind, discovered, profile.model),
+                    selectedId = profile.model,
+                    onSelect = { id -> viewModel.setAgentModel(agent, id) },
                 )
             }
         }
@@ -506,6 +528,25 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
                         Text(commit.hash, fontSize = ForgeType.secondary, fontFamily = FontFamily.Monospace, color = tokens.accentText)
                         Text(commit.subject, fontSize = ForgeType.secondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
+                }
+            }
+            item {
+                var commitMessage by rememberSaveable(chatId) { mutableStateOf("") }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ForgeTextField(
+                        value = commitMessage,
+                        onValueChange = { commitMessage = it.take(100) },
+                        label = { Text(stringResource(R.string.branch_commit_hint)) },
+                        singleLine = true,
+                        enabled = !busy && !running && status.conflicts.isEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { viewModel.commitChatBranch(chatId, commitMessage); commitMessage = "" },
+                        enabled = !busy && !running && status.conflicts.isEmpty() && status.uncommitted > 0 && commitMessage.isNotBlank(),
+                        shape = RoundedCornerShape(100),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.branch_commit)) }
                 }
             }
             item {

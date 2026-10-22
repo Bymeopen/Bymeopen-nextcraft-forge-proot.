@@ -193,6 +193,8 @@ fun AgentScreen(
     var renameOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheetOpen by rememberSaveable { mutableStateOf(false) }
     var routeSheetOpen by rememberSaveable { mutableStateOf(false) }
+    // The chip shows the model of the primary agent, which can differ from the selected one in the multi-agent modes.
+    androidx.compose.runtime.LaunchedEffect(state.routing) { viewModel.refreshAgentProfiles(); viewModel.refreshReadyAgents() }
     var branchSheetOpen by rememberSaveable { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
@@ -422,7 +424,7 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
-        val retry = state.retryPrompt?.takeIf { it.chatId == state.activeChatId && !state.activeChatRunning }
+        val retry = state.retryPrompts[state.activeChatId]?.takeIf { !state.activeChatRunning }
         if (retry != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
@@ -450,7 +452,24 @@ fun AgentScreen(
                 )
                 chatQueue.forEach { queued ->
                     val label = queued.text.ifBlank { queued.attachments.joinToString { it.displayName } }
-                    AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                        }
+                        // Steer: stop the running turn and send this message now instead of waiting for the queue.
+                        if (running) {
+                            ForgeTextButton(onClick = { viewModel.steerQueuedPrompt(queued.id) }) {
+                                Text(stringResource(R.string.agent_steer), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                if (running) {
+                    Text(
+                        stringResource(R.string.agent_steer_hint),
+                        fontSize = ForgeType.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -493,10 +512,33 @@ fun AgentScreen(
             }
             QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
         }
+        // Voice: words appear in the box while speaking; "stop", "clear" and a trailing "send now" act as commands.
+        var voiceBase by remember { mutableStateOf("") }
+        var imageDialogOpen by rememberSaveable { mutableStateOf(false) }
+        fun joinVoice(base: String, spoken: String) = listOf(base.trim(), spoken.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+        val voice = rememberVoiceController(
+            languageCode = state.languageCode,
+            onPartial = { promptInput = joinVoice(voiceBase, it) },
+            onFinal = { spoken ->
+                when (val command = VoiceCommands.parse(spoken)) {
+                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask() }
+                    VoiceCommand.Clear -> promptInput = ""
+                    is VoiceCommand.Dictate -> {
+                        val text = joinVoice(voiceBase, command.text)
+                        if (command.send && (text.isNotEmpty() || state.pendingAttachments.isNotEmpty())) {
+                            promptInput = ""
+                            viewModel.sendPrompt(text)
+                        } else {
+                            promptInput = text
+                        }
+                    }
+                }
+            },
+        )
         ChatComposer(
             promptInput = promptInput,
             onPromptChange = { promptInput = it },
-            agentName = state.agentKind.displayTitle(),
+            agentName = primaryAgent(state).displayTitle(),
             running = running,
             canSend = canSend,
             captureEnabled = !state.capturingScreens,
@@ -509,11 +551,18 @@ fun AgentScreen(
                 viewModel.sendPrompt(text)
             },
             onStop = viewModel::stopActiveTask,
-            modelChipLabel = chatModelChipLabel(state),
+            modelChipLabel = chatModelChipLabel(state, primaryAgent(state)),
             onModelChip = { modelSheetOpen = true },
-            routeChipLabel = routeModeLabel(state.routing.mode),
+            routeChipLabel = stringResource(R.string.route_chip_label, routeModeLabel(state.routing.mode)),
             onRouteChip = { routeSheetOpen = true },
+            onMic = {
+                if (!voice.listening) voiceBase = promptInput
+                voice.toggle()
+            },
+            listening = voice.listening,
+            onGenerateImage = { imageDialogOpen = true },
         )
+        if (imageDialogOpen) ImageGenerationDialog(state = state, viewModel = viewModel, onDismiss = { imageDialogOpen = false })
     }
     }
 
@@ -522,6 +571,9 @@ fun AgentScreen(
     if (routeSheetOpen) {
         androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshReadyAgents() }
         ChatRoutingSheet(state = state, viewModel = viewModel, onDismiss = { routeSheetOpen = false })
+    }
+    if (modelSheetOpen) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshAgentProfiles() }
     }
     if (modelSheetOpen) ChatModelSheet(state = state, viewModel = viewModel, onDismiss = { modelSheetOpen = false })
     if (renameOpen) {
@@ -655,7 +707,11 @@ internal fun ChatMessageCard(
                 }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        message.attachments.forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                        message.attachments.filterNot { it.mimeType.startsWith("image/") }
+                            .forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                    }
+                    message.attachments.filter { it.mimeType.startsWith("image/") }.forEach { att ->
+                        ChatImage(alt = att.displayName, src = att.relativePath, maxHeight = 200.dp)
                     }
                 }
             }

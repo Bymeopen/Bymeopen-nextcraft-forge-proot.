@@ -96,6 +96,24 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
                     horizontalPadding = 0.dp,
                 )
             }
+            if (routing.mode == RouteMode.SINGLE) {
+                // Single: exactly one provider, chosen here (the same choice as in the model sheet).
+                Text(stringResource(R.string.route_single_pick), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                AgentKind.entries.forEach { agent ->
+                    val ready = agent in state.readyAgents || agent == state.agentKind
+                    RadioRow(
+                        title = agent.displayTitle(),
+                        subtitle = stringResource(if (ready) R.string.route_agent_ready else R.string.route_agent_not_ready),
+                        selected = state.agentKind == agent,
+                        onClick = { viewModel.selectAgent(agent) },
+                        horizontalPadding = 0.dp,
+                    )
+                }
+                if (state.sessionRunning) {
+                    // selectAgent refuses while a turn runs (it would desync the session that is still streaming).
+                    Text(stringResource(R.string.route_single_busy), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                }
+            }
             if (routing.mode != RouteMode.SINGLE) {
                 Text(
                     stringResource(if (routing.mode == RouteMode.MANUAL) R.string.route_agents_manual else R.string.route_agents_priority),

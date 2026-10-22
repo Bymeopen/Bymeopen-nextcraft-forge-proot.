@@ -35,6 +35,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("runtime_setup_complete", false)
         set(value) { preferences.edit().putBoolean("runtime_setup_complete", value).apply() }
 
+    /** The notification and battery-exemption prompts are shown once, when the user first starts the runtime setup. */
+    var backgroundPromptsShown: Boolean
+        get() = preferences.getBoolean("background_prompts_shown", false)
+        set(value) { preferences.edit().putBoolean("background_prompts_shown", value).apply() }
+
     var backgroundSetupComplete: Boolean
         get() = preferences.getBoolean("background_setup_complete", false)
         set(value) { preferences.edit().putBoolean("background_setup_complete", value).apply() }
@@ -137,10 +142,30 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
 
+    /** Announce new app builds with a notification (checked in the background every few hours). On by default. */
+    var updateNotifications: Boolean
+        get() = preferences.getBoolean("update_notifications", true)
+        set(value) { preferences.edit().putBoolean("update_notifications", value).apply() }
+
+    /** versionCode of the newest build already announced, so one build never notifies twice. */
+    var lastNotifiedUpdateCode: Long
+        get() = preferences.getLong("last_notified_update_code", 0L)
+        set(value) { preferences.edit().putLong("last_notified_update_code", value).apply() }
+
+
     /** Adds a note about the `rea` toolkit to chat messages that concern binaries. Off by default: nothing extra is sent. */
     var reaChatHint: Boolean
         get() = preferences.getBoolean("rea_chat_hint", false)
         set(value) { preferences.edit().putBoolean("rea_chat_hint", value).apply() }
+    /** Id of a project in its delete-undo window; if the app dies before the files are wiped, the next start finishes it. */
+    var pendingProjectWipe: String?
+        get() = preferences.getString("pending_project_wipe", null)?.takeIf { it.isNotBlank() }
+        set(value) { preferences.edit().apply { if (value == null) remove("pending_project_wipe") else putString("pending_project_wipe", value) }.apply() }
+
+    /** Every Claude Code chat works in its own branch from its first turn, not only when another chat is running. */
+    var autoBranchChats: Boolean
+        get() = preferences.getBoolean("auto_branch_chats", false)
+        set(value) { preferences.edit().putBoolean("auto_branch_chats", value).apply() }
 
     /** Whether high-risk tool executions prompt for interactive approval instead of immediate rejection. */
     var interactiveHighRiskApprovals: Boolean
@@ -242,6 +267,19 @@ class AppPreferences(private val context: Context) {
                 .putBoolean("${prefix}openrouter_allow_fallbacks", profile.openRouterAllowFallbacks)
         }
         editor.apply()
+    }
+
+    /** Saves [profile] as the profile of [agent] only, leaving the generic keys (the selected agent's) untouched. */
+    fun saveAgentProfile(profile: ProviderProfile, agent: AgentKind) {
+        val prefix = providerPrefix(agent)
+        preferences.edit()
+            .putString("${prefix}kind", profile.kind.name)
+            .putString("${prefix}base_url", profile.baseUrl)
+            .putString("${prefix}model", profile.model)
+            .putString("${prefix}dsh_api", profile.dshApi)
+            .putString("${prefix}openrouter_order", profile.openRouterProviderOrder)
+            .putBoolean("${prefix}openrouter_allow_fallbacks", profile.openRouterAllowFallbacks)
+            .apply()
     }
 
     fun loadProvider(vault: ApiKeyVault, agent: AgentKind? = null): ProviderProfile {

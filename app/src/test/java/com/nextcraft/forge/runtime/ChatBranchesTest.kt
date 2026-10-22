@@ -60,5 +60,35 @@ class ChatBranchesTest {
             ChatBranches.parseMergeResult("RESULT=conflict\nfiles=a.kt,b.kt,\n", true),
         )
         assertTrue(ChatBranches.parseMergeResult("fatal: bad object", false) is BranchMergeResult.Failed)
+        assertEquals(
+            BranchMergeResult.Failed("git merge failed without conflicts"),
+            ChatBranches.parseMergeResult("RESULT=failed\nmsg=git merge failed without conflicts\n", true),
+        )
+    }
+
+    @Test
+    fun repoInfoIsParsed() {
+        val info = ChatBranches.parseRepoInfo("repo=yes\nbranch=main\nuncommitted=4\nC a1b2c3 First\nC d4e5f6 Second")
+        assertTrue(info.isRepo)
+        assertEquals("main", info.branch)
+        assertEquals(4, info.uncommitted)
+        assertEquals(listOf(BranchCommit("a1b2c3", "First"), BranchCommit("d4e5f6", "Second")), info.recent)
+        assertEquals(ProjectRepoInfo(), ChatBranches.parseRepoInfo("repo=none"))
+    }
+
+    @Test
+    fun branchNamesAreMadeSafe() {
+        assertEquals("fix-login-screen", ChatBranches.branchName("  Fix  Login Screen "))
+        assertEquals("feature/new-ui", ChatBranches.branchName("feature/New UI"))
+        assertEquals("a.b", ChatBranches.branchName("a..b"))
+        assertEquals(null, ChatBranches.branchName("***"))
+        assertEquals(null, ChatBranches.branchName("chat/abc"))
+        assertEquals(null, ChatBranches.branchName("x.lock"))
+    }
+
+    @Test
+    fun repoInfoListsBranches() {
+        val info = ChatBranches.parseRepoInfo("repo=yes\nbranch=dev\nuncommitted=0\nB main\nB dev")
+        assertEquals(listOf("main", "dev"), info.branches)
     }
 }

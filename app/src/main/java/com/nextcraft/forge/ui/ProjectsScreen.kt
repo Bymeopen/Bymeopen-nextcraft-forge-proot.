@@ -102,6 +102,7 @@ fun ProjectsScreen(
     onDeleteProject: (String) -> Unit,
     onRenameProject: (String, String) -> Unit = { _, _ -> },
     onNewQuickProject: () -> Unit = {},
+    onOpenUpdate: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val regular = state.projects
@@ -123,6 +124,11 @@ fun ProjectsScreen(
     }
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
+        state.updateInfo?.let { update ->
+            item(key = "update-banner") {
+                UpdateBanner(versionName = update.versionName, onOpen = onOpenUpdate)
+            }
+        }
         item(key = "hero") {
             ProjectsHero(
                 onQuickProject = onQuickProject,
@@ -302,6 +308,12 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
                 Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
             }
         }
+        Text(
+            text = stringResource(R.string.projects_buttons_hint),
+            fontSize = ForgeType.caption,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
 
@@ -715,4 +727,24 @@ private fun ProjectStatusPill(text: String, glyph: ForgeGlyph, tint: androidx.co
 internal fun compactLanguages(languages: String): String {
     val parts = languages.split(" / ").map { it.trim() }.filter { it.isNotEmpty() }
     return if (parts.size <= 2) languages else parts.first() + " +" + (parts.size - 1)
+}
+
+/** Shown on top of the project list while a newer build is available; opens Settings, where it is installed. */
+@Composable
+private fun UpdateBanner(versionName: String, onOpen: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    androidx.compose.material3.Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = scheme.primary.copy(alpha = 0.14f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(role = Role.Button, onClick = onOpen),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(stringResource(R.string.upd_banner_title, versionName), fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.upd_banner_hint), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+        }
+    }
 }

@@ -454,6 +454,11 @@ internal fun ChatComposer(
     /** Routing mode shown as a second chip (single agent, manual, failover, balanced); tapping it opens the routing sheet. */
     routeChipLabel: String = "",
     onRouteChip: (() -> Unit)? = null,
+    /** Microphone button before the send button; null hides it. [listening] shows the recording state. */
+    onMic: (() -> Unit)? = null,
+    listening: Boolean = false,
+    /** "Create image" entry of the attach menu (Nano Banana); null hides it. */
+    onGenerateImage: (() -> Unit)? = null,
 ) {
     val tokens = LocalForgeThemeTokens.current
     var attachMenuOpen by remember { mutableStateOf(false) }
@@ -510,6 +515,12 @@ internal fun ChatComposer(
                         text = { Text(stringResource(R.string.agent_attach_file)) },
                         onClick = { attachMenuOpen = false; onAttachFile() },
                     )
+                    if (onGenerateImage != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.image_menu)) },
+                            onClick = { attachMenuOpen = false; onGenerateImage() },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.capture_menu)) },
                         enabled = captureEnabled,
@@ -551,6 +562,16 @@ internal fun ChatComposer(
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
+            if (onMic != null) {
+                IconButton(onClick = onMic) {
+                    ForgeIcon(
+                        glyph = ForgeGlyph.MIC,
+                        tint = if (listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        size = 22.dp,
+                        description = stringResource(if (listening) R.string.voice_stop else R.string.voice_start),
+                    )
+                }
+            }
             val haptics = LocalHapticFeedback.current
             val reduceMotion = rememberReduceMotion()
             val sendScale by animateFloatAsState(

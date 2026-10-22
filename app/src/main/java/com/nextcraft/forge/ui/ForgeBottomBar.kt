@@ -65,9 +65,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.Density
@@ -119,6 +121,10 @@ import androidx.compose.foundation.layout.imePadding
 
 private const val NAV_MAX_FONT_SCALE = 1.3f
 
+// Bottom inset at or below this is the gesture-navigation handle strip; the bar overlaps its top GESTURE_INSET_TRIM.
+private val GESTURE_INSET_MAX = 34.dp
+private val GESTURE_INSET_TRIM = 10.dp
+
 internal data class NavEntry(val tab: ForgeTab, @StringRes val label: Int)
 
 /** Global bar: five destinations; Terminal also appears inside the project bar. */
@@ -144,7 +150,7 @@ internal val fullWidthTabs = setOf(ForgeTab.TERMINAL, ForgeTab.FILES, ForgeTab.P
 // Screens reachable from the Tools launcher keep the Tools tab highlighted.
 private val toolsGroup = setOf(
     ForgeTab.TOOLS, ForgeTab.FILES, ForgeTab.ANDROID, ForgeTab.PREVIEW,
-    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS, ForgeTab.CODE_VIEWER, ForgeTab.REA,
+    ForgeTab.TOOLCHAINS, ForgeTab.DIAGNOSTICS, ForgeTab.BUILD_MATRIX, ForgeTab.SSH, ForgeTab.CICD, ForgeTab.ROM, ForgeTab.CHECKPOINTS, ForgeTab.CODE_VIEWER, ForgeTab.FILE_BROWSER, ForgeTab.REA,
 )
 
 private fun ForgeTab.navIndex(): Int {
@@ -198,13 +204,23 @@ internal fun ForgeBottomBar(
             .padding(outerPadding)
             .forgeGlassSurface(backdrop, tokens.bottomBarContainerColor),
     ) {
-        Column(modifier = Modifier.navigationBarsPadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
+        // Gesture navigation only needs a thin strip for its handle: keep the bar close to it instead of floating a full
+        // extra inset above the screen edge. Three-button navigation keeps its whole inset so the bar never sits under
+        // the buttons.
+        val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val bottomInset = if (navInset <= GESTURE_INSET_MAX) (navInset - GESTURE_INSET_TRIM).coerceAtLeast(0.dp) else navInset
+        Column(
+            modifier = Modifier
+                .padding(bottom = bottomInset)
+                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
+        ) {
             if (!floating) Divider(color = scheme.outlineVariant, thickness = 0.5.dp)
             // Taller with larger system text, and labels stop scaling at 1.3x (five tabs share the width).
             val density = LocalDensity.current
             val navFontScale = density.fontScale.coerceAtMost(NAV_MAX_FONT_SCALE)
             val compactHeight = rememberCompactHeight()
-            val barHeight = (if (compactHeight) 60.dp else 72.dp) + 16.dp * (navFontScale - 1f).coerceAtLeast(0f)
+            val barHeight = (if (compactHeight) 56.dp else 66.dp) + 16.dp * (navFontScale - 1f).coerceAtLeast(0f)
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -212,6 +228,8 @@ internal fun ForgeBottomBar(
                     .padding(horizontal = 6.dp, vertical = if (compactHeight) 2.dp else 6.dp),
             ) {
                 val slot = maxWidth / entries.size
+                val labels = entries.map { stringResource(it.label) }
+                val longestLabel = labels.maxOf { it.length }
                 val pillInset = if (entries.size >= 5) 2.dp else 6.dp
                 // Pill: the only moving object. A radial gradient drawn behind it gives the soft outward glow
                 // (no blur, so it costs nothing on low-end GPUs). White skips the glow: it would look muddy.
@@ -311,8 +329,9 @@ internal fun ForgeBottomBar(
                             CompositionLocalProvider(LocalDensity provides Density(density.density, navFontScale)) {
                                 Text(
                                     text = label,
+                                    // One size for every tab: when any label is long, all labels on the narrow bar shrink together.
                                     fontSize = when {
-                                        slot < 76.dp && label.length >= 9 -> ForgeType.navCompact * 0.92f
+                                        slot < 76.dp && longestLabel >= 9 -> ForgeType.navCompact * 0.92f
                                         slot < 76.dp -> ForgeType.navCompact
                                         else -> ForgeType.caption
                                     },

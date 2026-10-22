@@ -2,6 +2,8 @@
 
 package com.nextcraft.forge.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.CrashReporter
 import com.nextcraft.forge.R
+import com.nextcraft.forge.runtime.BatteryOptimization
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.DevStack
 import com.nextcraft.forge.runtime.RuntimeSetupStatus
@@ -153,6 +156,20 @@ fun DiagnosticsScreen(viewModel: MainViewModel) {
                     modifier = Modifier.weight(1f),
                 )
             }
+        }
+        // Many ROMs stop "optimized" apps mid-build; offer the exemption until it is granted.
+        val batteryContext = LocalContext.current
+        var batteryUnrestricted by remember { mutableStateOf(BatteryOptimization.isUnrestricted(batteryContext)) }
+        val batteryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            batteryUnrestricted = BatteryOptimization.isUnrestricted(batteryContext)
+            viewModel.diagnostics.refresh()
+        }
+        if (!batteryUnrestricted) {
+            OutlinedButton(
+                shape = RoundedCornerShape(100),
+                onClick = { BatteryOptimization.launch(batteryContext) { batteryLauncher.launch(it) } },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(stringResource(R.string.tool_battery_unrestrict)) }
         }
         diag.healthSummary?.let { Text(it, fontSize = ForgeType.control, fontWeight = FontWeight.Medium, color = LocalForgeThemeTokens.current.accentText) }
         LogBox(text = diag.healthOutput, placeholder = stringResource(R.string.tool_health_placeholder))
