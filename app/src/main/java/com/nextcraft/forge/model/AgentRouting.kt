@@ -88,7 +88,10 @@ internal object AgentRouter {
             return if (selected in tried) null else RoutedMessage(selected, text, tagged = false)
         }
         parseTag(text)?.let { (agent, rest) ->
-            if (agent in ready && agent !in tried && rest.isNotEmpty()) return RoutedMessage(agent, rest, tagged = true)
+            // "Agents you can tag" is the list of switched-on agents: a switched-off agent cannot be reached by a tag either.
+            if (agent in config.agents && agent in ready && agent !in tried && rest.isNotEmpty()) {
+                return RoutedMessage(agent, rest, tagged = true)
+            }
         }
         if (config.mode != RouteMode.SINGLE) {
             config.rules.firstOrNull { it.agent in ready && it.agent !in tried && it.matches(text) }?.let {
@@ -98,7 +101,7 @@ internal object AgentRouter {
         val candidates = config.agents.filter { it in ready && it !in tried }
         val agent = when (config.mode) {
             RouteMode.SINGLE -> selected // handled above
-            RouteMode.MANUAL -> selected.takeIf { it !in tried && it in ready } ?: candidates.firstOrNull()
+            RouteMode.MANUAL -> primaryAgent(config, selected, ready).takeIf { it !in tried && it in ready } ?: candidates.firstOrNull()
             RouteMode.FAILOVER -> candidates.firstOrNull()
             RouteMode.BALANCED -> balancedPick(candidates, config, counter)
         } ?: return null
@@ -128,6 +131,16 @@ internal object AgentRouter {
     }
 
     private tailrec fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
+
+    /**
+     * The agent a plain message goes to first, and the one whose model and effort the chat shows: the selected agent
+     * while it is switched on, otherwise the first switched-on agent that is ready (Failover and Balanced start there too).
+     */
+    fun primaryAgent(config: RoutingConfig, selected: AgentKind, ready: Set<AgentKind>): AgentKind = when (config.mode) {
+        RouteMode.SINGLE -> selected
+        RouteMode.MANUAL -> if (selected in config.agents) selected else config.agents.firstOrNull { it in ready } ?: config.agents.firstOrNull() ?: selected
+        RouteMode.FAILOVER, RouteMode.BALANCED -> config.agents.firstOrNull { it in ready } ?: config.agents.firstOrNull() ?: selected
+    }
 
     /** True when a failed turn may be retried on another agent. */
     fun failsOver(mode: RouteMode): Boolean = mode == RouteMode.FAILOVER || mode == RouteMode.BALANCED

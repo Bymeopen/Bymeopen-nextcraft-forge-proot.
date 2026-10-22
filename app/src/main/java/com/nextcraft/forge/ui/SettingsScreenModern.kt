@@ -323,6 +323,13 @@ fun SettingsScreenModern(
                 onClick = { viewModel.checkForAppUpdates() },
                 trailing = { Text("›", color = scheme.onSurfaceVariant) },
             )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_update_notify),
+                subtitle = stringResource(R.string.settings_update_notify_sub),
+                checked = state.updateNotifications,
+                onCheckedChange = viewModel::setUpdateNotifications,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
             state.updateProgress?.let { fraction ->
                 LinearProgressIndicator(
                     progress = fraction,

@@ -373,6 +373,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     reaChatHint = preferences.reaChatHint,
+                    updateNotifications = preferences.updateNotifications,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
@@ -391,6 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             firstProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+            silentUpdateCheck()
         }
     }
 
@@ -1258,6 +1260,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Reads every agent's profile off the main thread (the vault is touched for the key check). */
+    fun refreshAgentProfiles() {
+        viewModelScope.launch {
+            val profiles = withContext(Dispatchers.IO) { AgentKind.entries.associateWith { agentProfile(it) } }
+            _state.update { it.copy(agentProfiles = profiles) }
+        }
+    }
+
+    /**
+     * Sets the model of [agent], which need not be the selected one: with several agents in a chat each answers with its
+     * own model. Antigravity keeps its model (and effort) globally; the others keep a profile per agent.
+     */
+    fun setAgentModel(agent: AgentKind, modelId: String) {
+        if (agent == _state.value.agentKind) {
+            updateProviderConfig(baseUrl = _state.value.providerProfile.baseUrl, model = modelId)
+        } else if (agent == AgentKind.ANTIGRAVITY) {
+            selectAntigravityModel(modelId)
+        } else {
+            val stored = preferences.loadProvider(vault, agent)
+            preferences.saveAgentProfile(stored.copy(model = modelId.trim()), agent)
+        }
+        refreshAgentProfiles()
+    }
+
     private fun agentProfile(agent: AgentKind): ProviderProfile {
         if (agent == _state.value.agentKind) return _state.value.providerProfile
         val loaded = preferences.loadProvider(vault, agent)
@@ -1584,7 +1610,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Stops the agent turn of the chat on screen only; other chats keep working and a running build keeps going. */
     fun stopActiveTask() {
         val run = runs[_state.value.activeChatId] ?: return
-        discardQueuedPrompts(run.chatId)
+        stopRun(run, discardQueue = true)
+    }
+
+    /**
+     * "Steer": sends a queued message now instead of after the turn. The running turn is stopped (what it already did stays
+     * in the workspace and in the chat) and the message starts a new turn right away with the conversation so far; the other
+     * queued messages keep waiting. This works for every agent, since none of the CLIs takes a new message in the middle of a
+     * turn that was started with its prompt on stdin.
+     */
+    fun steerQueuedPrompt(id: String) {
+        val queued = _state.value.queuedPrompts.firstOrNull { it.id == id } ?: return
+        val chatId = queued.chatId ?: return
+        val project = _state.value.activeProject?.takeIf { it.id == queued.projectId && _state.value.activeChatId == chatId } ?: return
+        removeQueuedPrompt(id)
+        val prompt = queued.copy(projectId = project.id, chatId = chatId)
+        val run = runs[chatId]
+        if (run == null) {
+            if (canStartAnotherRun(tentativeAgent(prompt.text))) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
+            return
+        }
+        stopRun(run, discardQueue = false) {
+            if (!runs.containsKey(chatId)) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
+        }
+    }
+
+    private fun stopRun(run: ChatRun, discardQueue: Boolean, afterStop: (() -> Unit)? = null) {
+        run.steering = !discardQueue
+        if (discardQueue) discardQueuedPrompts(run.chatId)
         val pendingApproval = run.pendingTool
         setRunStatus(run, UiText.res(R.string.agent_status_stopping))
         setRunPendingTool(run, null)
@@ -1603,7 +1656,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             job?.cancel()
             job?.join()
             finishRun(run, stoppedByUser = true)
-            dispatchQueuedPrompts()
+            if (afterStop != null) afterStop() else dispatchQueuedPrompts()
         }
     }
 
@@ -1685,12 +1738,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
                 appendFailureReason(run, reason)
-                offerRetry(run)
+                // A run stopped by "Steer" neither offers a retry nor touches the queue: the steering message starts next.
+                if (!run.steering) offerRetry(run)
                 finishRun(run)
-                discardQueuedPrompts(run.chatId)
-                viewModelScope.launch {
-                    run.job?.join()
-                    dispatchQueuedPrompts()
+                if (!run.steering) {
+                    discardQueuedPrompts(run.chatId)
+                    viewModelScope.launch {
+                        run.job?.join()
+                        dispatchQueuedPrompts()
+                    }
                 }
             }
         }
@@ -3890,6 +3946,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
 
+    fun setUpdateNotifications(enabled: Boolean) {
+        preferences.updateNotifications = enabled
+        _state.update { it.copy(updateNotifications = enabled) }
+        val app = getApplication<Application>()
+        if (enabled) {
+            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
+            silentUpdateCheck(force = true)
+        } else {
+            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
+        }
+    }
+
+    /**
+     * Looks for a newer build without the "checking" UI: when the app opens, and when notifications are switched on.
+     * A newer build is kept in [ForgeUiState.updateInfo] (the Projects banner and the update row read it) and announced
+     * once with a notification. Errors are ignored here; the manual check still reports them.
+     */
+    fun silentUpdateCheck(force: Boolean = false) {
+        if (!force && !preferences.updateNotifications) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSilentUpdateCheck < 60 * 60 * 1000L) return
+        lastSilentUpdateCheck = now
+        viewModelScope.launch {
+            val info = withContext(Dispatchers.IO) { runCatching { AppUpdater(getApplication()).check() }.getOrNull() } ?: return@launch
+            if (_state.value.updateInfo == null) {
+                _state.update { it.copy(updateInfo = info, updateStatusMessage = str(R.string.upd_available, info.versionName, info.versionCode)) }
+            }
+            withContext(Dispatchers.IO) { com.nextcraft.forge.update.UpdateNotifier.notifyIfNew(getApplication(), info) }
+        }
+    }
+
+    private var lastSilentUpdateCheck = 0L
+
     fun setReaChatHint(enabled: Boolean) {
         preferences.reaChatHint = enabled
         _state.update { it.copy(reaChatHint = enabled) }
@@ -4140,4 +4229,7 @@ private class ChatRun(
     var statusLine: UiText? = null
     var pendingTool: ToolRequest? = null
     var finished: Boolean = false
+
+    /** True while the run is being stopped so that a queued message can go out at once (see steerQueuedPrompt). */
+    var steering: Boolean = false
 }

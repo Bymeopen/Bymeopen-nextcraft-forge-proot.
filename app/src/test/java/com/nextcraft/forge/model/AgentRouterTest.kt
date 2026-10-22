@@ -106,6 +106,29 @@ class AgentRouterTest {
     }
 
     @Test
+    fun manualNeverUsesAnAgentThatIsSwitchedOff() {
+        // Claude is the selected agent but switched off; only Antigravity is on.
+        val cfg = RoutingConfig(RouteMode.MANUAL, agents = listOf(AgentKind.ANTIGRAVITY))
+        val plain = AgentRouter.route("hello", cfg, AgentKind.CLAUDE_CODE, all, 0)!!
+        assertEquals(AgentKind.ANTIGRAVITY, plain.agent)
+        // A tag cannot reach the switched-off agent either: the tag stays in the text and the on agent answers.
+        val tagged = AgentRouter.route("@claude hello", cfg, AgentKind.CLAUDE_CODE, all, 0)!!
+        assertEquals(AgentKind.ANTIGRAVITY, tagged.agent)
+        assertEquals("@claude hello", tagged.text)
+    }
+
+    @Test
+    fun primaryAgentFollowsTheSwitchedOnList() {
+        val onlyAgy = RoutingConfig(RouteMode.MANUAL, agents = listOf(AgentKind.ANTIGRAVITY))
+        assertEquals(AgentKind.ANTIGRAVITY, AgentRouter.primaryAgent(onlyAgy, AgentKind.CLAUDE_CODE, all))
+        val both = RoutingConfig(RouteMode.MANUAL, agents = listOf(AgentKind.ANTIGRAVITY, AgentKind.CLAUDE_CODE))
+        assertEquals(AgentKind.CLAUDE_CODE, AgentRouter.primaryAgent(both, AgentKind.CLAUDE_CODE, all))
+        val failover = RoutingConfig(RouteMode.FAILOVER, agents = listOf(AgentKind.DEEPSEEK_HARNESS, AgentKind.CLAUDE_CODE))
+        assertEquals(AgentKind.CLAUDE_CODE, AgentRouter.primaryAgent(failover, AgentKind.ANTIGRAVITY, setOf(AgentKind.CLAUDE_CODE)))
+        assertEquals(AgentKind.ANTIGRAVITY, AgentRouter.primaryAgent(RoutingConfig(RouteMode.SINGLE), AgentKind.ANTIGRAVITY, all))
+    }
+
+    @Test
     fun onlyFailoverAndBalancedFailOver() {
         assertTrue(AgentRouter.failsOver(RouteMode.FAILOVER))
         assertTrue(AgentRouter.failsOver(RouteMode.BALANCED))

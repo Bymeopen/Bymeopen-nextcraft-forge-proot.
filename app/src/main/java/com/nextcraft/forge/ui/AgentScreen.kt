@@ -193,6 +193,8 @@ fun AgentScreen(
     var renameOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheetOpen by rememberSaveable { mutableStateOf(false) }
     var routeSheetOpen by rememberSaveable { mutableStateOf(false) }
+    // The chip shows the model of the primary agent, which can differ from the selected one in the multi-agent modes.
+    androidx.compose.runtime.LaunchedEffect(state.routing) { viewModel.refreshAgentProfiles(); viewModel.refreshReadyAgents() }
     var branchSheetOpen by rememberSaveable { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
@@ -450,7 +452,24 @@ fun AgentScreen(
                 )
                 chatQueue.forEach { queued ->
                     val label = queued.text.ifBlank { queued.attachments.joinToString { it.displayName } }
-                    AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                        }
+                        // Steer: stop the running turn and send this message now instead of waiting for the queue.
+                        if (running) {
+                            ForgeTextButton(onClick = { viewModel.steerQueuedPrompt(queued.id) }) {
+                                Text(stringResource(R.string.agent_steer), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                if (running) {
+                    Text(
+                        stringResource(R.string.agent_steer_hint),
+                        fontSize = ForgeType.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -496,7 +515,7 @@ fun AgentScreen(
         ChatComposer(
             promptInput = promptInput,
             onPromptChange = { promptInput = it },
-            agentName = state.agentKind.displayTitle(),
+            agentName = primaryAgent(state).displayTitle(),
             running = running,
             canSend = canSend,
             captureEnabled = !state.capturingScreens,
@@ -509,7 +528,7 @@ fun AgentScreen(
                 viewModel.sendPrompt(text)
             },
             onStop = viewModel::stopActiveTask,
-            modelChipLabel = chatModelChipLabel(state),
+            modelChipLabel = chatModelChipLabel(state, primaryAgent(state)),
             onModelChip = { modelSheetOpen = true },
             routeChipLabel = routeModeLabel(state.routing.mode),
             onRouteChip = { routeSheetOpen = true },
@@ -522,6 +541,9 @@ fun AgentScreen(
     if (routeSheetOpen) {
         androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshReadyAgents() }
         ChatRoutingSheet(state = state, viewModel = viewModel, onDismiss = { routeSheetOpen = false })
+    }
+    if (modelSheetOpen) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshAgentProfiles() }
     }
     if (modelSheetOpen) ChatModelSheet(state = state, viewModel = viewModel, onDismiss = { modelSheetOpen = false })
     if (renameOpen) {
