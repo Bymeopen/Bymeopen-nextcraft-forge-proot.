@@ -313,8 +313,6 @@ internal fun ChatUsageSheet(state: ForgeUiState, onDismiss: () -> Unit) {
     }
 }
 
-/** Short model (and effort) text for the composer chip, e.g. "Fable 5.1 Low". */
-@Composable
 /** The agent a plain message goes to: the selected one in Single mode, otherwise the first switched-on one. */
 internal fun primaryAgent(state: ForgeUiState): AgentKind =
     com.nextcraft.forge.model.AgentRouter.primaryAgent(state.routing, state.agentKind, state.readyAgents)
@@ -322,6 +320,8 @@ internal fun primaryAgent(state: ForgeUiState): AgentKind =
 private fun profileOf(state: ForgeUiState, agent: AgentKind) =
     if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
 
+/** Short model (and effort) text for the composer chip, e.g. "Fable 5.1 Low". */
+@Composable
 internal fun chatModelChipLabel(state: ForgeUiState, agent: AgentKind = state.agentKind): String = when (agent) {
     AgentKind.CLAUDE_CODE -> {
         val model = claudeModelLabel(profileOf(state, agent).model.ifBlank { "default" })
