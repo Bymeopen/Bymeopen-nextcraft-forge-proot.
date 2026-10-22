@@ -276,6 +276,9 @@ internal val GlassCanvasColors = listOf(Color(0xFF001411), Color(0xFF00202E), Co
 
 private val GlassCosmicCanvasBrush = Brush.linearGradient(colors = GlassCanvasColors)
 
+/** Opaque Glass surface for anything that must never let the page behind it show through, e.g. a modal sheet. */
+internal val GlassFloatingSurface = Color(0xFF000D0B)
+
 private val DarkThemeTokens = ForgeThemeTokens(
     mode = ForgeThemeMode.DARK,
     isDark = true,

@@ -283,10 +283,9 @@ internal fun ChatUsageSheet(state: ForgeUiState, onDismiss: () -> Unit) {
     val used = estimateContextTokens(state.messages)
     val limit = contextWindowTokens(state.providerProfile.model)
     val fraction = (used.toFloat() / limit).coerceIn(0f, 1f)
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(stringResource(R.string.chat_usage_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
@@ -344,10 +343,9 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
     val agent = if (multi) sheetAgent else state.agentKind
     val profile = if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
     val discovered = if (agent == state.agentKind) state.discoveredModels else emptyList()
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.chat_model_sheet_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
@@ -468,10 +466,9 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
     val running = chatId in state.runningChatIds
     val diff = state.branchDiff[chatId]
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
-    ModalBottomSheet(
+    ForgeModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
     ) {
         androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier.padding(horizontal = ForgeSpace.card),
