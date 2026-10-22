@@ -32,6 +32,7 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import com.nextcraft.forge.runtime.deleteRecursivelyNoFollow
 import com.nextcraft.forge.runtime.shellSingleQuote
 import com.nextcraft.forge.network.GitHubRepository
 import com.nextcraft.forge.network.GitHubTokenPoll
@@ -713,8 +714,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val cleanName = name.trim().ifBlank { "New Project" }
         viewModelScope.launch {
-            val newProject = withContext(Dispatchers.IO) {
-                val slug = reserveProjectSlug(projectSlug(cleanName))
+            var reservedSlug: String? = null
+            val newProject = try {
+                withContext(Dispatchers.IO) {
+                val slug = reserveProjectSlug(projectSlug(cleanName)).also { reservedSlug = it }
                 val project = Project(
                     name = cleanName,
                     description = description.trim().ifBlank {
@@ -738,6 +741,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
                 }
                 project
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Disk full or an unwritable workspace used to escape viewModelScope and crash the app, and the
+                // reserved slug stayed taken.
+                reservedSlug?.let { slug -> synchronized(reservedSlugs) { reservedSlugs -= slug } }
+                _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_project_create_failed, e.message ?: e.javaClass.simpleName)) }
+                return@launch
             }
             val updated = listOf(newProject) + _state.value.projects
             preferences.saveProjects(updated)
@@ -848,7 +860,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.deleteProjectChats(project.id)
         }
         runCatching {
-            File(getApplication<Application>().filesDir, "workspaces/${project.id}").deleteRecursively()
+            File(getApplication<Application>().filesDir, "workspaces/${project.id}").deleteRecursivelyNoFollow()
             checkpoints.checkpointDir(project.id).deleteRecursively()
         }
     }
@@ -1056,6 +1068,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val app = getApplication<Application>()
                     appendAssistantText("\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
                     offerRetry()
+                    discardQueuedPrompts()
                 }
                 finishAgentTurn(project.id)
             }
@@ -1142,6 +1155,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 agentJob?.join()
                 activeRuntimeBridge = null
+                // The bridge's terminal event is delivered asynchronously. If this runs first, finishAgentTurn would
+                // later see sessionRunning=false and return, leaving the partial answer unsaved and its placeholder
+                // dropped from the history at the next send.
+                _state.value.activeProject?.let { finishAgentTurn(it.id) }
                 _state.update {
                     it.copy(sessionRunning = false, activeStatusLine = UiText.res(R.string.agent_status_stopped), pendingToolRequest = null)
                 }
@@ -1662,8 +1679,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrDefault(false)
             }
             if (ok) {
-                if (_state.value.selectedFilePath == cleanPath) {
+                // Also when a folder holding the open file was renamed: a stale path would make the next save
+                // recreate the old folder with the file in it.
+                val open = _state.value.selectedFilePath
+                if (open == cleanPath) {
                     _state.update { it.copy(selectedFilePath = newPath) }
+                } else if (open != null && open.startsWith("$cleanPath/")) {
+                    _state.update { it.copy(selectedFilePath = newPath + open.removePrefix(cleanPath)) }
                 }
                 refreshWorkspaceFilesAndChanges(project.id)
             }
@@ -1860,7 +1882,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     val ws = checkpoints.ensureWorkspace(project.id)
                     val target = checkpoints.safeWorkspaceFile(ws, cleanPath)
-                    target.exists() && target.deleteRecursively()
+                    target.exists() && target.deleteRecursivelyNoFollow()
                 }.getOrDefault(false)
             }
             if (deleted) {
@@ -3082,7 +3104,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         slug = slug,
                     )
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    ws.listFiles()?.forEach { it.deleteRecursively() }
+                    ws.listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
                     val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
                     try {
@@ -3095,7 +3117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } catch (error: Throwable) {
                         // The project is never saved on failure; don't leave its workspace behind on disk.
-                        ws.deleteRecursively()
+                        ws.deleteRecursivelyNoFollow()
                         checkpoints.checkpointDir(project.id).deleteRecursively()
                         throw error
                     }
@@ -3233,7 +3255,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } ?: throw IllegalStateException("Cannot open $displayName")
                     } catch (error: Throwable) {
                         // Nothing registered this workspace yet: remove the half-extracted files and free the slug.
-                        runCatching { ws.deleteRecursively() }
+                        runCatching { ws.deleteRecursivelyNoFollow() }
                         synchronized(reservedSlugs) { reservedSlugs -= slug }
                         throw error
                     }

@@ -374,6 +374,7 @@
     <string name="msg_gh_clone_failed">Clone failed: %1$s</string>
     <string name="msg_git_url_invalid">Enter an http(s) git URL</string>
     <string name="msg_imported">Imported %1$s</string>
+    <string name="msg_project_create_failed">Could not create the project: %1$s</string>
     <string name="msg_import_failed">Import failed: %1$s</string>
     <string name="msg_unknown_error">Unknown error</string>
     <string name="msg_gh_token_store_failed">Could not store the GitHub token.</string>
