@@ -293,6 +293,7 @@ class AntigravityRuntimeBridge(
                     guestWorkspacePath = "/workspace/hello",
                     emulateHardLinks = false,
                     outputFile = outputFile,
+                    trustClaudeWorkspace = false,
                 )
                 try {
                     val request = JSONObject()
@@ -454,6 +455,7 @@ class AntigravityRuntimeBridge(
                     command,
                     guestWorkspacePath = "/workspace/$projectSlug",
                     emulateHardLinks = false,
+                    trustClaudeWorkspace = false,
                 )
                 val native = process as? NativeSpawnProcess ?: error("Unsupported Antigravity process")
                 spawnedOutputFile = native.outputFile

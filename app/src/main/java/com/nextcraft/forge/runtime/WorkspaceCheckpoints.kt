@@ -97,11 +97,12 @@ class WorkspaceCheckpoints(
                             runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
                         )
                 }
+                // Directories are already confined to the workspace by onEnter, so a regular file inside one cannot
+                // escape it; a canonicalFile() per file was a realpath walk for every file of every prompt.
                 .filter {
                     it.isFile &&
                         !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
-                        !Files.isSymbolicLink(it.toPath()) &&
-                        runCatching { it.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
+                        !Files.isSymbolicLink(it.toPath())
                 }
                 .forEach { source ->
                     // A file only root can read (made by a build in the chroot) must not abort the whole turn.
@@ -479,11 +480,11 @@ class WorkspaceCheckpoints(
                         runCatching { directory.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false)
                     )
             }
+            // onEnter already keeps the walk inside the root, so no per-file canonicalFile() is needed.
             .filter {
                 it.isFile &&
                     !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) &&
-                    !Files.isSymbolicLink(it.toPath()) &&
-                    runCatching { it.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false)
+                    !Files.isSymbolicLink(it.toPath())
             }
             // A file the app cannot read (root-owned, or removed meanwhile) is left out instead of failing the turn.
             .mapNotNull { file -> runCatching { digest(file) }.getOrNull()?.let { file.relativeTo(root).invariantSeparatorsPath to it } }
