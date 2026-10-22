@@ -21,7 +21,8 @@ command -v zstd >/dev/null || { echo "zstd is required" >&2; exit 1; }
 
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
-mkdir -p "$temp_dir/payload/root/.local/bin" "$ROOT_DIR/dist/runtime-bundles"
+OUT_DIR="${NEXTCRAFT_OUT_DIR:-$ROOT_DIR/dist/runtime-bundles}"
+mkdir -p "$temp_dir/payload/root/.local/bin" "$OUT_DIR"
 
 curl -fL --retry 3 -o "$temp_dir/agy.tar.gz" "$SOURCE_URL"
 actual_sha512="$(shasum -a 512 "$temp_dir/agy.tar.gz" | cut -d' ' -f1)"
@@ -34,10 +35,9 @@ tar -xzf "$temp_dir/agy.tar.gz" -C "$temp_dir" antigravity
 install -m 0755 "$temp_dir/antigravity" "$temp_dir/payload/root/.local/bin/agy"
 printf '%s\n' "$VERSION" > "$temp_dir/payload/.nextcraft-agy-version"
 printf '%s\n' "$VERSION" > "$temp_dir/payload/.nextcraft-agy-version"
-cp "$temp_dir/payload/.nextcraft-agy-version" "$temp_dir/payload/.pocket-agy-version"  # older app builds read the legacy name
 
 python3 "$SCRIPT_DIR/create_deterministic_tar.py" "$temp_dir/payload" "$temp_dir/payload.tar"
-zstd -19 -T0 -f "$temp_dir/payload.tar" -o "$ROOT_DIR/dist/runtime-bundles/$ARCHIVE"
-shasum -a 256 "$ROOT_DIR/dist/runtime-bundles/$ARCHIVE"
-wc -c "$ROOT_DIR/dist/runtime-bundles/$ARCHIVE" "$temp_dir/payload.tar"
-echo "Antigravity bundle created: dist/runtime-bundles/$ARCHIVE"
+zstd -19 -T0 -f "$temp_dir/payload.tar" -o "$OUT_DIR/$ARCHIVE"
+sha256sum "$OUT_DIR/$ARCHIVE"
+wc -c "$OUT_DIR/$ARCHIVE" "$temp_dir/payload.tar"
+echo "Antigravity bundle created: $OUT_DIR/$ARCHIVE"

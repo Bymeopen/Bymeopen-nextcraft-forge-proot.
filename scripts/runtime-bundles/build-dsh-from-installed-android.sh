@@ -37,7 +37,6 @@ adb_cmd exec-out "su -c 'cat /data/local/tmp/nextcraft-dsh-export.tar'" > "$temp
 tar -xf "$temp_dir/source.tar" -C "$temp_dir/payload"
 printf '%s\n' "$DSH_VERSION" > "$temp_dir/payload/.nextcraft-dsh-version"
 printf '%s\n' "$DSH_VERSION" > "$temp_dir/payload/.nextcraft-dsh-version"
-cp "$temp_dir/payload/.nextcraft-dsh-version" "$temp_dir/payload/.pocket-dsh-version"  # older app builds read the legacy name
 
 [[ -L "$temp_dir/payload/usr/local/bin/dsh" ]]
 [[ -f "$temp_dir/payload/usr/local/lib/dsh/node_modules/.bin/dsh" ]]

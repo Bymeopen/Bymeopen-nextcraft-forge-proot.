@@ -102,8 +102,7 @@ mkdir -p "$payload"
 [[ -e "$payload/usr/bin/pip3" ]] || { echo "Overlay is missing usr/bin/pip3" >&2; exit 1; }
 [[ ! -e "$payload/usr/lib/python3.12/EXTERNALLY-MANAGED" ]]
 
-printf 'python-bundle-%s\n' "$BUNDLE_VERSION" > "$payload/.pocket-python-tools-version"
-cp "$payload/.pocket-python-tools-version" "$payload/.nextcraft-python-tools-version"
+printf 'python-bundle-%s\n' "$BUNDLE_VERSION" > "$payload/.nextcraft-python-tools-version"
 
 mkdir -p "$OUT_DIR"
 python3 "$SCRIPT_DIR/create_deterministic_tar.py" "$payload" "$work/payload.tar"

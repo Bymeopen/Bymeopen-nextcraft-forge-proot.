@@ -60,12 +60,12 @@ guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\${NODE_VERSION}-linux-arm6
 guest "apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /var/tmp/*"
 
 # 4. Siapkan direktori mount (/workspace/nextcraft, /nextcraft-bridge) & version markers
-guest "mkdir -p /workspace /workspace/nextcraft /nextcraft-bridge /pocket-bridge /opt/nextcraft /root/.gradle/init.d /system /apex /vendor /product"
-guest "printf 'ubuntu-24.04.5-arm64\\n' > /.nextcraft-rootfs-version && cp /.nextcraft-rootfs-version /.pocket-rootfs-version"
-guest "printf 'nextcraft-core-$VERSION\\n' > /.nextcraft-core-tools-version && cp /.nextcraft-core-tools-version /.pocket-core-tools-version"
-guest "printf 'core-bundle-$VERSION\\n' > /.nextcraft-runtime-ready && cp /.nextcraft-runtime-ready /.pocket-runtime-ready"
-guest "printf 'ubuntu-maintenance-v1\\n' > /.nextcraft-system-upgrade-version && cp /.nextcraft-system-upgrade-version /.pocket-system-upgrade-version"
-guest "printf '{\"WEB\":true,\"PYTHON\":false,\"CPP\":false,\"PHP\":false,\"ANDROID\":false}\\n' > /.nextcraft-dev-stacks.json && cp /.nextcraft-dev-stacks.json /.pocket-dev-stacks.json"
+guest "mkdir -p /workspace /workspace/nextcraft /nextcraft-bridge /opt/nextcraft /root/.gradle/init.d /system /apex /vendor /product"
+guest "printf 'ubuntu-24.04.5-arm64\\n' > /.nextcraft-rootfs-version"
+guest "printf 'nextcraft-core-$VERSION\\n' > /.nextcraft-core-tools-version"
+guest "printf 'core-bundle-$VERSION\\n' > /.nextcraft-runtime-ready"
+guest "printf 'ubuntu-maintenance-v1\\n' > /.nextcraft-system-upgrade-version"
+guest "printf '{\"WEB\":true,\"PYTHON\":false,\"CPP\":false,\"PHP\":false,\"ANDROID\":false}\\n' > /.nextcraft-dev-stacks.json"
 guest "rm -rf /root/.cache /root/.npm /root/.composer /root/.gradle/caches /root/.ssh; find /var/log -type f -delete; rm -f /etc/ssh/ssh_host_* /etc/machine-id /var/lib/dbus/machine-id /root/.bash_history"
 
 # 5. Unmount virtual filesystems secara bersih sebelum membuat arsip deterministik .tar.zst

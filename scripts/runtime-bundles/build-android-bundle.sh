@@ -16,7 +16,7 @@ set -euo pipefail
 #                                          Linux ARM64 Build-Tools. The binaries are static: no /system/bin/linker64.
 #   root/android-sdk/licenses/             android-sdk-license hash, as sdkmanager writes it
 #   root/maven/localMvnRepository/         offline Maven repository from build-android-maven-cache.sh
-#   root/.gradle/init.d/nextcraft-android.gradle, root/.gradle/gradle.properties, root/.nextcraft-android-tools-version (+ .pocket-* copy)
+#   root/.gradle/init.d/nextcraft-android.gradle, root/.gradle/gradle.properties, root/.nextcraft-android-tools-version
 #                                          byte-identical to what RuntimeInstaller writes
 #
 # No root or chroot is needed to assemble the bundle. Set NEXTCRAFT_CORE_ROOTFS to an extracted Core bundle to also
@@ -255,8 +255,6 @@ org.gradle.parallel=false
 kotlin.compiler.execution.strategy=in-process
 EOF
 printf '%s' "$TOOLS_VERSION" > "$payload/root/.nextcraft-android-tools-version"
-# Older app builds read the legacy name.
-cp "$payload/root/.nextcraft-android-tools-version" "$payload/root/.pocket-android-tools-version"
 
 echo "Checking the payload"
 for tool in "${NATIVE_TOOLS[@]}"; do
