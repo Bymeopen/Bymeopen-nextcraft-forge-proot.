@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Export the checksum-verified official Claude Code ARM64 binary from an
-# existing NextCraft Forge / Mobile-Harness installation on a rooted device.
+# existing NextCraft Forge installation on a rooted device.
 # Only the executable and version marker are included; authentication, settings,
 # conversations, projects, and device data are never copied.
 ADB_SERIAL="${ADB_SERIAL:-}"

@@ -1,0 +1,30 @@
+name: Mirror legacy runtime bundle
+
+# Manual only: copies the Ubuntu 20.04 Python 3.8 overlay (used only by runtimes still on the 20.04 rootfs) into a
+# release of this repository, so the app can stop downloading it from the upstream project. Re-running is safe.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: runtime-legacy-2026.09.4
+      SOURCE: https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4/pocketdev-python-arm64-2026.09.2.tar.zst
+      TARGET: nextcraft-python-legacy-arm64-2026.09.2.tar.zst
+      SHA256: 6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85
+    steps:
+      - name: Download and verify
+        run: |
+          curl -fL --retry 4 -o "$TARGET" "$SOURCE"
+          echo "$SHA256  $TARGET" | sha256sum -c -
+      - name: Publish release asset
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target main --title "Legacy runtime (Ubuntu 20.04)" \
+              --notes "Python 3.8 overlay for runtimes still on the Ubuntu 20.04 rootfs. Origin and licence: THIRD_PARTY_NOTICES.md."
+          gh release upload "$TAG" "$TARGET" -R "$GITHUB_REPOSITORY" --clobber
