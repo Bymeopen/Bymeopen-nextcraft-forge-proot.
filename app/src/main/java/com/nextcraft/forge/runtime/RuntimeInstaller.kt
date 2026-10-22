@@ -573,7 +573,7 @@ class RuntimeInstaller(private val context: Context) {
      */
     fun hasClaudeLoginCredential(): Boolean {
         val file = File(rootfs, "root/.claude/.credentials.json")
-        val quoted = "'${file.absolutePath.replace("'", "'\\''")}'"
+        val quoted = shellSingleQuote(file.absolutePath)
         return runCatching {
             val process = ProcessBuilder("su", "-c", "grep -q '\"refreshToken\"' $quoted").start()
             if (!process.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {

@@ -32,6 +32,9 @@ internal object RootfsRepair {
         // Never copyRecursively a rootfs: it follows symlinks and drops ownership, modes and
         // special files. A root `mv` preserves all of them (and is a plain rename on one fs).
         if (target.exists()) return false
+        require(RootPathGuard.isInsideAppData(source.canonicalPath) && RootPathGuard.isInsideAppData(target.canonicalPath)) {
+            "Refusing to move outside the app data directory"
+        }
         val exit = runRootCommand(
             "su", "-c",
             "mv -- ${shellSingleQuote(source.absolutePath)} ${shellSingleQuote(target.absolutePath)}",
@@ -96,6 +99,9 @@ internal object RootfsRepair {
         require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
             "Refusing to change ownership of invalid path: '$canonicalPath'"
         }
+        require(RootPathGuard.isInsideAppData(canonicalPath)) {
+            "Refusing to change ownership outside the app data directory: '$canonicalPath'"
+        }
         // -h: change a symlink itself, never the file it points to (it may point outside the rootfs).
         val exit = runRootCommand(
             "su", "-c",
@@ -112,6 +118,7 @@ internal object RootfsRepair {
      */
     fun writeAsRoot(target: File, content: ByteArray, staging: File, uid: Int, mode: Int = 0b110100100): Boolean {
         val parent = target.parentFile ?: return false
+        if (!RootPathGuard.isInsideAppData(target.canonicalPath)) return false
         staging.parentFile?.mkdirs()
         return try {
             staging.writeBytes(content)
@@ -139,6 +146,9 @@ internal object RootfsRepair {
         val canonicalPath = targetDir.canonicalPath.trimEnd('/')
         require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
             "Refusing to delete invalid path: '$canonicalPath'"
+        }
+        require(RootPathGuard.isInsideAppData(canonicalPath)) {
+            "Refusing to delete outside the app data directory: '$canonicalPath'"
         }
         val quotedPath = shellSingleQuote(canonicalPath)
         val exit = runRootCommand(
