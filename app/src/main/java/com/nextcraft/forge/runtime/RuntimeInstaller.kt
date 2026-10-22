@@ -117,22 +117,22 @@ class RuntimeInstaller(private val context: Context) {
     private val unmountChrootFile = File(runtimeBinDir, "unmount-chroot.sh")
     private val rootfs = File(runtimeDir, "ubuntu")
     private val downloads = File(context.cacheDir, "runtime-downloads")
-    private val coreReadyMarker = File(rootfs, ".pocket-runtime-ready")
-    private val nextcraftReadyMarker = File(rootfs, ".nextcraft-runtime-ready")
-    private val claudeMarker = File(rootfs, ".pocket-claude-version")
-    private val bundledClaudeMarker = File(rootfs, ".pocket-bundled-claude-version")
-    private val rootfsMarker = File(rootfs, ".pocket-rootfs-version")
-    private val languageToolsMarker = File(rootfs, ".pocket-language-tools-version")
-    private val coreToolsMarker = File(rootfs, ".pocket-core-tools-version")
-    private val systemUpgradeMarker = File(rootfs, ".pocket-system-upgrade-version")
-    private val devStacksFile = File(rootfs, ".pocket-dev-stacks.json")
-    private val dshMarker = File(rootfs, ".pocket-dsh-version")
-    private val agyMarker = File(rootfs, ".pocket-agy-version")
-    private val githubCliMarker = File(rootfs, ".pocket-github-cli-version")
-    private val dshAndroidCompatibilityMarker = File(rootfs, ".pocket-dsh-android-compat-version")
-    private val macosMetadataRepairMarker = File(rootfs, ".pocket-macos-metadata-repair")
+    private val coreReadyMarker = File(rootfs, ".nextcraft-runtime-ready")
+    private val claudeMarker = File(rootfs, ".nextcraft-claude-version")
+    private val bundledClaudeMarker = File(rootfs, ".nextcraft-bundled-claude-version")
+    private val rootfsMarker = File(rootfs, ".nextcraft-rootfs-version")
+    private val languageToolsMarker = File(rootfs, ".nextcraft-language-tools-version")
+    private val coreToolsMarker = File(rootfs, ".nextcraft-core-tools-version")
+    private val systemUpgradeMarker = File(rootfs, ".nextcraft-system-upgrade-version")
+    private val devStacksFile = File(rootfs, ".nextcraft-dev-stacks.json")
+    private val dshMarker = File(rootfs, ".nextcraft-dsh-version")
+    private val agyMarker = File(rootfs, ".nextcraft-agy-version")
+    private val githubCliMarker = File(rootfs, ".nextcraft-github-cli-version")
+    private val dshAndroidCompatibilityMarker = File(rootfs, ".nextcraft-dsh-android-compat-version")
+    private val macosMetadataRepairMarker = File(rootfs, ".nextcraft-macos-metadata-repair")
 
     fun isInstalled(): Boolean {
+        RuntimeMarkers.syncAll(rootfs)
         val chrootScriptsReady = runCatching { ensureChrootScripts() }.isSuccess
         val rootfsLayoutReady = ensureRootfsCompatibilityLinks()
         val legacyLanguageTools = languageToolsMarker.readTextOrNull() == LANGUAGE_TOOLS_VERSION
@@ -144,7 +144,7 @@ class RuntimeInstaller(private val context: Context) {
             isSupportedRootfsVersion(rootfsMarker.readTextOrNull()) &&
             File(rootfs, "usr/local/bin/node").exists() &&
             (legacyLanguageTools || coreToolsReady) &&
-            (coreReadyMarker.exists() || nextcraftReadyMarker.exists())
+            coreReadyMarker.exists()
         if (ready) repairLegacyMacosMetadata()
         return ready
     }
@@ -156,7 +156,7 @@ class RuntimeInstaller(private val context: Context) {
         // /workspace, ...) so the walk is neither huge nor able to delete "._*" files from a user's project.
         stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         macosMetadataRepairMarker.parentFile?.mkdirs()
-        macosMetadataRepairMarker.writeText("1")
+        macosMetadataRepairMarker.writeMarker("1")
     }
 
     /** Returns the already verified Root Chroot runtime without performing network or update checks. */
@@ -301,7 +301,7 @@ class RuntimeInstaller(private val context: Context) {
         }
         if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
             runSystemMaintenance(chrootExec, onProgress)
-            systemUpgradeMarker.writeText(SYSTEM_UPGRADE_VERSION)
+            systemUpgradeMarker.writeMarker(SYSTEM_UPGRADE_VERSION)
         }
         if (coreNeeded) {
             aptInstall(
@@ -313,10 +313,9 @@ class RuntimeInstaller(private val context: Context) {
             )
             writeResolver()
             verifyGuest(chrootExec, "git --version", "Failed to verify Git inside Root Chroot")
-            coreToolsMarker.writeText(CORE_TOOLS_VERSION)
+            coreToolsMarker.writeMarker(CORE_TOOLS_VERSION)
         }
-        if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
-        if (!nextcraftReadyMarker.exists()) nextcraftReadyMarker.writeText(CORE_TOOLS_VERSION)
+        if (!coreReadyMarker.exists()) coreReadyMarker.writeMarker(CORE_TOOLS_VERSION)
 
         val removedStacks = if (selectedStacks.isNotEmpty()) {
             (installedStacks() - selectedStacks) - DevStack.WEB
@@ -397,18 +396,16 @@ class RuntimeInstaller(private val context: Context) {
         when (agent) {
             AgentKind.CLAUDE_CODE -> {
                 removePath(File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")))
-                listOf(".pocket-claude-version", ".nextcraft-claude-version", ".pocket-bundled-claude-version")
-                    .forEach { File(rootfs, it).delete() }
+                listOf(claudeMarker, bundledClaudeMarker).forEach { it.deleteMarker() }
             }
             AgentKind.DEEPSEEK_HARNESS -> {
                 removePath(File(rootfs, "usr/local/bin/dsh"))
                 removePath(File(rootfs, "usr/local/lib/dsh"))
-                listOf(".pocket-dsh-version", ".nextcraft-dsh-version", ".pocket-dsh-android-compat-version")
-                    .forEach { File(rootfs, it).delete() }
+                listOf(dshMarker, dshAndroidCompatibilityMarker).forEach { it.deleteMarker() }
             }
             AgentKind.ANTIGRAVITY -> {
                 removePath(File(rootfs, AGY_GUEST_PATH.removePrefix("/")))
-                listOf(".pocket-agy-version", ".nextcraft-agy-version").forEach { File(rootfs, it).delete() }
+                agyMarker.deleteMarker()
             }
         }
         check(!isAgentInstalled(agent)) { "Could not fully remove ${agent.title}" }
@@ -500,7 +497,7 @@ class RuntimeInstaller(private val context: Context) {
             command = "$GITHUB_CLI_GUEST_PATH --version",
             failureMessage = "Failed to verify GitHub CLI",
         )
-        githubCliMarker.writeText(GITHUB_CLI_VERSION)
+        githubCliMarker.writeMarker(GITHUB_CLI_VERSION)
         check(isGitHubCliInstalled()) { "GitHub CLI installation is incomplete" }
         onProgress(RuntimeInstallProgress("GitHub CLI is ready", 1f))
     }
@@ -713,7 +710,7 @@ class RuntimeInstaller(private val context: Context) {
         } finally {
             downloaded.delete()
         }
-        claudeMarker.writeText(latest)
+        claudeMarker.writeMarker(latest)
     }
 
     private suspend fun updateAgy(
@@ -765,7 +762,7 @@ class RuntimeInstaller(private val context: Context) {
         } finally {
             downloaded.delete()
         }
-        agyMarker.writeText(latest)
+        agyMarker.writeMarker(latest)
     }
 
     private suspend fun updateDsh(
@@ -827,8 +824,8 @@ class RuntimeInstaller(private val context: Context) {
         if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
             Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek copy")
         }
-        dshMarker.writeText(expectedVersion)
-        dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
+        dshMarker.writeMarker(expectedVersion)
+        dshAndroidCompatibilityMarker.writeMarker(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
     private fun fetchAgyManifest(): JSONObject = JSONObject(
@@ -845,7 +842,7 @@ class RuntimeInstaller(private val context: Context) {
             coreReadyMarker.readTextOrNull(),
             bundledClaudeMarker.readTextOrNull(),
         ).mapNotNull { it?.trim() }.firstOrNull { it.matches(CLAUDE_VERSION_PATTERN) } ?: return
-        claudeMarker.writeText(legacyVersion)
+        claudeMarker.writeMarker(legacyVersion)
     }
 
     private fun isSupportedCoreToolsVersion(): Boolean = coreToolsMarker.readTextOrNull() in setOf(
@@ -900,7 +897,7 @@ class RuntimeInstaller(private val context: Context) {
             forceEmbedded = isAssetAvailable("runtime/${AGY_BUNDLE.fileName}"),
         )
         verifyGuest(chrootExec, "$AGY_GUEST_PATH --version", "Failed to verify Antigravity CLI")
-        agyMarker.writeText(AGY_VERSION)
+        agyMarker.writeMarker(AGY_VERSION)
         require(isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             "Antigravity CLI installation is incomplete"
         }
@@ -989,7 +986,7 @@ class RuntimeInstaller(private val context: Context) {
             if (!RootfsRepair.reclaimOwnership(dshRoot, AndroidProcess.myUid())) throw e
             applyDshAndroidCompatibility(dshRoot, dshMarker.readTextOrNull().orEmpty())
         }
-        dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
+        dshAndroidCompatibilityMarker.writeMarker(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
     private fun applyDshAndroidCompatibility(dshRoot: File, version: String) {
@@ -1272,7 +1269,7 @@ class RuntimeInstaller(private val context: Context) {
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        val marker = File(rootfs, "root/.pocket-android-tools-version")
+        val marker = File(rootfs, "root/.nextcraft-android-tools-version")
         if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION || !hasAndroidToolchainFiles(rootfs)) {
             // An older layout (different JDK/Gradle directories) would otherwise stay behind next to the new one.
             if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION && marker.isFile) removeAndroidStack()
@@ -1285,8 +1282,7 @@ class RuntimeInstaller(private val context: Context) {
                 onProgress,
             )
             makeAndroidToolsExecutable(rootfs)
-            marker.parentFile?.mkdirs()
-            marker.writeText(ANDROID_TOOLS_VERSION)
+            marker.writeMarker(ANDROID_TOOLS_VERSION)
         }
         writeAndroidGradleConfiguration(rootfs)
 
@@ -1439,6 +1435,7 @@ class RuntimeInstaller(private val context: Context) {
         val script = File(runtimeRootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/"))
         script.parentFile?.mkdirs()
         script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
+        File(runtimeRootfs, RuntimeMarkers.LEGACY_GRADLE_INIT_SCRIPT).delete()
     }
 
     private fun deviceTotalMemoryMb(): Long {
@@ -1484,7 +1481,7 @@ class RuntimeInstaller(private val context: Context) {
     fun migrateLegacyToolMarkers() {
         if (!File(rootfs, "usr/bin/bash").isFile) return
         if (languageToolsMarker.readTextOrNull() != LANGUAGE_TOOLS_VERSION) return
-        if (coreToolsMarker.readTextOrNull() != CORE_TOOLS_VERSION) coreToolsMarker.writeText(CORE_TOOLS_VERSION)
+        if (coreToolsMarker.readTextOrNull() != CORE_TOOLS_VERSION) coreToolsMarker.writeMarker(CORE_TOOLS_VERSION)
         val state = readDevStackState()
         DevStack.entries.forEach { stack -> if (!state.containsKey(stack.name)) state[stack.name] = true }
         writeDevStackState(state)
@@ -1511,7 +1508,7 @@ class RuntimeInstaller(private val context: Context) {
             DevStack.CPP -> guestExecutableOrSymlinkExists("usr/bin/gcc") && guestExecutableOrSymlinkExists("usr/bin/g++")
             DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
             DevStack.ANDROID ->
-                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                RuntimeMarkers.read(File(rootfs, "root/.nextcraft-android-tools-version"))?.trim() == ANDROID_TOOLS_VERSION &&
                     hasAndroidToolchainFiles(rootfs) &&
                     File(rootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/")).isFile
         }
@@ -1535,6 +1532,7 @@ class RuntimeInstaller(private val context: Context) {
         state.forEach { (name, value) -> obj.put(name, value) }
         // A truncated file reads back as "no stacks installed" and makes the next setup reinstall everything.
         writeRootfsFileAtomically(devStacksFile, obj.toString())
+        RuntimeMarkers.legacyOf(devStacksFile)?.let { runCatching { it.writeText(obj.toString()) } }
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -1895,7 +1893,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun isValidCoreRootfs(targetRootfs: File): Boolean =
         ensureRootfsCompatibilityLinks(targetRootfs) &&
             File(targetRootfs, "usr/bin/bash").isFile &&
-            isSupportedRootfsVersion(File(targetRootfs, ".pocket-rootfs-version").readTextOrNull())
+            isSupportedRootfsVersion(RuntimeMarkers.read(File(targetRootfs, ".nextcraft-rootfs-version"))?.trim())
 
     private fun actionableProcessError(output: String, fallback: String): String {
         val lines = output.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
@@ -2021,7 +2019,7 @@ class RuntimeInstaller(private val context: Context) {
             put("HOME", "/root")
             put("USER", "root")
             put("LOGNAME", "root")
-            val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
+            val androidReady = RuntimeMarkers.read(File(targetRootfs, "root/.nextcraft-android-tools-version"))?.trim() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
                 put("ANDROID_HOME", AndroidToolchain.SDK_GUEST_DIR)
@@ -2088,7 +2086,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     fun ensureSettingsAndHooks() {
-        val hook = File(rootfs, "opt/pocket/permission-hook.sh")
+        val hook = File(rootfs, "opt/nextcraft/permission-hook.sh")
         hook.parentFile?.mkdirs()
         // Hands every permission request to the app through the shared bridge directory and
         // waits for the user's/guardrail decision. The app classifies risk, auto-answers
@@ -2098,8 +2096,8 @@ class RuntimeInstaller(private val context: Context) {
         writeRootfsFileAtomically(
             hook,
             """#!/bin/sh
-BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
-RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/nextcraft-bridge}"
+RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/nextcraft-bridge-responses}"
 # Parallel chats share this directory: the session id (set by the app) tags the request so only its owner answers it.
 SID="${'$'}{NEXTCRAFT_SESSION_ID:-}"
 ID="${'$'}{SID:+${'$'}{SID}_}${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
@@ -2126,11 +2124,11 @@ printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"
         // BROWSER handler for `claude auth login`: there is no browser in the chroot, so the sign-in URL is handed to
         // the app through the bridge directory and opened in the Android browser. The browser then redirects to
         // http://localhost:<port>/callback, which the CLI (same network namespace) is listening on.
-        val openUrl = File(rootfs, "opt/pocket/open-url.sh")
+        val openUrl = File(rootfs, "opt/nextcraft/open-url.sh")
         writeRootfsFileAtomically(
             openUrl,
             """#!/bin/sh
-BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/nextcraft-bridge}"
 [ -n "${'$'}1" ] && [ -d "${'$'}BRIDGE" ] || exit 0
 printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDGE/claude-login-url.tmp" "${'$'}BRIDGE/claude-login-url"
 """,
@@ -2155,7 +2153,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                             .put(
                                 "hooks",
                                 JSONArray().put(
-                                    JSONObject().put("type", "command").put("command", "/opt/pocket/permission-hook.sh"),
+                                    JSONObject().put("type", "command").put("command", "/opt/nextcraft/permission-hook.sh"),
                                 ),
                             ),
                     ),
@@ -2164,13 +2162,19 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             .toString()
 
         val settingsPaths = listOf(
-            File(rootfs, "root/.claude/pocket-settings.json"),
+            File(rootfs, "root/.claude/nextcraft-settings.json"),
             File(rootfs, "root/.claude/settings.json"),
             File(rootfs, "etc/claude/settings.json"),
         )
         for (target in settingsPaths) {
             writeRootfsFileAtomically(target, settingsContent)
         }
+        // Sessions started by an older build (and its settings files) still call /opt/pocket/*: keep identical copies there.
+        val legacyScripts = File(rootfs, "opt/pocket")
+        listOf(hook, openUrl).forEach { script ->
+            runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }
+        }
+        File(rootfs, "root/.claude/pocket-settings.json").delete()
         ensureWorkspaceTrust("/workspace")
     }
 
@@ -2549,6 +2553,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
             }
         }
+        // Published bundles still carry the .pocket-* marker names.
+        RuntimeMarkers.syncAll(destination)
     }
 
     @Suppress("DEPRECATION")
@@ -2787,7 +2793,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
 
         /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
-        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "android", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "android", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses", "nextcraft-bridge-responses")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
@@ -2846,10 +2852,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
          * `build-android-bundle.sh` ships a byte-identical copy; keep both in sync.
          */
         internal val ANDROID_GRADLE_INIT_SCRIPT = """
-            def pocketMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            def nextcraftMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
             beforeSettings { settings ->
                 settings.pluginManagement.repositories {
-                    maven { url = pocketMaven }
+                    maven { url = nextcraftMaven }
                     google()
                     mavenCentral()
                     gradlePluginPortal()
@@ -2857,7 +2863,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             }
             settingsEvaluated { settings ->
                 settings.dependencyResolutionManagement.repositories {
-                    maven { url = pocketMaven }
+                    maven { url = nextcraftMaven }
                 }
             }
             gradle.beforeProject { project ->
@@ -2866,7 +2872,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     '$ANDROID_AAPT2_GUEST_PATH'
                 )
                 project.buildscript.repositories {
-                    maven { url = pocketMaven }
+                    maven { url = nextcraftMaven }
                 }
             }
         """.trimIndent() + "\n"
@@ -3169,8 +3175,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             HOST_RESP="${'$'}HOST_BRIDGE-responses"
             mkdir -p "${'$'}HOST_RESP"
             chown "${'$'}APP_UID:${'$'}APP_UID" "${'$'}HOST_RESP" 2>/dev/null || true
-            mount_dynamic_bind "${'$'}HOST_RESP" "${'$'}ROOTFS/pocketdev-bridge-responses"
-            mount -o remount,bind,ro "${'$'}ROOTFS/pocketdev-bridge-responses" 2>/dev/null || true
+            # The pocket* names are kept for scripts and sessions from older builds.
+            for resp_dir in nextcraft-bridge-responses pocketdev-bridge-responses; do
+                mount_dynamic_bind "${'$'}HOST_RESP" "${'$'}ROOTFS/${'$'}resp_dir"
+                mount -o remount,bind,ro "${'$'}ROOTFS/${'$'}resp_dir" 2>/dev/null || true
+            done
 
             if [ ! -s "${'$'}ROOTFS/etc/resolv.conf" ]; then
                 mkdir -p "${'$'}ROOTFS/etc"
@@ -3215,9 +3224,9 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             export NODE_OPTIONS="${'$'}{NODE_OPTIONS:---dns-result-order=ipv4first}"
             export COREPACK_ENABLE_DOWNLOAD_PROMPT="0"
             export GLIBC_TUNABLES="glibc.pthread.rseq=0"
-            export NEXTCRAFT_BRIDGE_DIR="/pocketdev-bridge"
-            export POCKETDEV_BRIDGE_DIR="/pocketdev-bridge"
-            export NEXTCRAFT_RESPONSE_DIR="/pocketdev-bridge-responses"
+            export NEXTCRAFT_BRIDGE_DIR="/nextcraft-bridge"
+            export POCKETDEV_BRIDGE_DIR="/nextcraft-bridge"
+            export NEXTCRAFT_RESPONSE_DIR="/nextcraft-bridge-responses"
             export PATH="${'$'}{PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
             case ":${'$'}PATH:" in
                 *:/root/.local/bin:*) ;;

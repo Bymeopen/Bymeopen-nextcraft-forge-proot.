@@ -30,7 +30,7 @@ internal object AndroidToolchain {
     const val AAPT2_GUEST_PATH = "$BUILD_TOOLS_GUEST_DIR/aapt2"
     const val ANDROID_JAR_GUEST_PATH = "$SDK_GUEST_DIR/platforms/$PLATFORM/android.jar"
     const val MAVEN_GUEST_DIR = "/root/maven/localMvnRepository"
-    const val GRADLE_INIT_SCRIPT_GUEST_PATH = "/root/.gradle/init.d/pocketdev-android.gradle"
+    const val GRADLE_INIT_SCRIPT_GUEST_PATH = "/" + RuntimeMarkers.GRADLE_INIT_SCRIPT
     const val GUEST_PATH_PREFIX = "$GRADLE_HOME_GUEST_DIR/bin:$BUILD_TOOLS_GUEST_DIR:$SDK_GUEST_DIR/cmdline-tools/latest/bin"
 
     /** Same paths relative to the rootfs directory on the host side. */
@@ -79,12 +79,14 @@ internal object AndroidToolchain {
         SDK_HOST_DIR,
         MAVEN_HOST_DIR.substringBefore('/') + "/maven",
         "root/.pocket-android-tools-version",
+        "root/.nextcraft-android-tools-version",
         "root/.gradle/caches",
         "root/.gradle/daemon",
         "root/.gradle/native",
         "root/.gradle/notifications",
         "root/.gradle/wrapper/dists",
         "root/.gradle/init.d/pocketdev-android.gradle",
+        RuntimeMarkers.GRADLE_INIT_SCRIPT,
         GRADLE_HOST_DIR,
         JDK_HOST_DIR,
         "opt/jdk-$JDK_MAJOR",

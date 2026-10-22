@@ -1997,7 +1997,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
         val reaInstalled = preferences.reaChatHint &&
-            File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
+            com.nextcraft.forge.runtime.RuntimeMarkers.read(File(RuntimeInstaller.rootfsDir(getApplication()), "root/.nextcraft-rea-version")) != null
         val agentPrompt = ScheduleDirectives.augment(ReaChatHint.augment(basePrompt, attachments, reaInstalled), preferences.scheduleEnabled)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",

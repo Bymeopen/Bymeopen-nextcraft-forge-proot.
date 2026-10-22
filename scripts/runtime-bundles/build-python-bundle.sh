@@ -25,12 +25,14 @@ OUT_DIR="${NEXTCRAFT_OUT_DIR:-$ROOT_DIR/dist/runtime-bundles}"
 for tool in zstd python3 chroot tar find; do
   command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
 done
-[[ -x "$CORE_ROOTFS/usr/bin/apt-get" && -f "$CORE_ROOTFS/.pocket-rootfs-version" ]] || {
+[[ -x "$CORE_ROOTFS/usr/bin/apt-get" && ( -f "$CORE_ROOTFS/.nextcraft-rootfs-version" || -f "$CORE_ROOTFS/.pocket-rootfs-version" ) ]] || {
   echo "$CORE_ROOTFS does not look like an extracted Core bundle" >&2
   exit 1
 }
-grep -qx 'ubuntu-24.04.5-arm64' "$CORE_ROOTFS/.pocket-rootfs-version" || {
-  echo "Core rootfs is $(cat "$CORE_ROOTFS/.pocket-rootfs-version"), expected ubuntu-24.04.5-arm64" >&2
+core_marker="$CORE_ROOTFS/.nextcraft-rootfs-version"
+[[ -f "$core_marker" ]] || core_marker="$CORE_ROOTFS/.pocket-rootfs-version"
+grep -qx 'ubuntu-24.04.5-arm64' "$core_marker" || {
+  echo "Core rootfs is $(cat "$core_marker"), expected ubuntu-24.04.5-arm64" >&2
   exit 1
 }
 

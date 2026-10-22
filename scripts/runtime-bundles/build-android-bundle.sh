@@ -16,7 +16,7 @@ set -euo pipefail
 #                                          Linux ARM64 Build-Tools. The binaries are static: no /system/bin/linker64.
 #   root/android-sdk/licenses/             android-sdk-license hash, as sdkmanager writes it
 #   root/maven/localMvnRepository/         offline Maven repository from build-android-maven-cache.sh
-#   root/.gradle/init.d/pocketdev-android.gradle, root/.gradle/gradle.properties, root/.pocket-android-tools-version
+#   root/.gradle/init.d/nextcraft-android.gradle, root/.gradle/gradle.properties, root/.nextcraft-android-tools-version (+ .pocket-* copy)
 #                                          byte-identical to what RuntimeInstaller writes
 #
 # No root or chroot is needed to assemble the bundle. Set NEXTCRAFT_CORE_ROOTFS to an extracted Core bundle to also
@@ -85,7 +85,7 @@ done
 [[ -z "$MAVEN_REPO" || -f "$MAVEN_REPO/MANIFEST.sha256" ]] || { echo "$MAVEN_REPO is not a build-android-maven-cache.sh output" >&2; exit 1; }
 if [[ -n "$CORE_ROOTFS" ]]; then
   [[ "$(id -u)" == "0" ]] || { echo "The chroot smoke test needs root" >&2; exit 1; }
-  grep -qx 'ubuntu-24.04.5-arm64' "$CORE_ROOTFS/.pocket-rootfs-version" 2>/dev/null || { echo "$CORE_ROOTFS is not an extracted Core 24.04.5 rootfs" >&2; exit 1; }
+  grep -qx 'ubuntu-24.04.5-arm64' "$CORE_ROOTFS/.nextcraft-rootfs-version" "$CORE_ROOTFS/.pocket-rootfs-version" 2>/dev/null || { echo "$CORE_ROOTFS is not an extracted Core 24.04.5 rootfs" >&2; exit 1; }
   if [[ "$(uname -m)" != "aarch64" ]]; then
     grep -qs '^flags: .*F' /proc/sys/fs/binfmt_misc/qemu-aarch64 || {
       echo "qemu-aarch64 binfmt handler with the F flag is not registered (binfmt_misc is lost on container restart)" >&2
@@ -222,11 +222,11 @@ rm "$payload/root/maven/localMvnRepository/MANIFEST.sha256"
 echo "Writing Gradle configuration and marker"
 mkdir -p "$payload/root/.gradle/init.d"
 # Same text as RuntimeInstaller.ANDROID_GRADLE_INIT_SCRIPT and the managed lines of writeAndroidGradleConfiguration.
-cat > "$payload/root/.gradle/init.d/pocketdev-android.gradle" <<EOF
-def pocketMaven = uri('/root/maven/localMvnRepository')
+cat > "$payload/root/.gradle/init.d/nextcraft-android.gradle" <<EOF
+def nextcraftMaven = uri('/root/maven/localMvnRepository')
 beforeSettings { settings ->
     settings.pluginManagement.repositories {
-        maven { url = pocketMaven }
+        maven { url = nextcraftMaven }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -234,7 +234,7 @@ beforeSettings { settings ->
 }
 settingsEvaluated { settings ->
     settings.dependencyResolutionManagement.repositories {
-        maven { url = pocketMaven }
+        maven { url = nextcraftMaven }
     }
 }
 gradle.beforeProject { project ->
@@ -243,7 +243,7 @@ gradle.beforeProject { project ->
         '/root/android-sdk/build-tools/$BUILD_TOOLS_VERSION/aapt2'
     )
     project.buildscript.repositories {
-        maven { url = pocketMaven }
+        maven { url = nextcraftMaven }
     }
 }
 EOF
@@ -254,7 +254,9 @@ org.gradle.workers.max=2
 org.gradle.parallel=false
 kotlin.compiler.execution.strategy=in-process
 EOF
-printf '%s' "$TOOLS_VERSION" > "$payload/root/.pocket-android-tools-version"
+printf '%s' "$TOOLS_VERSION" > "$payload/root/.nextcraft-android-tools-version"
+# Older app builds read the legacy name.
+cp "$payload/root/.nextcraft-android-tools-version" "$payload/root/.pocket-android-tools-version"
 
 echo "Checking the payload"
 for tool in "${NATIVE_TOOLS[@]}"; do

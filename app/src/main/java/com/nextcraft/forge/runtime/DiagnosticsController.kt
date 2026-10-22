@@ -118,11 +118,11 @@ class DiagnosticsController(private val context: Context) {
                 add(UiText.Raw("Battery optimization") to UiText.Raw(if (unrestricted) "Unrestricted" else "Optimized (some ROMs stop background builds)"))
             }
             add(row(R.string.diag_linux, UiText.res(if (installed) R.string.diag_installed else R.string.diag_not_installed)))
-            runCatching { File(rootfs, ".pocket-rootfs-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
+            runCatching { RuntimeMarkers.read(File(rootfs, ".nextcraft-rootfs-version"))?.trim() }.getOrNull()
                 ?.takeIf { it.isNotBlank() }?.let { add(row(R.string.diag_rootfs, UiText.Raw(it))) }
             if (installed) {
                 // The marker REA's installer writes; the version says whether the Learn/firmware/plugin features are there.
-                val rea = runCatching { File(rootfs, "root/.pocket-rea-version").takeIf { it.isFile }?.readText()?.trim() }.getOrNull()?.takeIf { it.isNotBlank() }
+                val rea = runCatching { RuntimeMarkers.read(File(rootfs, "root/.nextcraft-rea-version"))?.trim() }.getOrNull()?.takeIf { it.isNotBlank() }
                 add(row(R.string.diag_rea, rea?.let { UiText.Raw("v$it") } ?: UiText.res(R.string.diag_not_installed)))
                 val stacks = runCatching { installer.installedStacks().joinToString { it.label } }.getOrDefault("")
                 add(row(R.string.diag_stacks, stacks.ifBlank { null }?.let(UiText::Raw) ?: UiText.res(R.string.diag_none)))

@@ -149,7 +149,7 @@ class ClaudeAuthController(
                 runtime.rootfs,
                 workspace,
                 mapOf(
-                    "BROWSER" to "/opt/pocket/open-url.sh",
+                    "BROWSER" to "/opt/nextcraft/open-url.sh",
                     "TERM" to "xterm-256color",
                     "NO_COLOR" to "1",
                     "DISABLE_AUTOUPDATER" to "1",

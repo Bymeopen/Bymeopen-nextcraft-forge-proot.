@@ -43,7 +43,8 @@ curl -fL --retry 3 -o "$temp_dir/claude" "$RELEASE_BASE_URL/$VERSION/linux-arm64
 
 install -m 0755 "$temp_dir/claude" "$temp_dir/payload/usr/local/bin/claude"
 printf '%s\n' "$VERSION" > "$temp_dir/payload/.nextcraft-claude-version"
-printf '%s\n' "$VERSION" > "$temp_dir/payload/.pocket-claude-version"
+printf '%s\n' "$VERSION" > "$temp_dir/payload/.nextcraft-claude-version"
+cp "$temp_dir/payload/.nextcraft-claude-version" "$temp_dir/payload/.pocket-claude-version"  # older app builds read the legacy name
 
 python3 "$SCRIPT_DIR/create_deterministic_tar.py" "$temp_dir/payload" "$temp_dir/payload.tar"
 zstd -19 -T0 -f "$temp_dir/payload.tar" -o "$OUT_DIR/$ARCHIVE"

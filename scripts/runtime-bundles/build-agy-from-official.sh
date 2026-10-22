@@ -33,7 +33,8 @@ actual_sha512="$(shasum -a 512 "$temp_dir/agy.tar.gz" | cut -d' ' -f1)"
 tar -xzf "$temp_dir/agy.tar.gz" -C "$temp_dir" antigravity
 install -m 0755 "$temp_dir/antigravity" "$temp_dir/payload/root/.local/bin/agy"
 printf '%s\n' "$VERSION" > "$temp_dir/payload/.nextcraft-agy-version"
-printf '%s\n' "$VERSION" > "$temp_dir/payload/.pocket-agy-version"
+printf '%s\n' "$VERSION" > "$temp_dir/payload/.nextcraft-agy-version"
+cp "$temp_dir/payload/.nextcraft-agy-version" "$temp_dir/payload/.pocket-agy-version"  # older app builds read the legacy name
 
 python3 "$SCRIPT_DIR/create_deterministic_tar.py" "$temp_dir/payload" "$temp_dir/payload.tar"
 zstd -19 -T0 -f "$temp_dir/payload.tar" -o "$ROOT_DIR/dist/runtime-bundles/$ARCHIVE"
