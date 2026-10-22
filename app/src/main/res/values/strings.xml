@@ -1246,4 +1246,6 @@
     <string name="chat_menu_rea">REA (analyze binaries)</string>
     <string name="rea_progress_line">%1$d%% · %2$s</string>
     <string name="rea_progress_speed">%1$.1f MB received · %2$.1f MB/s (device network traffic)</string>
+    <string name="route_single_pick">AI provider for this chat (pick one)</string>
+    <string name="route_single_busy">The agent can be changed once the current turn has finished.</string>
 </resources>
