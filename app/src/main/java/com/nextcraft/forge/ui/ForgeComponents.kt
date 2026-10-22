@@ -342,7 +342,7 @@ fun ForgePillIcon(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .forgePressScale(interaction, pressedScale = 0.88f)
+            .forgePressScale(interaction, pressedScale = 0.88f, haptic = true)
             .size(width = 48.dp, height = 48.dp) // 48 dp is the minimum touch target
             .clip(RoundedCornerShape(100))
             .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick),
@@ -427,7 +427,7 @@ fun ForgePrimaryButton(
         enabled = enabled,
         shape = RoundedCornerShape(100),
         interactionSource = interaction,
-        modifier = modifier.forgePressScale(interaction).heightIn(min = 44.dp),
+        modifier = modifier.forgePressScale(interaction, haptic = true).heightIn(min = 44.dp),
     ) {
         Text(text = text, fontWeight = FontWeight.SemiBold)
     }

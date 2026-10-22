@@ -144,7 +144,9 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     var bypassSetupGate by rememberSaveable { mutableStateOf(false) }
     var showNewProjectDialog by rememberSaveable { mutableStateOf(false) }
+    var paletteOpen by rememberSaveable { mutableStateOf(false) }
     var showGitHubDialog by rememberSaveable { mutableStateOf(false) }
+    if (paletteOpen) ForgeCommandPalette(onDismiss = { paletteOpen = false }, onOpen = viewModel::selectTab)
 
     if (!state.runtimeInstalled && !bypassSetupGate) {
         RuntimeOnboardingScreen(
@@ -240,6 +242,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                         agentRunning = state.sessionRunning,
                         terminalBusy = state.terminalRunning,
                         onSelectTab = viewModel::selectTab,
+                        onLongPressTab = { paletteOpen = true },
                     )
                 }
             }

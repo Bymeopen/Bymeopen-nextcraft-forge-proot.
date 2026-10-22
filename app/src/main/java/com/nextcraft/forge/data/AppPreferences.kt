@@ -227,6 +227,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("theme_mode", "dark") ?: "dark"
         set(value) { preferences.edit().putString("theme_mode", value).apply() }
 
+    /** Glass without blur: solid surfaces, for people who find the frosted look hard to read or whose phone is slow. */
+    var glassSolid: Boolean
+        get() = preferences.getBoolean("glass_solid", false)
+        set(value) { preferences.edit().putBoolean("glass_solid", value).apply() }
+
     var languageCode: String
         get() = preferences.getString("language_code", "system") ?: "system"
         set(value) { preferences.edit().putString("language_code", value).apply() }
