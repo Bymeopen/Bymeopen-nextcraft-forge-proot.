@@ -14,7 +14,9 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -27,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import com.nextcraft.forge.data.AppPreferences
+import com.nextcraft.forge.ui.LocalChatImageLoader
 import com.nextcraft.forge.runtime.BatteryOptimization
 import com.nextcraft.forge.ui.AppStrings
 import com.nextcraft.forge.ui.LocalForgeThemeTokens
@@ -95,7 +98,22 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(tokens.canvasBrush),
                 ) {
-                    NextCraftForgeApp(viewModel = viewModel)
+                    val imageLoader = remember<suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?>(viewModel) {
+                        { src -> viewModel.loadChatImage(src) }
+                    }
+                    val appContext = this@MainActivity
+                    val videoHandler = remember(viewModel) {
+                        object : com.nextcraft.forge.ui.ChatVideoHandler {
+                            override suspend fun thumbnail(src: String) = viewModel.loadChatVideoThumbnail(src)
+                            override fun open(src: String) = viewModel.openChatVideo(appContext, src)
+                        }
+                    }
+                    CompositionLocalProvider(
+                        LocalChatImageLoader provides imageLoader,
+                        com.nextcraft.forge.ui.LocalChatVideoHandler provides videoHandler,
+                    ) {
+                        NextCraftForgeApp(viewModel = viewModel)
+                    }
                 }
             }
         }

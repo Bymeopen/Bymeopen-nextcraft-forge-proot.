@@ -118,6 +118,11 @@ fun AgentConfigScreen(
         )
         val agent = state.agentKind
         val agentInstalled = agent in state.installedAgents
+        var connectorsOpen by rememberSaveable { mutableStateOf(false) }
+        if (agent == AgentKind.CLAUDE_CODE && agentInstalled) {
+            ForgeTextButton(onClick = { connectorsOpen = true }) { Text(stringResource(R.string.connectors_open)) }
+        }
+        if (connectorsOpen) ConnectorsSheet(state = state, viewModel = viewModel, onDismiss = { connectorsOpen = false })
 
         if (!agentInstalled) {
             // Not installed: one card, one call to action (the reference's "X is not installed" state).
