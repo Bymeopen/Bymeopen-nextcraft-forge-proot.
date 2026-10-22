@@ -101,7 +101,7 @@ internal fun ChatVideo(src: String, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         thumb?.let {
-            Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
+            Image(bitmap = it, contentDescription = stringResource(R.string.chat_video_play), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
         }
         Surface(shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = 0.55f)) {
             Text(

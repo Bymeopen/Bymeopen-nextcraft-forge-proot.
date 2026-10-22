@@ -3,6 +3,7 @@ package com.nextcraft.forge.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -44,12 +45,12 @@ internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!hasKey) {
                     Text(stringResource(R.string.image_key_desc), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(
+                    ForgeTextField(
                         value = key,
                         onValueChange = { key = it },
                         label = { Text(stringResource(R.string.image_key_hint)) },
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
+                        kind = ForgeFieldKind.SECRET,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
@@ -58,13 +59,12 @@ internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel
                         selectedIndex = mode,
                         onSelect = { mode = it },
                     )
-                    OutlinedTextField(
+                    ForgeTextField(
                         value = prompt,
                         onValueChange = { prompt = it.take(2000) },
                         label = { Text(stringResource(R.string.image_prompt_hint)) },
-                        minLines = 3,
-                        maxLines = 6,
-                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
                     )
                     if (editing != null) {
                         Text(

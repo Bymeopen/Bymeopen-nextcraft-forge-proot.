@@ -496,7 +496,7 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
             item {
                 var commitMessage by rememberSaveable(chatId) { mutableStateOf("") }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    androidx.compose.material3.OutlinedTextField(
+                    ForgeTextField(
                         value = commitMessage,
                         onValueChange = { commitMessage = it.take(100) },
                         label = { Text(stringResource(R.string.branch_commit_hint)) },

@@ -86,7 +86,7 @@ internal fun RepoSheet(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    ForgeTextField(
                         value = message,
                         onValueChange = { message = it.take(100) },
                         label = { Text(stringResource(R.string.repo_commit_hint)) },
@@ -144,12 +144,13 @@ internal fun RepoSheet(
                 item {
                     var newBranch by rememberSaveable { mutableStateOf("") }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
+                        ForgeTextField(
                             value = newBranch,
                             onValueChange = { newBranch = it.take(60) },
                             label = { Text(stringResource(R.string.repo_branch_new_hint)) },
                             singleLine = true,
                             enabled = !state.repoBusy,
+                            kind = ForgeFieldKind.IDENTIFIER,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedButton(

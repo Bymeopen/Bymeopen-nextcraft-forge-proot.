@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -111,11 +112,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.connectorItems(state:
                 shape = RoundedCornerShape(100),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.connector_preset_context7)) }
-            OutlinedTextField(
+            ForgeTextField(
                 value = name,
                 onValueChange = { name = it.take(40) },
                 label = { Text(stringResource(R.string.connector_name_hint)) },
                 singleLine = true,
+                kind = ForgeFieldKind.NAME,
                 modifier = Modifier.fillMaxWidth(),
             )
             ForgePillTabs(
@@ -123,28 +125,30 @@ private fun androidx.compose.foundation.lazy.LazyListScope.connectorItems(state:
                 selectedIndex = kind,
                 onSelect = { kind = it },
             )
-            OutlinedTextField(
+            ForgeTextField(
                 value = target,
                 onValueChange = { target = it },
                 label = { Text(stringResource(if (kind == 0) R.string.connector_url_hint else R.string.connector_command_hint)) },
                 singleLine = true,
+                kind = if (kind == 0) ForgeFieldKind.URL else ForgeFieldKind.IDENTIFIER,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (kind == 1) {
-                OutlinedTextField(
+                ForgeTextField(
                     value = envName,
                     onValueChange = { envName = it.take(60) },
                     label = { Text(stringResource(R.string.connector_env_hint)) },
                     singleLine = true,
+                    kind = ForgeFieldKind.IDENTIFIER,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            OutlinedTextField(
+            ForgeTextField(
                 value = secret,
                 onValueChange = { secret = it },
                 label = { Text(stringResource(R.string.connector_secret_hint)) },
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
+                kind = ForgeFieldKind.SECRET,
                 modifier = Modifier.fillMaxWidth(),
             )
             ForgePrimaryButton(
@@ -200,27 +204,27 @@ private fun androidx.compose.foundation.lazy.LazyListScope.skillItems(state: For
                     }
                 }
             }
-            OutlinedTextField(
+            ForgeTextField(
                 value = name,
                 onValueChange = { name = it.take(64) },
                 label = { Text(stringResource(R.string.skill_name_hint)) },
                 singleLine = true,
+                kind = ForgeFieldKind.IDENTIFIER,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
+            ForgeTextField(
                 value = description,
                 onValueChange = { description = it.take(300) },
                 label = { Text(stringResource(R.string.skill_description_hint)) },
-                maxLines = 3,
-                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
             )
-            OutlinedTextField(
+            ForgeTextField(
                 value = body,
                 onValueChange = { body = it },
                 label = { Text(stringResource(R.string.skill_body_hint)) },
-                minLines = 5,
-                maxLines = 12,
-                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
             )
             ForgePrimaryButton(
                 text = stringResource(R.string.skill_save),
