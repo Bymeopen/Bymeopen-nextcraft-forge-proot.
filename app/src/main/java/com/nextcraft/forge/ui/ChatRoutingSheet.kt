@@ -73,10 +73,12 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
     // Ordered list: enabled agents in priority order first, then the ones that are off.
     val enabled = routing.agents
     val ordered = enabled + AgentKind.entries.filterNot { it in enabled }
+    val backdrop = LocalForgeBackdrop.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = if (backdrop != null) androidx.compose.ui.graphics.Color.Transparent else tokens.cardContainerColor,
+        modifier = Modifier.forgeGlassSheet(backdrop, tokens.cardContainerColor),
     ) {
         Column(
             modifier = Modifier

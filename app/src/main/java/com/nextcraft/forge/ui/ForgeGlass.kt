@@ -64,3 +64,30 @@ internal fun Modifier.forgeGlassSurface(backdrop: LayerBackdrop?, tint: Color): 
         },
     )
 }
+
+/**
+ * Glass fill for a bottom sheet: same blur + vibrancy + lens stack as [forgeGlassSurface], shaped for the sheet's
+ * top-rounded corners instead of a capsule. [tint] is the theme's translucent container colour (e.g.
+ * [ForgeThemeTokens.cardContainerColor], which at ~9% alpha in Glass is meant to sit over a blurred backdrop, not
+ * directly over whatever is scrolling behind a modal sheet — without this, the sheet is nearly see-through and the
+ * screen behind it bleeds through its text, as if two screens were drawn on top of each other.
+ */
+@Composable
+internal fun Modifier.forgeGlassSheet(backdrop: LayerBackdrop?, tint: Color): Modifier {
+    if (backdrop == null) return this
+    val lens = glassLensSupported
+    val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    return drawBackdrop(
+        backdrop = backdrop,
+        shape = { shape },
+        effects = {
+            vibrancy()
+            blur(16.dp.toPx())
+            if (lens) lens(refractionHeight = 14.dp.toPx(), refractionAmount = 18.dp.toPx())
+        },
+        onDrawSurface = {
+            drawRect(tint)
+            drawRect(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.Transparent)))
+        },
+    )
+}

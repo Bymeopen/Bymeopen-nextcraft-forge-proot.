@@ -340,11 +340,14 @@ internal fun ToolApprovalSheet(request: ToolRequest, onApprove: () -> Unit, onRe
         skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden },
     )
+    val backdrop = LocalForgeBackdrop.current
+    val cardColor = LocalForgeThemeTokens.current.cardContainerColor
     ModalBottomSheet(
         onDismissRequest = {},
         sheetState = sheetState,
-        containerColor = LocalForgeThemeTokens.current.cardContainerColor,
+        containerColor = if (backdrop != null) androidx.compose.ui.graphics.Color.Transparent else cardColor,
         contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.forgeGlassSheet(backdrop, cardColor),
     ) {
         ToolApprovalContent(request, onApprove, onReject)
     }
