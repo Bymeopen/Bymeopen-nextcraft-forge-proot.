@@ -1013,12 +1013,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(projects = updated) }
     }
 
-    /** Only Claude Code runs several chats at once; for the other agents the chat stays fixed while one is running. */
+    /**
+     * Opening or creating a chat is always allowed (each chat keeps its own live run copy). What the other agents cannot do
+     * is run two chats at once: a message sent meanwhile is queued ([canStartAnotherRun]). Deleting chats stays blocked here.
+     */
     private fun chatSwitchBlocked(): Boolean =
         _state.value.sessionRunning && runs.values.any { it.agent != AgentKind.CLAUDE_CODE }
 
     fun selectChat(chatId: String) {
-        if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
         // A chat that is working shows its live copy, status and pending approval, not the last saved file.
@@ -1036,7 +1038,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createChat(title: String = "") {
-        if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         // The first "Chat N" no chat uses: counting chats repeated a number after one was deleted.
         val usedTitles = _state.value.chats.map { it.title }.toSet()
