@@ -764,6 +764,11 @@ fun WebPreviewScreen(
                     glyph = ForgeGlyph.GLOBE,
                     title = stringResource(R.string.launch_preview_not_running),
                     message = stringResource(R.string.launch_preview_not_running_hint),
+                    actionLabel = stringResource(R.string.preview_open_terminal),
+                    onAction = {
+                        // Inside a project the terminal is a pane of that project; elsewhere it is the Terminal tab.
+                        if (state.activeTab == ForgeTab.PROJECTS) viewModel.selectProjectPane(ProjectPane.TERMINAL) else viewModel.selectTab(ForgeTab.TERMINAL)
+                    },
                 )
             }
         } else {

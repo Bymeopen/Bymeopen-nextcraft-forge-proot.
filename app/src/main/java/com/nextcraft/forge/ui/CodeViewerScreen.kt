@@ -113,7 +113,13 @@ fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
 
         if (showChanges) {
             if (state.changedItems.isEmpty()) {
-                Text(stringResource(R.string.files_no_unreviewed_checkpoint_changes), color = scheme.onSurfaceVariant, fontSize = ForgeType.control)
+                ForgeEmptyState(
+                    glyph = ForgeGlyph.CODE,
+                    title = stringResource(R.string.code_viewer_no_changes_title),
+                    message = stringResource(R.string.files_no_unreviewed_checkpoint_changes),
+                    actionLabel = stringResource(R.string.code_viewer_see_files, files.size),
+                    onAction = { showChanges = false },
+                )
             }
             state.changedItems.forEach { change ->
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

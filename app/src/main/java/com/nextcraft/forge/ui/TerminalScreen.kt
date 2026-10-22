@@ -230,10 +230,12 @@ fun TerminalScreen(
             }
         }
 
+        val chipScroll = rememberScrollState()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
+                .forgeFadingEdges(chipScroll, MaterialTheme.colorScheme.background)
+                .horizontalScroll(chipScroll)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {

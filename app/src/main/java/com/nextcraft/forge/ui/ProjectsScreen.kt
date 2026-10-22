@@ -308,6 +308,12 @@ private fun ProjectsHero(onQuickProject: () -> Unit, onNewProject: () -> Unit) {
                 Text(stringResource(R.string.projects_new_project), fontWeight = FontWeight.SemiBold)
             }
         }
+        Text(
+            text = stringResource(R.string.projects_buttons_hint),
+            fontSize = ForgeType.caption,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
 
