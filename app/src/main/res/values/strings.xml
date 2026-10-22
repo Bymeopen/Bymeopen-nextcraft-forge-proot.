@@ -326,6 +326,10 @@
     <string name="tools_toolchains">Toolchains Manager</string>
     <string name="tools_toolchains_desc">Manage compilers, SDKs and language packages</string>
     <string name="tool_copied">Copied</string>
+    <string name="crash_prompt_title">The app closed unexpectedly</string>
+    <string name="crash_prompt_message">The last session ended in a crash. Share the report so it can be fixed? Nothing is sent unless you choose an app and send it. The report holds the error trace, the app version and the device model. Chats are not included, but the trace can contain file names.</string>
+    <string name="crash_prompt_share">Share report</string>
+    <string name="crash_prompt_later">Not now</string>
     <string name="tool_last_crash">Last crash report</string>
     <string name="tool_no_crash">No crash recorded. If the app closes unexpectedly, its full stack trace appears here.</string>
     <string name="a11y_selected">Selected</string>
