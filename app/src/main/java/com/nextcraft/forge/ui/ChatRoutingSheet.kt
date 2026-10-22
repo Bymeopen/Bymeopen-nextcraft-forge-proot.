@@ -220,6 +220,7 @@ private fun RouteRulesSection(routing: RoutingConfig, viewModel: MainViewModel) 
         items = agents.map { it.displayTitle() },
         selectedIndex = agentIndex,
         onSelect = { agentIndex = it },
+        equalWidth = true, // 3 providers fit side by side; scrolling cut "Antigravity" at the edge
     )
     ForgePrimaryButton(
         text = stringResource(R.string.route_rule_add),
