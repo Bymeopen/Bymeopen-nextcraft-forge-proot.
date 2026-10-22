@@ -358,7 +358,7 @@ private fun ReaLessonSheet(rea: ReaState, controller: ReaController, onDismiss: 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         Column(
             modifier = Modifier
@@ -484,7 +484,7 @@ private fun ReaFilePicker(files: List<com.nextcraft.forge.model.WorkspaceEntry>,
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.rea_pick_file), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)

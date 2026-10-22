@@ -76,7 +76,7 @@ internal fun ChatRoutingSheet(state: ForgeUiState, viewModel: MainViewModel, onD
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         Column(
             modifier = Modifier

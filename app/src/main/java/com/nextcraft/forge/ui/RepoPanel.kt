@@ -57,7 +57,7 @@ internal fun RepoSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         LazyColumn(
             modifier = Modifier.padding(horizontal = ForgeSpace.card),

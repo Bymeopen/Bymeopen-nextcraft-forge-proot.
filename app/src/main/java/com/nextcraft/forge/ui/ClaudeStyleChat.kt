@@ -286,7 +286,7 @@ internal fun ChatUsageSheet(state: ForgeUiState, onDismiss: () -> Unit) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(stringResource(R.string.chat_usage_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
@@ -347,7 +347,7 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.chat_model_sheet_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
@@ -471,7 +471,7 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = tokens.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier.padding(horizontal = ForgeSpace.card),

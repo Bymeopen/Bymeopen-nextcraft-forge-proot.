@@ -73,7 +73,7 @@ fun ModelPickerDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = LocalForgeThemeTokens.current.cardContainerColor,
+        containerColor = forgeSheetColor(),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 16.dp),

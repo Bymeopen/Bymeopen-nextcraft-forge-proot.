@@ -343,7 +343,7 @@ internal fun ToolApprovalSheet(request: ToolRequest, onApprove: () -> Unit, onRe
     ModalBottomSheet(
         onDismissRequest = {},
         sheetState = sheetState,
-        containerColor = LocalForgeThemeTokens.current.cardContainerColor,
+        containerColor = forgeSheetColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         ToolApprovalContent(request, onApprove, onReject)
