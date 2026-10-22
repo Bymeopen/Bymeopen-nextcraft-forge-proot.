@@ -148,12 +148,22 @@ class AppPreferences(private val context: Context) {
         set(value) { preferences.edit().putBoolean("update_notifications", value).apply() }
 
     /** versionCode of the newest build already announced, so one build never notifies twice. */
+    /** Id of the newest changelog the user was told about; empty on a fresh install. */
+    var lastSeenChangelogId: String
+        get() = preferences.getString("last_seen_changelog_id", "") ?: ""
+        set(value) { preferences.edit().putString("last_seen_changelog_id", value).apply() }
+
     var lastNotifiedUpdateCode: Long
         get() = preferences.getLong("last_notified_update_code", 0L)
         set(value) { preferences.edit().putLong("last_notified_update_code", value).apply() }
 
 
     /** Adds a note about the `rea` toolkit to chat messages that concern binaries. Off by default: nothing extra is sent. */
+    /** Lets the agent create timers with a `[[schedule: …]]` line in its reply (and tells it how). */
+    var scheduleEnabled: Boolean
+        get() = preferences.getBoolean("schedule_enabled", true)
+        set(value) { preferences.edit().putBoolean("schedule_enabled", value).apply() }
+
     var reaChatHint: Boolean
         get() = preferences.getBoolean("rea_chat_hint", false)
         set(value) { preferences.edit().putBoolean("rea_chat_hint", value).apply() }

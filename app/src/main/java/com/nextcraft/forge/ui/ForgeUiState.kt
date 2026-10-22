@@ -212,6 +212,9 @@ data class ForgeUiState(
     val autoSyncGitHub: Boolean = false,
     val gameTemplatesEnabled: Boolean = false,
     val reaChatHint: Boolean = false,
+    /** Scheduled prompts (timers that send a message to a chat again) and whether the agent may create them. */
+    val scheduledTasks: List<com.nextcraft.forge.schedule.ScheduledTask> = emptyList(),
+    val scheduleEnabled: Boolean = true,
     val updateNotifications: Boolean = true,
     val autoBranchChats: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",

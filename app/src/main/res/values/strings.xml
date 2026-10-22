@@ -1395,4 +1395,28 @@
     <string name="chat_video_play">Play video</string>
     <string name="chat_video_missing">The video file is not in the workspace.</string>
     <string name="chat_video_no_player">No app on this device can play the video.</string>
+    <string name="chat_menu_schedule">Scheduled tasks</string>
+    <string name="schedule_title">Scheduled tasks</string>
+    <string name="schedule_channel">Scheduled tasks</string>
+    <plurals name="schedule_due_notification">
+        <item quantity="one">%d scheduled task is waiting. Open the app to run it.</item>
+        <item quantity="other">%d scheduled tasks are waiting. Open the app to run them.</item>
+    </plurals>
+    <string name="schedule_empty">No timers in this chat. Add one below, or type /loop 30m your prompt.</string>
+    <string name="schedule_by_you">Every %1$s · ran %2$d times</string>
+    <string name="schedule_by_agent">Made by the agent · every %1$s · ran %2$d times</string>
+    <string name="schedule_delete">Delete</string>
+    <string name="schedule_prompt_label">Prompt to repeat</string>
+    <string name="schedule_hint">Runs while the app is running in the background and this project is open; otherwise a notification tells you tasks are waiting. Minimum 5 minutes.</string>
+    <string name="schedule_add">Add</string>
+    <string name="schedule_close">Close</string>
+    <string name="schedule_added">Timer added: every %1$s</string>
+    <string name="schedule_cleared">Timers of this chat removed</string>
+    <string name="schedule_usage">Use /loop 30m your prompt (5m to 7d) or /loop off</string>
+    <string name="schedule_agent_changed">The agent changed this chat\'s timers</string>
+    <string name="settings_schedule_agent">Let the agent schedule tasks</string>
+    <string name="settings_schedule_agent_subtitle">The agent may repeat or monitor something by adding a timer to the chat (up to 3 per chat).</string>
+    <string name="chg_notif_channel">What\'s new</string>
+    <string name="chg_notif_title">NextCraft Forge updated</string>
+    <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
 </resources>

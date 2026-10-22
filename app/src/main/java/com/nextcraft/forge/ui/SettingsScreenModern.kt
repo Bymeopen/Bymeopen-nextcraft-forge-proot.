@@ -104,10 +104,12 @@ fun SettingsScreenModern(
     val isProvisioning = state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
     val runtimeBusy = !state.runtimeInstalled || isProvisioning
 
+    val scroll = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .forgeFadingVertical(scroll, MaterialTheme.colorScheme.background)
+            .verticalScroll(scroll)
             .padding(start = 14.dp, end = 14.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -170,6 +172,13 @@ fun SettingsScreenModern(
                 subtitle = stringResource(R.string.settings_rea_chat_hint_subtitle),
                 checked = state.reaChatHint,
                 onCheckedChange = viewModel::setReaChatHint,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_schedule_agent),
+                subtitle = stringResource(R.string.settings_schedule_agent_subtitle),
+                checked = state.scheduleEnabled,
+                onCheckedChange = viewModel::setScheduleEnabled,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             // One choice instead of two switches that excluded each other: the app already keeps them mutually exclusive.

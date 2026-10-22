@@ -85,10 +85,12 @@ fun AgentConfigScreen(
     val isProvisioning = state.setupSnapshot.status == RuntimeSetupStatus.RUNNING
     val runtimeBusy = !state.runtimeInstalled || isProvisioning
 
+    val scroll = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .forgeFadingVertical(scroll, MaterialTheme.colorScheme.background)
+            .verticalScroll(scroll)
             .padding(start = 14.dp, end = 14.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

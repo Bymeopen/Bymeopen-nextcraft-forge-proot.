@@ -80,7 +80,8 @@ fun ToolsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     val needle = query.trim()
 
-    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+    val scroll = rememberScrollState()
+    Column(modifier = modifier.fillMaxSize().forgeFadingVertical(scroll, MaterialTheme.colorScheme.background).verticalScroll(scroll).padding(bottom = 24.dp)) {
         ForgeProjectHeader(
             title = stringResource(R.string.tools_header_title),
             subtitle = stringResource(R.string.tools_header_subtitle),

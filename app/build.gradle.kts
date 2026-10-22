@@ -128,6 +128,8 @@ android {
                         it.systemProperty("robolectric.offline", "true")
                         it.systemProperty("robolectric.dependency.dir", dir)
                     }
+                    // -PforgeScreenshotMode=record|compare (see ScreenshotBaselines); default only renders the pictures.
+                    (project.findProperty("forgeScreenshotMode") as String?)?.let { mode -> it.systemProperty("forge.screenshot.mode", mode) }
                     it.maxHeapSize = "2g"
                 }
             }

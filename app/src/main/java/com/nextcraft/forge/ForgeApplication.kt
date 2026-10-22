@@ -14,6 +14,8 @@ class ForgeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashReporter.install(this)
+        com.nextcraft.forge.schedule.ScheduleTickWorker.schedule(this)
+        runCatching { com.nextcraft.forge.update.ChangelogNotifier.notifyIfNew(this) }
         if (com.nextcraft.forge.data.AppPreferences(this).updateNotifications) {
             com.nextcraft.forge.update.UpdateCheckWorker.schedule(this)
         }

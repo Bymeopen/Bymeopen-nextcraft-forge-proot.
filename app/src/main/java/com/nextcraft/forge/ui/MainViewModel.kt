@@ -84,6 +84,12 @@ import com.nextcraft.forge.runtime.DshRuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeBridge
 import com.nextcraft.forge.runtime.RuntimeExecutionService
 import com.nextcraft.forge.runtime.ReaChatHint
+import com.nextcraft.forge.schedule.ScheduleDirectives
+import com.nextcraft.forge.schedule.ScheduleLogic
+import com.nextcraft.forge.schedule.ScheduleRules
+import com.nextcraft.forge.schedule.ScheduleRuntime
+import com.nextcraft.forge.schedule.ScheduleStore
+import com.nextcraft.forge.schedule.ScheduledTask
 import com.nextcraft.forge.runtime.RuntimeInstaller
 import com.nextcraft.forge.runtime.BranchMergeResult
 import com.nextcraft.forge.runtime.CLAUDE_EFFORT_LEVELS
@@ -139,6 +145,7 @@ import com.nextcraft.forge.R
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = AppPreferences(application)
+    private val scheduleStore = ScheduleStore(application)
     private val vault = ApiKeyVault(application)
     private val installer = RuntimeInstaller(application)
     private val checkpoints = WorkspaceCheckpoints(application.filesDir, application)
@@ -275,6 +282,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val logLineIdCounter = AtomicLong(1L)
 
     init {
+        _state.update { it.copy(scheduledTasks = scheduleStore.load()) }
+        startScheduleTicker()
         // A project removed while its undo window was open and the app then died keeps its files; finish that wipe.
         preferences.pendingProjectWipe?.let { id ->
             viewModelScope.launch(Dispatchers.IO) {
@@ -401,6 +410,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     reaChatHint = preferences.reaChatHint,
+                    scheduleEnabled = preferences.scheduleEnabled,
                     updateNotifications = preferences.updateNotifications,
                     autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
@@ -883,6 +893,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteProject(projectId: String) {
+        dropScheduledTasks { it.projectId == projectId }
         // The workspace would be wiped under a running agent, build, or terminal process.
         if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_busy_before_delete)) }
@@ -1003,12 +1014,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(projects = updated) }
     }
 
-    /** Only Claude Code runs several chats at once; for the other agents the chat stays fixed while one is running. */
+    /**
+     * Opening or creating a chat is always allowed (each chat keeps its own live run copy). What the other agents cannot do
+     * is run two chats at once: a message sent meanwhile is queued ([canStartAnotherRun]). Deleting chats stays blocked here.
+     */
     private fun chatSwitchBlocked(): Boolean =
         _state.value.sessionRunning && runs.values.any { it.agent != AgentKind.CLAUDE_CODE }
 
     fun selectChat(chatId: String) {
-        if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
         // A chat that is working shows its live copy, status and pending approval, not the last saved file.
@@ -1026,7 +1039,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createChat(title: String = "") {
-        if (chatSwitchBlocked()) return
         val project = _state.value.activeProject ?: return
         // The first "Chat N" no chat uses: counting chats repeated a number after one was deleted.
         val usedTitles = _state.value.chats.map { it.title }.toSet()
@@ -1682,6 +1694,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (cleanPrompt.isEmpty() && attachments.isEmpty()) return
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId
+        if (attachments.isEmpty() && handleLoopCommand(cleanPrompt)) return
         _state.update { it.copy(pendingAttachments = emptyList()) }
         val prompt = QueuedPrompt(text = cleanPrompt, attachments = attachments, projectId = project.id, chatId = chatId)
         when {
@@ -1693,6 +1706,115 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             else -> startRun(project, chatId, prompt)
         }
+    }
+
+
+    // --- Scheduled tasks: a prompt sent again to a chat every N minutes (by the user or by the agent) ---
+
+    /** Runs due tasks while the app process lives; [com.nextcraft.forge.schedule.ScheduleTickWorker] covers a killed process. */
+    private fun startScheduleTicker() {
+        ScheduleRuntime.tickerActive = true
+        viewModelScope.launch {
+            while (true) {
+                delay(SCHEDULE_TICK_MS)
+                runCatching { runDueScheduledTasks() }
+            }
+        }
+    }
+
+    private fun saveScheduled(tasks: List<ScheduledTask>) {
+        scheduleStore.save(tasks)
+        _state.update { it.copy(scheduledTasks = tasks) }
+    }
+
+    private fun dropScheduledTasks(predicate: (ScheduledTask) -> Boolean) {
+        val current = _state.value.scheduledTasks
+        if (current.any(predicate)) saveScheduled(current.filterNot(predicate))
+    }
+
+    /**
+     * Starts every due task of the open project whose chat is idle. A task of another project waits until that project is
+     * opened (a run needs its chat list), and a busy chat is simply tried again at the next tick.
+     */
+    private fun runDueScheduledTasks() {
+        val st = _state.value
+        val projectId = st.activeProjectId ?: return
+        val project = st.activeProject ?: return
+        val chatIds = st.chats.map { it.id }.toSet()
+        // A deleted chat leaves no orphan timer behind.
+        dropScheduledTasks { it.projectId == projectId && it.chatId !in chatIds }
+        val now = System.currentTimeMillis()
+        val (updated, started) = ScheduleLogic.takeDue(_state.value.scheduledTasks, now) { task ->
+            task.projectId == projectId && !runs.containsKey(task.chatId) &&
+                canStartAnotherRun(tentativeAgent(task.prompt)) && task.chatId in chatIds
+        }
+        if (started.isEmpty()) return
+        saveScheduled(updated)
+        started.forEach { task ->
+            if (!runs.containsKey(task.chatId)) {
+                startRun(project, task.chatId, QueuedPrompt(text = task.prompt, projectId = project.id, chatId = task.chatId))
+            }
+        }
+    }
+
+    /** Reads `[[schedule: …]]` / `[[unschedule]]` from the agent's finished reply and keeps the timers in step. */
+    private fun applyAgentSchedule(run: ChatRun) {
+        if (!preferences.scheduleEnabled) return
+        val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
+        val directives = ScheduleDirectives.parse(reply)
+        if (directives.isEmpty()) return
+        val before = _state.value.scheduledTasks
+        val after = ScheduleLogic.applyDirectives(before, directives, run.projectId, run.chatId, System.currentTimeMillis())
+        if (after == before) return
+        saveScheduled(after)
+        _state.update { it.copy(bannerMessage = UiText.res(R.string.schedule_agent_changed)) }
+    }
+
+    /** `/loop 30m prompt` creates a task in this chat, `/loop off` removes this chat's tasks. True when the text was a command. */
+    private fun handleLoopCommand(text: String): Boolean {
+        val match = Regex("""^/loop\s+(\S+)(?:\s+([\s\S]+))?$""", RegexOption.IGNORE_CASE).matchEntire(text.trim()) ?: return false
+        val first = match.groupValues[1]
+        if (first.equals("off", ignoreCase = true)) {
+            val chatId = _state.value.activeChatId
+            dropScheduledTasks { it.chatId == chatId }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.schedule_cleared)) }
+            return true
+        }
+        val minutes = ScheduleRules.parseInterval(first)
+        val prompt = match.groupValues[2].trim()
+        if (minutes == null || prompt.isEmpty()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.schedule_usage)) }
+            return true
+        }
+        addScheduledTask(prompt, minutes)
+        return true
+    }
+
+    fun addScheduledTask(prompt: String, minutes: Int) {
+        val project = _state.value.activeProject ?: return
+        val clean = prompt.trim().take(ScheduleRules.MAX_PROMPT_LENGTH)
+        if (clean.isEmpty() || minutes !in ScheduleRules.MIN_INTERVAL_MINUTES..ScheduleRules.MAX_INTERVAL_MINUTES) return
+        val task = ScheduledTask(
+            projectId = project.id, chatId = _state.value.activeChatId, prompt = clean,
+            intervalMinutes = minutes, nextRunAtMillis = System.currentTimeMillis() + minutes * 60_000L,
+        )
+        saveScheduled(_state.value.scheduledTasks + task)
+        _state.update { it.copy(bannerMessage = UiText.res(R.string.schedule_added, ScheduleRules.label(minutes))) }
+    }
+
+    fun removeScheduledTask(id: String) = dropScheduledTasks { it.id == id }
+
+    fun setScheduledTaskEnabled(id: String, enabled: Boolean) {
+        val now = System.currentTimeMillis()
+        saveScheduled(_state.value.scheduledTasks.map {
+            // Turning a task back on waits one full interval instead of firing at once for all the time it was off.
+            if (it.id == id) it.copy(enabled = enabled, nextRunAtMillis = if (enabled) now + it.intervalMinutes * 60_000L else it.nextRunAtMillis) else it
+        })
+    }
+
+    fun setScheduleEnabled(enabled: Boolean) {
+        preferences.scheduleEnabled = enabled
+        _state.update { it.copy(scheduleEnabled = enabled) }
     }
 
     // --- Routing of messages between agents (single agent unless the user picked another mode in the chat) ---
@@ -1877,7 +1999,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
         val reaInstalled = preferences.reaChatHint &&
             File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
-        val agentPrompt = ReaChatHint.augment(basePrompt, attachments, reaInstalled)
+        val agentPrompt = ScheduleDirectives.augment(ReaChatHint.augment(basePrompt, attachments, reaInstalled), preferences.scheduleEnabled)
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
@@ -2209,6 +2331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is RuntimeEvent.PreviewStarted -> _state.update { it.copy(previewUrl = event.url) }
             is RuntimeEvent.SessionCompleted -> {
                 finishRun(run)
+                applyAgentSchedule(run)
                 // Wait for the bridge call to fully unwind so the next turn cannot race its shared state.
                 viewModelScope.launch {
                     run.job?.join()
@@ -4533,8 +4656,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setAntigravityConfig(model: String, effort: String) {
-        val cleanModel = model.trim()
         val cleanEffort = effort.trim().ifEmpty { "high" }
+        // Ids such as gemini-4-argon-high carry the effort themselves. Picking "Medium" with that model selected must
+        // switch to gemini-4-argon-medium; otherwise the tab looked dead and agy got a model and an effort that clash.
+        val cleanModel = model.trim().let { id ->
+            val variant = id.replace(AGY_EFFORT_SUFFIX, "-$cleanEffort")
+            val known = _state.value.antigravityModels
+            if (variant != id && (known.isEmpty() || variant in known)) variant else id
+        }
         preferences.antigravityModel = cleanModel
         preferences.antigravityEffort = cleanEffort
         _state.update {
@@ -4547,7 +4676,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Picks an Antigravity model; an id ending in -low/-medium/-high also sets the matching effort. */
     fun selectAntigravityModel(model: String) {
-        val effort = Regex("-(low|medium|high)$").find(model)?.groupValues?.get(1) ?: _state.value.antigravityEffort
+        val effort = AGY_EFFORT_SUFFIX.find(model)?.groupValues?.get(1) ?: _state.value.antigravityEffort
         setAntigravityConfig(model, effort)
     }
 
@@ -4708,6 +4837,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        ScheduleRuntime.tickerActive = false
         // viewModelScope is cancelled here, so a project still in its undo window is wiped on a plain thread.
         pendingDelete?.project?.let { project -> Thread { wipeProjectData(project) }.start() }
         RuntimeTaskController.requestStop()
@@ -4740,6 +4870,7 @@ private const val AGENT_TURN_END_GRACE_MS = 2_000L
 
 /** How many Claude Code chats may work at the same time (each is a separate Node process in the chroot). */
 private const val MAX_PARALLEL_CHATS = 3
+private const val SCHEDULE_TICK_MS = 30_000L
 
 /** Free RAM needed before another parallel run starts; below it the message waits in the queue. */
 private const val MIN_FREE_BYTES_FOR_PARALLEL_RUN = 900L * 1024 * 1024
@@ -4770,3 +4901,6 @@ private class ChatRun(
     /** True while the run is being stopped so that a queued message can go out at once (see steerQueuedPrompt). */
     var steering: Boolean = false
 }
+
+/** The effort part of an Antigravity model id such as gemini-4-argon-high. */
+private val AGY_EFFORT_SUFFIX = Regex("-(low|medium|high)$")
