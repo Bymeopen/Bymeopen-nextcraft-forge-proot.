@@ -47,9 +47,9 @@ class ThemeAndNavTest {
         }
     }
 
-    /** One brand hue across Dark, Glass and White, and an accent that can never be mistaken for the danger red. */
+    /** The three chosen accents (Dark = blue, Glass = teal, White = indigo), each far from the danger red. */
     @Test
-    fun brandHue_isOneIndigo_andNeverTheDangerRed() {
+    fun accents_areTheChosenHues_andNeverTheDangerRed() {
         fun hue(c: Color): Double {
             val r = c.red.toDouble(); val g = c.green.toDouble(); val b = c.blue.toDouble()
             val mx = maxOf(r, g, b); val mn = minOf(r, g, b); val d = mx - mn
@@ -57,14 +57,11 @@ class ThemeAndNavTest {
             val h = when (mx) { r -> ((g - b) / d) % 6; g -> (b - r) / d + 2; else -> (r - g) / d + 4 }
             return (h * 60 + 360) % 360
         }
-        val primaries = listOf("dark", "glass", "white").map { it to resolveThemeTokens(it, systemDark = false).first.primary }
-        primaries.forEach { (name, c) ->
-            val h = hue(c)
-            assertTrue("$name primary hue $h is not indigo/blue (210..270)", h in 210.0..270.0)
-        }
-        listOf("dark", "glass", "white").forEach { name ->
+        val chosen = mapOf("dark" to (200.0..230.0), "glass" to (160.0..190.0), "white" to (215.0..250.0))
+        chosen.forEach { (name, range) ->
             val (sch, tok) = resolveThemeTokens(name, systemDark = false)
             val accentHue = hue(sch.primary); val dangerHue = hue(tok.dangerText)
+            assertTrue("$name primary hue $accentHue is not in $range", accentHue in range)
             val gap = minOf(Math.abs(accentHue - dangerHue), 360 - Math.abs(accentHue - dangerHue))
             assertTrue("$name accent ($accentHue) too close to danger ($dangerHue)", gap >= 90.0)
         }
