@@ -42,6 +42,7 @@ private val toolSections = listOf(
             ToolEntry(ForgeTab.REA, ForgeGlyph.SEARCH, R.string.tools_rea, R.string.tools_rea_desc),
             ToolEntry(ForgeTab.TERMINAL, ForgeGlyph.TERMINAL, R.string.shell_terminal, R.string.tools_terminal_desc),
             ToolEntry(ForgeTab.FILES, ForgeGlyph.FOLDER, R.string.tools_files, R.string.tools_files_desc),
+            ToolEntry(ForgeTab.FILE_BROWSER, ForgeGlyph.FOLDER, R.string.tools_file_browser, R.string.tools_file_browser_desc),
             ToolEntry(ForgeTab.CODE_VIEWER, ForgeGlyph.EDIT, R.string.tools_code_viewer, R.string.tools_code_viewer_desc),
             ToolEntry(ForgeTab.PREVIEW, ForgeGlyph.GLOBE, R.string.tools_web_preview, R.string.tools_web_preview_desc),
         ),
