@@ -95,7 +95,11 @@ fun AgentConfigScreen(
         val statusText = state.apiStatusMessage?.asString().orEmpty()
         ForgeLargeTitle(
             title = stringResource(R.string.agent_config_title),
-            subtitle = listOf(state.agentKind.displayTitle(), state.providerProfile.model.ifBlank { "default" }).joinToString(" · "),
+            // Antigravity keeps its own model setting; the provider profile model belongs to the other agents.
+            subtitle = listOf(
+                state.agentKind.displayTitle(),
+                (if (state.agentKind == AgentKind.ANTIGRAVITY) state.antigravityModel else state.providerProfile.model).ifBlank { "default" },
+            ).joinToString(" · "),
             horizontalPadding = 6.dp,
             trailing = {
                 AgentStatusPill(

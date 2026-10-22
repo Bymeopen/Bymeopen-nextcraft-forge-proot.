@@ -153,8 +153,8 @@
     <string name="tools_android_builder">Pembangun Android</string>
     <string name="tools_android_builder_desc">Compile, tanda tangan, dan instal APK langsung</string>
     <string name="tools_section_development">Pengembangan</string>
-    <string name="tools_section_build_deploy">Build &amp; Deploy</string>
-    <string name="projects_agent_running">Agen sedang berjalan</string>
+    <string name="tools_section_build_deploy">Bangun &amp; Rilis</string>
+    <string name="projects_agent_running">Agen bekerja</string>
     <string name="projects_active_project">Proyek aktif</string>
     <string name="projects_project">Proyek</string>
     <string name="projects_quick_chat">Obrolan cepat</string>
@@ -867,7 +867,7 @@
     <string name="code_viewer_changes">Perubahan (%1$d)</string>
     <string name="code_viewer_files">File (%1$d)</string>
     <string name="code_viewer_no_files">Proyek ini belum punya file.</string>
-    <string name="terminal_general_subtitle">Folder home · Ubuntu root chroot</string>
+    <string name="terminal_general_subtitle">Home · Ubuntu chroot</string>
     <string name="terminal_go_to_project">Ke %1$s</string>
     <string name="files_edit_in_terminal">Edit di terminal</string>
     <string name="confirm_uninstall_title">Copot %1$s?</string>

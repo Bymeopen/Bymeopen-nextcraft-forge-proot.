@@ -2767,6 +2767,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val folder = "attachments/app-screens-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
             val added = mutableListOf<ChatAttachment>()
             try {
+                // An open keyboard hides the bottom bar and leaves a black gap in the pictures; close it first.
+                window.currentFocus?.clearFocus()
+                getApplication<Application>().getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    ?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
+                delay(KEYBOARD_CLOSE_MS)
                 appCaptureSteps().forEachIndexed { index, step ->
                     if (step.pane != null) {
                         _state.update { it.copy(projectView = ProjectView.CONVERSATION) }
@@ -2775,7 +2780,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (step.tab == ForgeTab.PROJECTS) _state.update { it.copy(projectView = ProjectView.LIST) }
                         selectTab(step.tab)
                     }
-                    delay(CAPTURE_SETTLE_MS)
+                    delay(CAPTURE_SETTLE_MS + step.extraSettleMs)
                     val bitmap = captureWindow(window) ?: return@forEachIndexed
                     val name = "%02d-%s.png".format(index + 1, step.name)
                     withContext(Dispatchers.IO) { savePng(project.id, "$folder/$name", name, bitmap) }?.let { added += it }
@@ -4689,6 +4694,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         /** Time for a screen to compose and draw before it is photographed. */
         const val CAPTURE_SETTLE_MS = 900L
+        const val KEYBOARD_CLOSE_MS = 500L
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
         const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }
