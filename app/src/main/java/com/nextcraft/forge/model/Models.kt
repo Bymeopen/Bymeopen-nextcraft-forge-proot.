@@ -82,6 +82,8 @@ enum class AgentKind(
     ;
 
     companion object {
+        fun fromStoredOrNull(value: String?): AgentKind? = entries.firstOrNull { it.stableId == value || it.name == value }
+
         fun fromStored(value: String?): AgentKind = entries.firstOrNull {
             it.stableId == value || it.name == value
         } ?: CLAUDE_CODE
@@ -367,6 +369,8 @@ data class ChatMessage(
     val attachments: List<ChatAttachment> = emptyList(),
     val workItems: List<ActivityItem> = emptyList(),
     val workedMillis: Long = 0L,
+    /** [AgentKind.stableId] of the agent that wrote this reply; null for user messages and replies saved before routing. */
+    val agent: String? = null,
 )
 
 data class ChatAttachment(

@@ -2291,6 +2291,17 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             runCatching { writeRootfsFileAtomically(bashrc, updated, mode = 0b110100100) }
                 .onFailure { Log.w("RuntimeInstaller", "Could not write the shell prompt", it) }
         }
+        ensureX86Wrapper()
+    }
+
+    /** Installs `run-x86` (see [X86Wrapper]) in the guest; skipped while it is up to date. */
+    private fun ensureX86Wrapper() {
+        val target = File(rootfs, X86Wrapper.GUEST_PATH)
+        if (runCatching { target.readText() }.getOrNull() == X86Wrapper.SCRIPT) return
+        runCatching {
+            target.parentFile?.mkdirs()
+            writeRootfsFileAtomically(target, X86Wrapper.SCRIPT, mode = 0b111101101)
+        }.onFailure { Log.w("RuntimeInstaller", "Could not write run-x86", it) }
     }
 
     private fun writeResolver() {
@@ -2925,6 +2936,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     ;;
             esac
 
+            # Opt-in (create the file ${'$'}ROOTFS/.nextcraft-private-mounts): run this session in its own mount namespace, so its
+            # bind mounts disappear with its last process instead of piling up in the shared namespace. Skipped when unshare is
+            # missing or already applied.
+            if [ -z "${'$'}NEXTCRAFT_IN_MOUNT_NS" ] && [ -f "${'$'}ROOTFS/.nextcraft-private-mounts" ] && command -v unshare >/dev/null 2>&1; then
+                NEXTCRAFT_IN_MOUNT_NS=1 exec unshare -m "${'$'}0" "${'$'}ROOTFS" "${'$'}HOST_WORKSPACE" "${'$'}GUEST_WORKSPACE" "${'$'}HOST_BRIDGE" "${'$'}APP_UID" "${'$'}@"
+            fi
+
             is_mounted() {
                 awk -v target="${'$'}1" '${'$'}2 == target { found=1; exit } END { exit !found }' /proc/mounts
             }
@@ -3134,11 +3152,34 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             child_status=0
             exec 3<&0
             forward_signal() {
-                kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+                if [ -n "${'$'}SETSID" ]; then
+                    kill "-${'$'}1" -- "-${'$'}child" 2>/dev/null || true
+                else
+                    kill "-${'$'}1" "${'$'}child" 2>/dev/null || true
+                fi
+            }
+
+            # Non-interactive runs (agents, builds) get their own session, so every process they spawn shares one process group
+            # that can be ended with the command. Interactive terminals keep the controlling tty and are left alone.
+            SETSID=""
+            if [ ! -t 0 ] && command -v setsid >/dev/null 2>&1; then
+                SETSID="setsid"
+            fi
+
+            # Ends whatever the command left behind (a dev server, a watcher, a daemonised helper): TERM, a short grace period, KILL.
+            reap_group() {
+                [ -n "${'$'}SETSID" ] || return 0
+                kill -s TERM -- "-${'$'}child" 2>/dev/null || return 0
+                local i=0
+                while [ "${'$'}i" -lt 10 ] && kill -0 -- "-${'$'}child" 2>/dev/null; do
+                    sleep 0.2
+                    i=${'$'}((i + 1))
+                done
+                kill -s KILL -- "-${'$'}child" 2>/dev/null || true
             }
 
             exec 9>&-
-            ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
+            ${'$'}SETSID ${'$'}CHROOT_BIN "${'$'}ROOTFS" /usr/bin/env \
                 GUEST_WORKSPACE="${'$'}GUEST_WORKSPACE" \
                 /bin/sh -c 'cd "${'$'}GUEST_WORKSPACE" && exec "${'$'}@"' -- "${'$'}@" <&3 3<&- &
             child=${'$'}!
@@ -3151,6 +3192,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 wait "${'$'}child" || child_status=${'$'}?
                 kill -0 "${'$'}child" 2>/dev/null || break
             done
+            reap_group
             exit "${'$'}child_status"
         """.trimIndent() + "\n"
 

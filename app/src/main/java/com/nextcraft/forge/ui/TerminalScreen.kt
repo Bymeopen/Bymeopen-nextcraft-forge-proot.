@@ -90,6 +90,8 @@ internal class TerminalViewHolder {
 fun TerminalScreen(
     state: ForgeUiState,
     viewModel: MainViewModel,
+    /** Null = the general terminal of the Terminal tab; otherwise the terminal of that chat, started in the chat's folder. */
+    chatId: String? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -97,9 +99,9 @@ fun TerminalScreen(
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
 
-    LaunchedEffect(Unit) { viewModel.ensureTerminalSession() }
-    val session = remember(state.terminalRevision) { viewModel.currentTerminalSession() }
-    val finished = remember(state.terminalRevision) { viewModel.isTerminalFinished() }
+    LaunchedEffect(chatId) { viewModel.ensureTerminalSession(chatId) }
+    val session = remember(state.terminalRevision, chatId) { viewModel.currentTerminalSession(chatId) }
+    val finished = remember(state.terminalRevision, chatId) { viewModel.isTerminalFinished(chatId) }
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
     val prefs = remember { context.getSharedPreferences("forge_terminal", android.content.Context.MODE_PRIVATE) }
@@ -118,7 +120,7 @@ fun TerminalScreen(
                     context.getSystemService(InputMethodManager::class.java)?.showSoftInput(terminal, 0)
                 }
             },
-            onEmulatorReady = viewModel::flushTerminalInput,
+            onEmulatorReady = { viewModel.flushTerminalInput(chatId) },
         ).also { client -> client.onTextSizeChanged = { px -> prefs.edit().putInt(TEXT_SIZE_KEY, px).apply() } }
     }
     val terminalBackground = tokens.terminalBackground.compositeOver(scheme.background)
@@ -152,7 +154,7 @@ fun TerminalScreen(
                 ForgePillIcon(
                     icon = Icons.Default.Delete,
                     description = stringResource(R.string.terminal_clear_terminal),
-                    onClick = viewModel::clearTerminal,
+                    onClick = { viewModel.clearTerminal(chatId) },
                     enabled = session != null,
                 )
             },
@@ -220,7 +222,7 @@ fun TerminalScreen(
                             text = stringResource(R.string.terminal_session_ended, session.exitStatus),
                             fontSize = ForgeType.secondary,
                         )
-                        ForgeTextButton(onClick = viewModel::restartTerminalSession) {
+                        ForgeTextButton(onClick = { viewModel.restartTerminalSession(chatId) }) {
                             Text(stringResource(R.string.terminal_restart))
                         }
                     }
@@ -236,7 +238,8 @@ fun TerminalScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             // The shell starts in the home folder; this jumps into the open project's folder.
-            state.activeProject?.let { project ->
+            // A chat's terminal already starts in the chat's folder, so only the general terminal needs the jump.
+            state.activeProject?.takeIf { chatId == null }?.let { project ->
                 AssistChip(
                     onClick = { dismissHint(); viewModel.terminalProjectDir()?.let { dir -> viewModel.runTerminalCommand("cd " + com.nextcraft.forge.runtime.shellSingleQuote(dir)) } },
                     enabled = ready,
@@ -246,7 +249,7 @@ fun TerminalScreen(
             }
             quickCommands.forEach { cmd ->
                 AssistChip(
-                    onClick = { dismissHint(); viewModel.runTerminalCommand(cmd) },
+                    onClick = { dismissHint(); viewModel.runTerminalCommand(cmd, chatId) },
                     enabled = ready,
                     shape = RoundedCornerShape(100),
                     label = {
@@ -264,7 +267,7 @@ fun TerminalScreen(
 
         // Command line pinned last, so it floats right above the keyboard (the layout is lifted by
         // imePadding). Text goes to the running program plus Enter.
-        TerminalCommandBar(enabled = session != null, onSend = { dismissHint(); viewModel.runTerminalCommand(it) })
+        TerminalCommandBar(enabled = session != null, onSend = { dismissHint(); viewModel.runTerminalCommand(it, chatId) })
     }
 }
 
@@ -381,6 +384,9 @@ internal fun TerminalKeyRow(
         TerminalKey("Tab", stringResource(R.string.terminal_key_tab), enabled) { press(KeyEvent.KEYCODE_TAB) }
         TerminalKey("Ctrl", stringResource(R.string.terminal_key_ctrl), enabled, active = modifiers.ctrl) { modifiers.ctrl = !modifiers.ctrl }
         TerminalKey("Alt", stringResource(R.string.terminal_key_alt), enabled, active = modifiers.alt) { modifiers.alt = !modifiers.alt }
+        TerminalKey("^C", stringResource(R.string.terminal_key_interrupt), enabled) {
+            liveView()?.inputCodePoint('c'.code, true, false)
+        }
         TerminalKey("↑", stringResource(R.string.terminal_key_up), enabled) { press(KeyEvent.KEYCODE_DPAD_UP) }
         TerminalKey("↓", stringResource(R.string.terminal_key_down), enabled) { press(KeyEvent.KEYCODE_DPAD_DOWN) }
         TerminalKey("←", stringResource(R.string.terminal_key_left), enabled) { press(KeyEvent.KEYCODE_DPAD_LEFT) }
@@ -389,9 +395,6 @@ internal fun TerminalKeyRow(
         TerminalKey("End", stringResource(R.string.terminal_key_end), enabled) { press(KeyEvent.KEYCODE_MOVE_END) }
         TerminalKey("PgUp", stringResource(R.string.terminal_key_pgup), enabled) { press(KeyEvent.KEYCODE_PAGE_UP) }
         TerminalKey("PgDn", stringResource(R.string.terminal_key_pgdn), enabled) { press(KeyEvent.KEYCODE_PAGE_DOWN) }
-        TerminalKey("^C", stringResource(R.string.terminal_key_interrupt), enabled) {
-            liveView()?.inputCodePoint('c'.code, true, false)
-        }
         listOf('-', '/', '|', '~').forEach { symbol ->
             TerminalKey(symbol.toString(), symbol.toString(), enabled) { type(symbol) }
         }

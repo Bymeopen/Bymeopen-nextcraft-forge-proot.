@@ -2,6 +2,7 @@ package com.nextcraft.forge.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,12 +25,12 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Opt-in (-PforgeScreenshots) renders of real composables at the phone sizes the app targets, written to
+ * NextCraft Screenshot: opt-in (-PforgeScreenshots) renders of real composables at the phone sizes the app targets, written to
  * app/build/screenshots. Each scenario is drawn in Indonesian, whose labels are the longest.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-abstract class PhoneSizeShots(private val label: String, private val theme: String = "dark") {
+abstract class NextCraftScreenshots(private val label: String, private val theme: String = "dark") {
     @get:Rule val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     private fun save(scenario: String) {
@@ -375,14 +376,92 @@ abstract class PhoneSizeShots(private val label: String, private val theme: Stri
         }
         save("onboarding")
     }
+
+    private fun fmEntries(): List<com.nextcraft.forge.model.WorkspaceEntry> {
+        fun d(path: String, n: Int) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), true, 0, childCount = n, modifiedMillis = System.currentTimeMillis() - 3_600_000)
+        fun f(path: String, size: Long) = com.nextcraft.forge.model.WorkspaceEntry(path, path.substringAfterLast('/'), false, 0, size, modifiedMillis = System.currentTimeMillis() - 86_400_000)
+        return listOf(d("app/src/main", 4), d("app/src/test", 2), f("app/src/Main.kt", 2048), f("app/src/util-strings-and-formatting-helpers.kt", 18_400), f("app/build.gradle.kts", 1_200_000))
+    }
+
+    @Test
+    fun filesManager() {
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FilesHeaderCard(
+                    title = "5 item", selecting = false, selectedCount = 0, enabled = true, sort = FileSort.NAME, showHidden = false,
+                    onSort = {}, onToggleHidden = {}, onNewFile = {}, onNewFolder = {}, onUpload = {}, onToggleSelect = {}, onRefresh = {},
+                )
+                FileBreadcrumbs(rootName = "Aplikasi Batrei", dir = "app/src", onNavigate = {})
+                WorkspaceFolderList(
+                    entries = fmEntries(), loading = false, atRoot = false, truncated = false, selectedPath = null, selecting = false,
+                    selectedPaths = mutableListOf(), enabled = true, onOpenFolder = {}, onSelectFile = {}, onNewFileIn = {}, onNewFolderIn = {},
+                    onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onAnalyzeWithRea = {}, onInstallApk = {}, onDelete = {},
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesManager")
+    }
+
+    @Test
+    fun filesSearch() {
+        val all = fmEntries()
+        val result = searchWorkspaceEntries(all, "main")
+        rule.setContent {
+            Frame {
+                ForgeProjectHeader(title = "Aplikasi Batrei", subtitle = "File", onBack = {})
+                FilesHeaderCard(
+                    title = "5 item", selecting = false, selectedCount = 0, enabled = true, sort = FileSort.NAME, showHidden = false,
+                    onSort = {}, onToggleHidden = {}, onNewFile = {}, onNewFolder = {}, onUpload = {}, onToggleSelect = {}, onRefresh = {},
+                    searching = true,
+                )
+                FileSearchBar(query = "main", onQueryChange = {}, resultCount = result.matches.size)
+                WorkspaceFolderList(
+                    entries = result.entries.filter { it.path in result.matches }, loading = false, atRoot = false, truncated = false, selectedPath = null,
+                    selecting = false, selectedPaths = mutableListOf(), enabled = true, onOpenFolder = {}, onSelectFile = {}, onNewFileIn = {},
+                    onNewFolderIn = {}, onUploadIn = {}, onRename = {}, onSaveCopy = {}, onEditInTerminal = {}, onAnalyzeWithRea = {}, onInstallApk = {}, onDelete = {},
+                    modifier = Modifier.weight(1f),
+                )
+                ForgeBottomBar(projectEntries, ForgeTab.FILES, changedCount = 0, agentRunning = false, terminalBusy = false, onSelectTab = {})
+            }
+        }
+        save("filesSearch")
+    }
+
+    @Test
+    fun layoutFixes() {
+        val chats = listOf(
+            com.nextcraft.forge.model.ProjectChat(title = "Test 2", updatedAtMillis = System.currentTimeMillis() - 3 * 3_600_000),
+            com.nextcraft.forge.model.ProjectChat(title = "Tes", updatedAtMillis = System.currentTimeMillis() - 12 * 3_600_000),
+            com.nextcraft.forge.model.ProjectChat(title = "Perbaiki error build di Launch", updatedAtMillis = System.currentTimeMillis() - 26 * 3_600_000),
+        )
+        rule.setContent {
+            Frame {
+                ForgeLargeTitle(title = "Pengaturan", subtitle = "Preferensi & konfigurasi", horizontalPadding = 20.dp)
+                ForgeSectionLabel("Umum", horizontalPadding = 20.dp, topPadding = 8.dp)
+                ThemeModeGrid(active = ForgeThemeMode.DARK, onSelect = {})
+                Text("Kedalaman penalaran", modifier = Modifier.padding(horizontal = 20.dp), fontSize = ForgeType.secondary)
+                Text("Paling dalam, jawaban lebih lambat", modifier = Modifier.padding(horizontal = 20.dp), fontSize = ForgeType.secondary, color = MaterialTheme.colorScheme.primary)
+                ForgePillTabs(items = listOf("Rendah", "Sedang", "Tinggi"), selectedIndex = 2, onSelect = {}, equalWidth = true)
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                    Text("Forge Sandbox", fontSize = ForgeType.screenTitle, modifier = Modifier.padding(horizontal = 8.dp))
+                    ForgePrimaryButton(text = "Obrolan baru", onClick = {}, modifier = Modifier.fillMaxWidth())
+                    chats.forEachIndexed { i, c -> ChatDrawerRow(chat = c, current = i == 0, running = i == 2, canDelete = true, onOpen = {}, onDelete = {}) }
+                }
+            }
+        }
+        save("layoutFixes")
+    }
 }
 
-@Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : PhoneSizeShots("6.1in-360x800")
-@Config(sdk = [34], qualifiers = "in-w412dp-h923dp-xxhdpi") class Shots63 : PhoneSizeShots("6.3in-412x923")
-@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class Shots667 : PhoneSizeShots("6.67in-393x873")
-@Config(sdk = [34], qualifiers = "in-w412dp-h915dp-xxhdpi") class Shots68 : PhoneSizeShots("6.8in-412x915")
-@Config(sdk = [34], qualifiers = "in-w440dp-h956dp-xxhdpi") class Shots69 : PhoneSizeShots("6.9in-440x956")
+@Config(sdk = [34], qualifiers = "in-w360dp-h800dp-xxhdpi") class Shots61 : NextCraftScreenshots("6.1in-360x800")
+@Config(sdk = [34], qualifiers = "in-w412dp-h923dp-xxhdpi") class Shots63 : NextCraftScreenshots("6.3in-412x923")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class Shots667 : NextCraftScreenshots("6.67in-393x873")
+@Config(sdk = [34], qualifiers = "in-w412dp-h915dp-xxhdpi") class Shots68 : NextCraftScreenshots("6.8in-412x915")
+@Config(sdk = [34], qualifiers = "in-w440dp-h956dp-xxhdpi") class Shots69 : NextCraftScreenshots("6.9in-440x956")
 
-@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsWhite : PhoneSizeShots("white-393x873", "white")
-@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsGlass : PhoneSizeShots("glass-393x873", "glass")
-@Config(sdk = [34], qualifiers = "in-w932dp-h430dp-land-xxhdpi") class ShotsLandscape : PhoneSizeShots("land-932x430")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsWhite : NextCraftScreenshots("white-393x873", "white")
+@Config(sdk = [34], qualifiers = "in-w393dp-h873dp-xxhdpi") class ShotsGlass : NextCraftScreenshots("glass-393x873", "glass")
+@Config(sdk = [34], qualifiers = "in-w932dp-h430dp-land-xxhdpi") class ShotsLandscape : NextCraftScreenshots("land-932x430")

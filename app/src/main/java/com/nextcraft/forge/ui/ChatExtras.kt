@@ -272,16 +272,21 @@ private fun ChangedFileRow(
                 } else {
                     DiffCodeView(lines = change.diffLines, path = change.path, previewLines = DIFF_PREVIEW_LINES)
                 }
-                // Wraps instead of scrolling: with four actions the last one ("Batalkan") was cut off at 393dp.
-                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    TextButton(onClick = { onEditInTerminal(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.files_edit_in_terminal)) }
-                    TextButton(onClick = { onOpenFile(change.path) }, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_open_in_files)) }
-                    TextButton(onClick = { onKeepFile(change.path) }, enabled = enabled, modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp)) { Text(stringResource(R.string.chat_keep)) }
-                    TextButton(
-                        onClick = { onRevertFile(change.path) },
-                        enabled = enabled,
-                        modifier = Modifier.heightIn(min = ForgeSpace.minTouch + 4.dp),
-                    ) { Text(stringResource(R.string.chat_revert), color = tokens.dangerText) }
+                // Two fixed rows instead of one wrapping row, so no button is ever orphaned: ways to look at the file on top,
+                // the decision (revert / keep) below with the primary action on the right.
+                val actionHeight = Modifier.heightIn(min = ForgeSpace.minTouch)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(onClick = { onEditInTerminal(change.path) }, modifier = actionHeight) { Text(stringResource(R.string.files_edit_in_terminal), maxLines = 1) }
+                    TextButton(onClick = { onOpenFile(change.path) }, modifier = actionHeight) { Text(stringResource(R.string.chat_open_in_files), maxLines = 1) }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { onRevertFile(change.path) }, enabled = enabled, modifier = actionHeight) {
+                        Text(stringResource(R.string.chat_revert), color = tokens.dangerText, maxLines = 1)
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onKeepFile(change.path) }, enabled = enabled, modifier = actionHeight) {
+                        Text(stringResource(R.string.chat_keep), fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
                 }
             }
         }
@@ -446,6 +451,9 @@ internal fun ChatComposer(
     /** Model (and effort) shown as a chip next to the attach button; tapping it opens the model sheet. */
     modelChipLabel: String = "",
     onModelChip: (() -> Unit)? = null,
+    /** Routing mode shown as a second chip (single agent, manual, failover, balanced); tapping it opens the routing sheet. */
+    routeChipLabel: String = "",
+    onRouteChip: (() -> Unit)? = null,
 ) {
     val tokens = LocalForgeThemeTokens.current
     var attachMenuOpen by remember { mutableStateOf(false) }
@@ -521,7 +529,24 @@ internal fun ChatComposer(
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 200.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.widthIn(max = 150.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            if (onRouteChip != null && routeChipLabel.isNotBlank()) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onRouteChip),
+                ) {
+                    Text(
+                        text = routeChipLabel,
+                        fontSize = ForgeType.secondary,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 110.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
             }

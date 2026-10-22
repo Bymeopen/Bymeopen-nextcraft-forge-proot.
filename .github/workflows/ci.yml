@@ -100,6 +100,7 @@ jobs:
       - name: Syntax check
         run: |
           sh -n scripts/runtime-bundles/chroot-exec.sh
+          sh scripts/test-chroot-reaper.sh
           sh -n scripts/runtime-bundles/unmount-chroot.sh
           for s in scripts/runtime-bundles/build-*.sh scripts/make-update-manifest.sh; do bash -n "$s"; done
       - name: Chroot supervisor rejects unsafe arguments

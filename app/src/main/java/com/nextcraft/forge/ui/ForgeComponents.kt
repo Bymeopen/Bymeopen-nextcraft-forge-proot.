@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -228,6 +230,8 @@ fun ForgeSectionLabel(
     text: String,
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = 20.dp,
+    /** Space above the label. A parent that already spaces its children (spacedBy) passes less so the gap is not doubled. */
+    topPadding: Dp = ForgeSpace.section,
 ) {
     Text(
         text = text.uppercase(),
@@ -236,7 +240,7 @@ fun ForgeSectionLabel(
         letterSpacing = ForgeType.sectionTracking,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier
-            .padding(start = horizontalPadding, end = horizontalPadding, top = ForgeSpace.section, bottom = ForgeSpace.labelToCard)
+            .padding(start = horizontalPadding, end = horizontalPadding, top = topPadding, bottom = ForgeSpace.labelToCard)
             .forgeHeading(),
     )
 }
@@ -363,6 +367,8 @@ fun ForgePillTabs(
     modifier: Modifier = Modifier,
     onLongPress: ((Int) -> Unit)? = null,
     longPressLabel: String? = null,
+    /** A few short options (e.g. Low / Medium / High): equal-width segments that fill the row instead of scrolling. */
+    equalWidth: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
@@ -370,8 +376,7 @@ fun ForgePillTabs(
         modifier = modifier
             .fillMaxWidth()
             // The fade at a cut edge tells the reader there are more tabs to scroll to.
-            .forgeFadingEdges(scroll, scheme.background)
-            .horizontalScroll(scroll)
+            .then(if (equalWidth) Modifier else Modifier.forgeFadingEdges(scroll, scheme.background).horizontalScroll(scroll))
             .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
     ) {
@@ -379,6 +384,7 @@ fun ForgePillTabs(
             val selected = index == selectedIndex
             Box(
                 modifier = Modifier
+                    .then(if (equalWidth) Modifier.weight(1f) else Modifier.widthIn(max = 168.dp))
                     .heightIn(min = 40.dp)
                     .clip(RoundedCornerShape(100))
                     .background(if (selected) scheme.onSurface.copy(alpha = 0.09f) else Color.Transparent)
@@ -398,6 +404,7 @@ fun ForgePillTabs(
                     fontSize = ForgeType.body,
                     color = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis,
                 )
             }
         }

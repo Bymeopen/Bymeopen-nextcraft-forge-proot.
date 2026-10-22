@@ -111,7 +111,7 @@ android {
         }
     }
 
-    // Opt-in layout screenshots across phone sizes: ./gradlew :app:testDebugUnitTest -PforgeScreenshots
+    // NextCraft Screenshot, opt-in layout screenshots across phone sizes: ./gradlew :app:testDebugUnitTest -PforgeScreenshots
     // (needs the Robolectric SDK download; default builds are unaffected).
     if (project.hasProperty("forgeScreenshots")) {
         testOptions {
@@ -142,6 +142,7 @@ android {
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
