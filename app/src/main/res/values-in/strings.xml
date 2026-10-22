@@ -136,7 +136,7 @@
     <string name="terminal_text_larger">Perbesar teks</string>
     <string name="terminal_input_hint">Ketik perintah</string>
     <string name="terminal_send">Kirim</string>
-    <string name="terminal_empty_hint">Shell Ubuntu asli. Ketik perintah di bawah, atau ketuk pintasan seperti claude.</string>
+    <string name="terminal_empty_hint">Shell Ubuntu asli. Ketik perintah di bawah, atau ketuk pintasan seperti claude. Ctrl dan Alt berlaku untuk tombol berikutnya yang ditekan (Ctrl, lalu C).</string>
     <string name="terminal_clear_terminal">Bersihkan terminal</string>
     <string name="terminal_run_command_in_the">Jalankan perintah di workspace</string>
     <string name="terminal_run">Jalankan</string>

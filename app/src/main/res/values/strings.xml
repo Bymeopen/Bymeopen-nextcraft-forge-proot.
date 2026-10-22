@@ -136,7 +136,7 @@
     <string name="terminal_text_larger">Larger text</string>
     <string name="terminal_input_hint">Type a command</string>
     <string name="terminal_send">Send</string>
-    <string name="terminal_empty_hint">A real Ubuntu shell. Type a command below, or tap a shortcut like claude.</string>
+    <string name="terminal_empty_hint">A real Ubuntu shell. Type a command below, or tap a shortcut like claude. Ctrl and Alt apply to the next key you press (Ctrl, then C).</string>
     <string name="terminal_clear_terminal">Clear terminal</string>
     <string name="terminal_run_command_in_the">Run command in the workspace</string>
     <string name="terminal_run">Run</string>
