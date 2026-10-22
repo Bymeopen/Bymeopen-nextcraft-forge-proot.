@@ -67,6 +67,13 @@ class ThemeAndNavTest {
         }
     }
 
+    /** "Sistem" keeps its own colours; it must not silently follow the Dark / White picks. */
+    @Test
+    fun system_keepsItsOwnColours_apartFromDarkAndWhite() {
+        assertTrue(resolveThemeTokens("system", systemDark = true).first.primary != resolveThemeTokens("dark", false).first.primary)
+        assertTrue(resolveThemeTokens("system", systemDark = false).first.primary != resolveThemeTokens("white", false).first.primary)
+    }
+
     /** Added/removed diff text must read on its own row tint in every theme (glass tints are translucent, so it is composited). */
     @Test
     fun diffText_meetsAA_onItsRow() {
