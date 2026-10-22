@@ -66,6 +66,53 @@ internal fun imageRefOfLine(line: String): MarkdownImageRef? {
     return if (extension in IMAGE_EXTENSIONS) MarkdownImageRef("", bare) else null
 }
 
+private val VIDEO_EXTENSIONS = setOf("mp4", "webm", "mkv", "mov")
+
+/** The workspace path of a video when the line is only that path (optionally in backticks), else null. */
+internal fun videoPathOfLine(line: String): String? {
+    val bare = line.trim().removeSurrounding("`")
+    if (bare.isEmpty() || bare.any { it.isWhitespace() || it == '(' || it == ')' || it == '[' || it == ']' }) return null
+    if (bare.startsWith("http", ignoreCase = true)) return null
+    return bare.takeIf { it.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS }
+}
+
+/** Shows a still frame of a chat video and opens it in the system player. */
+internal interface ChatVideoHandler {
+    suspend fun thumbnail(src: String): ImageBitmap?
+    fun open(src: String)
+}
+
+internal val LocalChatVideoHandler = staticCompositionLocalOf<ChatVideoHandler?> { null }
+
+/** A video file in a message: its first frame with a play badge; a tap plays it. */
+@Composable
+internal fun ChatVideo(src: String, modifier: Modifier = Modifier) {
+    val handler = LocalChatVideoHandler.current
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(12.dp)
+    val thumb by produceState<ImageBitmap?>(null, src) { value = handler?.thumbnail(src) }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 120.dp, max = 360.dp)
+            .clip(shape)
+            .background(scheme.onSurface.copy(alpha = 0.08f))
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_video_play)) { handler?.open(src) },
+        contentAlignment = Alignment.Center,
+    ) {
+        thumb?.let {
+            Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
+        }
+        Surface(shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = 0.55f)) {
+            Text(
+                text = "▶  " + stringResource(R.string.chat_video_play),
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
 /** Where an image `src` lives. */
 internal sealed interface ChatImageSource {
     data class Remote(val url: String) : ChatImageSource

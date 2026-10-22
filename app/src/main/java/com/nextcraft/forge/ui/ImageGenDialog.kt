@@ -21,6 +21,9 @@ import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
 import com.nextcraft.forge.network.GeminiImageModels
 
+private val VIDEO_ASPECTS = listOf("16:9", "9:16")
+private val VIDEO_RESOLUTIONS = listOf("720p", "1080p")
+
 /** Nano Banana: describe a picture (or, with an image attached, how to change it) and it lands in the chat. */
 @Composable
 internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
@@ -29,6 +32,9 @@ internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel
     var key by remember { mutableStateOf("") }
     var prompt by rememberSaveable { mutableStateOf("") }
     var modelIndex by rememberSaveable { mutableStateOf(0) }
+    var mode by rememberSaveable { mutableStateOf(0) }
+    var aspectIndex by rememberSaveable { mutableStateOf(0) }
+    var resolutionIndex by rememberSaveable { mutableStateOf(0) }
     val editing = state.pendingAttachments.firstOrNull { it.mimeType.startsWith("image/") }
 
     AlertDialog(
@@ -47,6 +53,11 @@ internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
+                    ForgePillTabs(
+                        items = listOf(stringResource(R.string.media_mode_image), stringResource(R.string.media_mode_video)),
+                        selectedIndex = mode,
+                        onSelect = { mode = it },
+                    )
                     OutlinedTextField(
                         value = prompt,
                         onValueChange = { prompt = it.take(2000) },
@@ -61,11 +72,17 @@ internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    ForgePillTabs(
-                        items = listOf(stringResource(R.string.image_model_fast), stringResource(R.string.image_model_pro)),
-                        selectedIndex = modelIndex,
-                        onSelect = { modelIndex = it },
-                    )
+                    if (mode == 0) {
+                        ForgePillTabs(
+                            items = listOf(stringResource(R.string.image_model_fast), stringResource(R.string.image_model_pro)),
+                            selectedIndex = modelIndex,
+                            onSelect = { modelIndex = it },
+                        )
+                    } else {
+                        ForgePillTabs(items = VIDEO_ASPECTS, selectedIndex = aspectIndex, onSelect = { aspectIndex = it })
+                        ForgePillTabs(items = VIDEO_RESOLUTIONS, selectedIndex = resolutionIndex, onSelect = { resolutionIndex = it })
+                        Text(stringResource(R.string.video_note), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         },
@@ -78,7 +95,11 @@ internal fun ImageGenerationDialog(state: ForgeUiState, viewModel: MainViewModel
                 TextButton(
                     enabled = prompt.isNotBlank() && !state.imageGenerating,
                     onClick = {
-                        viewModel.generateImage(prompt, GeminiImageModels.all[modelIndex.coerceIn(0, GeminiImageModels.all.lastIndex)])
+                        if (mode == 0) {
+                            viewModel.generateImage(prompt, GeminiImageModels.all[modelIndex.coerceIn(0, GeminiImageModels.all.lastIndex)])
+                        } else {
+                            viewModel.generateVideo(prompt, VIDEO_ASPECTS[aspectIndex.coerceIn(0, 1)], VIDEO_RESOLUTIONS[resolutionIndex.coerceIn(0, 1)])
+                        }
                         prompt = ""
                         onDismiss()
                     },

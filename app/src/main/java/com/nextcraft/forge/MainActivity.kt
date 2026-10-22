@@ -75,7 +75,17 @@ class MainActivity : ComponentActivity() {
                     val imageLoader = remember<suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?>(viewModel) {
                         { src -> viewModel.loadChatImage(src) }
                     }
-                    CompositionLocalProvider(LocalChatImageLoader provides imageLoader) {
+                    val appContext = this@MainActivity
+                    val videoHandler = remember(viewModel) {
+                        object : com.nextcraft.forge.ui.ChatVideoHandler {
+                            override suspend fun thumbnail(src: String) = viewModel.loadChatVideoThumbnail(src)
+                            override fun open(src: String) = viewModel.openChatVideo(appContext, src)
+                        }
+                    }
+                    CompositionLocalProvider(
+                        LocalChatImageLoader provides imageLoader,
+                        com.nextcraft.forge.ui.LocalChatVideoHandler provides videoHandler,
+                    ) {
                         NextCraftForgeApp(viewModel = viewModel)
                     }
                 }

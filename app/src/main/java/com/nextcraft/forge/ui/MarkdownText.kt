@@ -61,6 +61,7 @@ private sealed interface MarkdownBlock {
     object HorizontalRule : MarkdownBlock
     data class Paragraph(val text: String) : MarkdownBlock
     data class Image(val alt: String, val src: String) : MarkdownBlock
+    data class Video(val src: String) : MarkdownBlock
 }
 
 @Composable
@@ -88,6 +89,7 @@ fun MarkdownText(
                     is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
                     is MarkdownBlock.Table -> TableBlockView(block, resolvedColor, tokens)
                     is MarkdownBlock.Image -> ChatImage(alt = block.alt, src = block.src)
+                    is MarkdownBlock.Video -> ChatVideo(src = block.src)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
@@ -447,8 +449,13 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
         }
 
         val image = imageRefOfLine(line)
+        val video = if (image == null) videoPathOfLine(line) else null
         when {
             line.isBlank() -> flushParagraph()
+            video != null -> {
+                flushParagraph()
+                blocks += MarkdownBlock.Video(video)
+            }
             image != null -> {
                 flushParagraph()
                 blocks += MarkdownBlock.Image(image.alt, image.src)

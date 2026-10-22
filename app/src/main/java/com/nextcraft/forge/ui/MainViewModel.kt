@@ -32,6 +32,7 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import androidx.compose.ui.graphics.asImageBitmap
 import com.nextcraft.forge.network.GeminiImageClient
 import com.nextcraft.forge.runtime.ClaudeSkillStore
 import com.nextcraft.forge.runtime.ConnectorStore
@@ -40,6 +41,8 @@ import com.nextcraft.forge.runtime.McpNames
 import com.nextcraft.forge.runtime.McpTransport
 import com.nextcraft.forge.network.GeminiImageModels
 import com.nextcraft.forge.network.GeminiImageResult
+import com.nextcraft.forge.network.GeminiVideoClient
+import com.nextcraft.forge.network.GeminiVideoResult
 import com.nextcraft.forge.runtime.RepoOpResult
 import com.nextcraft.forge.runtime.deleteRecursivelyNoFollow
 import com.nextcraft.forge.runtime.shellSingleQuote
@@ -1272,6 +1275,109 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 },
             )
         }
+    }
+
+    private val geminiVideo = GeminiVideoClient()
+
+    /**
+     * Creates a video clip with Gemini Omni (image-to-video when an image is attached), saves it under `videos/` in the
+     * chat's workspace and adds it to the chat. The call is synchronous on Google's side and can take minutes.
+     */
+    fun generateVideo(prompt: String, aspectRatio: String, resolution: String) {
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        val clean = prompt.trim()
+        if (clean.isEmpty() || _state.value.imageGenerating) return
+        if (runs.containsKey(chatId)) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_busy_chat)) }
+            return
+        }
+        val key = vault.get(GeminiImageModels.KEY_ID)
+        if (key.isNullOrBlank()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_need_key)) }
+            return
+        }
+        val attachment = _state.value.pendingAttachments.firstOrNull { it.mimeType.startsWith("image/") }
+        _state.update { it.copy(imageGenerating = true, bannerMessage = UiText.res(R.string.video_working)) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val root = if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) {
+                        chatBranches.branchFor(project, chatId).cloneDir
+                    } else {
+                        checkpoints.ensureWorkspace(project.id)
+                    }
+                    val input = attachment?.let { att ->
+                        val file = checkpoints.safeWorkspaceFile(root, att.relativePath)
+                        if (file.isFile && file.length() <= ChatImageDecoder.MAX_BYTES) file.readBytes() to att.mimeType else null
+                    }
+                    val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                    val name = "videos/omni-$stamp.mp4"
+                    val target = checkpoints.safeWorkspaceFile(root, name)
+                    target.parentFile?.mkdirs()
+                    when (val result = geminiVideo.generate(key, clean, target, aspectRatio, resolution, input?.first, input?.second ?: "image/png")) {
+                        is GeminiVideoResult.Failure -> Result.failure(IllegalStateException(result.message))
+                        GeminiVideoResult.Success -> Result.success(name)
+                    }
+                }.getOrElse { Result.failure(it) }
+            }
+            outcome.fold(
+                onSuccess = { path ->
+                    appendLocalMessages(project.id, chatId, listOf(ChatMessage(fromUser = true, text = clean), ChatMessage(fromUser = false, text = path)))
+                    _state.update { it.copy(imageGenerating = false, pendingAttachments = if (attachment != null) emptyList() else it.pendingAttachments) }
+                    refreshWorkspaceFilesAndChanges(project.id)
+                },
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(imageGenerating = false, bannerMessage = UiText.res(R.string.video_failed, error.message ?: error.javaClass.simpleName))
+                    }
+                },
+            )
+        }
+    }
+
+    /** The file behind a chat video `src` (same path checks and branch-first lookup as images), or null. */
+    private fun resolveChatMediaFile(src: String): java.io.File? {
+        val project = _state.value.activeProject ?: return null
+        val chatId = _state.value.activeChatId
+        val source = classifyImageSource(src, project.slug) as? ChatImageSource.Workspace ?: return null
+        val roots = buildList {
+            if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) add(chatBranches.branchFor(project, chatId).cloneDir)
+            add(checkpoints.ensureWorkspace(project.id))
+        }
+        return roots.firstNotNullOfOrNull { root ->
+            runCatching { checkpoints.safeWorkspaceFile(root, source.relativePath) }.getOrNull()?.takeIf { it.isFile }
+        }
+    }
+
+    /** A still frame of a chat video, for its card. */
+    suspend fun loadChatVideoThumbnail(src: String): androidx.compose.ui.graphics.ImageBitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            val file = resolveChatMediaFile(src) ?: return@runCatching null
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                retriever.getFrameAtTime(0)?.asImageBitmap()
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }.getOrNull()
+    }
+
+    /** Opens a chat video in the device's video player. */
+    fun openChatVideo(context: android.content.Context, src: String) {
+        val file = runCatching { resolveChatMediaFile(src) }.getOrNull()
+        if (file == null) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.chat_video_missing)) }
+            return
+        }
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                .setDataAndType(uri, "video/mp4")
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }.onFailure { _state.update { it.copy(bannerMessage = UiText.res(R.string.chat_video_no_player)) } }
     }
 
     /** Adds finished messages to a chat that has no agent run (they are saved like any other message). */

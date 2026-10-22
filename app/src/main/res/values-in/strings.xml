@@ -1120,8 +1120,8 @@
     <string name="chat_image_failed">Gambar tidak tersedia: %1$s</string>
     <string name="chat_image_default_alt">Gambar</string>
     <string name="chat_image_close">Tutup gambar</string>
-    <string name="image_menu">Buat gambar (Nano Banana)</string>
-    <string name="image_dialog_title">Buat gambar</string>
+    <string name="image_menu">Buat gambar atau video (Gemini)</string>
+    <string name="image_dialog_title">Buat gambar atau video</string>
     <string name="image_key_hint">API key Google AI Studio</string>
     <string name="image_key_desc">Pembuatan gambar memakai API key Google AI Studio milik Anda (aistudio.google.com). Disimpan terenkripsi di perangkat ini.</string>
     <string name="image_key_save">Simpan key</string>
@@ -1164,4 +1164,12 @@
     <string name="skill_saved">Skill disimpan.</string>
     <string name="skill_invalid">Beri skill nama dan instruksi.</string>
     <string name="skill_save_failed">Tidak bisa mengubah berkas skill.</string>
+    <string name="media_mode_image">Gambar</string>
+    <string name="media_mode_video">Video</string>
+    <string name="video_note">Video memakai Gemini Omni dengan key Google yang sama. Bisa memakan beberapa menit dan biayanya bisa lebih mahal dari gambar; biarkan aplikasi terbuka.</string>
+    <string name="video_working">Membuat video… ini bisa beberapa menit.</string>
+    <string name="video_failed">Pembuatan video gagal: %1$s</string>
+    <string name="chat_video_play">Putar video</string>
+    <string name="chat_video_missing">Berkas video tidak ada di workspace.</string>
+    <string name="chat_video_no_player">Tidak ada aplikasi di perangkat ini yang bisa memutar video.</string>
 </resources>
