@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.runtime.BranchStatus
+import com.nextcraft.forge.runtime.ProjectRepoInfo
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.AndroidTemplate
@@ -207,6 +208,9 @@ data class ForgeUiState(
     val branchBusy: Set<String> = emptySet(),
     /** Last diff text loaded for a branch (chat id to text). */
     val branchDiff: Map<String, String> = emptyMap(),
+    /** The open project's own repository (null until the repository panel loads it). */
+    val projectRepo: ProjectRepoInfo? = null,
+    val repoBusy: Boolean = false,
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,

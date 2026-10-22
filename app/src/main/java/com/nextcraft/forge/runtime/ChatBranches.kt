@@ -30,6 +30,14 @@ data class BranchStatus(
     val recent: List<BranchCommit> = emptyList(),
 )
 
+/** The project's own repository (its main folder), shown in the repository panel. */
+data class ProjectRepoInfo(
+    val isRepo: Boolean = false,
+    val branch: String = "",
+    val uncommitted: Int = 0,
+    val recent: List<BranchCommit> = emptyList(),
+)
+
 sealed interface BranchMergeResult {
     data object Done : BranchMergeResult
     data class Conflict(val files: List<String>) : BranchMergeResult
@@ -73,6 +81,17 @@ class ChatBranches(context: Context) {
         git(project, chatId, COMMIT_SCRIPT, "MSG" to commitMessage(message))
     }
 
+    /** State and latest commits of the project's own repository (not a chat branch). */
+    suspend fun repoInfo(project: Project): ProjectRepoInfo = withContext(Dispatchers.IO) {
+        val result = gitProject(project, REPO_INFO_SCRIPT)
+        if (result.ok) parseRepoInfo(result.output) else ProjectRepoInfo()
+    }
+
+    /** Commits everything in the project folder (creating the repository first when there is none). */
+    suspend fun commitProject(project: Project, message: String): ChrootResult = withContext(Dispatchers.IO) {
+        gitProject(project, COMMIT_PROJECT_SCRIPT, "MSG" to commitMessage(message))
+    }
+
     /** Commits the branch now with the user's own message (the turn commit uses the prompt's first line). */
     suspend fun commitNow(project: Project, chatId: String, message: String) = commitTurn(project, chatId, message)
 
@@ -107,6 +126,18 @@ class ChatBranches(context: Context) {
         val branch = branchFor(project, chatId)
         git(project, chatId, DISCARD_SCRIPT)
         WorkspaceCheckpoints.clearWorkspaceOverride(branch.pseudoProjectId)
+    }
+
+    private suspend fun gitProject(project: Project, script: String, vararg extra: Pair<String, String>): ChrootResult {
+        val main = checkpoints.ensureWorkspace(project.id)
+        val env = mapOf("FORGE_ID" to "main", "FORGE_SLUG" to project.slug) + extra.toMap()
+        return runner.run(
+            workspaceDir = main,
+            slug = project.slug,
+            command = script,
+            environment = env,
+            timeoutMillis = GIT_TIMEOUT_MS,
+        )
     }
 
     private suspend fun git(project: Project, chatId: String, script: String, vararg extra: Pair<String, String>): ChrootResult {
@@ -164,6 +195,26 @@ class ChatBranches(context: Context) {
             )
         }
 
+        /** Reads the `key=value` and `C <hash> <subject>` lines REPO_INFO_SCRIPT prints. */
+        fun parseRepoInfo(output: String): ProjectRepoInfo {
+            val values = HashMap<String, String>()
+            val commits = ArrayList<BranchCommit>()
+            output.lineSequence().forEach { line ->
+                when {
+                    line.startsWith("C ") -> line.removePrefix("C ").split(' ', limit = 2).let {
+                        if (it.size == 2) commits += BranchCommit(it[0], it[1])
+                    }
+                    '=' in line -> values[line.substringBefore('=')] = line.substringAfter('=').trim()
+                }
+            }
+            return ProjectRepoInfo(
+                isRepo = values["repo"] == "yes",
+                branch = values["branch"].orEmpty(),
+                uncommitted = values["uncommitted"]?.toIntOrNull() ?: 0,
+                recent = commits,
+            )
+        }
+
         fun parseMergeResult(output: String, ok: Boolean): BranchMergeResult {
             val lines = output.lineSequence().map(String::trim).toList()
             return when {
@@ -206,6 +257,24 @@ class ChatBranches(context: Context) {
               G checkout -q -b "chat/§FORGE_ID"
               G tag -f forge-base HEAD >/dev/null
             fi
+        """)
+
+        private val REPO_INFO_SCRIPT = script("""
+            cd "§M"
+            if [ ! -d .git ]; then echo repo=none; exit 0; fi
+            echo repo=yes
+            echo "branch=§(G rev-parse --abbrev-ref HEAD 2>/dev/null || echo -)"
+            echo "uncommitted=§(G status --porcelain | wc -l)"
+            G log --format='C %h %s' -n 15 2>/dev/null || true
+        """)
+
+        private val COMMIT_PROJECT_SCRIPT = script("""
+            cd "§M"
+            [ -d .git ] || G init -q -b main
+            mkdir -p .git/info
+            grep -qxF '/.forge/' .git/info/exclude 2>/dev/null || echo '/.forge/' >> .git/info/exclude
+            G add -A
+            if ! G diff --cached --quiet; then G commit -q -m "§MSG"; fi
         """)
 
         private val COMMIT_SCRIPT = script("""

@@ -1061,6 +1061,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Loads the project repository and the state of every chat branch (the local pull requests). */
+    fun refreshProjectRepo() {
+        val project = _state.value.activeProject ?: return
+        _state.update { it.copy(repoBusy = true) }
+        viewModelScope.launch {
+            val info = runCatching { chatBranches.repoInfo(project) }.getOrNull()
+            _state.update { st -> st.copy(projectRepo = info ?: st.projectRepo, repoBusy = false) }
+            _state.value.chats.filter { it.isolated }.forEach { refreshBranchStatus(it.id) }
+        }
+    }
+
+    /** Commits everything in the project folder with the user's message. */
+    fun commitProjectRepo(message: String) {
+        val project = _state.value.activeProject ?: return
+        val clean = message.trim()
+        if (clean.isEmpty() || _state.value.repoBusy) return
+        // A chat that works in the project folder itself may be mid-write; its files would be committed half done.
+        if (runs.values.any { it.projectId == project.id && !it.isolated }) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.repo_busy_agent)) }
+            return
+        }
+        _state.update { it.copy(repoBusy = true) }
+        viewModelScope.launch {
+            val result = runCatching { chatBranches.commitProject(project, clean) }
+            val failure = result.exceptionOrNull()?.message ?: result.getOrNull()?.takeIf { !it.ok }?.output?.trim()?.takeLast(200)
+            _state.update {
+                it.copy(
+                    repoBusy = false,
+                    bannerMessage = if (failure == null) UiText.res(R.string.repo_committed) else UiText.res(R.string.branch_failed, failure),
+                )
+            }
+            refreshProjectRepo()
+        }
+    }
+
     /** Commits what the chat's branch holds right now with the user's own message. */
     fun commitChatBranch(chatId: String, message: String) {
         val project = _state.value.activeProject ?: return

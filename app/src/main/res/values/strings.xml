@@ -1098,4 +1098,22 @@
     <string name="branch_committed">Committed to the branch.</string>
     <string name="branch_commit_hint">Commit message</string>
     <string name="branch_commit">Commit</string>
+    <string name="repo_button">Repository</string>
+    <string name="repo_title">Repository</string>
+    <string name="repo_branch">Branch: %1$s</string>
+    <string name="repo_not_repo">Not a Git repository yet. The first commit creates it.</string>
+    <string name="repo_uncommitted">%1$d uncommitted files</string>
+    <string name="repo_clean">Nothing to commit</string>
+    <string name="repo_commit_hint">Commit message</string>
+    <string name="repo_commit">Commit all changes</string>
+    <string name="repo_recent">Recent commits</string>
+    <string name="repo_prs">Local pull requests</string>
+    <string name="repo_prs_empty">No chat branch has changes to merge. Chats that work in their own branch show up here.</string>
+    <string name="repo_pr_review">Review diff</string>
+    <string name="repo_pr_merge">Merge</string>
+    <string name="repo_pr_conflict">Conflicts: resolve them first</string>
+    <string name="repo_pr_behind">%1$d commits behind the project</string>
+    <string name="repo_pr_summary">%1$d commits · %2$d files · +%3$d −%4$d</string>
+    <string name="repo_busy_agent">A chat is working in the project folder. Wait for it to finish, then commit.</string>
+    <string name="repo_committed">Committed to the project.</string>
 </resources>
