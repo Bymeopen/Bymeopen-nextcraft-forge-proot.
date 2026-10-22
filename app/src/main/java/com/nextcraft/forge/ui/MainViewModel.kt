@@ -3486,6 +3486,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val githubOperationLock = java.util.concurrent.locks.ReentrantLock()
 
+    /** The running-task notification names the build stage, so the lock screen shows more than "Running assembleDebug". */
+    private fun pushBuildStageToNotification(stage: AndroidBuildStage, projectName: String) {
+        val label = when (stage) {
+            AndroidBuildStage.PREPARING -> R.string.build_stage_preparing
+            AndroidBuildStage.RESOLVING -> R.string.build_stage_resolving
+            AndroidBuildStage.COMPILING -> R.string.build_stage_compiling
+            AndroidBuildStage.RESOURCES -> R.string.build_stage_resources
+            AndroidBuildStage.PACKAGING -> R.string.build_stage_packaging
+            AndroidBuildStage.FINDING_APK -> R.string.build_stage_finding_apk
+            else -> return
+        }
+        startServiceSafely(
+            getApplication(),
+            Intent(getApplication(), RuntimeExecutionService::class.java)
+                .setAction(RuntimeExecutionService.ACTION_PROGRESS)
+                .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName)
+                .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "$projectName · ${str(label)}"),
+        )
+    }
+
     fun runAndroidBuild(task: String = "assembleDebug", installAfterBuild: Boolean = false) {
         val project = _state.value.activeProject ?: return
         if (_state.value.androidBuild.phase == AndroidBuildPhase.BUILDING) return
@@ -3551,7 +3571,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 throw CancellationException("Build stopped")
                             }
                             logBuilder.append(line).append('\n')
-                            val stage = inferAndroidBuildStage(line, _state.value.androidBuild.stage)
+                            val previousStage = _state.value.androidBuild.stage
+                            val stage = inferAndroidBuildStage(line, previousStage)
+                            if (stage != previousStage) pushBuildStageToNotification(stage, project.name)
                             _state.update { current ->
                                 current.copy(
                                     androidBuild = current.androidBuild.copy(

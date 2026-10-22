@@ -605,6 +605,11 @@
     <string name="msg_runtime_op_running">Operasi runtime lain sedang berjalan.</string>
     <string name="msg_agent_update_check_failed">Tidak bisa memeriksa pembaruan agen: %1$s</string>
     <string name="msg_agents_up_to_date">Semua agen yang terpasang sudah terbaru.</string>
+    <string name="settings_glass_solid">Glass solid</string>
+    <string name="settings_glass_solid_desc">Tanpa blur: permukaan solid, lebih mudah dibaca dan hemat baterai</string>
+    <string name="palette_title">Buka…</string>
+    <string name="palette_hint">Ketik untuk mencari</string>
+    <string name="palette_empty">Tidak ada yang cocok.</string>
     <string name="settings_appearance">Tampilan</string>
     <string name="settings_language_system">Bawaan sistem</string>
     <string name="settings_language">Bahasa</string>

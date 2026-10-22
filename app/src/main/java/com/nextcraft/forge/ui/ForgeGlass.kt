@@ -11,6 +11,8 @@ import androidx.compose.material3.MaterialTheme
 import android.os.Build
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -39,9 +41,12 @@ internal val LocalForgeBackdrop = staticCompositionLocalOf<LayerBackdrop?> { nul
  * Set at start-up when blur should be skipped even though the OS can do it: low-RAM devices (the blur is the costliest
  * thing the app draws) and people who turned on the system's high-contrast text, who need solid surfaces.
  */
-@Volatile internal var glassReducedEffects: Boolean = false
+internal var glassReducedEffects: Boolean by androidx.compose.runtime.mutableStateOf(false)
 
-internal val glassBlurSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !glassReducedEffects
+/** The user's own "solid Glass" choice (Settings > Appearance); a state, so flipping it updates the open screen at once. */
+internal var glassUserSolid: Boolean by androidx.compose.runtime.mutableStateOf(false)
+
+internal val glassBlurSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !glassReducedEffects && !glassUserSolid
 
 internal fun detectReducedEffects(context: android.content.Context): Boolean {
     val lowRam = context.getSystemService(android.app.ActivityManager::class.java)?.isLowRamDevice == true

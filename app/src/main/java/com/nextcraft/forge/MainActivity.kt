@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         applyWindowTheme(AppPreferences(this).themeMode)
         super.onCreate(savedInstanceState)
+        com.nextcraft.forge.ui.glassUserSolid = AppPreferences(this).glassSolid
         com.nextcraft.forge.ui.glassReducedEffects = com.nextcraft.forge.ui.detectReducedEffects(this)
         // First-time users are asked when they start the runtime setup; existing installs keep the old behaviour.
         if (AppPreferences(this).runtimeSetupComplete) requestNotificationPermissionIfNeeded()

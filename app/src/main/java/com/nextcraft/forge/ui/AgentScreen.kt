@@ -780,7 +780,14 @@ internal fun ChatMessageCard(
                 message.workItems.isEmpty() -> R.string.agent_thinking
                 else -> R.string.agent_status_working
             }
-            WorkingIndicator(startedAt = message.createdAt, label = stringResource(phase), modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+            // While a tool runs, say which one ("Working… · Bash"), so a long step doesn't look like a hang.
+            val running = message.workItems.lastOrNull { !it.isComplete }?.title?.replace(Regex("\\s+"), " ")?.trim()?.take(32)
+            val phaseLabel = stringResource(phase)
+            WorkingIndicator(
+                startedAt = message.createdAt,
+                label = if (running.isNullOrBlank() || message.text.isNotBlank()) phaseLabel else "$phaseLabel · $running",
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+            )
         }
     }
 }

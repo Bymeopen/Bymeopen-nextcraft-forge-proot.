@@ -49,6 +49,10 @@ object ForgeMotion {
     fun <T> springSnappy(): androidx.compose.animation.core.SpringSpec<T> =
         spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium)
 
+    /** Sheets and morphing shapes (Expressive): a little more overshoot than [springSnappy], still settles quickly. */
+    fun <T> springExpressive(): androidx.compose.animation.core.SpringSpec<T> =
+        spring(dampingRatio = 0.62f, stiffness = 380f)
+
     /** Screen push: slide 24% + fade in, the leaving screen fades and drifts 12% the other way. */
     fun screenTransition(forward: Boolean, reduceMotion: Boolean): ContentTransform {
         if (reduceMotion) return fadeIn(snap()) with fadeOut(snap())
@@ -88,8 +92,18 @@ fun <K> ForgeScreenHost(
 }
 
 /** Scales the element to 96% while pressed; pair it with the clickable that owns [interactionSource]. */
-fun Modifier.forgePressScale(interactionSource: MutableInteractionSource, pressedScale: Float = 0.96f): Modifier = composed {
+fun Modifier.forgePressScale(
+    interactionSource: MutableInteractionSource,
+    pressedScale: Float = 0.96f,
+    haptic: Boolean = false,
+): Modifier = composed {
     val pressed by interactionSource.collectIsPressedAsState()
+    if (haptic) {
+        // One light tick on touch-down, so every pill and button answers the finger the same way (the system's
+        // touch-feedback setting still applies).
+        val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+        LaunchedEffect(pressed) { if (pressed) haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) }
+    }
     val reduceMotion = rememberReduceMotion()
     val scale by animateFloatAsState(
         targetValue = if (pressed) pressedScale else 1f,

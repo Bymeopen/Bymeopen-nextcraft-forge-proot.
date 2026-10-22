@@ -18,6 +18,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.widthIn
@@ -245,6 +246,40 @@ private fun ChangedFileRow(
     val tokens = LocalForgeThemeTokens.current
     val name = change.path.substringAfterLast('/')
     val dir = change.path.substringBeforeLast('/', "")
+    // Swipe right keeps the file, left reverts it (the revert has its own Undo snackbar). Only while the row is collapsed:
+    // an open diff scrolls sideways and would fight the swipe.
+    val haptics = LocalHapticFeedback.current
+    val swipe = androidx.compose.material3.rememberSwipeToDismissBoxState(
+        confirmValueChange = { target ->
+            when (target) {
+                androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd -> { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onKeepFile(change.path) }
+                androidx.compose.material3.SwipeToDismissBoxValue.EndToStart -> { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onRevertFile(change.path) }
+                else -> Unit
+            }
+            false // the list drops the row itself once the change is resolved; if it is not, the row springs back
+        },
+    )
+    androidx.compose.material3.SwipeToDismissBox(
+        state = swipe,
+        enableDismissFromStartToEnd = enabled && !open,
+        enableDismissFromEndToStart = enabled && !open,
+        backgroundContent = {
+            val keeping = swipe.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd
+            val reverting = swipe.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.EndToStart
+            if (keeping || reverting) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background((if (keeping) tokens.successText else tokens.dangerText).copy(alpha = 0.16f)).padding(horizontal = 18.dp),
+                    contentAlignment = if (keeping) Alignment.CenterStart else Alignment.CenterEnd,
+                ) {
+                    Text(
+                        stringResource(if (keeping) R.string.chat_keep else R.string.chat_revert),
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (keeping) tokens.successText else tokens.dangerText,
+                    )
+                }
+            }
+        },
+    ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -295,6 +330,7 @@ private fun ChangedFileRow(
                 }
             }
         }
+    }
     }
 }
 

@@ -617,6 +617,11 @@
     <string name="msg_runtime_op_running">Another runtime operation is already running.</string>
     <string name="msg_agent_update_check_failed">Could not check for agent updates: %1$s</string>
     <string name="msg_agents_up_to_date">All installed agents are up to date.</string>
+    <string name="settings_glass_solid">Solid Glass</string>
+    <string name="settings_glass_solid_desc">No blur: solid surfaces, easier to read and lighter on the battery</string>
+    <string name="palette_title">Go to…</string>
+    <string name="palette_hint">Type to search</string>
+    <string name="palette_empty">Nothing matches.</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_language_system">System default</string>
     <string name="settings_language">Language</string>
