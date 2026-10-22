@@ -121,6 +121,7 @@ fun AgentConfigScreen(
             items = agents.map { it.displayTitle() },
             selectedIndex = agents.indexOf(state.agentKind).coerceAtLeast(0),
             onSelect = { viewModel.selectAgent(agents[it]) },
+            equalWidth = true, // 3 providers fit side by side; scrolling cut "Antigravity" at the edge
         )
         val agent = state.agentKind
         val agentInstalled = agent in state.installedAgents

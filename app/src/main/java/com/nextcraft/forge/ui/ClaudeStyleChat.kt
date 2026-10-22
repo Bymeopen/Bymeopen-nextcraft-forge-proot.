@@ -357,6 +357,7 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
                     items = agents.map { it.displayTitle() },
                     selectedIndex = agents.indexOf(agent).coerceAtLeast(0),
                     onSelect = { sheetAgent = agents[it] },
+                    equalWidth = true, // 3 providers fit side by side; scrolling cut "Antigravity" at the edge
                 )
             }
             when (agent) {
