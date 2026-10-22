@@ -35,6 +35,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("runtime_setup_complete", false)
         set(value) { preferences.edit().putBoolean("runtime_setup_complete", value).apply() }
 
+    /** The notification and battery-exemption prompts are shown once, when the user first starts the runtime setup. */
+    var backgroundPromptsShown: Boolean
+        get() = preferences.getBoolean("background_prompts_shown", false)
+        set(value) { preferences.edit().putBoolean("background_prompts_shown", value).apply() }
+
     var backgroundSetupComplete: Boolean
         get() = preferences.getBoolean("background_setup_complete", false)
         set(value) { preferences.edit().putBoolean("background_setup_complete", value).apply() }
