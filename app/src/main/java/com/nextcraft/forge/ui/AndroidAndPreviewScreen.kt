@@ -164,94 +164,81 @@ fun AndroidBuildScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Opened from Tools there is no project header above: give it the same Back as the other tool screens.
-            if (state.activeTab != ForgeTab.PROJECTS) {
-                androidx.compose.material3.IconButton(onClick = { viewModel.selectTab(ForgeTab.TOOLS) }) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.a11y_back))
-                }
+        ForgeProjectHeader(
+            title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
+            subtitle = stringResource(R.string.launch_launch),
+            // Opened from Tools there is no project header above: Back returns to Tools, like the other tool screens.
+            onBack = if (state.activeTab != ForgeTab.PROJECTS) ({ viewModel.selectTab(ForgeTab.TOOLS) }) else null,
+            actions = {
+            if (canStop) {
+                ForgePillIcon(
+                    icon = Icons.Default.Close,
+                    description = stringResource(R.string.launch_cancel_build),
+                    onClick = viewModel::stopAndroidBuild,
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                ForgePillIcon(
+                    icon = Icons.Default.PlayArrow,
+                    description = stringResource(R.string.launch_build_and_install_apk),
+                    enabled = !busy,
+                    onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
+                )
             }
-            // Launch is reached from a project's header, so it reads as a project page: name first, "Launch" under it.
-            ForgeLargeTitle(
-                title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
-                subtitle = stringResource(R.string.launch_launch),
-                modifier = Modifier.weight(1f),
-            )
-            ForgeActionPill {
-                if (canStop) {
-                    ForgePillIcon(
-                        icon = Icons.Default.Close,
-                        description = stringResource(R.string.launch_cancel_build),
-                        onClick = viewModel::stopAndroidBuild,
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                } else {
-                    ForgePillIcon(
-                        icon = Icons.Default.PlayArrow,
-                        description = stringResource(R.string.launch_build_and_install_apk),
+            Box {
+                ForgePillIcon(
+                    icon = Icons.Default.MoreVert,
+                    description = stringResource(R.string.launch_more_build_actions),
+                    onClick = { menuOpen = true },
+                )
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.launch_assemble_debug_no_install)) },
                         enabled = !busy,
-                        onClick = { viewModel.runAndroidBuild("assembleDebug", installAfterBuild = true) },
+                        onClick = {
+                            menuOpen = false
+                            viewModel.runAndroidBuild("assembleDebug", installAfterBuild = false)
+                        },
                     )
-                }
-                Box {
-                    ForgePillIcon(
-                        icon = Icons.Default.MoreVert,
-                        description = stringResource(R.string.launch_more_build_actions),
-                        onClick = { menuOpen = true },
+                    if (build.apkPath != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.launch_install_last_apk)) },
+                            enabled = !busy,
+                            onClick = {
+                                menuOpen = false
+                                viewModel.installBuiltApk()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.launch_clean)) },
+                        enabled = !busy,
+                        onClick = {
+                            menuOpen = false
+                            viewModel.runAndroidBuild("clean", installAfterBuild = false)
+                        },
                     )
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.launch_force_rebuild)) },
+                        enabled = !busy,
+                        onClick = {
+                            menuOpen = false
+                            viewModel.runAndroidBuild("clean assembleDebug", installAfterBuild = true)
+                        },
+                    )
+                    if (build.apkPath != null) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.launch_assemble_debug_no_install)) },
-                            enabled = !busy,
+                            text = { Text(stringResource(R.string.launch_copy_apk_path)) },
                             onClick = {
                                 menuOpen = false
-                                viewModel.runAndroidBuild("assembleDebug", installAfterBuild = false)
+                                clipboard.setText(AnnotatedString(build.apkPath))
                             },
                         )
-                        if (build.apkPath != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.launch_install_last_apk)) },
-                                enabled = !busy,
-                                onClick = {
-                                    menuOpen = false
-                                    viewModel.installBuiltApk()
-                                },
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.launch_clean)) },
-                            enabled = !busy,
-                            onClick = {
-                                menuOpen = false
-                                viewModel.runAndroidBuild("clean", installAfterBuild = false)
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.launch_force_rebuild)) },
-                            enabled = !busy,
-                            onClick = {
-                                menuOpen = false
-                                viewModel.runAndroidBuild("clean assembleDebug", installAfterBuild = true)
-                            },
-                        )
-                        if (build.apkPath != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.launch_copy_apk_path)) },
-                                onClick = {
-                                    menuOpen = false
-                                    clipboard.setText(AnnotatedString(build.apkPath))
-                                },
-                            )
-                        }
                     }
                 }
             }
-        }
+            },
+        )
 
         // Status block
         val errorCount = build.issues.count { it.severity == AndroidIssueSeverity.ERROR }

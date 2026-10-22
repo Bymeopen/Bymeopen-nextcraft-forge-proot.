@@ -1058,6 +1058,8 @@
     <string name="mt_ssh_user">User may only contain letters, digits, . _ -</string>
     <string name="mt_ssh_host">Host may only contain letters, digits, . _ -</string>
     <string name="mt_ssh_port">Port must be 1-65535.</string>
+    <string name="mt_ssh_checking">Checking the SSH client…</string>
+    <string name="mt_ssh_missing">OpenSSH client is not installed.</string>
     <string name="mt_ssh_forward">Forward must look like 8080:localhost:80.</string>
     <string name="mt_logcat_read_logs">Reading logcat needs READ_LOGS: run `adb shell pm grant %1$s android.permission.READ_LOGS` once.</string>
     <string name="mt_repair_ok">PRoot engine and launcher script verified.</string>
