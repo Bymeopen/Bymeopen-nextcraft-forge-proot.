@@ -74,6 +74,7 @@ internal fun ChatTopBar(
     onOpenChanges: () -> Unit,
     onRename: () -> Unit,
     onUsage: () -> Unit,
+    onSchedule: () -> Unit,
     onClear: () -> Unit,
     onDelete: () -> Unit,
     onBranch: () -> Unit,
@@ -137,6 +138,7 @@ internal fun ChatTopBar(
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_rename)) }, onClick = { menuOpen = false; onRename() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_usage)) }, onClick = { menuOpen = false; onUsage() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_schedule)) }, onClick = { menuOpen = false; onSchedule() })
                 if (state.agentKind == AgentKind.CLAUDE_CODE) {
                     if (activeChat?.isolated == true) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.branch_menu_open)) }, onClick = { menuOpen = false; onBranch() })

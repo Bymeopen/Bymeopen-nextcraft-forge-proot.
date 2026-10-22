@@ -174,6 +174,13 @@ fun SettingsScreenModern(
                 onCheckedChange = viewModel::setReaChatHint,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_schedule_agent),
+                subtitle = stringResource(R.string.settings_schedule_agent_subtitle),
+                checked = state.scheduleEnabled,
+                onCheckedChange = viewModel::setScheduleEnabled,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
             // One choice instead of two switches that excluded each other: the app already keeps them mutually exclusive.
             Text(
                 text = stringResource(R.string.settings_approval_title),

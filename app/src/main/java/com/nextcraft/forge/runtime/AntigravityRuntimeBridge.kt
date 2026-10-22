@@ -518,7 +518,9 @@ class AntigravityRuntimeBridge(
                                 eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.response))
                             }
                             resultSeen = true
-                        } else throw AntigravitySessionException(friendlyError(event.error ?: event.status))
+                        } else throw AntigravitySessionException(
+                            friendlyError(event.error ?: event.status, System.currentTimeMillis() - sessionStartedAtMillis),
+                        )
                     }
                     null -> Unit
                 }
@@ -596,7 +598,10 @@ class AntigravityRuntimeBridge(
             } else {
                 val exit = process.waitFor()
                 check(exit == 0 && resultSeen) {
-                    friendlyError(lastDiagnostic.ifBlank { "Antigravity exited with code $exit" })
+                    friendlyError(
+                        lastDiagnostic.ifBlank { "Antigravity exited with code $exit" },
+                        System.currentTimeMillis() - sessionStartedAtMillis,
+                    )
                 }
             }
             val paths = checkpoints.changedFiles(workspace, before)
@@ -617,7 +622,9 @@ class AntigravityRuntimeBridge(
                 userStopRequested -> "Stopped by user"
                 // Already classified when it was thrown; classifying the friendly text again could pick up log noise.
                 it is AntigravitySessionException -> it.message.orEmpty()
-                else -> antigravityFriendlyError(it.message.orEmpty(), diagnostic)
+                else -> antigravityFriendlyError(
+                    it.message.orEmpty(), diagnostic, System.currentTimeMillis() - sessionStartedAtMillis,
+                )
             }
             emitFailure(sessionId, message)
             if (userStopRequested) cancelForegroundRuntime()
@@ -699,7 +706,8 @@ class AntigravityRuntimeBridge(
 
     private fun cancelForegroundRuntime() = foreground.cancel()
 
-    private fun friendlyError(raw: String): String = antigravityFriendlyError(raw)
+    private fun friendlyError(raw: String, elapsedMs: Long = 0L): String =
+        antigravityFriendlyError(raw, elapsedMs = elapsedMs)
 
     private fun recentAntigravityDiagnostic(sinceMillis: Long): String = runCatching {
         val logDir = File(
@@ -714,11 +722,17 @@ class AntigravityRuntimeBridge(
     }.getOrDefault("")
 }
 
-internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): String {
+internal fun antigravityFriendlyError(
+    raw: String,
+    diagnostic: String = "",
+    elapsedMs: Long = Long.MAX_VALUE,
+): String {
     val rawValue = raw.replace(Regex("\\s+"), " ").trim()
     // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
     // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
-    return classifyAntigravityError(rawValue, allowTimeout = true)
+    // "60-minute limit" only fits a turn that really ran that long; a quick timeout is something else, show it.
+    val ranToLimit = elapsedMs >= ANTIGRAVITY_TASK_LIMIT_MS - 5 * 60_000L
+    return classifyAntigravityError(rawValue, allowTimeout = ranToLimit)
         ?: classifyAntigravityError("$rawValue ${antigravityDiagnosticSignal(diagnostic)}", allowTimeout = false)
         ?: rawValue.ifBlank { ANTIGRAVITY_GENERIC_FAILURE }.take(500)
 }
@@ -736,6 +750,8 @@ private fun antigravityDiagnosticSignal(diagnostic: String): String {
         .replace(Regex("\\s+"), " ")
         .trim()
 }
+
+private const val ANTIGRAVITY_TASK_LIMIT_MS = 60 * 60_000L
 
 private fun classifyAntigravityError(value: String, allowTimeout: Boolean): String? = when {
     ANTIGRAVITY_NETWORK_ERRORS.any { value.contains(it, ignoreCase = true) } ->
