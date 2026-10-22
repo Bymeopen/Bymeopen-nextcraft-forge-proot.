@@ -769,7 +769,9 @@ private fun classifyAntigravityError(value: String, allowTimeout: Boolean): Stri
         "Your Antigravity account is out of credits. Check the account plan or wait for credits to reset."
     allowTimeout && (value.contains("timed out", true) || value.contains("timeout", true)) ->
         "Antigravity reached the 60-minute task limit. Your files were kept."
-    value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
+    // Only from agy's own error: its log mentions models routinely ("model ... not in local config, using default"),
+    // which made unrelated failures read as "model unavailable".
+    allowTimeout && value.contains("model", true) && (value.contains("invalid", true) || value.contains("unknown", true)) ->
         "The selected Antigravity model is unavailable. Refresh models in Settings."
     else -> null
 }
@@ -842,7 +844,9 @@ private fun MutableList<String>.addAntigravitySelection(model: String, effort: S
     if (model.isNotBlank()) {
         addAll(listOf("--model", model))
     }
-    if (effort in setOf("low", "medium", "high")) {
+    // A model id that already names its effort (gemini-4-argon-high) gets no second, possibly different --effort.
+    val modelHasEffort = Regex("-(low|medium|high)$").containsMatchIn(model)
+    if (!modelHasEffort && effort in setOf("low", "medium", "high")) {
         addAll(listOf("--effort", effort))
     }
 }
