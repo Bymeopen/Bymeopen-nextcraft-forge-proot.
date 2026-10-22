@@ -446,6 +446,9 @@ internal fun ChatComposer(
     /** Model (and effort) shown as a chip next to the attach button; tapping it opens the model sheet. */
     modelChipLabel: String = "",
     onModelChip: (() -> Unit)? = null,
+    /** Microphone button before the send button; null hides it. [listening] shows the recording state. */
+    onMic: (() -> Unit)? = null,
+    listening: Boolean = false,
 ) {
     val tokens = LocalForgeThemeTokens.current
     var attachMenuOpen by remember { mutableStateOf(false) }
@@ -523,6 +526,16 @@ internal fun ChatComposer(
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
+            if (onMic != null) {
+                IconButton(onClick = onMic) {
+                    ForgeIcon(
+                        glyph = ForgeGlyph.MIC,
+                        tint = if (listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        size = 22.dp,
+                        description = stringResource(if (listening) R.string.voice_stop else R.string.voice_start),
+                    )
+                }
+            }
             val haptics = LocalHapticFeedback.current
             val reduceMotion = rememberReduceMotion()
             val sendScale by animateFloatAsState(

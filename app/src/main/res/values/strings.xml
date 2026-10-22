@@ -1128,4 +1128,9 @@
     <string name="repo_branch_deleted">Branch deleted.</string>
     <string name="repo_auto_branch">Branch per chat automatically</string>
     <string name="repo_auto_branch_desc">Each Claude Code chat works in its own branch from its first message, so chats never overwrite each other.</string>
+    <string name="voice_start">Speak a message</string>
+    <string name="voice_stop">Stop listening</string>
+    <string name="voice_unavailable">Speech recognition is not available on this device.</string>
+    <string name="voice_permission_denied">Allow the microphone to use voice input.</string>
+    <string name="voice_error">Voice input failed. Check your connection and try again.</string>
 </resources>

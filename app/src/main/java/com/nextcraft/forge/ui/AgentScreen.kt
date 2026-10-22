@@ -490,6 +490,28 @@ fun AgentScreen(
             }
             QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
         }
+        // Voice: words appear in the box while speaking; "stop", "clear" and a trailing "send now" act as commands.
+        var voiceBase by remember { mutableStateOf("") }
+        fun joinVoice(base: String, spoken: String) = listOf(base.trim(), spoken.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+        val voice = rememberVoiceController(
+            languageCode = state.languageCode,
+            onPartial = { promptInput = joinVoice(voiceBase, it) },
+            onFinal = { spoken ->
+                when (val command = VoiceCommands.parse(spoken)) {
+                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask() }
+                    VoiceCommand.Clear -> promptInput = ""
+                    is VoiceCommand.Dictate -> {
+                        val text = joinVoice(voiceBase, command.text)
+                        if (command.send && (text.isNotEmpty() || state.pendingAttachments.isNotEmpty())) {
+                            promptInput = ""
+                            viewModel.sendPrompt(text)
+                        } else {
+                            promptInput = text
+                        }
+                    }
+                }
+            },
+        )
         ChatComposer(
             promptInput = promptInput,
             onPromptChange = { promptInput = it },
@@ -508,6 +530,11 @@ fun AgentScreen(
             onStop = viewModel::stopActiveTask,
             modelChipLabel = chatModelChipLabel(state),
             onModelChip = { modelSheetOpen = true },
+            onMic = {
+                if (!voice.listening) voiceBase = promptInput
+                voice.toggle()
+            },
+            listening = voice.listening,
         )
     }
     }

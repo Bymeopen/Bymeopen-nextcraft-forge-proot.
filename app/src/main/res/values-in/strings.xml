@@ -1111,4 +1111,9 @@
     <string name="repo_branch_deleted">Branch dihapus.</string>
     <string name="repo_auto_branch">Branch otomatis per chat</string>
     <string name="repo_auto_branch_desc">Tiap chat Claude Code bekerja di branch sendiri sejak pesan pertama, jadi chat tidak saling menimpa.</string>
+    <string name="voice_start">Ucapkan pesan</string>
+    <string name="voice_stop">Berhenti mendengarkan</string>
+    <string name="voice_unavailable">Pengenalan suara tidak tersedia di perangkat ini.</string>
+    <string name="voice_permission_denied">Izinkan mikrofon untuk memakai input suara.</string>
+    <string name="voice_error">Input suara gagal. Periksa koneksi lalu coba lagi.</string>
 </resources>
