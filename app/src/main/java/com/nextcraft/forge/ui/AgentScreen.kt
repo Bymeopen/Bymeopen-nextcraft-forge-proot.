@@ -523,6 +523,9 @@ fun AgentScreen(
         androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshReadyAgents() }
         ChatRoutingSheet(state = state, viewModel = viewModel, onDismiss = { routeSheetOpen = false })
     }
+    if (modelSheetOpen) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshAgentProfiles() }
+    }
     if (modelSheetOpen) ChatModelSheet(state = state, viewModel = viewModel, onDismiss = { modelSheetOpen = false })
     if (renameOpen) {
         RenameChatDialog(

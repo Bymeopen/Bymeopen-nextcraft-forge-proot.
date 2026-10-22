@@ -259,6 +259,19 @@ class AppPreferences(private val context: Context) {
         editor.apply()
     }
 
+    /** Saves [profile] as the profile of [agent] only, leaving the generic keys (the selected agent's) untouched. */
+    fun saveAgentProfile(profile: ProviderProfile, agent: AgentKind) {
+        val prefix = providerPrefix(agent)
+        preferences.edit()
+            .putString("${prefix}kind", profile.kind.name)
+            .putString("${prefix}base_url", profile.baseUrl)
+            .putString("${prefix}model", profile.model)
+            .putString("${prefix}dsh_api", profile.dshApi)
+            .putString("${prefix}openrouter_order", profile.openRouterProviderOrder)
+            .putBoolean("${prefix}openrouter_allow_fallbacks", profile.openRouterAllowFallbacks)
+            .apply()
+    }
+
     fun loadProvider(vault: ApiKeyVault, agent: AgentKind? = null): ProviderProfile {
         val prefix = agent?.let(::providerPrefix)
         val hasAgentProfile = prefix != null && preferences.contains("${prefix}kind")

@@ -1260,6 +1260,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Reads every agent's profile off the main thread (the vault is touched for the key check). */
+    fun refreshAgentProfiles() {
+        viewModelScope.launch {
+            val profiles = withContext(Dispatchers.IO) { AgentKind.entries.associateWith { agentProfile(it) } }
+            _state.update { it.copy(agentProfiles = profiles) }
+        }
+    }
+
+    /**
+     * Sets the model of [agent], which need not be the selected one: with several agents in a chat each answers with its
+     * own model. Antigravity keeps its model (and effort) globally; the others keep a profile per agent.
+     */
+    fun setAgentModel(agent: AgentKind, modelId: String) {
+        if (agent == _state.value.agentKind) {
+            updateProviderConfig(baseUrl = _state.value.providerProfile.baseUrl, model = modelId)
+        } else if (agent == AgentKind.ANTIGRAVITY) {
+            selectAntigravityModel(modelId)
+        } else {
+            val stored = preferences.loadProvider(vault, agent)
+            preferences.saveAgentProfile(stored.copy(model = modelId.trim()), agent)
+        }
+        refreshAgentProfiles()
+    }
+
     private fun agentProfile(agent: AgentKind): ProviderProfile {
         if (agent == _state.value.agentKind) return _state.value.providerProfile
         val loaded = preferences.loadProvider(vault, agent)

@@ -43,6 +43,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -330,7 +331,12 @@ internal fun chatModelChipLabel(state: ForgeUiState): String = when (state.agent
 internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
     val tokens = LocalForgeThemeTokens.current
     val scheme = MaterialTheme.colorScheme
-    val agent = state.agentKind
+    // With several agents in a chat, the sheet edits the agent picked in the tabs, not only the selected one.
+    val multi = state.routing.mode != com.nextcraft.forge.model.RouteMode.SINGLE
+    var sheetAgent by remember { mutableStateOf(state.agentKind) }
+    val agent = if (multi) sheetAgent else state.agentKind
+    val profile = if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
+    val discovered = if (agent == state.agentKind) state.discoveredModels else emptyList()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -338,6 +344,15 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.chat_model_sheet_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
+            if (multi) {
+                // One tab per provider: its own models and, for Claude and Antigravity, its own reasoning effort.
+                val agents = AgentKind.entries
+                ForgePillTabs(
+                    items = agents.map { it.displayTitle() },
+                    selectedIndex = agents.indexOf(agent).coerceAtLeast(0),
+                    onSelect = { sheetAgent = agents[it] },
+                )
+            }
             when (agent) {
                 AgentKind.CLAUDE_CODE -> {
                     val levels = listOf("") + CLAUDE_EFFORT_LEVELS
@@ -348,9 +363,9 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
                         onSelect = { viewModel.setClaudeEffort(levels[it]) },
                     )
                     ModelList(
-                        options = providerModelOptions(state.providerProfile.kind, state.discoveredModels, state.providerProfile.model),
-                        selectedId = state.providerProfile.model,
-                        onSelect = { id -> viewModel.updateProviderConfig(baseUrl = state.providerProfile.baseUrl, model = id) },
+                        options = providerModelOptions(profile.kind, discovered, profile.model),
+                        selectedId = profile.model,
+                        onSelect = { id -> viewModel.setAgentModel(agent, id) },
                     )
                 }
                 AgentKind.ANTIGRAVITY -> {
@@ -364,13 +379,13 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
                     ModelList(
                         options = antigravityModelOptions(state.antigravityModels, state.antigravityModel),
                         selectedId = state.antigravityModel,
-                        onSelect = viewModel::selectAntigravityModel,
+                        onSelect = { id -> viewModel.setAgentModel(AgentKind.ANTIGRAVITY, id) },
                     )
                 }
                 AgentKind.DEEPSEEK_HARNESS -> ModelList(
-                    options = providerModelOptions(state.providerProfile.kind, state.discoveredModels, state.providerProfile.model),
-                    selectedId = state.providerProfile.model,
-                    onSelect = { id -> viewModel.updateProviderConfig(baseUrl = state.providerProfile.baseUrl, model = id) },
+                    options = providerModelOptions(profile.kind, discovered, profile.model),
+                    selectedId = profile.model,
+                    onSelect = { id -> viewModel.setAgentModel(agent, id) },
                 )
             }
         }

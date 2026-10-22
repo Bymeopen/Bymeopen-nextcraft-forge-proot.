@@ -166,6 +166,8 @@ data class ForgeUiState(
     val routing: RoutingConfig = RoutingConfig(),
     /** Agents that have credentials; refreshed when the routing sheet opens. */
     val readyAgents: Set<AgentKind> = emptySet(),
+    /** Provider profile (kind, model) of every agent, so the model sheet can edit an agent other than the selected one. */
+    val agentProfiles: Map<AgentKind, ProviderProfile> = emptyMap(),
     val activeStatusLine: UiText? = null,
     val pendingToolRequest: ToolRequest? = null,
     val changedItems: List<ChangeItem> = emptyList(),
