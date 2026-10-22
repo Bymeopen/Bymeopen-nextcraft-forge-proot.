@@ -10,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.runtime.BranchStatus
+import com.nextcraft.forge.runtime.ClaudeSkill
+import com.nextcraft.forge.runtime.McpConnector
 import com.nextcraft.forge.runtime.ProjectRepoInfo
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
@@ -213,6 +215,9 @@ data class ForgeUiState(
     val projectRepo: ProjectRepoInfo? = null,
     val repoBusy: Boolean = false,
     val imageGenerating: Boolean = false,
+    /** MCP connectors and Claude Code skills (loaded when the connectors sheet opens). */
+    val connectors: List<McpConnector> = emptyList(),
+    val skills: List<ClaudeSkill> = emptyList(),
     /** Bumped when the Google image key is saved, so the dialog notices it. */
     val geminiKeyVersion: Int = 0,
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */

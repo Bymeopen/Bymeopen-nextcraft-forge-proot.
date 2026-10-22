@@ -33,6 +33,11 @@ import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
 import com.nextcraft.forge.network.GeminiImageClient
+import com.nextcraft.forge.runtime.ClaudeSkillStore
+import com.nextcraft.forge.runtime.ConnectorStore
+import com.nextcraft.forge.runtime.McpConnector
+import com.nextcraft.forge.runtime.McpNames
+import com.nextcraft.forge.runtime.McpTransport
 import com.nextcraft.forge.network.GeminiImageModels
 import com.nextcraft.forge.network.GeminiImageResult
 import com.nextcraft.forge.runtime.RepoOpResult
@@ -1106,6 +1111,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }.getOrNull()
     }
+
+    // ── Connectors (MCP) and skills for Claude Code ──────────────────────────────────────────────
+
+    private val connectorStore by lazy { ConnectorStore(getApplication()) }
+
+    private fun skillStore(): ClaudeSkillStore? = runCatching {
+        ClaudeSkillStore(File(installer.installedRuntime().rootfs, "root/.claude/skills"))
+    }.getOrNull()
+
+    fun loadConnectors() {
+        viewModelScope.launch {
+            val (connectors, skills) = withContext(Dispatchers.IO) {
+                connectorStore.list() to skillStore()?.list().orEmpty()
+            }
+            _state.update { it.copy(connectors = connectors, skills = skills) }
+        }
+    }
+
+    /** Adds or updates a connector; a blank [secret] keeps the saved one when editing and means none when new. */
+    fun saveConnector(name: String, transport: McpTransport, target: String, secretName: String, secret: String) {
+        val id = McpNames.id(name)
+        val cleanTarget = target.trim()
+        val invalid = when {
+            id == null -> R.string.connector_invalid_name
+            cleanTarget.isEmpty() -> R.string.connector_invalid_target
+            transport == McpTransport.HTTP && !com.nextcraft.forge.network.LocalNetwork.isPlainHttpAllowed(cleanTarget) ->
+                R.string.connector_invalid_url
+            transport == McpTransport.COMMAND && secret.isNotBlank() && !McpNames.isEnvName(secretName.trim()) ->
+                R.string.connector_invalid_env
+            else -> null
+        }
+        if (invalid != null || id == null) {
+            _state.update { it.copy(bannerMessage = UiText.res(invalid ?: R.string.connector_invalid_name)) }
+            return
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val existing = connectorStore.list().firstOrNull { it.id == id }
+                connectorStore.upsert(
+                    McpConnector(id, name.trim().take(40), transport, cleanTarget, secretName.trim(), existing?.enabled ?: true),
+                    secret.takeIf { it.isNotBlank() },
+                )
+            }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.connector_saved)) }
+            loadConnectors()
+        }
+    }
+
+    fun setConnectorEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { connectorStore.setEnabled(id, enabled) }
+            loadConnectors()
+        }
+    }
+
+    fun deleteConnector(id: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { connectorStore.delete(id) }
+            loadConnectors()
+        }
+    }
+
+    fun saveSkill(name: String, description: String, body: String) {
+        val skillName = ClaudeSkillStore.skillName(name)
+        if (skillName == null || body.isBlank()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.skill_invalid)) }
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching { skillStore()?.save(skillName, description, body) != null }.getOrDefault(false)
+            }
+            _state.update { it.copy(bannerMessage = UiText.res(if (saved) R.string.skill_saved else R.string.skill_save_failed)) }
+            loadConnectors()
+        }
+    }
+
+    fun deleteSkill(name: String) {
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) { runCatching { skillStore()?.delete(name) == true }.getOrDefault(false) }
+            if (!deleted) _state.update { it.copy(bannerMessage = UiText.res(R.string.skill_save_failed)) }
+            loadConnectors()
+        }
+    }
+
+    suspend fun loadSkillBody(name: String): String = withContext(Dispatchers.IO) { skillStore()?.body(name).orEmpty() }
 
     // ── Image generation (Nano Banana) ───────────────────────────────────────────────────────────
 
