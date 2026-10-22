@@ -94,6 +94,34 @@ class ClaudeAuthController(
 
     private val accountPrefs by lazy { com.nextcraft.forge.data.AppPreferences(context) }
 
+    /** Taps back into the app from the Custom Tab, which never returns there on its own after sign-in. */
+    private fun notifySignedIn(account: String?) = runCatching {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java) ?: return@runCatching
+        manager.createNotificationChannel(
+            android.app.NotificationChannel(
+                SIGN_IN_CHANNEL_ID,
+                context.getString(R.string.notif_channel_results),
+                android.app.NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?.apply { flags = android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP }
+            ?: return@runCatching
+        val contentIntent = android.app.PendingIntent.getActivity(
+            context, 3, launchIntent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(context, SIGN_IN_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(context.getString(R.string.notif_task_completed))
+            .setContentText(account?.let { context.getString(R.string.rt_auth_connected_as, it) } ?: context.getString(R.string.rt_auth_claude_connected))
+            .setContentIntent(contentIntent)
+            .setAutoCancel(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        manager.notify(SIGN_IN_NOTIFICATION_ID, notification)
+    }
+
     /** Upstream entry point; the card refreshes through [refreshFromDisk], which also fills in the email. */
     suspend fun loadAccountEmail() = refreshFromDisk()
 
@@ -245,6 +273,10 @@ class ClaudeAuthController(
                             accountPrefs.claudeAccountEmail = account.orEmpty()
                             mutableState.value = signedInState(account)
                             onSignedInChanged(true)
+                            // The sign-in page shows "you can close this window" but a Custom Tab never closes itself
+                            // or returns to the app on its own; a notification is the only way back for someone who
+                            // does not remember to switch apps manually.
+                            notifySignedIn(account)
                             break
                         }
                     }
@@ -414,6 +446,8 @@ class ClaudeAuthController(
         const val LOGIN_TIMEOUT_MS = 15 * 60 * 1_000L
         const val RESTART_WAIT_MS = 5_000L
         const val CREDENTIAL_POLL_MS = 2_000L
+        const val SIGN_IN_CHANNEL_ID = "auth-results"
+        const val SIGN_IN_NOTIFICATION_ID = 43
         const val MAX_OUTPUT_CHARS = 100_000
         val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
     }
