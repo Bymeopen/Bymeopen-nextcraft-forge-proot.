@@ -1051,6 +1051,8 @@
     <string name="mt_ssh_user">User may only contain letters, digits, . _ -</string>
     <string name="mt_ssh_host">Host may only contain letters, digits, . _ -</string>
     <string name="mt_ssh_port">Port must be 1-65535.</string>
+    <string name="mt_ssh_checking">Checking the SSH client…</string>
+    <string name="mt_ssh_missing">OpenSSH client is not installed.</string>
     <string name="mt_ssh_forward">Forward must look like 8080:localhost:80.</string>
     <string name="mt_repair_ok">Chroot mount points and supervisor scripts verified.</string>
     <string name="mt_repair_incomplete">Chroot repair incomplete: some mounts are still active. Reboot the device and retry.</string>

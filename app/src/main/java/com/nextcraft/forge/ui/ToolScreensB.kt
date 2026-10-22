@@ -215,7 +215,7 @@ fun SshScreen(viewModel: MainViewModel) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             ForgeTextButton(onClick = viewModel.ssh::cancel) { Text(stringResource(R.string.tool_stop)) }
         }
-        LogBox(text = ssh.log, placeholder = stringResource(R.string.tool_log_placeholder))
+        LogBox(text = messageLines(ssh.log), placeholder = stringResource(R.string.tool_log_placeholder))
     }
     if (showAdd) {
         var alias by remember { mutableStateOf("") }
