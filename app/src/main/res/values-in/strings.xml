@@ -1236,4 +1236,6 @@
     <string name="settings_update_notify_sub">Memeriksa di latar belakang setiap beberapa jam dan menampilkan satu notifikasi untuk tiap build baru.</string>
     <string name="upd_banner_title">Pembaruan %1$s tersedia</string>
     <string name="upd_banner_hint">Ketuk untuk membuka Pengaturan dan memasangnya.</string>
+    <string name="agent_steer">Steer</string>
+    <string name="agent_steer_hint">Steer menghentikan giliran ini dan langsung mengirim pesan; yang sudah dikerjakan agen tetap tersimpan.</string>
 </resources>

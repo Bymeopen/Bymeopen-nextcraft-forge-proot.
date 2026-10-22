@@ -1610,7 +1610,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Stops the agent turn of the chat on screen only; other chats keep working and a running build keeps going. */
     fun stopActiveTask() {
         val run = runs[_state.value.activeChatId] ?: return
-        discardQueuedPrompts(run.chatId)
+        stopRun(run, discardQueue = true)
+    }
+
+    /**
+     * "Steer": sends a queued message now instead of after the turn. The running turn is stopped (what it already did stays
+     * in the workspace and in the chat) and the message starts a new turn right away with the conversation so far; the other
+     * queued messages keep waiting. This works for every agent, since none of the CLIs takes a new message in the middle of a
+     * turn that was started with its prompt on stdin.
+     */
+    fun steerQueuedPrompt(id: String) {
+        val queued = _state.value.queuedPrompts.firstOrNull { it.id == id } ?: return
+        val chatId = queued.chatId ?: return
+        val project = _state.value.activeProject?.takeIf { it.id == queued.projectId && _state.value.activeChatId == chatId } ?: return
+        removeQueuedPrompt(id)
+        val prompt = queued.copy(projectId = project.id, chatId = chatId)
+        val run = runs[chatId]
+        if (run == null) {
+            if (canStartAnotherRun(tentativeAgent(prompt.text))) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
+            return
+        }
+        stopRun(run, discardQueue = false) {
+            if (!runs.containsKey(chatId)) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
+        }
+    }
+
+    private fun stopRun(run: ChatRun, discardQueue: Boolean, afterStop: (() -> Unit)? = null) {
+        run.steering = !discardQueue
+        if (discardQueue) discardQueuedPrompts(run.chatId)
         val pendingApproval = run.pendingTool
         setRunStatus(run, UiText.res(R.string.agent_status_stopping))
         setRunPendingTool(run, null)
@@ -1629,7 +1656,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             job?.cancel()
             job?.join()
             finishRun(run, stoppedByUser = true)
-            dispatchQueuedPrompts()
+            if (afterStop != null) afterStop() else dispatchQueuedPrompts()
         }
     }
 
@@ -1711,12 +1738,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
                 appendFailureReason(run, reason)
-                offerRetry(run)
+                // A run stopped by "Steer" neither offers a retry nor touches the queue: the steering message starts next.
+                if (!run.steering) offerRetry(run)
                 finishRun(run)
-                discardQueuedPrompts(run.chatId)
-                viewModelScope.launch {
-                    run.job?.join()
-                    dispatchQueuedPrompts()
+                if (!run.steering) {
+                    discardQueuedPrompts(run.chatId)
+                    viewModelScope.launch {
+                        run.job?.join()
+                        dispatchQueuedPrompts()
+                    }
                 }
             }
         }
@@ -4199,4 +4229,7 @@ private class ChatRun(
     var statusLine: UiText? = null
     var pendingTool: ToolRequest? = null
     var finished: Boolean = false
+
+    /** True while the run is being stopped so that a queued message can go out at once (see steerQueuedPrompt). */
+    var steering: Boolean = false
 }

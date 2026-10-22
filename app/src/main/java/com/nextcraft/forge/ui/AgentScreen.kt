@@ -452,7 +452,24 @@ fun AgentScreen(
                 )
                 chatQueue.forEach { queued ->
                     val label = queued.text.ifBlank { queued.attachments.joinToString { it.displayName } }
-                    AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            AttachmentChip(name = label, size = 0L, onRemove = { viewModel.removeQueuedPrompt(queued.id) }, showSize = false)
+                        }
+                        // Steer: stop the running turn and send this message now instead of waiting for the queue.
+                        if (running) {
+                            ForgeTextButton(onClick = { viewModel.steerQueuedPrompt(queued.id) }) {
+                                Text(stringResource(R.string.agent_steer), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                if (running) {
+                    Text(
+                        stringResource(R.string.agent_steer_hint),
+                        fontSize = ForgeType.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

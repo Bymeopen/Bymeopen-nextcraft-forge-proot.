@@ -1255,4 +1255,6 @@
     <string name="settings_update_notify_sub">Checks in the background every few hours and shows a notification once for each new build.</string>
     <string name="upd_banner_title">Update %1$s is available</string>
     <string name="upd_banner_hint">Tap to open Settings and install it.</string>
+    <string name="agent_steer">Steer</string>
+    <string name="agent_steer_hint">Steer stops this turn and sends the message now; what the agent already did is kept.</string>
 </resources>
