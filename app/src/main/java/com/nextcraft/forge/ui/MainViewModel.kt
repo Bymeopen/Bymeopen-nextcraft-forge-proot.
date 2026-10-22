@@ -373,6 +373,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     reaChatHint = preferences.reaChatHint,
+                    updateNotifications = preferences.updateNotifications,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
@@ -391,6 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             firstProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
+            silentUpdateCheck()
         }
     }
 
@@ -3889,6 +3891,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.gameTemplatesEnabled = enabled
         _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
+
+    fun setUpdateNotifications(enabled: Boolean) {
+        preferences.updateNotifications = enabled
+        _state.update { it.copy(updateNotifications = enabled) }
+        val app = getApplication<Application>()
+        if (enabled) {
+            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
+            silentUpdateCheck(force = true)
+        } else {
+            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
+        }
+    }
+
+    /**
+     * Looks for a newer build without the "checking" UI: when the app opens, and when notifications are switched on.
+     * A newer build is kept in [ForgeUiState.updateInfo] (the Projects banner and the update row read it) and announced
+     * once with a notification. Errors are ignored here; the manual check still reports them.
+     */
+    fun silentUpdateCheck(force: Boolean = false) {
+        if (!force && !preferences.updateNotifications) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSilentUpdateCheck < 60 * 60 * 1000L) return
+        lastSilentUpdateCheck = now
+        viewModelScope.launch {
+            val info = withContext(Dispatchers.IO) { runCatching { AppUpdater(getApplication()).check() }.getOrNull() } ?: return@launch
+            if (_state.value.updateInfo == null) {
+                _state.update { it.copy(updateInfo = info, updateStatusMessage = str(R.string.upd_available, info.versionName, info.versionCode)) }
+            }
+            withContext(Dispatchers.IO) { com.nextcraft.forge.update.UpdateNotifier.notifyIfNew(getApplication(), info) }
+        }
+    }
+
+    private var lastSilentUpdateCheck = 0L
 
     fun setReaChatHint(enabled: Boolean) {
         preferences.reaChatHint = enabled

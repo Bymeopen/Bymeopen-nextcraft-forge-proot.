@@ -142,6 +142,16 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("default_project_seeded", false)
         set(value) { preferences.edit().putBoolean("default_project_seeded", value).apply() }
 
+    /** Announce new app builds with a notification (checked in the background every few hours). On by default. */
+    var updateNotifications: Boolean
+        get() = preferences.getBoolean("update_notifications", true)
+        set(value) { preferences.edit().putBoolean("update_notifications", value).apply() }
+
+    /** versionCode of the newest build already announced, so one build never notifies twice. */
+    var lastNotifiedUpdateCode: Long
+        get() = preferences.getLong("last_notified_update_code", 0L)
+        set(value) { preferences.edit().putLong("last_notified_update_code", value).apply() }
+
     /** Adds a note about the `rea` toolkit to chat messages that concern binaries. Off by default: nothing extra is sent. */
     var reaChatHint: Boolean
         get() = preferences.getBoolean("rea_chat_hint", false)

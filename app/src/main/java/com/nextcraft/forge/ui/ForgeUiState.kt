@@ -206,6 +206,7 @@ data class ForgeUiState(
     val autoSyncGitHub: Boolean = false,
     val gameTemplatesEnabled: Boolean = false,
     val reaChatHint: Boolean = false,
+    val updateNotifications: Boolean = true,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
     val claudeEffort: String = "",

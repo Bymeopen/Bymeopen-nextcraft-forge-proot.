@@ -356,6 +356,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
                             onDeleteProject = viewModel::deleteProject,
                             onRenameProject = viewModel::renameProject,
                             onNewQuickProject = viewModel::createQuickProject,
+                            onOpenUpdate = { viewModel.selectTab(ForgeTab.SETTINGS) },
                         )
                         ProjectView.CHATS, ProjectView.CONVERSATION -> if (splitPane) {
                             Row(modifier = Modifier.fillMaxSize()) {

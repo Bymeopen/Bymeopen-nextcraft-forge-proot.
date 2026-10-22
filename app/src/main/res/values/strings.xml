@@ -1248,4 +1248,11 @@
     <string name="rea_progress_speed">%1$.1f MB received · %2$.1f MB/s (device network traffic)</string>
     <string name="route_single_pick">AI provider for this chat (pick one)</string>
     <string name="route_single_busy">The agent can be changed once the current turn has finished.</string>
+    <string name="upd_notif_channel">App updates</string>
+    <string name="upd_notif_title">Update available</string>
+    <string name="upd_notif_text">NextCraft Forge %1$s is ready to install</string>
+    <string name="settings_update_notify">Notify me about updates</string>
+    <string name="settings_update_notify_sub">Checks in the background every few hours and shows a notification once for each new build.</string>
+    <string name="upd_banner_title">Update %1$s is available</string>
+    <string name="upd_banner_hint">Tap to open Settings and install it.</string>
 </resources>

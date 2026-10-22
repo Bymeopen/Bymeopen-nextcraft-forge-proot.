@@ -1229,4 +1229,11 @@
     <string name="rea_progress_speed">%1$.1f MB diterima · %2$.1f MB/detik (lalu lintas jaringan perangkat)</string>
     <string name="route_single_pick">Penyedia AI untuk chat ini (pilih satu)</string>
     <string name="route_single_busy">Agen bisa diganti setelah giliran yang sedang berjalan selesai.</string>
+    <string name="upd_notif_channel">Pembaruan aplikasi</string>
+    <string name="upd_notif_title">Pembaruan tersedia</string>
+    <string name="upd_notif_text">NextCraft Forge %1$s siap dipasang</string>
+    <string name="settings_update_notify">Beri tahu saya soal pembaruan</string>
+    <string name="settings_update_notify_sub">Memeriksa di latar belakang setiap beberapa jam dan menampilkan satu notifikasi untuk tiap build baru.</string>
+    <string name="upd_banner_title">Pembaruan %1$s tersedia</string>
+    <string name="upd_banner_hint">Ketuk untuk membuka Pengaturan dan memasangnya.</string>
 </resources>
