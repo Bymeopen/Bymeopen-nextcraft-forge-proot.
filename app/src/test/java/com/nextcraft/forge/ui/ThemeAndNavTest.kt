@@ -38,11 +38,45 @@ class ThemeAndNavTest {
         assertText("error/surface", scheme.error, scheme.surface)
     }
 
+    /** Dark keeps near-neutral greys: the only colour allowed in them is the faint indigo tint (<= 12/255 between channels). */
     @Test
-    fun linearDark_neutralGreys_haveNoColourCast() {
+    fun dark_greys_carryOnlyAFaintBrandTint() {
         listOf(scheme.background, scheme.surface, scheme.surfaceVariant, scheme.onSurfaceVariant).forEach {
-            assertEquals(it.red, it.green, 0.001f)
-            assertEquals(it.green, it.blue, 0.001f)
+            val spread = maxOf(it.red, it.green, it.blue) - minOf(it.red, it.green, it.blue)
+            assertTrue("grey is too coloured: spread ${spread * 255}/255", spread <= 12f / 255f)
+        }
+    }
+
+    /** One brand hue across Dark, Glass and White, and an accent that can never be mistaken for the danger red. */
+    @Test
+    fun brandHue_isOneIndigo_andNeverTheDangerRed() {
+        fun hue(c: Color): Double {
+            val r = c.red.toDouble(); val g = c.green.toDouble(); val b = c.blue.toDouble()
+            val mx = maxOf(r, g, b); val mn = minOf(r, g, b); val d = mx - mn
+            if (d == 0.0) return -1.0
+            val h = when (mx) { r -> ((g - b) / d) % 6; g -> (b - r) / d + 2; else -> (r - g) / d + 4 }
+            return (h * 60 + 360) % 360
+        }
+        val primaries = listOf("dark", "glass", "white").map { it to resolveThemeTokens(it, systemDark = false).first.primary }
+        primaries.forEach { (name, c) ->
+            val h = hue(c)
+            assertTrue("$name primary hue $h is not indigo/blue (210..270)", h in 210.0..270.0)
+        }
+        listOf("dark", "glass", "white").forEach { name ->
+            val (sch, tok) = resolveThemeTokens(name, systemDark = false)
+            val accentHue = hue(sch.primary); val dangerHue = hue(tok.dangerText)
+            val gap = minOf(Math.abs(accentHue - dangerHue), 360 - Math.abs(accentHue - dangerHue))
+            assertTrue("$name accent ($accentHue) too close to danger ($dangerHue)", gap >= 90.0)
+        }
+    }
+
+    /** Added/removed diff text must read on its own row tint in every theme (glass tints are translucent, so it is composited). */
+    @Test
+    fun diffText_meetsAA_onItsRow() {
+        listOf("dark", "white").forEach { name ->
+            val (sch, tok) = resolveThemeTokens(name, systemDark = false)
+            assertText("$name added", tok.diffAddedText, tok.diffAddedBackground)
+            assertText("$name removed", tok.diffRemovedText, tok.diffRemovedBackground)
         }
     }
 
