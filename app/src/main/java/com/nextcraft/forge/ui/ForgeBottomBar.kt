@@ -212,6 +212,8 @@ internal fun ForgeBottomBar(
                     .padding(horizontal = 6.dp, vertical = if (compactHeight) 2.dp else 6.dp),
             ) {
                 val slot = maxWidth / entries.size
+                val labels = entries.map { stringResource(it.label) }
+                val longestLabel = labels.maxOf { it.length }
                 val pillInset = if (entries.size >= 5) 2.dp else 6.dp
                 // Pill: the only moving object. A radial gradient drawn behind it gives the soft outward glow
                 // (no blur, so it costs nothing on low-end GPUs). White skips the glow: it would look muddy.
@@ -311,8 +313,9 @@ internal fun ForgeBottomBar(
                             CompositionLocalProvider(LocalDensity provides Density(density.density, navFontScale)) {
                                 Text(
                                     text = label,
+                                    // One size for every tab: when any label is long, all labels on the narrow bar shrink together.
                                     fontSize = when {
-                                        slot < 76.dp && label.length >= 9 -> ForgeType.navCompact * 0.92f
+                                        slot < 76.dp && longestLabel >= 9 -> ForgeType.navCompact * 0.92f
                                         slot < 76.dp -> ForgeType.navCompact
                                         else -> ForgeType.caption
                                     },
