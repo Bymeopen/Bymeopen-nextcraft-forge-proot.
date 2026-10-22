@@ -325,7 +325,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 emptySet()
             }
-            // Everything below that needs a project is skipped until the user creates or imports one.
+            // No project is possible on a fresh install, or once the user deletes them all; everything below that
+            // needs one is then skipped.
             val firstProject = projects.firstOrNull()
             configureAllProjectRoots(projects)
             val chats = firstProject?.let { preferences.loadProjectChats(it.id) }.orEmpty()
@@ -830,7 +831,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val currentProjects = _state.value.projects
-        if (currentProjects.size <= 1) return
         val index = currentProjects.indexOfFirst { it.id == projectId }
         if (index < 0) return
         val removed = currentProjects[index]
@@ -845,7 +845,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _state.update { it.copy(projects = updated, undoDelete = ProjectUndo(removed.id, removed.name)) }
         if (_state.value.activeProjectId == projectId) {
-            selectProject(updated.first().id)
+            if (updated.isNotEmpty()) {
+                selectProject(updated.first().id)
+            } else {
+                // The last project is gone: leave the project context empty (the Projects screen offers a new one).
+                _state.update {
+                    it.copy(
+                        activeProjectId = "",
+                        chats = emptyList(),
+                        activeChatId = "main",
+                        messages = emptyList(),
+                        selectedFilePath = null,
+                        selectedFileContent = "",
+                        selectedFileDirty = false,
+                    )
+                }
+            }
         }
     }
 
@@ -859,6 +874,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         preferences.saveProjects(restored)
         _state.update { it.copy(projects = restored, undoDelete = null) }
+        // Undoing the deletion of the only project: open it again.
+        if (_state.value.activeProjectId.isBlank()) selectProject(pending.project.id)
     }
 
     /** The Snackbar was dismissed or timed out on its own; the deletion stays pending until its window ends. */
