@@ -457,6 +457,9 @@ class AntigravityRuntimeBridge(
                     emulateHardLinks = false,
                     trustClaudeWorkspace = false,
                 )
+                // Registered before anything below can throw: onFailure kills activeProcess, so a failing tailer must not
+                // leave agy running unattended.
+                activeProcess = process
                 val native = process as? NativeSpawnProcess ?: error("Unsupported Antigravity process")
                 spawnedOutputFile = native.outputFile
                 tailer = InotifyLogTailer(native.outputFile)
