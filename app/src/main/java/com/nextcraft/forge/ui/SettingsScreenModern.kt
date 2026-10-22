@@ -182,6 +182,11 @@ fun SettingsScreenModern(
                 onCheckedChange = viewModel::setGameTemplatesEnabled,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
+        }
+
+        // ───────────────────────── Agent ─────────────────────────
+        ForgeSectionLabel(stringResource(R.string.settings_section_agent), horizontalPadding = 6.dp, topPadding = 8.dp)
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             ForgeToggleRow(
                 title = stringResource(R.string.settings_rea_chat_hint),
                 subtitle = stringResource(R.string.settings_rea_chat_hint_subtitle),
@@ -196,14 +201,12 @@ fun SettingsScreenModern(
                 onCheckedChange = viewModel::setScheduleEnabled,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
-            // One choice instead of two switches that excluded each other: the app already keeps them mutually exclusive.
-            Text(
-                text = stringResource(R.string.settings_approval_title),
-                fontSize = ForgeType.secondary,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 2.dp),
-            )
+        }
+
+        // ───────────────────────── Tool approval ─────────────────────────
+        // One choice instead of two switches that excluded each other: the app already keeps them mutually exclusive.
+        ForgeSectionLabel(stringResource(R.string.settings_approval_title), horizontalPadding = 6.dp, topPadding = 8.dp)
+        ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
             RadioRow(
                 title = stringResource(R.string.settings_approval_ask),
                 subtitle = stringResource(R.string.settings_prompt_before_executing_destructive),
