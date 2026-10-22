@@ -283,12 +283,10 @@ internal fun ChatUsageSheet(state: ForgeUiState, onDismiss: () -> Unit) {
     val used = estimateContextTokens(state.messages)
     val limit = contextWindowTokens(state.providerProfile.model)
     val fraction = (used.toFloat() / limit).coerceIn(0f, 1f)
-    val usageBackdrop = LocalForgeBackdrop.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = if (usageBackdrop != null) androidx.compose.ui.graphics.Color.Transparent else tokens.cardContainerColor,
-        modifier = Modifier.forgeGlassSheet(usageBackdrop, tokens.cardContainerColor),
+        containerColor = tokens.cardContainerColor,
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(stringResource(R.string.chat_usage_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
@@ -346,12 +344,10 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
     val agent = if (multi) sheetAgent else state.agentKind
     val profile = if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
     val discovered = if (agent == state.agentKind) state.discoveredModels else emptyList()
-    val modelSheetBackdrop = LocalForgeBackdrop.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = if (modelSheetBackdrop != null) androidx.compose.ui.graphics.Color.Transparent else tokens.cardContainerColor,
-        modifier = Modifier.forgeGlassSheet(modelSheetBackdrop, tokens.cardContainerColor),
+        containerColor = tokens.cardContainerColor,
     ) {
         Column(modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.chat_model_sheet_title), fontSize = ForgeType.screenTitle, fontWeight = FontWeight.SemiBold)
@@ -472,12 +468,10 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
     val running = chatId in state.runningChatIds
     val diff = state.branchDiff[chatId]
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
-    val branchBackdrop = LocalForgeBackdrop.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = if (branchBackdrop != null) androidx.compose.ui.graphics.Color.Transparent else tokens.cardContainerColor,
-        modifier = Modifier.forgeGlassSheet(branchBackdrop, tokens.cardContainerColor),
+        containerColor = tokens.cardContainerColor,
     ) {
         androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier.padding(horizontal = ForgeSpace.card),

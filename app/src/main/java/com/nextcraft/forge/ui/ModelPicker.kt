@@ -69,14 +69,11 @@ fun ModelPickerDialog(
         }
     }
     val offerCustom = needle.isNotEmpty() && options.none { it.id.equals(needle, ignoreCase = true) }
-    val backdrop = LocalForgeBackdrop.current
-    val cardColor = LocalForgeThemeTokens.current.cardContainerColor
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = if (backdrop != null) androidx.compose.ui.graphics.Color.Transparent else cardColor,
-        modifier = Modifier.forgeGlassSheet(backdrop, cardColor),
+        containerColor = LocalForgeThemeTokens.current.cardContainerColor,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = ForgeSpace.card).padding(bottom = 16.dp),

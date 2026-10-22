@@ -45,13 +45,11 @@ internal fun ConnectorsSheet(state: ForgeUiState, viewModel: MainViewModel, onDi
     val tokens = LocalForgeThemeTokens.current
     var tab by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(Unit) { viewModel.loadConnectors() }
-    val backdrop = LocalForgeBackdrop.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = if (backdrop != null) androidx.compose.ui.graphics.Color.Transparent else tokens.cardContainerColor,
-        modifier = Modifier.forgeGlassSheet(backdrop, tokens.cardContainerColor),
+        containerColor = tokens.cardContainerColor,
     ) {
         LazyColumn(
             modifier = Modifier.padding(horizontal = ForgeSpace.card),
