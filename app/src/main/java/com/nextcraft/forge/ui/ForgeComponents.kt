@@ -372,6 +372,8 @@ fun ForgePillTabs(
 ) {
     val scheme = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
+    // Equal segments only while they can hold their labels; more than three options scroll instead of being cut to "R…".
+    val equalWidth = equalWidth && items.size <= 3
     Row(
         modifier = modifier
             .fillMaxWidth()

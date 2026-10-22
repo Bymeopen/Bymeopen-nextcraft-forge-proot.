@@ -115,7 +115,10 @@ import androidx.compose.foundation.layout.imePadding
 internal fun NewProjectDialog(
     onDismiss: () -> Unit,
     onCreate: (name: String, description: String, isAndroid: Boolean, template: AndroidTemplate, starter: StarterTemplate) -> Unit,
+    gameTemplatesEnabled: Boolean = false,
 ) {
+    // The game starter only shows once it is switched on in Settings.
+    val starters = StarterTemplate.entries.filter { gameTemplatesEnabled || it != StarterTemplate.GAME_LIBGDX }
     var name by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
     var isAndroid by rememberSaveable { mutableStateOf(false) }
@@ -161,9 +164,9 @@ internal fun NewProjectDialog(
                 } else {
                     // Non-Android starter: an empty workspace, or a Go app that builds for Windows and Linux.
                     ForgePillTabs(
-                        items = StarterTemplate.entries.map { it.label },
-                        selectedIndex = StarterTemplate.entries.indexOf(starter),
-                        onSelect = { starter = StarterTemplate.entries[it] },
+                        items = starters.map { it.label },
+                        selectedIndex = starters.indexOf(starter).coerceAtLeast(0),
+                        onSelect = { starter = starters[it] },
                         modifier = Modifier.padding(horizontal = 0.dp),
                     )
                 }

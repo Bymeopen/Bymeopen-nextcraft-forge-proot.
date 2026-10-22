@@ -140,7 +140,7 @@ class ForgeTerminalViewClient(
     override fun onLongPress(event: MotionEvent?): Boolean = false
     override fun readControlKey(): Boolean = modifiers.consumeCtrl()
     override fun readAltKey(): Boolean = modifiers.consumeAlt()
-    override fun readShiftKey(): Boolean = false
+    override fun readShiftKey(): Boolean = modifiers.consumeShift()
     override fun readFnKey(): Boolean = false
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean = false
     override fun onEmulatorSet() = onEmulatorReady()

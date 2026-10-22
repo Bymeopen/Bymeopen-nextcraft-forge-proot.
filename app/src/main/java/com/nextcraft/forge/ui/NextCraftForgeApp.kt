@@ -426,6 +426,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     if (showNewProjectDialog) {
         NewProjectDialog(
+            gameTemplatesEnabled = state.gameTemplatesEnabled,
             onDismiss = { showNewProjectDialog = false },
             onCreate = { name, desc, isAndroid, template, starter ->
                 viewModel.createProject(name, desc, isAndroid, template, starter)

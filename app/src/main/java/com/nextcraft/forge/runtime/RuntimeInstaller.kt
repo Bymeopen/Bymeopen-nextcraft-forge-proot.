@@ -2402,6 +2402,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
     /** Keeps the coloured prompt block in /root/.bashrc ([ShellPrompt]); an unreadable file is left alone. */
     private fun ensureShellPrompt() {
+        ensureX86Wrapper()
         val bashrc = File(rootfs, "root/.bashrc")
         val current = runCatching { if (bashrc.isFile) bashrc.readText() else "" }.getOrNull() ?: return
         val updated = ShellPrompt.apply(current)
@@ -2409,7 +2410,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             runCatching { writeRootfsFileAtomically(bashrc, updated, mode = 0b110100100) }
                 .onFailure { Log.w("RuntimeInstaller", "Could not write the shell prompt", it) }
         }
-        ensureX86Wrapper()
     }
 
     /** Installs `run-x86` (see [X86Wrapper]) in the guest; skipped while it is up to date. */

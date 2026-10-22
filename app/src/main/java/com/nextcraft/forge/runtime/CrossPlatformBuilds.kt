@@ -72,6 +72,17 @@ internal fun detectCrossTargets(workspace: File): List<CrossTarget> {
         }
     }
 
+    // libGDX starter (GameProjectTemplateGenerator): one runnable jar for Windows and Linux PCs.
+    if (File(workspace, ".nextcraft/game-project.json").isFile && File(workspace, "desktop/build.gradle.kts").isFile) {
+        found += CrossTarget(
+            id = "gdx:desktop-jar",
+            name = "Game PC (.jar, Windows/Linux)",
+            platform = BuildPlatform.WINDOWS,
+            command = "gradle --console=plain :desktop:dist",
+            onDevice = true,
+        )
+    }
+
     if (File(workspace, "Cargo.toml").isFile) {
         val rust = listOf("cargo" to "cargo", "rustup" to "rustup")
         found += CrossTarget(

@@ -204,6 +204,7 @@ data class ForgeUiState(
     val interactiveHighRiskApprovals: Boolean = true,
     val autoApproveAllTools: Boolean = false,
     val autoSyncGitHub: Boolean = false,
+    val gameTemplatesEnabled: Boolean = false,
     val reaChatHint: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",

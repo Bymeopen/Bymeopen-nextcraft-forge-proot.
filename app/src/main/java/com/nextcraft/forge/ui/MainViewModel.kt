@@ -63,6 +63,7 @@ import com.nextcraft.forge.runtime.DiagnosticsController
 import com.nextcraft.forge.runtime.CiCdController
 import com.nextcraft.forge.runtime.BuildMatrixController
 import com.nextcraft.forge.runtime.GoProjectTemplateGenerator
+import com.nextcraft.forge.runtime.GameProjectTemplateGenerator
 import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
@@ -362,11 +363,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     agentKind = savedAgent,
                     routing = preferences.routing,
                     themeMode = ForgeThemeMode.fromStored(preferences.themeMode).id,
-                    projects = projects,
-                    activeProjectId = firstProject?.id.orEmpty(),
-                    chats = chats,
-                    activeChatId = activeChatId,
-                    messages = messages,
+                    // Bootstrap can wait on a root prompt; if the user already opened or deleted a project meanwhile, keep that.
+                    projects = if (it.activeProjectId.isBlank()) projects else it.projects,
+                    activeProjectId = if (it.activeProjectId.isBlank()) firstProject?.id.orEmpty() else it.activeProjectId,
+                    chats = if (it.activeProjectId.isBlank()) chats else it.chats,
+                    activeChatId = if (it.activeProjectId.isBlank()) activeChatId else it.activeChatId,
+                    messages = if (it.activeProjectId.isBlank()) messages else it.messages,
                     androidBuild = if (it.androidBuild.phase == AndroidBuildPhase.BUILDING) it.androidBuild else initialBuildRecord,
                     providerProfile = profile,
                     savedApiKeys = keys,
@@ -375,6 +377,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
+                    gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     reaChatHint = preferences.reaChatHint,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -747,16 +750,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         when {
                             isAndroid -> "Android (${androidTemplate.label}) project"
                             starter == StarterTemplate.GO -> "Go command-line app"
+                            starter == StarterTemplate.GAME_LIBGDX -> "libGDX game (Android + PC)"
                             else -> "General coding workspace"
                         }
                     },
                     language = when {
                         isAndroid -> "Kotlin"
                         starter == StarterTemplate.GO -> "Go"
+                        starter == StarterTemplate.GAME_LIBGDX -> "Java (libGDX)"
                         else -> "Multi-language"
                     },
                     slug = slug,
-                    type = if (isAndroid) ProjectType.ANDROID else ProjectType.GENERAL,
+                    // A libGDX game has an Android :app module, so it gets the Android build-and-install flow.
+                    type = if (isAndroid || starter == StarterTemplate.GAME_LIBGDX) ProjectType.ANDROID else ProjectType.GENERAL,
                     androidTemplate = if (isAndroid) androidTemplate else null,
                 )
                 val wsDir = File(getApplication<Application>().filesDir, "workspaces/${project.id}")
@@ -771,6 +777,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     checkpoints.ensureWorkspace(project.id)
                     if (starter == StarterTemplate.GO) {
                         GoProjectTemplateGenerator.generate(wsDir, cleanName)
+                    } else if (starter == StarterTemplate.GAME_LIBGDX) {
+                        GameProjectTemplateGenerator.generate(wsDir, cleanName)
                     } else {
                         File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
                     }
@@ -834,6 +842,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val index = currentProjects.indexOfFirst { it.id == projectId }
         if (index < 0) return
         val removed = currentProjects[index]
+        closeProjectTerminals(removed.id)
         // A second delete inside the undo window makes the first one final.
         finalizePendingDelete()
         val updated = currentProjects.filterNot { it.id == projectId }
@@ -858,6 +867,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         selectedFilePath = null,
                         selectedFileContent = "",
                         selectedFileDirty = false,
+                        changedItems = emptyList(),
+                        workspaceFiles = emptyList(),
+                        androidBuild = AndroidBuildRecord(),
+                        branchStatus = emptyMap(),
+                        branchDiff = emptyMap(),
+                        queuedPrompts = emptyList(),
+                        retryPrompt = null,
                     )
                 }
             }
@@ -932,7 +948,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Only Claude Code runs several chats at once; for the other agents the chat stays fixed while one is running. */
     private fun chatSwitchBlocked(): Boolean =
-        _state.value.sessionRunning && _state.value.agentKind != AgentKind.CLAUDE_CODE
+        _state.value.sessionRunning && runs.values.any { it.agent != AgentKind.CLAUDE_CODE }
 
     fun selectChat(chatId: String) {
         if (chatSwitchBlocked()) return
@@ -1088,8 +1104,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val title = _state.value.chats.firstOrNull { it.id == chatId }?.title.orEmpty()
         withBranchBusy(chatId) {
             val result = branchLock(chatId).withLock {
-                chatBranches.commitTurn(project, chatId, "Forge: save work before merge")
-                chatBranches.mergeIntoMain(project, chatId, title)
+                val saved = chatBranches.commitTurn(project, chatId, "Forge: save work before merge")
+                // Conflict markers still in the branch must be fixed first; merging now would put them in the project.
+                if (!saved.ok && saved.output.contains("unresolved conflict")) {
+                    BranchMergeResult.Failed(saved.output.trim().takeLast(200))
+                } else {
+                    chatBranches.mergeIntoMain(project, chatId, title)
+                }
             }
             val message = when (result) {
                 BranchMergeResult.Done -> UiText.res(R.string.branch_merged)
@@ -1277,11 +1298,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val tried = run.tried + run.agent
         val next = routeFor(run.lastPrompt.text, tried) ?: return false
         val project = _state.value.projects.firstOrNull { it.id == run.projectId } ?: return false
+        // Only the open project can take the resend (startRun works on the chats on screen), and the other agent must
+        // have a free slot like any new message: two agents editing one folder would overwrite each other.
+        if (project.id != _state.value.activeProjectId || !canStartAnotherRun(next.agent, ignoringChat = run.chatId)) return false
         appendAssistantText(run, "\n\n[" + reason + "]\n" + str(R.string.route_failover_notice, next.agent.title))
         finishRun(run)
         viewModelScope.launch {
             run.job?.join()
-            startRun(project, run.chatId, run.lastPrompt.copy(projectId = project.id, chatId = run.chatId), tried = tried, resend = true)
+            run.eventsJob?.cancel()
+            // The chat may have changed hands while the old session was unwinding.
+            val still = _state.value.activeProjectId == project.id && !runs.containsKey(run.chatId) &&
+                _state.value.chats.any { it.id == run.chatId }
+            if (still) {
+                startRun(project, run.chatId, run.lastPrompt.copy(projectId = project.id, chatId = run.chatId), tried = tried, resend = true)
+            } else {
+                offerRetry(run)
+            }
         }
         return true
     }
@@ -1295,10 +1327,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * the other agents keep a single run. A further run also needs free memory: each Claude process is a Node
      * runtime, and the system kills processes when RAM runs out.
      */
-    private fun canStartAnotherRun(agent: AgentKind = _state.value.agentKind): Boolean {
-        if (runs.isEmpty()) return true
+    private fun canStartAnotherRun(agent: AgentKind = _state.value.agentKind, ignoringChat: String? = null): Boolean {
+        val active = if (ignoringChat == null) runs else runs.filterKeys { it != ignoringChat }
+        if (active.isEmpty()) return true
         if (agent != AgentKind.CLAUDE_CODE) return false
-        if (runs.size >= MAX_PARALLEL_CHATS) return false
+        if (active.size >= MAX_PARALLEL_CHATS) return false
         val memory = android.app.ActivityManager.MemoryInfo()
         getApplication<Application>().getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(memory)
         return !memory.lowMemory && memory.availMem >= MIN_FREE_BYTES_FOR_PARALLEL_RUN
@@ -1359,7 +1392,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // one gets its own branch so the two cannot overwrite each other's files.
         val agentKind = agent
         val wasIsolated = _state.value.chats.firstOrNull { it.id == chatId }?.isolated == true
-        val isolated = agentKind == AgentKind.CLAUDE_CODE && (wasIsolated || runs.isNotEmpty())
+        // An isolated chat stays isolated whichever agent answers (failover, tags and rules can pick a non-Claude one).
+        val isolated = wasIsolated || (agentKind == AgentKind.CLAUDE_CODE && runs.isNotEmpty())
         if (isolated && !wasIsolated) _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_auto)) }
         val updatedChats = _state.value.chats.map { chat ->
             if (chat.id == chatId) {
@@ -1436,6 +1470,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (tryFailover(run, error.message ?: app.getString(R.string.agent_turn_error_unknown))) return@launch
                     appendAssistantText(run, "\n\n" + app.getString(R.string.agent_turn_error, error.message ?: app.getString(R.string.agent_turn_error_unknown)))
                     offerRetry(run)
+                    finishRun(run)
+                    // Messages queued behind this chat would otherwise wait for some other run to end.
+                    discardQueuedPrompts(run.chatId)
+                    viewModelScope.launch { dispatchQueuedPrompts() }
                 }
                 finishRun(run)
             }
@@ -1647,7 +1685,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
-                appendAssistantText(run, "\n\n[$reason]")
+                appendFailureReason(run, reason)
                 offerRetry(run)
                 finishRun(run)
                 discardQueuedPrompts(run.chatId)
@@ -1657,6 +1695,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    /**
+     * Adds "[reason]" to the reply unless the agent already printed that error into it (Claude Code streams an API
+     * error as reply text and then fails with the same message, which showed the whole error twice).
+     */
+    private fun appendFailureReason(run: ChatRun, reason: String) {
+        val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
+        val head = reason.trim().lineSequence().firstOrNull().orEmpty().take(80)
+        val shown = head.isNotBlank() && reply.contains(head)
+        if (!shown) appendAssistantText(run, "\n\n[$reason]")
     }
 
     private fun appendAssistantText(run: ChatRun, delta: String) {
@@ -2422,8 +2471,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val terminals = HashMap<String, TerminalHandle>()
 
+    /** Chat ids are only unique inside a project (every project has a chat called "main"), so the key holds both. */
+    private fun terminalKey(chatId: String?): String = chatId?.let { "chat:${_state.value.activeProjectId}:$it" } ?: "main"
+
     private fun terminalHandle(chatId: String?): TerminalHandle =
-        terminals.getOrPut(chatId?.let { "chat:$it" } ?: "main") { TerminalHandle(chatId) }
+        terminals.getOrPut(terminalKey(chatId)) { TerminalHandle(chatId) }
 
     val terminalSessionClient = ForgeTerminalSessionClient(application) { session -> onTerminalSessionEnded(session) }
 
@@ -2449,6 +2501,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         handle.starting = true
         viewModelScope.launch {
             try {
+                // An isolated chat gets its clone at its first turn; make it now so the shell does not start in the main folder.
+                if (chatId != null) prepareChatBranchFolder(chatId)
                 val spec = withContext(Dispatchers.IO) { buildTerminalLaunchSpec(handle) }
                 handle.inChroot = spec.inChroot
                 handle.session = TerminalSession(
@@ -2471,6 +2525,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun prepareChatBranchFolder(chatId: String) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated != true) return
+        runCatching { branchLock(chatId).withLock { chatBranches.ensure(project, chatId) } }
+            .onFailure { Log.w("MainViewModel", "chat branch for the terminal failed", it) }
+    }
+
     /** "Restart" after the shell ended: discards the dead session and starts a fresh one. */
     fun restartTerminalSession() = restartTerminalSession(null)
 
@@ -2486,9 +2547,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Ends the shell of a chat that was deleted. */
     private fun closeChatTerminal(chatId: String) {
-        terminals.remove("chat:$chatId")?.let { handle ->
+        terminals.remove(terminalKey(chatId))?.let { handle ->
             handle.pending.clear()
             handle.session?.finishIfRunning()
+        }
+    }
+
+    /** Ends every chat shell of [projectId] (its folders are about to be deleted). */
+    private fun closeProjectTerminals(projectId: String) {
+        terminals.keys.filter { it.startsWith("chat:$projectId:") }.forEach { key ->
+            terminals.remove(key)?.let { handle ->
+                handle.pending.clear()
+                handle.session?.finishIfRunning()
+            }
         }
     }
 
@@ -3848,6 +3919,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setGameTemplatesEnabled(enabled: Boolean) {
+        preferences.gameTemplatesEnabled = enabled
+        _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
 
     fun setReaChatHint(enabled: Boolean) {

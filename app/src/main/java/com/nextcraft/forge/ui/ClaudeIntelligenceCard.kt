@@ -87,7 +87,6 @@ internal fun ClaudeIntelligenceCard(
             }
             ForgePillTabs(
                 items = effortLabels,
-                equalWidth = true,
                 selectedIndex = effortIndex,
                 // Saved right away: there is no separate Save button in this layout.
                 onSelect = { viewModel.setClaudeEffort(levels[it]) },

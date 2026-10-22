@@ -949,6 +949,8 @@ private val DANGEROUS_PATTERNS = listOf(
     "dd if=", "/dev/block", "/dev/loop", "/dev/sd", "/dev/zero", "/dev/mem", "/dev/kmem", "/proc/", "umount",
     "| sh", "| bash", "find -exec", "find -delete", "pocketdev-bridge", "nextcraft-bridge", "pocket-bridge",
     "/opt/pocket", ".claude", ".git-credentials",
+    // Credential stores the Bash route could cat: the SSH keys and the GitHub CLI token.
+    ".ssh/", "/.ssh", ".config/gh",
 )
 
 private val SAFE_STREAM_REDIRECT_REGEX =
@@ -984,12 +986,14 @@ private fun scriptCanEscapeSandbox(text: String): Boolean =
 
 /** Commands that create, overwrite or move files; their path arguments must stay inside the project. */
 private fun mutatesFiles(first: String, words: List<String>): Boolean =
-    first in setOf("cp", "mv", "mkdir", "touch") ||
+    first in setOf("cp", "mv", "mkdir", "touch", "uniq") ||
         (first == "sed" && words.any { it == "--in-place" || (it.startsWith("-i") && !it.startsWith("--")) })
 
 private fun isOutsideWorkspacePath(word: String): Boolean {
     val arg = word.trim('\'', '"')
     if (arg.startsWith("-") || arg.isEmpty()) return false
+    // ~/.bashrc and friends: the tilde expands to the home of root, which is outside the project.
+    if (arg == "~" || arg.startsWith("~/")) return true
     if (isSensitivePath(arg)) return true
     return arg.startsWith("/") && !arg.startsWith("/workspace/") && !arg.startsWith("/tmp/")
 }
@@ -1049,14 +1053,23 @@ private fun maskQuotedAndEscapedSeparators(input: String): String {
     return out.toString()
 }
 
+/** System directories whose programs may be named by full path; any other path could point at a file the agent wrote. */
+private val TRUSTED_COMMAND_DIRS = listOf("/usr/bin/", "/bin/", "/usr/local/bin/")
+
 private fun isSafeBashSegment(segment: String): Boolean {
     val words = segment.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
-        .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=\\S*")) }
-    val first = words.firstOrNull()?.trim('\'', '"')?.substringAfterLast('/') ?: return false
+    // A leading VAR=value (LD_PRELOAD=./x.so cat f, PATH=./bin ls) changes what the "safe" command really runs.
+    if (words.firstOrNull()?.matches(ENV_ASSIGNMENT_REGEX) == true) return false
+    val firstWord = words.firstOrNull()?.trim('\'', '"') ?: return false
+    // `./ls` or `/workspace/cat` is a program the agent may have just written, not the allowlisted tool of that name.
+    if ('/' in firstWord && TRUSTED_COMMAND_DIRS.none(firstWord::startsWith)) return false
+    val first = firstWord.substringAfterLast('/')
     if (first == "env" || first == "xargs") {
         // Wrappers run another command, so judge that command. A bare `env` dumps every exported
         // variable (including provider API keys) into the model context and is never auto-approved.
-        val wrapped = words.drop(1).dropWhile { it.startsWith("-") || it.matches(ENV_ASSIGNMENT_REGEX) }
+        // `env VAR=value cmd` is refused for the same reason as a leading assignment.
+        if (words.drop(1).any { it.matches(ENV_ASSIGNMENT_REGEX) }) return false
+        val wrapped = words.drop(1).dropWhile { it.startsWith("-") }
         if (wrapped.isEmpty()) return first == "xargs"
         return isSafeBashSegment(wrapped.joinToString(" "))
     }
@@ -1064,7 +1077,9 @@ private fun isSafeBashSegment(segment: String): Boolean {
     // (find -fprint, git diff --output, sort/tree -o): never auto-approved.
     val args = words.drop(1).map { it.trim('\'', '"') }
     if (args.any { UNSAFE_TOOL_FLAG_REGEX.matches(it) }) return false
-    if ((first == "sort" || first == "tree") && args.any { it == "-o" || (first == "tree" && it.startsWith("-o") && it.length > 2) }) return false
+    if ((first == "sort" || first == "tree") && args.any { it.startsWith("-o") }) return false
+    // `date -s` sets the system clock.
+    if (first == "date" && args.any { it == "-s" || it.startsWith("-s") || it.startsWith("--set") }) return false
     if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false

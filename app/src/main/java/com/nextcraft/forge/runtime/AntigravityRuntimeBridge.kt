@@ -214,8 +214,25 @@ class AntigravityRuntimeBridge(
     )
     @Volatile private var warm: WarmAgy? = null
     @Volatile private var warmGeneration = 0L
-    /** null until known; false once agy showed it only starts on end of input, so every turn closes stdin. */
+    /**
+     * null until known; false once agy showed it only starts on end of input, so every turn closes stdin. Saved per
+     * agy version, so the 20 s probe that finds this out runs once, not after every app restart.
+     */
+    private val warmModeFile = File(context.filesDir, "agy-warm-mode")
     @Volatile private var warmSupported: Boolean? = null
+    @Volatile private var warmModeLoaded = false
+
+    private fun agyVersion(): String = installer.installedAgentVersions()[AgentKind.ANTIGRAVITY].orEmpty()
+
+    private fun readWarmMode(): Boolean? = runCatching {
+        val (version, mode) = warmModeFile.readText().trim().split(' ', limit = 2)
+        if (version != agyVersion()) null else mode.toBooleanStrictOrNull()
+    }.getOrNull()
+
+    private fun rememberWarmMode(supported: Boolean) {
+        warmSupported = supported
+        runCatching { warmModeFile.writeText("${agyVersion()} $supported") }
+    }
 
     private fun closeWarm(entry: WarmAgy?) {
         entry ?: return
@@ -404,6 +421,11 @@ class AntigravityRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
+            // Read on the IO thread (it checks the installed agy version), once per app run.
+            if (!warmModeLoaded) {
+                warmSupported = readWarmMode()
+                warmModeLoaded = true
+            }
             val currentModel = model()
             val currentEffort = effort()
             val currentConversation = conversationId(projectId)
@@ -507,13 +529,13 @@ class AntigravityRuntimeBridge(
                         if (stdinOpen && !eventSeen && now - promptSentAtMillis >= WARM_PROBE_MS) {
                             if (reuse != null) {
                                 // A kept-alive agy that ignores the next message: start fresh from the next turn on.
-                                warmSupported = false
+                                rememberWarmMode(false)
                                 throw AntigravitySessionException(
                                     "Antigravity stopped responding. Send the message again.",
                                 )
                             }
                             // This agy only starts on end of input; give it that and remember for later turns.
-                            warmSupported = false
+                            rememberWarmMode(false)
                             stdinOpen = false
                             runCatching { process.outputStream.close() }
                         }
@@ -567,7 +589,7 @@ class AntigravityRuntimeBridge(
             }
             if (resultSeen && stdinOpen && process.isAlive) {
                 // agy answered without end of input and is still running: keep it for the next message.
-                warmSupported = true
+                rememberWarmMode(true)
                 val entry = WarmAgy(
                     process, tailer, spawnedOutputFile!!, projectId, currentModel, currentEffort, conversationId(projectId),
                 )

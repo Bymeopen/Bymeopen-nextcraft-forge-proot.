@@ -35,6 +35,18 @@ class AgentRouterTest {
     }
 
     @Test
+    fun singleNeverLeavesTheSelectedAgentNotEvenWithATagOrARule() {
+        val rules = listOf(PromptRule(listOf("unit test"), AgentKind.DEEPSEEK_HARNESS))
+        val cfg = RoutingConfig(RouteMode.SINGLE, rules = rules)
+        for (text in listOf("@deepseek fix it", "@agy: hello", "write a unit test", "@claude hi")) {
+            val routed = AgentRouter.route(text, cfg, AgentKind.ANTIGRAVITY, all, 7)!!
+            assertEquals(AgentKind.ANTIGRAVITY, routed.agent)
+            assertEquals(text, routed.text)
+            assertFalse(routed.tagged)
+        }
+    }
+
+    @Test
     fun failoverUsesPriorityOrderSkippingTriedAndNotReady() {
         val order = listOf(AgentKind.DEEPSEEK_HARNESS, AgentKind.CLAUDE_CODE, AgentKind.ANTIGRAVITY)
         val cfg = config(RouteMode.FAILOVER, order)

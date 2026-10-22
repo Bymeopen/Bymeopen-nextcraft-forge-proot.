@@ -99,9 +99,9 @@ fun TerminalScreen(
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
 
-    LaunchedEffect(chatId) { viewModel.ensureTerminalSession(chatId) }
-    val session = remember(state.terminalRevision, chatId) { viewModel.currentTerminalSession(chatId) }
-    val finished = remember(state.terminalRevision, chatId) { viewModel.isTerminalFinished(chatId) }
+    LaunchedEffect(chatId, state.activeProjectId) { viewModel.ensureTerminalSession(chatId) }
+    val session = remember(state.terminalRevision, chatId, state.activeProjectId) { viewModel.currentTerminalSession(chatId) }
+    val finished = remember(state.terminalRevision, chatId, state.activeProjectId) { viewModel.isTerminalFinished(chatId) }
     val modifiers = remember { TerminalModifierKeys() }
     val holder = remember { TerminalViewHolder() }
     val prefs = remember { context.getSharedPreferences("forge_terminal", android.content.Context.MODE_PRIVATE) }
@@ -363,12 +363,17 @@ internal fun TerminalKeyRow(
         var mod = 0
         if (modifiers.consumeCtrl()) mod = mod or KeyHandler.KEYMOD_CTRL
         if (modifiers.consumeAlt()) mod = mod or KeyHandler.KEYMOD_ALT
+        if (modifiers.consumeShift()) mod = mod or KeyHandler.KEYMOD_SHIFT
         view.handleKeyCode(keyCode, mod)
     }
 
     fun type(char: Char) {
         val view = liveView() ?: return
-        view.inputCodePoint(char.code, modifiers.consumeCtrl(), modifiers.consumeAlt())
+        // An armed Shift gives the shifted character: a capital letter, or "_" / "?" for the "-" and "/" keys.
+        val shifted = if (modifiers.consumeShift()) {
+            when (char) { '-' -> '_'; '/' -> '?'; else -> char.uppercaseChar() }
+        } else char
+        view.inputCodePoint(shifted.code, modifiers.consumeCtrl(), modifiers.consumeAlt())
     }
 
     fun enter() {
@@ -394,6 +399,7 @@ internal fun TerminalKeyRow(
     ) {
         TerminalKey("Esc", stringResource(R.string.terminal_key_esc), enabled) { press(KeyEvent.KEYCODE_ESCAPE) }
         TerminalKey("Tab", stringResource(R.string.terminal_key_tab), enabled) { press(KeyEvent.KEYCODE_TAB) }
+        TerminalKey("Shift", stringResource(R.string.terminal_key_shift), enabled, active = modifiers.shift) { modifiers.shift = !modifiers.shift }
         TerminalKey("Ctrl", stringResource(R.string.terminal_key_ctrl), enabled, active = modifiers.ctrl) { modifiers.ctrl = !modifiers.ctrl }
         TerminalKey("Alt", stringResource(R.string.terminal_key_alt), enabled, active = modifiers.alt) { modifiers.alt = !modifiers.alt }
         TerminalKey("Shift", stringResource(R.string.terminal_key_shift), enabled, active = modifiers.shift) { modifiers.shift = !modifiers.shift }
