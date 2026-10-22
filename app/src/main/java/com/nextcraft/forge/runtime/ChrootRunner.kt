@@ -37,7 +37,7 @@ class ChrootRunner(context: Context) {
             guestCommand = listOf("/bin/bash", "-lc", command),
         )
         return try {
-            ProcessBuilder("su", "-mm", "-c", suCommand).redirectErrorStream(true).start()
+            ProcessBuilder(SuCompat.argv(suCommand)).redirectErrorStream(true).start()
         } catch (error: Throwable) {
             envFile.delete()
             throw error

@@ -124,7 +124,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -503,12 +505,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _backgroundPrompts = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Fires once, when the runtime setup is first started: the Activity then asks for notifications and the battery exemption. */
+    val backgroundPrompts: SharedFlow<Unit> = _backgroundPrompts
+
+    private fun requestBackgroundPromptsOnce() {
+        // The Activity marks the prompts as shown once it actually displays them, so a missed emission is retried.
+        if (!preferences.backgroundPromptsShown) _backgroundPrompts.tryEmit(Unit)
+    }
+
     fun startRuntimeSetup() {
+        requestBackgroundPromptsOnce()
         val current = _state.value
         val stacksCsv = current.selectedDevStacks.joinToString(",") { it.name }
         preferences.selectedDevStacks = current.selectedDevStacks.map { it.name }.toSet()
         preferences.agentKind = current.agentKind.stableId
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java)
                 .setAction(RuntimeSetupService.ACTION_START)
@@ -536,9 +549,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return false
     }
 
+    /** Android 8+ throws when the app is not allowed to start a foreground service (12+: also from the background). */
+    private fun startServiceSafely(context: android.content.Context, intent: Intent) {
+        runCatching { ContextCompat.startForegroundService(context, intent) }
+            .onFailure { android.util.Log.w("MainViewModel", "Could not start ${intent.component?.shortClassName}: ${it::class.simpleName}") }
+    }
+
     private fun startRuntimeOperation(scope: SetupScope, configure: Intent.() -> Unit) {
         _state.update { it.copy(setupScope = scope) }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java).apply(configure),
         )
@@ -605,8 +624,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun installCoreWith(stacks: Set<DevStack>, agent: AgentKind) {
         if (_state.value.setupSnapshot.status == RuntimeSetupStatus.RUNNING) return
+        requestBackgroundPromptsOnce()
         _state.update { it.copy(setupScope = SetupScope.RUNTIME) }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeSetupService::class.java)
                 .setAction(RuntimeSetupService.ACTION_START)
@@ -3342,7 +3362,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
-        ContextCompat.startForegroundService(
+        startServiceSafely(
             getApplication(),
             Intent(getApplication(), RuntimeExecutionService::class.java)
                 .setAction(RuntimeExecutionService.ACTION_START)

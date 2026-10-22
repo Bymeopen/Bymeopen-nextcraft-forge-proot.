@@ -29,3 +29,11 @@ __pycache__/
 
 # REA writes its consent marker to $HOME/.rea (tests use the repo root as HOME)
 .rea/
+
+# Native build output (CMake/Ninja)
+.cxx/
+
+# Key material (the shared debug.keystore is tracked deliberately)
+*.jks
+*.p12
+*.pem

@@ -826,6 +826,7 @@
     <string name="diag_installed">terpasang</string>
     <string name="diag_not_installed">belum terpasang</string>
     <string name="diag_none">tidak ada</string>
+    <string name="tool_battery_unrestrict">Izinkan berjalan di latar (baterai)</string>
     <string name="diag_health_failed">Pemeriksaan gagal</string>
     <string name="diag_charging_value">%1$s · mengisi daya</string>
     <string name="model_badge_latest">terbaru</string>
