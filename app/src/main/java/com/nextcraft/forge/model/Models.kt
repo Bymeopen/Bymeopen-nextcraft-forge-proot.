@@ -69,7 +69,7 @@ enum class AgentKind(
     ),
     DEEPSEEK_HARNESS(
         "deepseek-harness",
-        "DeepSeek Harness",
+        "DeepSeek",
         "Official DeepSeek coding agent · API-key providers",
         "26.8 MB",
     ),
@@ -365,6 +365,8 @@ data class ProjectChat(
     val title: String = "New chat",
     val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis(),
+    /** True when the chat works in its own branch (a clone of the project) and merges into it explicitly. */
+    val isolated: Boolean = false,
 )
 
 enum class DiffLineType { CONTEXT, ADDITION, DELETION, INFO }

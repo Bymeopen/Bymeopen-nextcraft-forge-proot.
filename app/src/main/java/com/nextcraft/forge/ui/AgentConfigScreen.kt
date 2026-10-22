@@ -242,6 +242,7 @@ fun AgentConfigScreen(
             // token. Shown for every provider of Claude Code so the sign-in is never hidden behind "Access mode".
             if (agent == AgentKind.CLAUDE_CODE) {
                 ClaudeAccountCard(viewModel)
+                ClaudeIntelligenceCard(state = state, viewModel = viewModel, onOpenModelPicker = { showModelPicker = true })
             }
 
             // Model & access: a heading with Discover, then the model row and the credentials row.
@@ -257,64 +258,58 @@ fun AgentConfigScreen(
                 }
             }
             if (state.apiBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (statusText.isNotBlank()) {
-                Text(text = statusText, fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp))
-            }
             var modelOpen by rememberSaveable(agent) { mutableStateOf(false) }
             var credentialsOpen by rememberSaveable(agent) { mutableStateOf(false) }
             val activeKey = state.savedApiKeys.firstOrNull { it.isActive }
             ForgeThemedCard(modifier = Modifier.fillMaxWidth()) {
-                AgentDisclosureRow(
-                    icon = ForgeGlyph.SPARK,
-                    title = stringResource(R.string.agent_ai_model),
-                    subtitle = state.providerProfile.model.ifBlank { "default" },
-                    expanded = modelOpen,
-                    onToggle = { modelOpen = !modelOpen },
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                // Claude Code picks its model in the "active intelligence" card above; this row is for the other agents.
+                if (agent != AgentKind.CLAUDE_CODE) {
+                    AgentDisclosureRow(
+                        icon = ForgeGlyph.SPARK,
+                        title = stringResource(R.string.agent_ai_model),
+                        subtitle = state.providerProfile.model.ifBlank { "default" },
+                        expanded = modelOpen,
+                        onToggle = { modelOpen = !modelOpen },
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = ForgeSpace.card, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.settings_current_model), fontSize = ForgeType.secondary, color = scheme.onSurfaceVariant)
+                                    Text(
+                                        text = state.providerProfile.model.ifBlank { "default" },
+                                        fontSize = ForgeType.cardTitle,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
+                                    Text(stringResource(R.string.settings_choose_model))
+                                }
+                            }
+                            if (state.discoveredModels.isNotEmpty()) {
                                 Text(
-                                    text = state.providerProfile.model.ifBlank { "default" },
-                                    fontSize = ForgeType.cardTitle,
-                                    fontWeight = FontWeight.SemiBold,
+                                    text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
+                                    fontSize = ForgeType.secondary,
+                                    fontWeight = FontWeight.Medium,
+                                    color = scheme.onSurfaceVariant,
                                 )
-                            }
-                            OutlinedButton(shape = RoundedCornerShape(100), onClick = { showModelPicker = true }) {
-                                Text(stringResource(R.string.settings_choose_model))
+                                state.discoveredModels.take(30).forEach { m ->
+                                    RadioRow(
+                                        title = m.displayName,
+                                        subtitle = m.id,
+                                        mono = true,
+                                        selected = m.id == state.providerProfile.model,
+                                        onClick = {
+                                            modelInput = m.id
+                                            viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
+                                        },
+                                        horizontalPadding = 0.dp,
+                                    )
+                                }
                             }
                         }
-                        if (state.discoveredModels.isNotEmpty()) {
-                            Text(
-                                text = quantityStringResource(R.plurals.settings_models_found, state.discoveredModels.size, state.discoveredModels.size),
-                                fontSize = ForgeType.secondary,
-                                fontWeight = FontWeight.Medium,
-                                color = scheme.onSurfaceVariant,
-                            )
-                            state.discoveredModels.take(30).forEach { m ->
-                                RadioRow(
-                                    title = m.displayName,
-                                    subtitle = m.id,
-                                    mono = true,
-                                    selected = m.id == state.providerProfile.model,
-                                    onClick = {
-                                        modelInput = m.id
-                                        viewModel.updateProviderConfig(baseUrl = baseUrlInput, model = m.id, openRouterOrder = openRouterOrderInput)
-                                    },
-                                    horizontalPadding = 0.dp,
-                                )
-                            }
-                        }
-                        OutlinedButton(
-                            shape = RoundedCornerShape(100),
-                            onClick = viewModel::validateProviderConnection,
-                            enabled = !state.apiBusy,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                        ) { Text(stringResource(R.string.settings_validate)) }
                     }
+                    ThinDivider()
                 }
-                ThinDivider()
                 AgentDisclosureRow(
                     icon = ForgeGlyph.LOCK,
                     title = stringResource(R.string.agent_credentials),
@@ -384,6 +379,30 @@ fun AgentConfigScreen(
                         )
                     }
                 }
+            }
+            // Same connection test as Antigravity: one button under the card, result coloured below it.
+            OutlinedButton(
+                shape = RoundedCornerShape(100),
+                onClick = viewModel::validateProviderConnection,
+                enabled = !state.apiBusy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            ) {
+                ForgeIcon(glyph = ForgeGlyph.REFRESH, tint = scheme.primary, size = 18.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.agent_test_connection))
+            }
+            if (statusText.isNotBlank()) {
+                val themeTokens = LocalForgeThemeTokens.current
+                Text(
+                    text = statusText,
+                    fontSize = ForgeType.secondary,
+                    color = when {
+                        statusText.startsWith("✓") -> themeTokens.successText
+                        statusText.startsWith("✕") -> themeTokens.dangerText
+                        else -> scheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
             }
             if (showModelPicker) {
                 ModelPickerDialog(

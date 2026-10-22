@@ -2064,7 +2064,9 @@ class RuntimeInstaller(private val context: Context) {
             """#!/bin/sh
 BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
 RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
-ID="${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
+# Parallel chats share this directory: the session id (set by the app) tags the request so only its owner answers it.
+SID="${'$'}{NEXTCRAFT_SESSION_ID:-}"
+ID="${'$'}{SID:+${'$'}{SID}_}${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
 DECISION=deny
 if [ -d "${'$'}BRIDGE" ] && cat > "${'$'}BRIDGE/${'$'}ID.request.tmp" && mv "${'$'}BRIDGE/${'$'}ID.request.tmp" "${'$'}BRIDGE/${'$'}ID.request"; then
     i=0
@@ -2779,7 +2781,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             compressedBytes = 584_522_930L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
-            label = "DeepSeek Harness",
+            label = "DeepSeek",
             fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
             sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
             compressedBytes = 28_066_921L,
