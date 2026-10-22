@@ -172,6 +172,11 @@ fun DiagnosticsScreen(viewModel: MainViewModel) {
                 )
                 OutlinedButton(
                     shape = RoundedCornerShape(100),
+                    onClick = { CrashReporter.shareIntent(context)?.let { context.startActivity(it) } },
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(R.string.crash_prompt_share)) }
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
                     onClick = {
                         CrashReporter.clear(context)
                         crash = null
