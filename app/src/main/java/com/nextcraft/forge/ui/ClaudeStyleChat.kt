@@ -315,15 +315,22 @@ internal fun ChatUsageSheet(state: ForgeUiState, onDismiss: () -> Unit) {
 
 /** Short model (and effort) text for the composer chip, e.g. "Fable 5.1 Low". */
 @Composable
-internal fun chatModelChipLabel(state: ForgeUiState): String = when (state.agentKind) {
+/** The agent a plain message goes to: the selected one in Single mode, otherwise the first switched-on one. */
+internal fun primaryAgent(state: ForgeUiState): AgentKind =
+    com.nextcraft.forge.model.AgentRouter.primaryAgent(state.routing, state.agentKind, state.readyAgents)
+
+private fun profileOf(state: ForgeUiState, agent: AgentKind) =
+    if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
+
+internal fun chatModelChipLabel(state: ForgeUiState, agent: AgentKind = state.agentKind): String = when (agent) {
     AgentKind.CLAUDE_CODE -> {
-        val model = claudeModelLabel(state.providerProfile.model.ifBlank { "default" })
+        val model = claudeModelLabel(profileOf(state, agent).model.ifBlank { "default" })
             .removePrefix("Claude ").removeSuffix(" (latest)")
         val effort = state.claudeEffort.takeIf { it.isNotBlank() }?.let { claudeEffortText(it) }
         listOfNotNull(model, effort).joinToString(" ")
     }
     AgentKind.ANTIGRAVITY -> state.antigravityModel.takeIf { it.isNotBlank() }?.let(::antigravityModelLabel) ?: "Antigravity"
-    AgentKind.DEEPSEEK_HARNESS -> state.providerProfile.model.ifBlank { "DeepSeek" }
+    AgentKind.DEEPSEEK_HARNESS -> profileOf(state, agent).model.ifBlank { "DeepSeek" }
 }
 
 /** Model list and effort row opened from the composer chip. */
@@ -333,7 +340,7 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
     val scheme = MaterialTheme.colorScheme
     // With several agents in a chat, the sheet edits the agent picked in the tabs, not only the selected one.
     val multi = state.routing.mode != com.nextcraft.forge.model.RouteMode.SINGLE
-    var sheetAgent by remember { mutableStateOf(state.agentKind) }
+    var sheetAgent by remember { mutableStateOf(primaryAgent(state)) }
     val agent = if (multi) sheetAgent else state.agentKind
     val profile = if (agent == state.agentKind) state.providerProfile else state.agentProfiles[agent] ?: state.providerProfile
     val discovered = if (agent == state.agentKind) state.discoveredModels else emptyList()
