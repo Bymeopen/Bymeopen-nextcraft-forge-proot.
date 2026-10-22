@@ -1653,7 +1653,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
-                appendAssistantText(run, "\n\n[$reason]")
+                appendFailureReason(run, reason)
                 offerRetry(run)
                 finishRun(run)
                 discardQueuedPrompts(run.chatId)
@@ -1663,6 +1663,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    /**
+     * Adds "[reason]" to the reply unless the agent already printed that error into it (Claude Code streams an API
+     * error as reply text and then fails with the same message, which showed the whole error twice).
+     */
+    private fun appendFailureReason(run: ChatRun, reason: String) {
+        val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
+        val head = reason.trim().lineSequence().firstOrNull().orEmpty().take(80)
+        val shown = head.isNotBlank() && reply.contains(head)
+        if (!shown) appendAssistantText(run, "\n\n[$reason]")
     }
 
     private fun appendAssistantText(run: ChatRun, delta: String) {
