@@ -60,6 +60,7 @@ private sealed interface MarkdownBlock {
     data class Table(val rows: List<List<String>>) : MarkdownBlock
     object HorizontalRule : MarkdownBlock
     data class Paragraph(val text: String) : MarkdownBlock
+    data class Image(val alt: String, val src: String) : MarkdownBlock
 }
 
 @Composable
@@ -86,6 +87,7 @@ fun MarkdownText(
                     is MarkdownBlock.NumberedItem -> NumberedBlock(block, resolvedColor, tokens)
                     is MarkdownBlock.BlockQuote -> BlockQuoteView(block, resolvedColor, tokens)
                     is MarkdownBlock.Table -> TableBlockView(block, resolvedColor, tokens)
+                    is MarkdownBlock.Image -> ChatImage(alt = block.alt, src = block.src)
                     MarkdownBlock.HorizontalRule -> Divider(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
@@ -444,8 +446,13 @@ private fun parseMarkdown(raw: String): List<MarkdownBlock> {
             flushTable()
         }
 
+        val image = imageRefOfLine(line)
         when {
             line.isBlank() -> flushParagraph()
+            image != null -> {
+                flushParagraph()
+                blocks += MarkdownBlock.Image(image.alt, image.src)
+            }
             trimmed == "---" || trimmed == "***" -> {
                 flushParagraph()
                 blocks += MarkdownBlock.HorizontalRule

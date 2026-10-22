@@ -1063,6 +1063,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val chatImageCache = object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(24) {}
+
+    /**
+     * The image behind a chat `src`. Workspace files are read through the same path checks as the file editor (no
+     * `..`, no symlinks) from the chat's own branch first, then from the project; remote addresses are only fetched
+     * after the reader tapped them.
+     */
+    suspend fun loadChatImage(src: String): androidx.compose.ui.graphics.ImageBitmap? = withContext(Dispatchers.IO) {
+        val project = _state.value.activeProject ?: return@withContext null
+        val chatId = _state.value.activeChatId
+        val source = classifyImageSource(src, project.slug) ?: return@withContext null
+        runCatching {
+            when (source) {
+                is ChatImageSource.Data -> {
+                    val key = "data|${source.base64.length}|${source.base64.hashCode()}"
+                    chatImageCache.get(key) ?: ChatImageDecoder.decode(android.util.Base64.decode(source.base64, android.util.Base64.DEFAULT))
+                        ?.also { chatImageCache.put(key, it) }
+                }
+                is ChatImageSource.Remote -> {
+                    val key = "url|${source.url}"
+                    chatImageCache.get(key) ?: ChatImageDecoder.fetch(source.url)?.let(ChatImageDecoder::decode)
+                        ?.also { chatImageCache.put(key, it) }
+                }
+                is ChatImageSource.Workspace -> {
+                    val roots = buildList {
+                        if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) {
+                            add(chatBranches.branchFor(project, chatId).cloneDir)
+                        }
+                        add(checkpoints.ensureWorkspace(project.id))
+                    }
+                    val file = roots.firstNotNullOfOrNull { root ->
+                        runCatching { checkpoints.safeWorkspaceFile(root, source.relativePath) }.getOrNull()?.takeIf { it.isFile }
+                    } ?: return@runCatching null
+                    if (file.length() > ChatImageDecoder.MAX_BYTES) return@runCatching null
+                    val key = "file|${file.absolutePath}|${file.lastModified()}|${file.length()}"
+                    chatImageCache.get(key) ?: ChatImageDecoder.decode(file.readBytes())?.also { chatImageCache.put(key, it) }
+                }
+            }
+        }.getOrNull()
+    }
+
     /** Loads the project repository and the state of every chat branch (the local pull requests). */
     fun refreshProjectRepo() {
         val project = _state.value.activeProject ?: return

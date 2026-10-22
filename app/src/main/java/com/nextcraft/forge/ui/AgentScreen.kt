@@ -673,7 +673,11 @@ internal fun ChatMessageCard(
                 }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        message.attachments.forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                        message.attachments.filterNot { it.mimeType.startsWith("image/") }
+                            .forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                    }
+                    message.attachments.filter { it.mimeType.startsWith("image/") }.forEach { att ->
+                        ChatImage(alt = att.displayName, src = att.relativePath, maxHeight = 200.dp)
                     }
                 }
             }

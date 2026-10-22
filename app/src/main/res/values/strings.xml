@@ -1133,4 +1133,8 @@
     <string name="voice_unavailable">Speech recognition is not available on this device.</string>
     <string name="voice_permission_denied">Allow the microphone to use voice input.</string>
     <string name="voice_error">Voice input failed. Check your connection and try again.</string>
+    <string name="chat_image_tap_remote">Tap to load an image from %1$s</string>
+    <string name="chat_image_failed">Image unavailable: %1$s</string>
+    <string name="chat_image_default_alt">Image</string>
+    <string name="chat_image_close">Close image</string>
 </resources>

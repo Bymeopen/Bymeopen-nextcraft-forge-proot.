@@ -1116,4 +1116,8 @@
     <string name="voice_unavailable">Pengenalan suara tidak tersedia di perangkat ini.</string>
     <string name="voice_permission_denied">Izinkan mikrofon untuk memakai input suara.</string>
     <string name="voice_error">Input suara gagal. Periksa koneksi lalu coba lagi.</string>
+    <string name="chat_image_tap_remote">Ketuk untuk memuat gambar dari %1$s</string>
+    <string name="chat_image_failed">Gambar tidak tersedia: %1$s</string>
+    <string name="chat_image_default_alt">Gambar</string>
+    <string name="chat_image_close">Tutup gambar</string>
 </resources>
