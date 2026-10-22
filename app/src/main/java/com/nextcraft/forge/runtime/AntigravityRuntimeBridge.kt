@@ -722,7 +722,11 @@ class AntigravityRuntimeBridge(
     }.getOrDefault("")
 }
 
-internal fun antigravityFriendlyError(raw: String, diagnostic: String = ""): String {
+internal fun antigravityFriendlyError(
+    raw: String,
+    diagnostic: String = "",
+    elapsedMs: Long = Long.MAX_VALUE,
+): String {
     val rawValue = raw.replace(Regex("\\s+"), " ").trim()
     // The error itself decides first. The agy log tail is only a fallback and never decides "timeout": the
     // prompt tells the agent to run `timeout 15m gradle`, so that word is routinely in the log.
