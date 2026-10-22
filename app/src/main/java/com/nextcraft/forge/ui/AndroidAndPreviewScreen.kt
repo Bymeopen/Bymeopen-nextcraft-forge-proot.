@@ -166,6 +166,7 @@ fun AndroidBuildScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         ForgeProjectHeader(
             title = state.activeProject?.name ?: stringResource(R.string.launch_launch),
+            accentSeed = state.activeProject?.name,
             subtitle = stringResource(R.string.launch_launch),
             // Opened from Tools there is no project header above: Back returns to Tools, like the other tool screens.
             onBack = if (state.activeTab != ForgeTab.PROJECTS) ({ viewModel.selectTab(ForgeTab.TOOLS) }) else null,
@@ -644,6 +645,7 @@ fun WebPreviewScreen(
         if (state.activeTab == ForgeTab.PROJECTS) {
             ForgeProjectHeader(
                 title = state.activeProject?.name ?: stringResource(R.string.launch_preview),
+                accentSeed = state.activeProject?.name,
                 subtitle = stringResource(R.string.launch_preview) + " · " + stringResource(R.string.launch_local_dev_server),
                 onBack = { viewModel.projectBack() },
             )
