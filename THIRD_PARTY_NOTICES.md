@@ -1,5 +1,17 @@
 # Third-party notices
 
+## Licensing of this project
+NextCraft Forge as a whole is distributed under the **GNU General Public License v3.0 only** (`LICENSE`,
+SPDX: `GPL-3.0-only`), because it links the GPLv3 Termux terminal libraries listed below.
+Parts derived from Mobile Harness stay under their **MIT** licence: MIT is GPL-compatible, so they are combined into the
+GPLv3 work, and their copyright and permission notice below must be kept in every copy.
+
+| Component | Licence | Notice kept in |
+|---|---|---|
+| NextCraft Forge (combined work) | GPL-3.0-only | `LICENSE` |
+| Mobile Harness-derived parts | MIT | this file |
+| Termux `terminal-emulator` / `terminal-view` | GPL-3.0-only (Apache-2.0 portions by Jack Palevich) | this file |
+
 ## Mobile Harness
 - **What:** NextCraft Forge started as an adaptation of Mobile Harness (https://github.com/techjarves/Mobile-Harness);
   parts of the app and of the runtime bundle layout derive from it. The legacy Python 3.8 runtime overlay comes from
