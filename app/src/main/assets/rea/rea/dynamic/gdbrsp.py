@@ -45,11 +45,13 @@ class GdbClient:
         self._buffer = b""
 
     @classmethod
-    def connect(cls, host: str, port: int, timeout: float) -> "GdbClient":
+    def connect(cls, host: str, port: int, timeout: float, alive=None) -> "GdbClient":
         """Mencoba menyambung sampai ``timeout``; gdbstub baru membuka port setelah proses QEMU siap."""
         deadline = time.monotonic() + timeout
         last: Exception | None = None
         while time.monotonic() < deadline:
+            if alive is not None and not alive():
+                break  # proses yang harus membuka port sudah berhenti; menunggu lebih lama sia-sia
             try:
                 sock = socket.create_connection((host, port), timeout=1.0)
                 return cls(sock)
