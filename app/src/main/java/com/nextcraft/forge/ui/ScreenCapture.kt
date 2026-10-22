@@ -28,6 +28,7 @@ internal fun appCaptureSteps(): List<CaptureStep> = listOf(
     CaptureStep("tools", ForgeTab.TOOLS),
     CaptureStep("diagnostics", ForgeTab.DIAGNOSTICS),
     CaptureStep("code-viewer", ForgeTab.CODE_VIEWER),
+    CaptureStep("file-browser", ForgeTab.FILE_BROWSER),
     CaptureStep("settings", ForgeTab.SETTINGS),
 )
 

@@ -131,6 +131,7 @@ enum class ForgeTab(val title: String) {
     ROM("ROM Studio"),
     CHECKPOINTS("Checkpoints"),
     CODE_VIEWER("Code viewer"),
+    FILE_BROWSER("File browser"),
     REA("REA"),
 }
 
