@@ -1099,4 +1099,16 @@
     <string name="repo_pr_summary">%1$d commit · %2$d berkas · +%3$d −%4$d</string>
     <string name="repo_busy_agent">Ada chat yang sedang bekerja di folder proyek. Tunggu selesai, lalu commit.</string>
     <string name="repo_committed">Berhasil di-commit ke proyek.</string>
+    <string name="repo_branches">Branch</string>
+    <string name="repo_branch_new_hint">Nama branch baru</string>
+    <string name="repo_branch_create">Buat dan pindah</string>
+    <string name="repo_branch_switch">Pindah</string>
+    <string name="repo_branch_delete">Hapus</string>
+    <string name="repo_branch_current">aktif</string>
+    <string name="repo_branch_dirty">Commit atau buang perubahan dulu sebelum pindah branch.</string>
+    <string name="repo_branch_created">Branch dibuat dan diaktifkan.</string>
+    <string name="repo_branch_switched">Pindah branch berhasil.</string>
+    <string name="repo_branch_deleted">Branch dihapus.</string>
+    <string name="repo_auto_branch">Branch otomatis per chat</string>
+    <string name="repo_auto_branch_desc">Tiap chat Claude Code bekerja di branch sendiri sejak pesan pertama, jadi chat tidak saling menimpa.</string>
 </resources>

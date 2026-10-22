@@ -1116,4 +1116,16 @@
     <string name="repo_pr_summary">%1$d commits · %2$d files · +%3$d −%4$d</string>
     <string name="repo_busy_agent">A chat is working in the project folder. Wait for it to finish, then commit.</string>
     <string name="repo_committed">Committed to the project.</string>
+    <string name="repo_branches">Branches</string>
+    <string name="repo_branch_new_hint">New branch name</string>
+    <string name="repo_branch_create">Create and switch</string>
+    <string name="repo_branch_switch">Switch</string>
+    <string name="repo_branch_delete">Delete</string>
+    <string name="repo_branch_current">current</string>
+    <string name="repo_branch_dirty">Commit or discard your changes before switching branches.</string>
+    <string name="repo_branch_created">Branch created and checked out.</string>
+    <string name="repo_branch_switched">Switched branch.</string>
+    <string name="repo_branch_deleted">Branch deleted.</string>
+    <string name="repo_auto_branch">Branch per chat automatically</string>
+    <string name="repo_auto_branch_desc">Each Claude Code chat works in its own branch from its first message, so chats never overwrite each other.</string>
 </resources>

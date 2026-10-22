@@ -32,6 +32,7 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import com.nextcraft.forge.runtime.RepoOpResult
 import com.nextcraft.forge.runtime.deleteRecursivelyNoFollow
 import com.nextcraft.forge.runtime.shellSingleQuote
 import com.nextcraft.forge.network.GitHubRepository
@@ -353,6 +354,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
+                    autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
                     claudeEffort = preferences.claudeEffort,
@@ -1072,6 +1074,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Runs a branch operation on the project repository; refused while a chat writes in the project folder. */
+    private fun repoBranchOp(success: Int, op: suspend (Project) -> RepoOpResult) {
+        val project = _state.value.activeProject ?: return
+        if (_state.value.repoBusy) return
+        if (runs.values.any { it.projectId == project.id && !it.isolated }) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.repo_busy_agent)) }
+            return
+        }
+        _state.update { it.copy(repoBusy = true) }
+        viewModelScope.launch {
+            val result = runCatching { op(project) }.getOrElse { RepoOpResult.Failed(it.message ?: it.javaClass.simpleName) }
+            val banner = when (result) {
+                RepoOpResult.Done -> UiText.res(success)
+                RepoOpResult.Dirty -> UiText.res(R.string.repo_branch_dirty)
+                is RepoOpResult.Failed -> UiText.res(R.string.branch_failed, result.message)
+            }
+            _state.update { it.copy(repoBusy = false, bannerMessage = banner) }
+            refreshProjectRepo()
+            if (result == RepoOpResult.Done) refreshWorkspaceFilesAndChanges(project.id)
+        }
+    }
+
+    fun createRepoBranch(name: String) = repoBranchOp(R.string.repo_branch_created) { chatBranches.createBranch(it, name) }
+
+    fun switchRepoBranch(name: String) = repoBranchOp(R.string.repo_branch_switched) { chatBranches.switchBranch(it, name) }
+
+    fun deleteRepoBranch(name: String) = repoBranchOp(R.string.repo_branch_deleted) { chatBranches.deleteBranch(it, name) }
+
     /** Commits everything in the project folder with the user's message. */
     fun commitProjectRepo(message: String) {
         val project = _state.value.activeProject ?: return
@@ -1272,7 +1302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // one gets its own branch so the two cannot overwrite each other's files.
         val agentKind = _state.value.agentKind
         val wasIsolated = _state.value.chats.firstOrNull { it.id == chatId }?.isolated == true
-        val isolated = agentKind == AgentKind.CLAUDE_CODE && (wasIsolated || runs.isNotEmpty())
+        val isolated = agentKind == AgentKind.CLAUDE_CODE && (wasIsolated || runs.isNotEmpty() || preferences.autoBranchChats)
         if (isolated && !wasIsolated) _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_auto)) }
         val updatedChats = _state.value.chats.map { chat ->
             if (chat.id == chatId) {
@@ -3621,6 +3651,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setAutoBranchChats(enabled: Boolean) {
+        preferences.autoBranchChats = enabled
+        _state.update { it.copy(autoBranchChats = enabled) }
     }
 
     fun setAutoSyncGitHub(enabled: Boolean) {

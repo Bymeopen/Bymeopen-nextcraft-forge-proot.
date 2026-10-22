@@ -36,7 +36,16 @@ data class ProjectRepoInfo(
     val branch: String = "",
     val uncommitted: Int = 0,
     val recent: List<BranchCommit> = emptyList(),
+    /** Local branches of the project repository. */
+    val branches: List<String> = emptyList(),
 )
+
+/** Outcome of a branch operation on the project repository. */
+sealed interface RepoOpResult {
+    data object Done : RepoOpResult
+    data object Dirty : RepoOpResult
+    data class Failed(val message: String) : RepoOpResult
+}
 
 sealed interface BranchMergeResult {
     data object Done : BranchMergeResult
@@ -90,6 +99,20 @@ class ChatBranches(context: Context) {
     /** Commits everything in the project folder (creating the repository first when there is none). */
     suspend fun commitProject(project: Project, message: String): ChrootResult = withContext(Dispatchers.IO) {
         gitProject(project, COMMIT_PROJECT_SCRIPT, "MSG" to commitMessage(message))
+    }
+
+    suspend fun createBranch(project: Project, name: String): RepoOpResult = withContext(Dispatchers.IO) {
+        val clean = branchName(name) ?: return@withContext RepoOpResult.Failed("Invalid branch name")
+        parseRepoOp(gitProject(project, CREATE_BRANCH_SCRIPT, "NAME" to clean))
+    }
+
+    suspend fun switchBranch(project: Project, name: String): RepoOpResult = withContext(Dispatchers.IO) {
+        parseRepoOp(gitProject(project, SWITCH_BRANCH_SCRIPT, "NAME" to name))
+    }
+
+    /** Safe delete (`git branch -d`): refuses a branch with commits that are not merged. */
+    suspend fun deleteBranch(project: Project, name: String): RepoOpResult = withContext(Dispatchers.IO) {
+        parseRepoOp(gitProject(project, DELETE_BRANCH_SCRIPT, "NAME" to name))
     }
 
     /** Commits the branch now with the user's own message (the turn commit uses the prompt's first line). */
@@ -195,15 +218,41 @@ class ChatBranches(context: Context) {
             )
         }
 
+        /** A safe git branch name from free text, or null when nothing usable is left. */
+        fun branchName(text: String): String? {
+            val clean = text.trim().lowercase()
+                .replace(Regex("\\s+"), "-")
+                .replace(Regex("[^a-z0-9._/-]"), "")
+                .replace(Regex("[/.-]{2,}")) { it.value.first().toString() }
+                .trim('-', '/', '.')
+                .take(60)
+                .trimEnd('-', '/', '.')
+            return clean.takeIf { it.isNotEmpty() && !it.endsWith(".lock") && !it.startsWith("chat/") }
+        }
+
+        fun parseRepoOp(result: ChrootResult): RepoOpResult {
+            val lines = result.output.lineSequence().map(String::trim).toList()
+            return when {
+                lines.any { it == "RESULT=ok" } -> RepoOpResult.Done
+                lines.any { it == "RESULT=dirty" } -> RepoOpResult.Dirty
+                else -> RepoOpResult.Failed(
+                    lines.firstOrNull { it.startsWith("msg=") }?.removePrefix("msg=")
+                        ?: result.output.trim().takeLast(200).ifEmpty { "git failed" },
+                )
+            }
+        }
+
         /** Reads the `key=value` and `C <hash> <subject>` lines REPO_INFO_SCRIPT prints. */
         fun parseRepoInfo(output: String): ProjectRepoInfo {
             val values = HashMap<String, String>()
             val commits = ArrayList<BranchCommit>()
+            val branches = ArrayList<String>()
             output.lineSequence().forEach { line ->
                 when {
                     line.startsWith("C ") -> line.removePrefix("C ").split(' ', limit = 2).let {
                         if (it.size == 2) commits += BranchCommit(it[0], it[1])
                     }
+                    line.startsWith("B ") -> branches += line.removePrefix("B ").trim()
                     '=' in line -> values[line.substringBefore('=')] = line.substringAfter('=').trim()
                 }
             }
@@ -212,6 +261,7 @@ class ChatBranches(context: Context) {
                 branch = values["branch"].orEmpty(),
                 uncommitted = values["uncommitted"]?.toIntOrNull() ?: 0,
                 recent = commits,
+                branches = branches,
             )
         }
 
@@ -265,7 +315,29 @@ class ChatBranches(context: Context) {
             echo repo=yes
             echo "branch=§(G rev-parse --abbrev-ref HEAD 2>/dev/null || echo -)"
             echo "uncommitted=§(G status --porcelain | wc -l)"
+            G for-each-ref --format='B %(refname:short)' refs/heads 2>/dev/null || true
             G log --format='C %h %s' -n 15 2>/dev/null || true
+        """)
+
+        private val CREATE_BRANCH_SCRIPT = script("""
+            cd "§M"
+            [ -d .git ] || { echo "msg=Make the first commit before creating a branch"; exit 0; }
+            if ! G check-ref-format --branch "§NAME" >/dev/null 2>&1; then echo "msg=Invalid branch name"; exit 0; fi
+            if G show-ref -q --verify "refs/heads/§NAME"; then echo "msg=That branch already exists"; exit 0; fi
+            G checkout -q -b "§NAME" && echo RESULT=ok
+        """)
+
+        /** Switching with uncommitted changes could carry or lose them; the user commits first. */
+        private val SWITCH_BRANCH_SCRIPT = script("""
+            cd "§M"
+            if [ -n "§(G status --porcelain)" ]; then echo RESULT=dirty; exit 0; fi
+            G checkout -q "§NAME" && echo RESULT=ok
+        """)
+
+        private val DELETE_BRANCH_SCRIPT = script("""
+            cd "§M"
+            if [ "§(G rev-parse --abbrev-ref HEAD)" = "§NAME" ]; then echo "msg=Switch to another branch first"; exit 0; fi
+            if OUT="§(G branch -d "§NAME" 2>&1)"; then echo RESULT=ok; else echo "msg=§(echo "§OUT" | tail -n 1)"; fi
         """)
 
         private val COMMIT_PROJECT_SCRIPT = script("""

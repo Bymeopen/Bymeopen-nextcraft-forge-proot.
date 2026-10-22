@@ -85,6 +85,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
 
+    /** Every Claude Code chat works in its own branch from its first turn, not only when another chat is running. */
+    var autoBranchChats: Boolean
+        get() = preferences.getBoolean("auto_branch_chats", false)
+        set(value) { preferences.edit().putBoolean("auto_branch_chats", value).apply() }
+
     /** Whether high-risk tool executions prompt for interactive approval instead of immediate rejection. */
     var interactiveHighRiskApprovals: Boolean
         // Auto-approve-all (default on) overrides prompting, so until the user chooses, show this as off instead of

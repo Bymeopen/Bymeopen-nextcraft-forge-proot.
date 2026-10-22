@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -100,6 +101,64 @@ internal fun RepoSheet(
                             (repo == null || !repo.isRepo || repo.uncommitted > 0),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                }
+            }
+            item {
+                ForgeToggleRow(
+                    title = stringResource(R.string.repo_auto_branch),
+                    subtitle = stringResource(R.string.repo_auto_branch_desc),
+                    checked = state.autoBranchChats,
+                    onCheckedChange = viewModel::setAutoBranchChats,
+                )
+            }
+            if (repo != null && repo.isRepo) {
+                item {
+                    Text(stringResource(R.string.repo_branches), fontSize = ForgeType.rowTitle, fontWeight = FontWeight.SemiBold)
+                }
+                items(repo.branches, key = { "branch-$it" }) { name ->
+                    val current = name == repo.branch
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = if (current) name + " · " + stringResource(R.string.repo_branch_current) else name,
+                            fontSize = ForgeType.secondary,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (!current) {
+                            ForgeTextButton(onClick = { viewModel.switchRepoBranch(name) }, enabled = !state.repoBusy && !anyRunInProject) {
+                                Text(stringResource(R.string.repo_branch_switch))
+                            }
+                            ForgeTextButton(onClick = { viewModel.deleteRepoBranch(name) }, enabled = !state.repoBusy && !anyRunInProject) {
+                                Text(stringResource(R.string.repo_branch_delete), color = scheme.error)
+                            }
+                        }
+                    }
+                }
+                item {
+                    var newBranch by rememberSaveable { mutableStateOf("") }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = newBranch,
+                            onValueChange = { newBranch = it.take(60) },
+                            label = { Text(stringResource(R.string.repo_branch_new_hint)) },
+                            singleLine = true,
+                            enabled = !state.repoBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedButton(
+                            onClick = { viewModel.createRepoBranch(newBranch); newBranch = "" },
+                            enabled = !state.repoBusy && !anyRunInProject && newBranch.isNotBlank(),
+                            shape = RoundedCornerShape(100),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.repo_branch_create)) }
+                    }
                 }
             }
             item {
