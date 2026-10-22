@@ -190,9 +190,70 @@ internal val AirbnbWhiteColorScheme: ColorScheme = lightColorScheme(
     surfaceTint = Color.Transparent,
 )
 
-// 4. SYSTEM LIGHT (the White palette when the OS is in Light Mode: same indigo, a slightly cooler canvas)
-internal val SystemLightColorScheme: ColorScheme = AirbnbWhiteColorScheme.copy(
+// 4. SISTEM (follows the phone): keeps its own earlier colours, separate from the Dark / Glass / White picks above.
+private val SystemDarkColorScheme: ColorScheme = darkColorScheme(
+    // Linear-style neutral dark: R=G=B greys, one indigo accent (values measured from Linear Android).
+    primary = Color(0xFF5E6AD2),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF1C1F3D),
+    onPrimaryContainer = Color(0xFFDDE0FF),
+    secondary = Color(0xFF4CB47F),
+    onSecondary = Color(0xFF06231A),
+    secondaryContainer = Color(0xFF12281E),
+    onSecondaryContainer = Color(0xFFB6F0D0),
+    tertiary = Color(0xFFF2C94C),
+    onTertiary = Color(0xFF2A2000),
+    background = Color(0xFF0B0B0B),
+    onBackground = Color(0xFFEDEDED),
+    surface = Color(0xFF131313),
+    onSurface = Color(0xFFEDEDED),
+    surfaceVariant = Color(0xFF181818),
+    onSurfaceVariant = Color(0xFF9C9C9C),
+    outline = Color(0xFF2A2A2A),
+    outlineVariant = Color(0xFF1E1E1E),
+    error = Color(0xFFE5484D),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFF3A1416),
+    onErrorContainer = Color(0xFFFFD5D6),
+    surfaceTint = Color.Transparent,
+)
+
+private val SystemLightBaseColorScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFFD70F47), // Airbnb coral darkened: white text on #FF385C is only 3.5:1
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFF0F3),
+    onPrimaryContainer = Color(0xFF8A0F28),
+    secondary = Color(0xFF008489),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE6F6F7),
+    onSecondaryContainer = Color(0xFF004F52),
+    tertiary = Color(0xFF6D28D9),
+    onTertiary = Color(0xFFFFFFFF),
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF222222),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF222222),
+    surfaceVariant = Color(0xFFF7F7F7),
+    onSurfaceVariant = Color(0xFF666666),
+    outline = Color(0xFFDDDDDD),
+    outlineVariant = Color(0xFFEBEBEB),
+    error = Color(0xFFC13515),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFF0EE),
+    onErrorContainer = Color(0xFF7A1C08),
+    surfaceTint = Color.Transparent,
+)
+
+internal val SystemLightColorScheme: ColorScheme = SystemLightBaseColorScheme.copy(
+    primary = Color(0xFF0369A1), // white on #0284C7 was 4.1:1
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE0F2FE),
+    onPrimaryContainer = Color(0xFF0C4A6E),
     background = Color(0xFFF8FAFC),
+    surface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFFF1F5F9),
+    outline = Color(0xFFCBD5E1),
+    outlineVariant = Color(0xFFE2E8F0),
 )
 
 // Pre-allocated Brushes & Tokens to prevent recomposition allocation thrashing (THEME-BUG-025)
@@ -311,13 +372,85 @@ internal val WhiteThemeTokens = ForgeThemeTokens(
     ),
 )
 
-private val SystemDarkThemeTokens = DarkThemeTokens.copy(mode = ForgeThemeMode.SYSTEM)
+private val SystemDarkThemeTokens = ForgeThemeTokens(
+    mode = ForgeThemeMode.SYSTEM,
+    isDark = true,
+    isGlass = false,
+    isWhite = false,
+    canvasBrush = SolidColor(Color(0xFF0B0B0B)),
+    windowBackgroundArgb = Color(0xFF0B0B0B).toArgb(),
+    cardContainerColor = Color(0xFF131313),
+    cardElevatedColor = Color(0xFF1B1B1B),
+    cardBorderStroke = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)),
+    elevatedBorderStroke = null,
+    cardCornerRadius = 18.dp,
+    topBarContainerColor = Color(0xFF0B0B0B),
+    bottomBarContainerColor = Color(0xFF131313),
+    accentText = Color(0xFFB9BFF5),
+    successText = Color(0xFF4CB47F),
+    warningText = Color(0xFFF2C94C),
+    dangerText = Color(0xFFE94D52), // E5484D was 4.4:1 on the elevated card
+    terminalBackground = Color(0xFF070707),
+    terminalHeaderBackground = Color(0xFF131313),
+    terminalText = Color(0xFFE6E6E6),
+    inlineCodeBackground = Color(0x335E6AD2),
+    diffAddedBackground = Color(0xFF0F2A1F),
+    diffAddedText = Color(0xFF6EE7B7),
+    diffRemovedBackground = Color(0xFF2E1214),
+    diffRemovedText = Color(0xFFFCA5A5),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFF5E6AD2),
+        backgroundColor = Color(0xFF5E6AD2).copy(alpha = 0.32f),
+    ),
+)
 
-private val SystemLightThemeTokens = WhiteThemeTokens.copy(
+
+private val SystemLightBaseTokens = ForgeThemeTokens(
+    mode = ForgeThemeMode.WHITE,
+    isDark = false,
+    isGlass = false,
+    isWhite = true,
+    canvasBrush = SolidColor(Color(0xFFFFFFFF)),
+    windowBackgroundArgb = Color(0xFFFFFFFF).toArgb(),
+    cardContainerColor = Color(0xFFF7F7F7),
+    cardElevatedColor = Color(0xFFEFEFEF),
+    cardBorderStroke = BorderStroke(0.5.dp, Color(0xFFE4E4E4)),
+    elevatedBorderStroke = BorderStroke(0.5.dp, Color(0xFFE4E4E4)),
+    cardCornerRadius = 18.dp,
+    topBarContainerColor = Color(0xFFFFFFFF),
+    bottomBarContainerColor = Color(0xFFF7F7F7),
+    accentText = Color(0xFFC70A32),  // >= 4.5:1 on every White surface
+    successText = Color(0xFF007505), // Kazan Green darkened (>= 4.5:1 on #F7F7F7)
+    warningText = Color(0xFFA04A07), // Deep Amber (>= 4.5:1 on #EFEFEF)
+    dangerText = Color(0xFFC13515),  // Airbnb Arches Red
+    terminalBackground = Color(0xFFF7F7F7),
+    terminalHeaderBackground = Color(0xFFEBEBEB),
+    terminalText = Color(0xFF222222),
+    inlineCodeBackground = Color(0xFFFFF0F3),
+    diffAddedBackground = Color(0xFFEAFBF0),
+    diffAddedText = Color(0xFF006338),
+    diffRemovedBackground = Color(0xFFFFF0F0),
+    diffRemovedText = Color(0xFFC13515),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFFD70F47),
+        backgroundColor = Color(0xFFD70F47).copy(alpha = 0.22f),
+    ),
+)
+
+private val SystemLightThemeTokens = SystemLightBaseTokens.copy(
     mode = ForgeThemeMode.SYSTEM,
     isWhite = false,
     canvasBrush = SolidColor(Color(0xFFF8FAFC)),
     windowBackgroundArgb = Color(0xFFF8FAFC).toArgb(),
+    cardElevatedColor = Color(0xFFF1F5F9),
+    cardBorderStroke = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+    elevatedBorderStroke = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+    accentText = Color(0xFF0369A1),
+    inlineCodeBackground = Color(0xFFE0F2FE),
+    selectionColors = TextSelectionColors(
+        handleColor = Color(0xFF0284C7),
+        backgroundColor = Color(0xFF0284C7).copy(alpha = 0.22f),
+    ),
 )
 
 fun resolveThemeTokens(
@@ -326,7 +459,7 @@ fun resolveThemeTokens(
 ): Pair<ColorScheme, ForgeThemeTokens> {
     return when (ForgeThemeMode.fromStored(themeMode)) {
         ForgeThemeMode.SYSTEM -> if (systemDark) {
-            ZuanDarkColorScheme to SystemDarkThemeTokens
+            SystemDarkColorScheme to SystemDarkThemeTokens
         } else {
             SystemLightColorScheme to SystemLightThemeTokens
         }

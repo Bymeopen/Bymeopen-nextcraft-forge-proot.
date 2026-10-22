@@ -19,11 +19,27 @@ check() {
   fi
 }
 
+# check_optional NAME COMMAND: like check, but a failure prints SKIP and is not counted as an error.
+check_optional() {
+  local name="$1"
+  shift
+  local out
+  if out=$(timeout 60 bash -c "$*" 2>&1); then
+    printf 'OK   %-22s %s\n' "$name" "$(printf '%s' "$out" | head -1 | cut -c1-70)"
+    pass=$((pass + 1))
+  else
+    printf 'SKIP %-22s not installed (optional)\n' "$name"
+  fi
+}
+
 echo "== Sistem"
 check "rootfs"            'cat /.pocket-rootfs-version'
 check "glibc"             'ldd --version | head -1'
 check "disk /"            'df -h / | awk "NR==2{print \$4\" free\"; exit (\$5+0>95)}"'
 check "/tmp writable"     'f=$(mktemp) && rm -f "$f" && echo ok'
+# proot needs --link2symlink because Android storage may refuse hard links; the chroot does not, if the rootfs
+# filesystem supports them. dpkg and git rely on link(2), so report it explicitly.
+check "hardlinks"         'd=$(mktemp -d /root/.hl.XXXXXX) && : > "$d/a" && ln "$d/a" "$d/b" && [ "$(stat -c %h "$d/a")" = 2 ] && rm -rf "$d" && echo supported'
 
 echo "== Mount"
 for m in /dev /dev/pts /proc /sys /tmp /system /apex /vendor /product; do
@@ -32,6 +48,11 @@ done
 # Bionic tools need the APEX modules mounted under /apex (see docs/RUNTIME_KNOWN_ISSUES.md #1).
 check "apex submounts"    'n=$(grep -c " /apex/" /proc/mounts); echo "$n submount"; [ "$n" -gt 0 ]'
 check "linker64"          't=$(readlink -f /system/bin/linker64) && test -e "$t" && echo "$t"'
+# Host directories bound into the guest are an exposure: they must be read-only so a guest process cannot change the
+# phone's system partitions (see docs/RUNTIME_KNOWN_ISSUES.md). /vendor and /product are optional on some devices.
+for m in /system /apex /vendor /product; do
+  check "ro $m"           "grep ' $m ' /proc/mounts | head -1 | awk '{split(\$4,o,\",\"); for(i in o) if(o[i]==\"ro\") ok=1; print \$4; exit !ok}'"
+done
 
 echo "== Jaringan"
 check "DNS"               'getent hosts archive.ubuntu.com'
@@ -47,7 +68,8 @@ echo "== Agen"
 check "claude"            'claude --version'
 check "dsh"               'dsh --version'
 check "agy"               '/root/.local/bin/agy --version'
-check "gh"                '/root/.local/bin/gh --version'
+# GitHub CLI is optional (installed when the person connects GitHub), so a missing gh is SKIP, not ERR.
+check_optional "gh"       '/root/.local/bin/gh --version'
 
 echo "== Python"
 check "python3"           'python3 --version'

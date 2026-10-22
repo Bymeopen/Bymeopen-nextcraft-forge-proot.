@@ -123,6 +123,8 @@ import androidx.compose.foundation.layout.imePadding
 fun NextCraftForgeApp(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
 
+    CrashReportPrompt()
+
     state.unsavedChangesPrompt?.let { path ->
         AlertDialog(
             modifier = Modifier.forgePopIn(),
