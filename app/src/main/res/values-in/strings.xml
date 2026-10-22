@@ -569,6 +569,8 @@
     <string name="terminal_key_tab">Tab</string>
     <string name="terminal_key_ctrl">Control, berlaku untuk tombol berikutnya</string>
     <string name="terminal_key_alt">Alt, berlaku untuk tombol berikutnya</string>
+    <string name="terminal_key_shift">Shift, berlaku untuk tombol berikutnya</string>
+    <string name="terminal_key_enter">Enter</string>
     <string name="terminal_key_up">Panah atas</string>
     <string name="terminal_key_down">Panah bawah</string>
     <string name="terminal_key_left">Panah kiri</string>

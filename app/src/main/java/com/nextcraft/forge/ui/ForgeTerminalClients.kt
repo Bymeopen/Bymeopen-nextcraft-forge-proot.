@@ -22,8 +22,10 @@ import com.termux.view.TerminalViewClient
 class TerminalModifierKeys {
     var ctrl by mutableStateOf(false)
     var alt by mutableStateOf(false)
+    var shift by mutableStateOf(false)
 
     fun consumeCtrl(): Boolean = ctrl.also { ctrl = false }
+    fun consumeShift(): Boolean = shift.also { shift = false }
     fun consumeAlt(): Boolean = alt.also { alt = false }
 }
 
@@ -138,7 +140,7 @@ class ForgeTerminalViewClient(
     override fun onLongPress(event: MotionEvent?): Boolean = false
     override fun readControlKey(): Boolean = modifiers.consumeCtrl()
     override fun readAltKey(): Boolean = modifiers.consumeAlt()
-    override fun readShiftKey(): Boolean = false
+    override fun readShiftKey(): Boolean = modifiers.consumeShift()
     override fun readFnKey(): Boolean = false
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean = false
     override fun onEmulatorSet() = onEmulatorReady()
