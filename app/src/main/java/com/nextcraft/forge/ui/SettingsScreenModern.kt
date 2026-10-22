@@ -132,7 +132,22 @@ fun SettingsScreenModern(
                 trailing = { Chevron(appearanceOpen) },
             )
             AnimatedVisibility(visible = appearanceOpen) {
-                ThemeModeGrid(active = activeThemeMode, onSelect = viewModel::setThemeMode)
+                Column {
+                    ThemeModeGrid(active = activeThemeMode, onSelect = viewModel::setThemeMode)
+                    if (activeThemeMode == ForgeThemeMode.GLASS) {
+                        val glassContext = androidx.compose.ui.platform.LocalContext.current
+                        SettingsRow(
+                            icon = ForgeGlyph.SLIDERS,
+                            title = stringResource(R.string.settings_glass_solid),
+                            subtitle = stringResource(R.string.settings_glass_solid_desc),
+                            onClick = {
+                                glassUserSolid = !glassUserSolid
+                                com.nextcraft.forge.data.AppPreferences(glassContext).glassSolid = glassUserSolid
+                            },
+                            trailing = { androidx.compose.material3.Switch(checked = glassUserSolid, onCheckedChange = null) },
+                        )
+                    }
+                }
             }
             ThinDivider()
 

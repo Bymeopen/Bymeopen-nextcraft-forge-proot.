@@ -24,16 +24,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.nextcraft.forge.R
 
-private data class ToolEntry(
+internal data class ToolEntry(
     val tab: ForgeTab,
     val glyph: ForgeGlyph,
     @StringRes val title: Int,
     @StringRes val subtitle: Int,
 )
 
-private data class ToolSection(@StringRes val label: Int, val entries: List<ToolEntry>)
+internal data class ToolSection(@StringRes val label: Int, val entries: List<ToolEntry>)
 
-private val toolSections = listOf(
+internal val toolSections = listOf(
     ToolSection(
         R.string.tools_section_development,
         listOf(
