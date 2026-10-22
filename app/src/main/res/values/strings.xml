@@ -1408,4 +1408,7 @@
     <string name="schedule_agent_changed">The agent changed this chat\'s timers</string>
     <string name="settings_schedule_agent">Let the agent schedule tasks</string>
     <string name="settings_schedule_agent_subtitle">The agent may repeat or monitor something by adding a timer to the chat (up to 3 per chat).</string>
+    <string name="chg_notif_channel">What\'s new</string>
+    <string name="chg_notif_title">NextCraft Forge updated</string>
+    <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
 </resources>
