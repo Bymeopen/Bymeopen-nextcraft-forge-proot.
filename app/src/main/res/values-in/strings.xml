@@ -1033,6 +1033,8 @@
     <string name="mt_ssh_user">Pengguna hanya boleh berisi huruf, angka, . _ -</string>
     <string name="mt_ssh_host">Host hanya boleh berisi huruf, angka, . _ -</string>
     <string name="mt_ssh_port">Port harus 1-65535.</string>
+    <string name="mt_ssh_checking">Memeriksa klien SSH…</string>
+    <string name="mt_ssh_missing">Klien OpenSSH belum terpasang.</string>
     <string name="mt_ssh_forward">Forward harus berbentuk 8080:localhost:80.</string>
     <string name="mt_repair_ok">Titik mount chroot dan skrip supervisor terverifikasi.</string>
     <string name="mt_repair_incomplete">Perbaikan chroot belum tuntas: sebagian mount masih aktif. Nyalakan ulang perangkat lalu coba lagi.</string>

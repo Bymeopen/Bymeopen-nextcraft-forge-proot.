@@ -724,8 +724,6 @@ internal fun RadioRow(
                     fontSize = ForgeType.secondary,
                     color = scheme.onSurfaceVariant,
                     fontFamily = if (mono) FontFamily.Monospace else null,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

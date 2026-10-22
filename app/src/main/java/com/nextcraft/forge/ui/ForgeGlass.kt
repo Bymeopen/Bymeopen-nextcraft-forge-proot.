@@ -35,7 +35,21 @@ import com.kyant.backdrop.effects.vibrancy
  */
 internal val LocalForgeBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
-internal val glassBlurSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+/**
+ * Set at start-up when blur should be skipped even though the OS can do it: low-RAM devices (the blur is the costliest
+ * thing the app draws) and people who turned on the system's high-contrast text, who need solid surfaces.
+ */
+@Volatile internal var glassReducedEffects: Boolean = false
+
+internal val glassBlurSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !glassReducedEffects
+
+internal fun detectReducedEffects(context: android.content.Context): Boolean {
+    val lowRam = context.getSystemService(android.app.ActivityManager::class.java)?.isLowRamDevice == true
+    val highContrast = runCatching {
+        android.provider.Settings.Secure.getInt(context.contentResolver, "high_text_contrast_enabled", 0) == 1
+    }.getOrDefault(false)
+    return lowRam || highContrast
+}
 internal val glassLensSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
 /** Records the content behind floating chrome. Apply to the container that holds the screens, not the chrome. */

@@ -249,7 +249,7 @@ internal fun ForgeBottomBar(
                                         brush = Brush.radialGradient(
                                             colors = listOf(scheme.primary.copy(alpha = 0.28f), Color.Transparent),
                                             center = center,
-                                            radius = size.maxDimension * 0.62f,
+                                            radius = size.minDimension * 0.9f,
                                         ),
                                     )
                                 },
