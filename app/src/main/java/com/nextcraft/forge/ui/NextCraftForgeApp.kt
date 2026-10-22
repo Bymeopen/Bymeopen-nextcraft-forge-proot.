@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -126,7 +125,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     CrashReportPrompt()
 
     state.unsavedChangesPrompt?.let { path ->
-        AlertDialog(
+        ForgeAlertDialog(
             modifier = Modifier.forgePopIn(),
             onDismissRequest = viewModel::cancelLeavingFile,
             title = { Text(stringResource(R.string.files_unsaved_title)) },
@@ -420,7 +419,7 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
     }
 
     if (showGitHubDialog) {
-        AlertDialog(
+        ForgeAlertDialog(
             onDismissRequest = { showGitHubDialog = false },
             title = { Text(stringResource(R.string.settings_github)) },
             text = { GitHubSection(state, viewModel) },
