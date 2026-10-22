@@ -28,6 +28,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -50,6 +54,8 @@ fun ProjectChatsScreen(
     val scheme = MaterialTheme.colorScheme
     val project = state.activeProject
     val chats = state.chats.sortedByDescending { it.updatedAtMillis }
+    var repoOpen by rememberSaveable { mutableStateOf(false) }
+    var reviewChatId by rememberSaveable { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         ForgeProjectHeader(
@@ -84,6 +90,22 @@ fun ProjectChatsScreen(
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 6.dp),
         )
+
+        ForgeTextButton(
+            onClick = { repoOpen = true },
+            modifier = Modifier.padding(start = 12.dp),
+        ) { Text(stringResource(R.string.repo_button)) }
+        if (repoOpen) {
+            RepoSheet(
+                state = state,
+                viewModel = viewModel,
+                onReview = { chatId -> reviewChatId = chatId },
+                onDismiss = { repoOpen = false },
+            )
+        }
+        reviewChatId?.let { id ->
+            BranchSheet(state = state, viewModel = viewModel, chatId = id, onDismiss = { reviewChatId = null })
+        }
 
         if (chats.isEmpty()) {
             ForgeEmptyState(

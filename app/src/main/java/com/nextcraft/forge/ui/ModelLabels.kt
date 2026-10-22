@@ -119,4 +119,6 @@ private fun relativeTime(atMillis: Long, nowMillis: Long, fallback: String): Str
 }
 
 @Composable
-fun ProjectChat.displayTitle(): String = title.ifBlank { stringResource(R.string.chat_main) }
+fun ProjectChat.displayTitle(): String =
+    // "Main chat" is the English default stored in older data; show it in the app language.
+    if (title.isBlank() || title == "Main chat") stringResource(R.string.chat_main) else title

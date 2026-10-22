@@ -424,7 +424,7 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
-        val retry = state.retryPrompt?.takeIf { it.chatId == state.activeChatId && !state.activeChatRunning }
+        val retry = state.retryPrompts[state.activeChatId]?.takeIf { !state.activeChatRunning }
         if (retry != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
@@ -512,6 +512,29 @@ fun AgentScreen(
             }
             QuickActionRow(chips, modifier = Modifier.padding(top = 4.dp))
         }
+        // Voice: words appear in the box while speaking; "stop", "clear" and a trailing "send now" act as commands.
+        var voiceBase by remember { mutableStateOf("") }
+        var imageDialogOpen by rememberSaveable { mutableStateOf(false) }
+        fun joinVoice(base: String, spoken: String) = listOf(base.trim(), spoken.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+        val voice = rememberVoiceController(
+            languageCode = state.languageCode,
+            onPartial = { promptInput = joinVoice(voiceBase, it) },
+            onFinal = { spoken ->
+                when (val command = VoiceCommands.parse(spoken)) {
+                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask() }
+                    VoiceCommand.Clear -> promptInput = ""
+                    is VoiceCommand.Dictate -> {
+                        val text = joinVoice(voiceBase, command.text)
+                        if (command.send && (text.isNotEmpty() || state.pendingAttachments.isNotEmpty())) {
+                            promptInput = ""
+                            viewModel.sendPrompt(text)
+                        } else {
+                            promptInput = text
+                        }
+                    }
+                }
+            },
+        )
         ChatComposer(
             promptInput = promptInput,
             onPromptChange = { promptInput = it },
@@ -532,7 +555,14 @@ fun AgentScreen(
             onModelChip = { modelSheetOpen = true },
             routeChipLabel = routeModeLabel(state.routing.mode),
             onRouteChip = { routeSheetOpen = true },
+            onMic = {
+                if (!voice.listening) voiceBase = promptInput
+                voice.toggle()
+            },
+            listening = voice.listening,
+            onGenerateImage = { imageDialogOpen = true },
         )
+        if (imageDialogOpen) ImageGenerationDialog(state = state, viewModel = viewModel, onDismiss = { imageDialogOpen = false })
     }
     }
 
@@ -677,7 +707,11 @@ internal fun ChatMessageCard(
                 }
                 if (message.attachments.isNotEmpty()) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        message.attachments.forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                        message.attachments.filterNot { it.mimeType.startsWith("image/") }
+                            .forEach { att -> AttachmentChip(name = att.displayName, size = att.sizeBytes, onRemove = null) }
+                    }
+                    message.attachments.filter { it.mimeType.startsWith("image/") }.forEach { att ->
+                        ChatImage(alt = att.displayName, src = att.relativePath, maxHeight = 200.dp)
                     }
                 }
             }

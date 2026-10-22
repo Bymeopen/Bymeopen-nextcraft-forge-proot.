@@ -1945,6 +1945,8 @@ class RuntimeInstaller(private val context: Context) {
         pseudoTerminal: Boolean = false,
         ptyRows: Int = 40,
         ptyColumns: Int = 120,
+        trustClaudeWorkspace: Boolean = true,
+        claudeMcpServers: org.json.JSONObject? = null,
     ): Process {
         val (envFile, suCommand) = prepareChrootShellCommand(
             workspace = workspace,
@@ -1953,11 +1955,13 @@ class RuntimeInstaller(private val context: Context) {
             guestCommand = guestCommand,
             chrootExec = chrootExec,
             targetRootfs = rootfs,
+            trustClaudeWorkspace = trustClaudeWorkspace,
+            claudeMcpServers = claudeMcpServers,
         )
 
         val spawned = try {
             NativeSpawnProcess.start(
-                argv = listOf("su", "-mm", "-c", suCommand),
+                argv = SuCompat.argv(suCommand),
                 environment = emptyMap(),
                 cwd = context.filesDir.absolutePath,
                 outputFile = outputFile,
@@ -1990,6 +1994,8 @@ class RuntimeInstaller(private val context: Context) {
         guestCommand: List<String>,
         chrootExec: File = chrootExecFile,
         targetRootfs: File = rootfs,
+        trustClaudeWorkspace: Boolean = true,
+        claudeMcpServers: org.json.JSONObject? = null,
     ): Pair<File, String> {
         check(ensureRootfsCompatibilityLinks(targetRootfs)) { "Core runtime has an invalid Linux filesystem layout" }
         require(
@@ -2003,8 +2009,9 @@ class RuntimeInstaller(private val context: Context) {
         workspace.mkdirs()
         File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         writeAndroidGradleConfiguration(targetRootfs)
-        if (guestWorkspacePath != "/root") {
-            ensureWorkspaceTrust(guestWorkspacePath, environment)
+        // ~/.claude.json belongs to Claude Code; other agents never read it, so they skip the parse + fsync per launch.
+        if (trustClaudeWorkspace && guestWorkspacePath != "/root") {
+            ensureWorkspaceTrust(guestWorkspacePath, environment, claudeMcpServers)
         }
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
         File(context.filesDir, "runtime-bridge-responses").mkdirs()
@@ -2170,6 +2177,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
     private fun ensureWorkspaceTrust(
         workspacePath: String,
         environment: Map<String, String> = emptyMap(),
+        mcpServers: org.json.JSONObject? = null,
     ) = synchronized(CLAUDE_STATE_LOCK) {
         val stateFile = File(rootfs, "root/.claude.json")
         if (stateFile.exists() && !(stateFile.canRead() && stateFile.canWrite())) {
@@ -2186,28 +2194,56 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         } else {
             JSONObject()
         }
+        var changed = false
         listOf("disableAllHooks", "permissions", "hooks", "allowedTools", "autoApprove")
-            .forEach { state.remove(it) }
-        state.put("hasCompletedOnboarding", true)
-        val projects = state.optJSONObject("projects") ?: JSONObject()
-        val workspace = projects.optJSONObject(workspacePath) ?: JSONObject()
-        workspace.put("hasTrustDialogAccepted", true)
+            .forEach { if (state.has(it)) { state.remove(it); changed = true } }
+        if (!state.optBoolean("hasCompletedOnboarding", false)) {
+            state.put("hasCompletedOnboarding", true)
+            changed = true
+        }
+        val projects = state.optJSONObject("projects") ?: JSONObject().also { changed = true }
+        val workspace = projects.optJSONObject(workspacePath) ?: JSONObject().also { changed = true }
+        if (!workspace.optBoolean("hasTrustDialogAccepted", false)) {
+            workspace.put("hasTrustDialogAccepted", true)
+            changed = true
+        }
         projects.put(workspacePath, workspace)
         state.put("projects", projects)
         val apiKeySuffix = environment["ANTHROPIC_API_KEY"]?.trim()?.takeIf { it.isNotEmpty() }?.takeLast(20)
         if (!apiKeySuffix.isNullOrBlank()) {
-            val responses = state.optJSONObject("customApiKeyResponses") ?: JSONObject()
-            val approved = responses.optJSONArray("approved") ?: JSONArray()
+            val responses = state.optJSONObject("customApiKeyResponses") ?: JSONObject().also { changed = true }
+            val approved = responses.optJSONArray("approved") ?: JSONArray().also { changed = true }
             val existing = (0 until approved.length()).mapNotNull { approved.optString(it).takeIf(String::isNotBlank) }.toSet()
             if (apiKeySuffix !in existing) {
                 approved.put(apiKeySuffix)
+                changed = true
             }
             responses.put("approved", approved)
             if (responses.optJSONArray("rejected") == null) {
                 responses.put("rejected", JSONArray())
+                changed = true
             }
             state.put("customApiKeyResponses", responses)
         }
+        // Connectors the user added: the entries this app manages (prefix "forge-") follow the saved list, anything
+        // else in mcpServers (added with `claude mcp add`) is left alone.
+        if (mcpServers != null) {
+            val existing = state.optJSONObject("mcpServers") ?: JSONObject()
+            fun managed(source: JSONObject): String = source.keys().asSequence()
+                .filter { it.startsWith(McpConnector.MANAGED_PREFIX) }.sorted()
+                .joinToString("|") { key -> key + "=" + source.get(key) }
+            if (managed(existing) != managed(mcpServers)) {
+                existing.keys().asSequence().toList()
+                    .filter { it.startsWith(McpConnector.MANAGED_PREFIX) }
+                    .forEach { existing.remove(it) }
+                mcpServers.keys().forEach { key -> existing.put(key, mcpServers.get(key)) }
+                state.put("mcpServers", existing)
+                changed = true
+            }
+        }
+        // Every launch used to rewrite (and fsync) the file even when nothing changed; that is slow flash I/O and
+        // can overwrite what a running Claude session wrote in the meantime.
+        if (!changed && stateFile.exists()) return@synchronized
         writeRootfsFileAtomically(stateFile, state.toString())
     }
 
@@ -2751,7 +2787,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         }
 
         /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
-        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "android", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
@@ -2943,8 +2979,29 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 NEXTCRAFT_IN_MOUNT_NS=1 exec unshare -m "${'$'}0" "${'$'}ROOTFS" "${'$'}HOST_WORKSPACE" "${'$'}GUEST_WORKSPACE" "${'$'}HOST_BRIDGE" "${'$'}APP_UID" "${'$'}@"
             fi
 
+            # Pure-sh readers of /proc/mounts: stock Android toolbox/toybox does not ship awk on every release, and the
+            # mount logic must not depend on a Magisk/KernelSU busybox being on PATH.
+            mounts_at_or_under() {
+                while read -r _ mp _; do
+                    case "${'$'}mp" in "${'$'}1"|"${'$'}1"/*) printf '%s\n' "${'$'}mp" ;; esac
+                done < /proc/mounts
+            }
+            mounts_below() {
+                while read -r _ mp _; do
+                    case "${'$'}mp" in "${'$'}1"/*) printf '%s\n' "${'$'}mp" ;; esac
+                done < /proc/mounts
+            }
             is_mounted() {
-                awk -v target="${'$'}1" '${'$'}2 == target { found=1; exit } END { exit !found }' /proc/mounts
+                while read -r _ mp _; do
+                    [ "${'$'}mp" = "${'$'}1" ] && return 0
+                done < /proc/mounts
+                return 1
+            }
+            has_submounts() {
+                while read -r _ mp _; do
+                    case "${'$'}mp" in "${'$'}1"/*) return 0 ;; esac
+                done < /proc/mounts
+                return 1
             }
 
             mount_once() {
@@ -2970,9 +3027,6 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             # A recursive bind is not used: its copies are peers of the shared Android mounts until they are made slaves,
             # and unmounting a copy that is still a peer also unmounts the real module. Instead the directory is bound on
             # its own, made a slave while it has no submounts yet, and only then are the modules bound one by one.
-            has_submounts() {
-                awk -v prefix="${'$'}1/" 'index(${'$'}2, prefix) == 1 { found=1; exit } END { exit !found }' /proc/mounts
-            }
 
             # On failure MAKE_SLAVE_ERR holds what each attempt printed, so the warning below can say why.
             make_slave() {
@@ -3008,7 +3062,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     return 0
                 fi
                 # Parents first, so each module lands on a mount point that is already a slave copy.
-                awk -v prefix="${'$'}src/" 'index(${'$'}2, prefix) == 1 { print ${'$'}2 }' /proc/mounts | sort | while read -r sub; do
+                mounts_below "${'$'}src" | sort | while read -r sub; do
                     target="${'$'}dst${'$'}{sub#"${'$'}src"}"
                     [ -d "${'$'}sub" ] && [ -d "${'$'}target" ] || continue
                     is_mounted "${'$'}target" && continue
@@ -3065,6 +3119,45 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     mount_bionic "${'$'}bionic_dir" "${'$'}ROOTFS${'$'}bionic_dir"
                 fi
             done
+
+            # Opt-in view of the Android root under /android. Off unless the app-side file runtime/android-root holds "ro" or
+            # "rw"; it sits outside the rootfs, so the guest cannot switch it on or upgrade ro to rw itself.
+            ANDROID_ROOT_MODE=${'$'}(cat "${'$'}(dirname "${'$'}ROOTFS")/android-root" 2>/dev/null | tr -d ' \n\r')
+            mount_android_view() {
+                local src="${'$'}1"
+                local dst="${'$'}ROOTFS/android${'$'}1"
+                [ -d "${'$'}src" ] || return 0
+                mkdir -p "${'$'}dst"
+                is_mounted "${'$'}dst" && return 0
+                mount -o bind "${'$'}src" "${'$'}dst" 2>/dev/null || return 0
+                # Same propagation rule as mount_bionic: a copy that stays a peer would let umount hit the real mount.
+                if ! make_slave "${'$'}dst"; then
+                    umount "${'$'}dst" 2>/dev/null || true
+                    echo "Warning: skipped /android${'$'}src: mount propagation cannot be changed" >&2
+                    return 0
+                fi
+                mounts_below "${'$'}src" | sort | while read -r sub; do
+                    target="${'$'}dst${'$'}{sub#"${'$'}src"}"
+                    [ -d "${'$'}sub" ] && [ -d "${'$'}target" ] || continue
+                    is_mounted "${'$'}target" && continue
+                    if mount -o bind "${'$'}sub" "${'$'}target" 2>/dev/null && ! make_slave "${'$'}target"; then
+                        umount "${'$'}target" 2>/dev/null || true
+                    fi
+                done
+                if [ "${'$'}ANDROID_ROOT_MODE" = "ro" ]; then
+                    # Read-only must cover every submount too, otherwise /android/data/media etc. stay writable.
+                    mounts_at_or_under "${'$'}dst" | sort | while read -r m; do
+                        mount -o remount,bind,ro "${'$'}m" 2>/dev/null || echo "Warning: ${'$'}m is still writable" >&2
+                    done
+                fi
+            }
+            case "${'$'}ANDROID_ROOT_MODE" in
+                ro|rw)
+                    for android_dir in /data /storage /mnt /metadata /cache /odm /system_ext /vendor /product /system /apex; do
+                        mount_android_view "${'$'}android_dir"
+                    done
+                    ;;
+            esac
 
             mkdir -p "${'$'}HOST_WORKSPACE" "${'$'}HOST_BRIDGE"
             if [ "${'$'}HOST_WORKSPACE" != "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" ]; then
@@ -3213,14 +3306,19 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             fi
             ROOTFS_REAL=${'$'}(realpath "${'$'}ROOTFS" 2>/dev/null || printf '%s' "${'$'}ROOTFS")
             ROOTFS_CLEAN="${'$'}{ROOTFS_REAL%/}"
+            mounts_at_or_under() {
+                while read -r _ mp _; do
+                    case "${'$'}mp" in "${'$'}1"|"${'$'}1"/*) printf '%s\n' "${'$'}mp" ;; esac
+                done < /proc/mounts
+            }
             # Make every mount under the rootfs private before unmounting: the Bionic directories are recursive copies of
             # shared Android mounts, and unmounting a copy that is still a peer would also unmount the original.
-            for mp in ${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort); do
+            for mp in ${'$'}(mounts_at_or_under "${'$'}ROOTFS_CLEAN" | sort); do
                 mount --make-private "${'$'}mp" 2>/dev/null || mount -o private "${'$'}mp" 2>/dev/null || true
             done
 
             for pass in 1 2 3; do
-                MOUNTS=${'$'}(awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { print ${'$'}2 }' /proc/mounts | sort -r)
+                MOUNTS=${'$'}(mounts_at_or_under "${'$'}ROOTFS_CLEAN" | sort -r)
                 if [ -z "${'$'}MOUNTS" ]; then
                     break
                 fi
@@ -3232,7 +3330,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     fi
                 done
             done
-            if awk -v prefix="${'$'}ROOTFS_CLEAN/" -v exact="${'$'}ROOTFS_CLEAN" 'index(${'$'}2, prefix) == 1 || ${'$'}2 == exact { found=1; exit } END { exit !found }' /proc/mounts; then
+            if [ -n "${'$'}(mounts_at_or_under "${'$'}ROOTFS_CLEAN")" ]; then
                 exit 1
             fi
             rm -rf "${'$'}ROOTFS_CLEAN/tmp/.nextcraft-mounts" 2>/dev/null || true

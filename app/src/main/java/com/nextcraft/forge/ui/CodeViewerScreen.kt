@@ -48,7 +48,8 @@ internal fun fileAsViewerLines(content: String): List<DiffLine> =
 @Composable
 fun CodeViewerScreen(state: ForgeUiState, viewModel: MainViewModel) {
     val scheme = MaterialTheme.colorScheme
-    var showChanges by rememberSaveable { mutableStateOf(true) }
+    // Open on the files when there is nothing to review, instead of an empty "changes" tab.
+    var showChanges by rememberSaveable { mutableStateOf(state.changedItems.isNotEmpty()) }
     var openPath by rememberSaveable { mutableStateOf<String?>(null) }
     // Generated and vendored folders would bury the project's own files and make the list thousands of rows long.
     val allFiles = remember(state.workspaceFiles) {

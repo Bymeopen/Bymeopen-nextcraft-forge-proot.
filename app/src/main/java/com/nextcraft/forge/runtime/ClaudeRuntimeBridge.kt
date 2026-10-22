@@ -242,6 +242,7 @@ class ClaudeRuntimeBridge(
                 launch.environment + ("NEXTCRAFT_SESSION_ID" to sessionId),
                 command,
                 guestWorkspacePath = guestWorkspacePath,
+                claudeMcpServers = runCatching { ConnectorStore(context).mcpServersJson() }.getOrNull(),
             )
             activeProcess = process
             runCatching {

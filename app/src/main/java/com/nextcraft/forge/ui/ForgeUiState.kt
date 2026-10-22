@@ -10,6 +10,9 @@ import androidx.lifecycle.viewModelScope
 import com.nextcraft.forge.data.ApiKeyVault
 import com.nextcraft.forge.data.AppPreferences
 import com.nextcraft.forge.runtime.BranchStatus
+import com.nextcraft.forge.runtime.ClaudeSkill
+import com.nextcraft.forge.runtime.McpConnector
+import com.nextcraft.forge.runtime.ProjectRepoInfo
 import com.nextcraft.forge.model.ActivityItem
 import com.nextcraft.forge.model.AgentKind
 import com.nextcraft.forge.model.RoutingConfig
@@ -210,6 +213,7 @@ data class ForgeUiState(
     val gameTemplatesEnabled: Boolean = false,
     val reaChatHint: Boolean = false,
     val updateNotifications: Boolean = true,
+    val autoBranchChats: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",
     val claudeEffort: String = "",
@@ -219,6 +223,15 @@ data class ForgeUiState(
     val branchBusy: Set<String> = emptySet(),
     /** Last diff text loaded for a branch (chat id to text). */
     val branchDiff: Map<String, String> = emptyMap(),
+    /** The open project's own repository (null until the repository panel loads it). */
+    val projectRepo: ProjectRepoInfo? = null,
+    val repoBusy: Boolean = false,
+    val imageGenerating: Boolean = false,
+    /** MCP connectors and Claude Code skills (loaded when the connectors sheet opens). */
+    val connectors: List<McpConnector> = emptyList(),
+    val skills: List<ClaudeSkill> = emptyList(),
+    /** Bumped when the Google image key is saved, so the dialog notices it. */
+    val geminiKeyVersion: Int = 0,
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
@@ -231,7 +244,8 @@ data class ForgeUiState(
     /** Recovery offered with [bannerMessage]; shown only while the banner still carries the message it was made for. */
     val bannerAction: BannerAction? = null,
     /** The last message of a turn that failed (not stopped); offered as "Try again" above the composer. */
-    val retryPrompt: RetryPrompt? = null,
+    /** The last prompt of each chat whose turn failed (by chat id), so parallel failures do not overwrite each other. */
+    val retryPrompts: Map<String, RetryPrompt> = emptyMap(),
     /** Set while a deleted project can still be restored; the UI shows a Snackbar with Undo. */
     val undoDelete: ProjectUndo? = null,
 )
