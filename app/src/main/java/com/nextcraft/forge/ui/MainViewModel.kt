@@ -63,6 +63,7 @@ import com.nextcraft.forge.runtime.DiagnosticsController
 import com.nextcraft.forge.runtime.CiCdController
 import com.nextcraft.forge.runtime.BuildMatrixController
 import com.nextcraft.forge.runtime.GoProjectTemplateGenerator
+import com.nextcraft.forge.runtime.GameProjectTemplateGenerator
 import com.nextcraft.forge.runtime.sanitizeClaudeAuthOutput
 import com.nextcraft.forge.runtime.AntigravityRuntimeBridge
 import com.nextcraft.forge.runtime.ClaudeRuntimeBridge
@@ -370,6 +371,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
+                    gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     reaChatHint = preferences.reaChatHint,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -749,16 +751,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         when {
                             isAndroid -> "Android (${androidTemplate.label}) project"
                             starter == StarterTemplate.GO -> "Go command-line app"
+                            starter == StarterTemplate.GAME_LIBGDX -> "libGDX game (Android + PC)"
                             else -> "General coding workspace"
                         }
                     },
                     language = when {
                         isAndroid -> "Kotlin"
                         starter == StarterTemplate.GO -> "Go"
+                        starter == StarterTemplate.GAME_LIBGDX -> "Java (libGDX)"
                         else -> "Multi-language"
                     },
                     slug = slug,
-                    type = if (isAndroid) ProjectType.ANDROID else ProjectType.GENERAL,
+                    // A libGDX game has an Android :app module, so it gets the Android build-and-install flow.
+                    type = if (isAndroid || starter == StarterTemplate.GAME_LIBGDX) ProjectType.ANDROID else ProjectType.GENERAL,
                     androidTemplate = if (isAndroid) androidTemplate else null,
                 )
                 val wsDir = File(getApplication<Application>().filesDir, "workspaces/${project.id}")
@@ -773,6 +778,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     checkpoints.ensureWorkspace(project.id)
                     if (starter == StarterTemplate.GO) {
                         GoProjectTemplateGenerator.generate(wsDir, cleanName)
+                    } else if (starter == StarterTemplate.GAME_LIBGDX) {
+                        GameProjectTemplateGenerator.generate(wsDir, cleanName)
                     } else {
                         File(wsDir, "README.md").writeText("# $cleanName\n\n${project.description}\n")
                     }
@@ -1677,7 +1684,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
-                appendAssistantText(run, "\n\n[$reason]")
+                appendFailureReason(run, reason)
                 offerRetry(run)
                 finishRun(run)
                 discardQueuedPrompts(run.chatId)
@@ -1687,6 +1694,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    /**
+     * Adds "[reason]" to the reply unless the agent already printed that error into it (Claude Code streams an API
+     * error as reply text and then fails with the same message, which showed the whole error twice).
+     */
+    private fun appendFailureReason(run: ChatRun, reason: String) {
+        val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
+        val head = reason.trim().lineSequence().firstOrNull().orEmpty().take(80)
+        val shown = head.isNotBlank() && reply.contains(head)
+        if (!shown) appendAssistantText(run, "\n\n[$reason]")
     }
 
     private fun appendAssistantText(run: ChatRun, delta: String) {
@@ -3865,6 +3883,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setGameTemplatesEnabled(enabled: Boolean) {
+        preferences.gameTemplatesEnabled = enabled
+        _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
 
     fun setReaChatHint(enabled: Boolean) {

@@ -166,6 +166,13 @@ fun SettingsScreenModern(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             ForgeToggleRow(
+                title = stringResource(R.string.settings_game_templates),
+                subtitle = stringResource(R.string.settings_game_templates_subtitle),
+                checked = state.gameTemplatesEnabled,
+                onCheckedChange = viewModel::setGameTemplatesEnabled,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
                 title = stringResource(R.string.settings_rea_chat_hint),
                 subtitle = stringResource(R.string.settings_rea_chat_hint_subtitle),
                 checked = state.reaChatHint,
