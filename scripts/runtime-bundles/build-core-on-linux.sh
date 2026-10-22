@@ -27,9 +27,10 @@ work="$(mktemp -d)"
 rootfs="$work/rootfs"
 # Unmount before deleting: rm -rf must never walk into the host's /dev or /proc.
 unmount_rootfs() {
-  grep " $rootfs/" /proc/mounts | cut -d' ' -f2 | sort -r | while read -r m; do umount -l "$m" 2>/dev/null || true; done
+  # grep exits 1 once nothing is mounted; that is the normal end state, not an error.
+  { grep " $rootfs/" /proc/mounts || true; } | cut -d' ' -f2 | sort -r | while read -r m; do umount -l "$m" 2>/dev/null || true; done
 }
-trap 'unmount_rootfs; rm -rf --one-file-system "$work"' EXIT
+trap 'unmount_rootfs; rm -rf --one-file-system "$work" || true' EXIT
 
 curl -fL --retry 3 -o "$work/$ROOTFS_FILE" "$ROOTFS_URL"
 printf '%s  %s\n' "$ROOTFS_SHA256" "$work/$ROOTFS_FILE" | sha256sum -c -

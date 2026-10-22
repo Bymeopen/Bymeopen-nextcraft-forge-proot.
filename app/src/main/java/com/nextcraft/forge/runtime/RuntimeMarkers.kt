@@ -21,7 +21,7 @@ internal object RuntimeMarkers {
         "github-cli-version", "dsh-android-compat-version", "macos-metadata-repair", "python-tools-version",
     ).map { PREFIX + it } + listOf("root/${PREFIX}rea-version", "root/${PREFIX}android-tools-version")
 
-    /** Gradle loads every script in init.d, so only one of these may exist. */
+    /** Gradle loads every script in init.d, so only one of these may exist. Same path as AndroidToolchain (compiled standalone by build-android-maven-cache.sh). */
     const val GRADLE_INIT_SCRIPT = "root/.gradle/init.d/nextcraft-android.gradle"
     const val LEGACY_GRADLE_INIT_SCRIPT = "root/.gradle/init.d/pocketdev-android.gradle"
 
