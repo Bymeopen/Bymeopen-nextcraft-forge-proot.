@@ -6,10 +6,11 @@ import mmap
 import re
 from typing import Any
 
-_ASCII = re.compile(rb"[\x20-\x7e]{%d,}")
-_UTF16 = re.compile(rb"(?:[\x20-\x7e]\x00){%d,}")
+# A run is cut at 4096 characters: an unbounded run (a long printable section) was read whole into memory and scored.
+_ASCII = re.compile(rb"[\x20-\x7e]{%d,4096}")
+_UTF16 = re.compile(rb"(?:[\x20-\x7e]\x00){%d,4096}")
 _URL = re.compile(r"\b(?:https?|ftp|wss?)://[^\s\"'<>]+", re.IGNORECASE)
-_EMAIL = re.compile(r"\b[A-Za-z0-9.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
+_EMAIL = re.compile(r"\b[A-Za-z0-9.+-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
 _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _PATH = re.compile(r"^(?:/[\w.\-@+]+){2,}/?$|^[A-Za-z]:\\[\w\\. -]+$")
 _HEXKEY = re.compile(r"\b[0-9a-fA-F]{32,}\b")

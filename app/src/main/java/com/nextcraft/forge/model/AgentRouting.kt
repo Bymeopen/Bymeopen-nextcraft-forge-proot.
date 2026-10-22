@@ -82,6 +82,11 @@ internal object AgentRouter {
         counter: Int,
         tried: Set<AgentKind> = emptySet(),
     ): RoutedMessage? {
+        // Single is exactly the agent the user selected: no @tag, no keyword rule and no readiness check can move the
+        // message elsewhere, and the text goes through untouched.
+        if (config.mode == RouteMode.SINGLE) {
+            return if (selected in tried) null else RoutedMessage(selected, text, tagged = false)
+        }
         parseTag(text)?.let { (agent, rest) ->
             if (agent in ready && agent !in tried && rest.isNotEmpty()) return RoutedMessage(agent, rest, tagged = true)
         }
@@ -92,8 +97,8 @@ internal object AgentRouter {
         }
         val candidates = config.agents.filter { it in ready && it !in tried }
         val agent = when (config.mode) {
-            RouteMode.SINGLE, RouteMode.MANUAL -> selected.takeIf { it !in tried && (config.mode == RouteMode.SINGLE || it in ready) }
-                ?: if (config.mode == RouteMode.MANUAL) candidates.firstOrNull() else null
+            RouteMode.SINGLE -> selected // handled above
+            RouteMode.MANUAL -> selected.takeIf { it !in tried && it in ready } ?: candidates.firstOrNull()
             RouteMode.FAILOVER -> candidates.firstOrNull()
             RouteMode.BALANCED -> balancedPick(candidates, config, counter)
         } ?: return null

@@ -16,6 +16,7 @@ from typing import Any
 from ..parsers.elf import function_symbols, open_elf
 from ..result import E_MISSING_DEP, E_NOT_SUPPORTED, E_SYMBOL, E_USAGE, ReaError
 from .gdbrsp import GdbClient, parse_registers, parse_stop_reply
+from .proc import StreamDrain
 
 _QEMU = {"aarch64": "qemu-aarch64", "arm": "qemu-arm", "x86_64": "qemu-x86_64", "386": "qemu-i386"}
 _LAYOUT: dict[str, list[tuple[str, int]]] = {
@@ -130,10 +131,23 @@ def run_emulated(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    # Both pipes are read from the start: a program that prints more than a pipe holds would otherwise block forever.
+    out_drain = StreamDrain(process.stdout, MAX_OUTPUT)
+    err_drain = StreamDrain(process.stderr, MAX_OUTPUT)
     client: GdbClient | None = None
     layout = _LAYOUT[machine]
     try:
-        client = GdbClient.connect("127.0.0.1", port, timeout)
+        try:
+            client = GdbClient.connect("127.0.0.1", port, timeout, alive=lambda: process.poll() is None)
+        except ReaError:
+            if process.poll() is not None:
+                reason = err_drain.text(wait=1.0).strip()[:300] or "tanpa pesan"
+                raise ReaError(
+                    E_NOT_SUPPORTED,
+                    f"QEMU berhenti sebelum debugger tersambung: {reason}",
+                    "Pastikan arsitektur ELF cocok dengan qemu-user yang terpasang (`rea doctor`).",
+                ) from None
+            raise
         features = client.request("qSupported:multiprocess+;swbreak+;hwbreak+", timeout)
         first = parse_stop_reply(client.request("?", timeout))
         registers = parse_registers(client.request("g", timeout), layout)
@@ -182,7 +196,7 @@ def run_emulated(
                 process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 process.kill()
-            result["output"] = _read_stream(process.stdout)
+            result["output"] = out_drain.text(wait=1.0)
         return result
     except (TimeoutError, ConnectionError) as error:
         raise ReaError(E_USAGE, f"Sesi gdbstub terputus: {error}", "Coba lagi dengan --timeout lebih besar.") from error

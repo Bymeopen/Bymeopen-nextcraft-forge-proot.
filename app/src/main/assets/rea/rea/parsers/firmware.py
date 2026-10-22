@@ -512,7 +512,7 @@ def _extract_zip(carved: str, folder: str) -> dict[str, Any]:
                 if total > MAX_DECOMPRESS:
                     return {"status": "failed", "output": None, "detail": "ukuran terekstrak melewati batas", "hint": ""}
             archive.extractall(folder)
-    except (zipfile.BadZipFile, OSError, RuntimeError) as error:
+    except (zipfile.BadZipFile, OSError, RuntimeError, zlib.error, lzma.LZMAError, EOFError, NotImplementedError) as error:
         return {"status": "failed", "output": None, "detail": str(error)[:200], "hint": ""}
     return {"status": "ok", "output": folder, "detail": "", "hint": ""}
 

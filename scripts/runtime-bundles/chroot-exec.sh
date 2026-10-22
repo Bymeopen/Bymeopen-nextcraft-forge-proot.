@@ -131,7 +131,9 @@ mount_dynamic_bind() {
     if is_mounted "$dst"; then
         local prev_src=""
         [ -f "$state_file" ] && prev_src=$(cat "$state_file" 2>/dev/null || true)
-        if [ "$prev_src" != "$src" ]; then
+        # A mount whose source was deleted keeps showing the dead directory (link count 0) even after the same path is
+        # created again (a discarded and re-created chat branch, a deleted probe folder), so it must be replaced too.
+        if [ "$prev_src" != "$src" ] || [ "$(stat -c %h "$dst" 2>/dev/null)" = 0 ]; then
             umount "$dst" 2>/dev/null || umount -l "$dst" 2>/dev/null || true
         fi
     fi
@@ -252,7 +254,9 @@ fi
 # Claude prompt) is passed through fd 3: a non-interactive shell gives background commands /dev/null.
 child_status=0
 exec 3<&0
+STOPPED=""
 forward_signal() {
+    STOPPED=1
     if [ -n "$SETSID" ]; then
         kill "-$1" -- "-$child" 2>/dev/null || true
     else
@@ -267,7 +271,7 @@ if [ ! -t 0 ] && command -v setsid >/dev/null 2>&1; then
     SETSID="setsid"
 fi
 
-# Ends whatever the command left behind (a dev server, a watcher, a daemonised helper): TERM, a short grace period, KILL.
+# Ends whatever a stopped or failed command left behind (a dev server, a watcher, a helper): TERM, a short grace period, KILL.
 reap_group() {
     [ -n "$SETSID" ] || return 0
     kill -s TERM -- "-$child" 2>/dev/null || return 0
@@ -293,5 +297,9 @@ while :; do
     wait "$child" || child_status=$?
     kill -0 "$child" 2>/dev/null || break
 done
-reap_group
+# Only after a stop or a failure: a command that finished normally may have left a dev server running on purpose
+# (the Preview tab looks for it), so its processes are not touched.
+if [ -n "$STOPPED" ] || [ "$child_status" -ne 0 ]; then
+    reap_group
+fi
 exit "$child_status"

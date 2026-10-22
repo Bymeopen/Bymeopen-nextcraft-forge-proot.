@@ -533,12 +533,12 @@ internal fun AntigravityAccountCard(
                         Chevron(expanded = false)
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Stacked, not side by side: the long hint used to squeeze the label into two ragged lines.
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = stringResource(R.string.agent_reasoning_depth),
                         fontSize = ForgeType.secondary,
                         color = scheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
                     )
                     Text(
                         text = stringResource(
@@ -554,6 +554,7 @@ internal fun AntigravityAccountCard(
                 }
                 ForgePillTabs(
                     items = listOf(stringResource(R.string.agent_effort_low), stringResource(R.string.agent_effort_medium), stringResource(R.string.agent_effort_high)),
+                    equalWidth = true,
                     selectedIndex = effortIndex,
                     onSelect = {
                         onAgyEffortChange(efforts[it])

@@ -22,7 +22,7 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.14.3"
+          gradle-version: "9.8.2"
       - name: Render screenshots
         run: gradle --no-daemon :app:testDebugUnitTest -PforgeScreenshots --tests "com.nextcraft.forge.ui.Shots*"
       - uses: actions/upload-artifact@v4

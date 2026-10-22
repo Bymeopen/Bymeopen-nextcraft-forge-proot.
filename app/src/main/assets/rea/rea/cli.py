@@ -672,13 +672,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_FORMAT_ERRORS = {"ELFError", "ELFParseError", "ELFRelocationError", "DWARFError", "error", "RecursionError", "ZeroDivisionError"}
+
+
+def _is_format_error(error: BaseException) -> bool:
+    """Pustaka pengurai (pyelftools, struct) melempar ini untuk masukan yang rusak, bukan karena bug REA."""
+    import struct
+
+    return isinstance(error, (struct.error, ZeroDivisionError, RecursionError)) or type(error).__name__ in _FORMAT_ERRORS
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
     except SystemExit as exit_request:
         # argparse sudah mencetak pesan ke stderr; --version dan --help keluar dengan 0.
-        return int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
+        code = int(exit_request.code or 0) if isinstance(exit_request.code, int) else 2
+        words = list(argv) if argv is not None else sys.argv[1:]
+        if code != 0 and "--json" in words:
+            # Aplikasi membaca baris terakhir stdout sebagai objek JSON; tanpa itu galat argumen tampak seperti crash.
+            command = next((w for w in words if not w.startswith("-")), "rea")
+            emit_json(failure(command, ReaError(E_USAGE, "Argumen tidak valid.", f"Jalankan `rea {command} --help`.")))
+        return code
     handlers = {"doctor": _doctor, "id": _id, "analyze": _analyze, "report": _report, "apk": _apk, "dex": _dex, "decompile": _decompile, "emu": _emu, "run": _run, "learn": _learn, "plugins": _plugins_cmd, "firmware": _firmware}
     _show_notice_once()
     if args.no_plugins:
@@ -691,7 +707,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.json:
             print(f"Galat: {error.message}" + (f"\n{error.hint}" if error.hint else ""), file=sys.stderr)
     except Exception as error:  # noqa: BLE001 - batas terluar: jangan pernah menumpahkan traceback ke aplikasi
-        result = failure(args.command, ReaError(E_INTERNAL, f"{type(error).__name__}: {error}", "Laporkan galat ini."))
+        if _is_format_error(error):
+            # Berkas terpotong atau rusak bukan galat REA: katakan itu, jangan minta pengguna melapor.
+            result = failure(args.command, ReaError(E_BAD_FORMAT, f"Berkas rusak atau terpotong: {error}", "Periksa dengan `rea id`."))
+        else:
+            result = failure(args.command, ReaError(E_INTERNAL, f"{type(error).__name__}: {error}", "Laporkan galat ini."))
         code = 1
         if not args.json:
             print(f"Galat internal: {error}", file=sys.stderr)
