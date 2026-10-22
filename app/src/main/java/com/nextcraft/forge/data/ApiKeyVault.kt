@@ -174,10 +174,12 @@ class ApiKeyVault(context: Context) {
             android.util.Log.w("ApiKeyVault", "Encrypt failed: ${error::class.simpleName}")
             throw IllegalStateException("Could not encrypt the API key. Unlock the device and try again.", error)
         }
-        preferences.edit()
+        val saved = preferences.edit()
             .putString("$storageId.iv", Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .commit()
+        // A failed commit (disk full) used to look like a saved key that then read back as missing.
+        check(saved) { "Could not save the API key. Check free storage and try again." }
     }
 
     fun contains(providerId: String): Boolean = get(providerId) != null

@@ -177,7 +177,7 @@ internal class LocalFormatGateway(
         val target = JSONObject()
             .put("model", normalizeModel(profile.model))
             .put("stream", false)
-            .put("max_tokens", source.optInt("max_tokens", 4096))
+            .put(maxTokensField(), source.optInt("max_tokens", 4096))
         if (source.has("temperature")) target.put("temperature", source.get("temperature"))
         val messages = JSONArray()
         source.opt("system")?.let { system ->
@@ -894,6 +894,15 @@ internal class LocalFormatGateway(
     private fun providerError(body: String): String = runCatching {
         JSONObject(body).optJSONObject("error")?.stringOrEmpty("message").orEmpty().ifBlank { body.take(500) }
     }.getOrDefault(body.take(500))
+
+    /**
+     * api.openai.com rejects `max_tokens` on its reasoning models (o-series, gpt-5) with HTTP 400 and accepts
+     * `max_completion_tokens` on every current chat model. Other OpenAI-compatible servers keep the older name.
+     */
+    private fun maxTokensField(): String {
+        val host = runCatching { URL(profile.resolvedBaseUrl.trim()).host }.getOrDefault("")
+        return if (host.equals("api.openai.com", ignoreCase = true)) "max_completion_tokens" else "max_tokens"
+    }
 
     private fun normalizeModel(model: String): String = model
         .removePrefix("models/")

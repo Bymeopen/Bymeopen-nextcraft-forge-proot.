@@ -231,7 +231,8 @@ object RuntimeLaunchConfigBuilder {
                 }
             }
             ProviderProtocol.ANTHROPIC -> {
-                environment["ANTHROPIC_BASE_URL"] = profile.resolvedBaseUrl.trim().trimEnd('/')
+                // Claude Code appends /v1/messages itself; a base URL saved with /v1 would hit /v1/v1/messages.
+                environment["ANTHROPIC_BASE_URL"] = profile.resolvedBaseUrl.trim().trimEnd('/').removeSuffix("/v1")
                 environment["ANTHROPIC_MODEL"] = profile.model
             }
             ProviderProtocol.ANTHROPIC_GATEWAY -> {
