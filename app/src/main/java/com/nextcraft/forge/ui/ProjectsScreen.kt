@@ -73,7 +73,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -203,7 +202,7 @@ fun ProjectsScreen(
     }
     pendingRenameProject?.let { target ->
         var name by remember(target.id) { mutableStateOf(target.name) }
-        AlertDialog(
+        ForgeAlertDialog(
             onDismissRequest = { pendingRenameProject = null },
             title = { Text(stringResource(R.string.projects_rename_title)) },
             text = {
@@ -231,7 +230,7 @@ fun ProjectsScreen(
         )
     }
     pendingDeleteProject?.let { target ->
-        AlertDialog(
+        ForgeAlertDialog(
             modifier = Modifier.forgePopIn(),
             onDismissRequest = { pendingDeleteProject = null },
             title = { Text(stringResource(R.string.shell_delete_project_confirm_title)) },
@@ -471,7 +470,7 @@ private fun ImportTile(
 @Composable
 private fun CloneUrlDialog(onDismiss: () -> Unit, onClone: (String) -> Unit) {
     var url by rememberSaveable { mutableStateOf("") }
-    AlertDialog(
+    ForgeAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.projects_clone_title)) },
         text = {

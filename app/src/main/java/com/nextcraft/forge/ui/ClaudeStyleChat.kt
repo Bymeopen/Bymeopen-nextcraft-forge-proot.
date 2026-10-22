@@ -27,7 +27,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -259,7 +258,7 @@ internal fun ChatDrawerRow(
 @Composable
 internal fun RenameChatDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf(initial) }
-    AlertDialog(
+    ForgeAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.chat_rename_title), fontWeight = FontWeight.SemiBold) },
         text = {
@@ -600,7 +599,7 @@ internal fun BranchSheet(state: ForgeUiState, viewModel: MainViewModel, chatId: 
         }
     }
     if (confirmDiscard) {
-        AlertDialog(
+        ForgeAlertDialog(
             onDismissRequest = { confirmDiscard = false },
             title = { Text(stringResource(R.string.branch_discard), fontWeight = FontWeight.SemiBold) },
             text = { Text(stringResource(R.string.branch_discard_confirm)) },

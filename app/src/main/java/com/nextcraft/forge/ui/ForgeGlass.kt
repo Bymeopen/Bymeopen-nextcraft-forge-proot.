@@ -129,3 +129,36 @@ internal fun ForgeModalSheet(
         content = content,
     )
 }
+
+/** Counts an open modal in [LocalForgeSheetDepth] so the root blurs the page behind it (Glass), like a sheet does. */
+@Composable
+private fun CountAsOpenModal() {
+    val depth = LocalForgeSheetDepth.current
+    DisposableEffect(depth) {
+        depth?.let { it.intValue += 1 }
+        onDispose { depth?.let { it.intValue -= 1 } }
+    }
+}
+
+/** The one way to show an alert dialog: Material's AlertDialog plus the same blurred backdrop in Glass as a sheet. */
+@Composable
+internal fun ForgeAlertDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    dismissButton: @Composable (() -> Unit)? = null,
+    title: @Composable (() -> Unit)? = null,
+    text: @Composable (() -> Unit)? = null,
+    shape: androidx.compose.ui.graphics.Shape = androidx.compose.material3.AlertDialogDefaults.shape,
+) {
+    CountAsOpenModal()
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismissRequest,
+        confirmButton = confirmButton,
+        modifier = modifier,
+        dismissButton = dismissButton,
+        title = title,
+        text = text,
+        shape = shape,
+    )
+}

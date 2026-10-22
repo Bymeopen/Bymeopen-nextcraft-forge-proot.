@@ -77,7 +77,6 @@ import androidx.compose.material.icons.filled.List
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowBack
@@ -396,7 +395,7 @@ fun AgentScreen(
         var confirmCapture by remember { mutableStateOf(false) }
         if (confirmCapture) {
             val captureTarget = cameraContext.findWindow()
-            AlertDialog(
+            ForgeAlertDialog(
                 onDismissRequest = { confirmCapture = false },
                 title = { Text(stringResource(R.string.capture_confirm_title)) },
                 text = { Text(stringResource(R.string.capture_confirm_message)) },
