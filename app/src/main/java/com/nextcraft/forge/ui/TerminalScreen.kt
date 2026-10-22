@@ -387,10 +387,11 @@ internal fun TerminalKeyRow(
     ) {
         TerminalKey("Esc", stringResource(R.string.terminal_key_esc), enabled) { press(KeyEvent.KEYCODE_ESCAPE) }
         TerminalKey("Tab", stringResource(R.string.terminal_key_tab), enabled) { press(KeyEvent.KEYCODE_TAB) }
+        // Enter sits third so it is on screen without scrolling the row, even at 360dp.
+        TerminalKey("Enter", stringResource(R.string.terminal_key_enter), enabled) { press(KeyEvent.KEYCODE_ENTER) }
         TerminalKey("Shift", stringResource(R.string.terminal_key_shift), enabled, active = modifiers.shift) { modifiers.shift = !modifiers.shift }
         TerminalKey("Ctrl", stringResource(R.string.terminal_key_ctrl), enabled, active = modifiers.ctrl) { modifiers.ctrl = !modifiers.ctrl }
         TerminalKey("Alt", stringResource(R.string.terminal_key_alt), enabled, active = modifiers.alt) { modifiers.alt = !modifiers.alt }
-        TerminalKey("Enter", stringResource(R.string.terminal_key_enter), enabled) { press(KeyEvent.KEYCODE_ENTER) }
         TerminalKey("^C", stringResource(R.string.terminal_key_interrupt), enabled) {
             liveView()?.inputCodePoint('c'.code, true, false)
         }
@@ -425,7 +426,7 @@ private fun TerminalKey(
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = if (active) scheme.primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
         ),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        contentPadding = PaddingValues(horizontal = 11.dp, vertical = 0.dp),
         modifier = Modifier
             .heightIn(min = ForgeSpace.minTouch)
             .semantics { contentDescription = description }
