@@ -233,6 +233,7 @@ class AntigravityRuntimeBridge(
                     guestWorkspacePath = "/workspace/hello",
                     emulateHardLinks = false,
                     outputFile = outputFile,
+                    trustClaudeWorkspace = false,
                 )
                 try {
                     val request = JSONObject()
@@ -368,6 +369,7 @@ class AntigravityRuntimeBridge(
                 command,
                 guestWorkspacePath = "/workspace/$projectSlug",
                 emulateHardLinks = false,
+                trustClaudeWorkspace = false,
             )
             activeProcess = process
             if (userStopRequested) process.destroy()

@@ -95,11 +95,12 @@ class WorkspaceCheckpoints(
                             runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
                         )
                 }
+                // Directories are already confined to the workspace by onEnter, so a regular file inside one cannot
+                // escape it; a canonicalFile() per file was a realpath walk for every file of every prompt.
                 .filter {
                     it.isFile &&
                         !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
-                        !Files.isSymbolicLink(it.toPath()) &&
-                        runCatching { it.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
+                        !Files.isSymbolicLink(it.toPath())
                 }
                 .forEach { source ->
                     val relative = source.relativeTo(workspace).invariantSeparatorsPath
@@ -475,11 +476,11 @@ class WorkspaceCheckpoints(
                         runCatching { directory.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false)
                     )
             }
+            // onEnter already keeps the walk inside the root, so no per-file canonicalFile() is needed.
             .filter {
                 it.isFile &&
                     !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) &&
-                    !Files.isSymbolicLink(it.toPath()) &&
-                    runCatching { it.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false)
+                    !Files.isSymbolicLink(it.toPath())
             }
             .associate { it.relativeTo(root).invariantSeparatorsPath to digest(it) }
     }
