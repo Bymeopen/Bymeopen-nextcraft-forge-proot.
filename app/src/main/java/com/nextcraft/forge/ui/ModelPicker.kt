@@ -137,12 +137,7 @@ fun ModelPickerDialog(
                 }
                 if (filtered.isEmpty() && !offerCustom) {
                     item(key = "empty") {
-                        Text(
-                            stringResource(R.string.model_picker_empty),
-                            fontSize = ForgeType.body,
-                            color = scheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 12.dp),
-                        )
+                        ForgeEmptyState(glyph = ForgeGlyph.SEARCH, title = stringResource(R.string.model_picker_empty))
                     }
                 }
             }
