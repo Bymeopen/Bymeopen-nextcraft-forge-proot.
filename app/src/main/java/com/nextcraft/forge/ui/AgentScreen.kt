@@ -492,6 +492,7 @@ fun AgentScreen(
         }
         // Voice: words appear in the box while speaking; "stop", "clear" and a trailing "send now" act as commands.
         var voiceBase by remember { mutableStateOf("") }
+        var imageDialogOpen by rememberSaveable { mutableStateOf(false) }
         fun joinVoice(base: String, spoken: String) = listOf(base.trim(), spoken.trim()).filter { it.isNotEmpty() }.joinToString(" ")
         val voice = rememberVoiceController(
             languageCode = state.languageCode,
@@ -535,7 +536,9 @@ fun AgentScreen(
                 voice.toggle()
             },
             listening = voice.listening,
+            onGenerateImage = { imageDialogOpen = true },
         )
+        if (imageDialogOpen) ImageGenerationDialog(state = state, viewModel = viewModel, onDismiss = { imageDialogOpen = false })
     }
     }
 

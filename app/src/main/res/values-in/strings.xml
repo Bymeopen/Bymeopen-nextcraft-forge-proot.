@@ -1120,4 +1120,18 @@
     <string name="chat_image_failed">Gambar tidak tersedia: %1$s</string>
     <string name="chat_image_default_alt">Gambar</string>
     <string name="chat_image_close">Tutup gambar</string>
+    <string name="image_menu">Buat gambar (Nano Banana)</string>
+    <string name="image_dialog_title">Buat gambar</string>
+    <string name="image_key_hint">API key Google AI Studio</string>
+    <string name="image_key_desc">Pembuatan gambar memakai API key Google AI Studio milik Anda (aistudio.google.com). Disimpan terenkripsi di perangkat ini.</string>
+    <string name="image_key_save">Simpan key</string>
+    <string name="image_prompt_hint">Jelaskan gambarnya</string>
+    <string name="image_editing">Mengedit gambar terlampir: %1$s</string>
+    <string name="image_generate">Buat</string>
+    <string name="image_model_fast">Nano Banana</string>
+    <string name="image_model_pro">Nano Banana Pro</string>
+    <string name="image_busy_chat">Tunggu agent selesai di chat ini dulu.</string>
+    <string name="image_need_key">Tambahkan API key Google dulu.</string>
+    <string name="image_working">Sedang membuat gambar…</string>
+    <string name="image_failed">Pembuatan gambar gagal: %1$s</string>
 </resources>

@@ -449,6 +449,8 @@ internal fun ChatComposer(
     /** Microphone button before the send button; null hides it. [listening] shows the recording state. */
     onMic: (() -> Unit)? = null,
     listening: Boolean = false,
+    /** "Create image" entry of the attach menu (Nano Banana); null hides it. */
+    onGenerateImage: (() -> Unit)? = null,
 ) {
     val tokens = LocalForgeThemeTokens.current
     var attachMenuOpen by remember { mutableStateOf(false) }
@@ -502,6 +504,12 @@ internal fun ChatComposer(
                         text = { Text(stringResource(R.string.agent_attach_file)) },
                         onClick = { attachMenuOpen = false; onAttachFile() },
                     )
+                    if (onGenerateImage != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.image_menu)) },
+                            onClick = { attachMenuOpen = false; onGenerateImage() },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.capture_menu)) },
                         enabled = captureEnabled,

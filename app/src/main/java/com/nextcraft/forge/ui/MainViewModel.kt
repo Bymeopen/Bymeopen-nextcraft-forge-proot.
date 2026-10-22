@@ -32,6 +32,9 @@ import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
 import com.nextcraft.forge.network.GitHubDeviceCode
+import com.nextcraft.forge.network.GeminiImageClient
+import com.nextcraft.forge.network.GeminiImageModels
+import com.nextcraft.forge.network.GeminiImageResult
 import com.nextcraft.forge.runtime.RepoOpResult
 import com.nextcraft.forge.runtime.deleteRecursivelyNoFollow
 import com.nextcraft.forge.runtime.shellSingleQuote
@@ -1102,6 +1105,90 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }.getOrNull()
+    }
+
+    // ── Image generation (Nano Banana) ───────────────────────────────────────────────────────────
+
+    private val geminiImage = GeminiImageClient()
+
+    fun hasGeminiImageKey(): Boolean = vault.contains(GeminiImageModels.KEY_ID)
+
+    fun saveGeminiImageKey(key: String) {
+        val clean = key.trim()
+        if (clean.isEmpty()) return
+        runCatching { vault.put(GeminiImageModels.KEY_ID, clean) }
+            .onFailure { _state.update { st -> st.copy(bannerMessage = UiText.res(R.string.msg_api_key_save_failed)) } }
+        _state.update { it.copy(geminiKeyVersion = it.geminiKeyVersion + 1) }
+    }
+
+    /**
+     * Creates (or, with an image attached, edits) a picture with Nano Banana, saves it in the chat's workspace under
+     * `images/` and adds it to the chat as a message.
+     */
+    fun generateImage(prompt: String, model: String) {
+        val project = _state.value.activeProject ?: return
+        val chatId = _state.value.activeChatId
+        val clean = prompt.trim()
+        if (clean.isEmpty() || _state.value.imageGenerating) return
+        if (runs.containsKey(chatId)) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_busy_chat)) }
+            return
+        }
+        val key = vault.get(GeminiImageModels.KEY_ID)
+        if (key.isNullOrBlank()) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.image_need_key)) }
+            return
+        }
+        val attachment = _state.value.pendingAttachments.firstOrNull { it.mimeType.startsWith("image/") }
+        _state.update { it.copy(imageGenerating = true, bannerMessage = UiText.res(R.string.image_working)) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val root = if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) {
+                        chatBranches.branchFor(project, chatId).cloneDir
+                    } else {
+                        checkpoints.ensureWorkspace(project.id)
+                    }
+                    val input = attachment?.let { att ->
+                        val file = checkpoints.safeWorkspaceFile(root, att.relativePath)
+                        if (file.isFile && file.length() <= ChatImageDecoder.MAX_BYTES) file.readBytes() to att.mimeType else null
+                    }
+                    when (val result = geminiImage.generate(key, model, clean, input?.first, input?.second ?: "image/png")) {
+                        is GeminiImageResult.Failure -> Result.failure(IllegalStateException(result.message))
+                        is GeminiImageResult.Success -> {
+                            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                            val name = "images/nanobanana-$stamp.${com.nextcraft.forge.network.imageExtension(result.mimeType)}"
+                            val target = checkpoints.safeWorkspaceFile(root, name)
+                            target.parentFile?.mkdirs()
+                            target.writeBytes(result.bytes)
+                            Result.success(name to result.note)
+                        }
+                    }
+                }.getOrElse { Result.failure(it) }
+            }
+            outcome.fold(
+                onSuccess = { (path, note) ->
+                    val alt = clean.replace(Regex("[\\[\\]()\\n]"), " ").take(80)
+                    val reply = ChatMessage(fromUser = false, text = "![$alt]($path)" + if (note.isNotBlank()) "\n\n$note" else "")
+                    appendLocalMessages(project.id, chatId, listOf(ChatMessage(fromUser = true, text = clean), reply))
+                    _state.update { it.copy(imageGenerating = false, pendingAttachments = if (attachment != null) emptyList() else it.pendingAttachments) }
+                    refreshWorkspaceFilesAndChanges(project.id)
+                },
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(imageGenerating = false, bannerMessage = UiText.res(R.string.image_failed, error.message ?: error.javaClass.simpleName))
+                    }
+                },
+            )
+        }
+    }
+
+    /** Adds finished messages to a chat that has no agent run (they are saved like any other message). */
+    private fun appendLocalMessages(projectId: String, chatId: String, added: List<ChatMessage>) {
+        val current = if (_state.value.activeChatId == chatId) _state.value.messages else preferences.loadMessages(projectId, chatId)
+        val updated = current.filterNot { it.id == "streaming-assistant" } + added
+        preferences.saveMessages(projectId, chatId, updated)
+        if (_state.value.activeChatId == chatId) _state.update { it.copy(messages = updated) }
     }
 
     /** Loads the project repository and the state of every chat branch (the local pull requests). */

@@ -1137,4 +1137,18 @@
     <string name="chat_image_failed">Image unavailable: %1$s</string>
     <string name="chat_image_default_alt">Image</string>
     <string name="chat_image_close">Close image</string>
+    <string name="image_menu">Create image (Nano Banana)</string>
+    <string name="image_dialog_title">Create image</string>
+    <string name="image_key_hint">Google AI Studio API key</string>
+    <string name="image_key_desc">Image generation uses your own Google AI Studio key (aistudio.google.com). It is stored encrypted on this device.</string>
+    <string name="image_key_save">Save key</string>
+    <string name="image_prompt_hint">Describe the image</string>
+    <string name="image_editing">Editing the attached image: %1$s</string>
+    <string name="image_generate">Generate</string>
+    <string name="image_model_fast">Nano Banana</string>
+    <string name="image_model_pro">Nano Banana Pro</string>
+    <string name="image_busy_chat">Wait for the agent to finish in this chat first.</string>
+    <string name="image_need_key">Add a Google API key first.</string>
+    <string name="image_working">Generating image…</string>
+    <string name="image_failed">Image generation failed: %1$s</string>
 </resources>

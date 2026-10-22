@@ -212,6 +212,9 @@ data class ForgeUiState(
     /** The open project's own repository (null until the repository panel loads it). */
     val projectRepo: ProjectRepoInfo? = null,
     val repoBusy: Boolean = false,
+    val imageGenerating: Boolean = false,
+    /** Bumped when the Google image key is saved, so the dialog notices it. */
+    val geminiKeyVersion: Int = 0,
     /** Model ids reported by `agy models` (empty until refreshed; the picker then offers built-in presets). */
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
