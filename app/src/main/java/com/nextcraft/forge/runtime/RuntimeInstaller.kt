@@ -105,7 +105,7 @@ private data class RuntimeBundle(
 )
 
 /** Release hosting the Ubuntu 24.04 bundles built from scripts/runtime-bundles. */
-private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.1"
+private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.2"
 
 
 class RuntimeInstaller(private val context: Context) {
@@ -848,6 +848,7 @@ class RuntimeInstaller(private val context: Context) {
         LEGACY_CORE_TOOLS_VERSION,
         PREVIOUS_CORE_TOOLS_VERSION,
         NEXTCRAFT_CORE_TOOLS_VERSION,
+        NEXTCRAFT_CORE_TOOLS_VERSION_2,
     )
 
     /** The Python 3.12 overlay needs glibc 2.39; an Ubuntu 20.04 runtime has to be reinstalled on 24.04 first. */
@@ -2834,6 +2835,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
         private const val PREVIOUS_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val NEXTCRAFT_CORE_TOOLS_VERSION = "nextcraft-core-2026.10.1"
+        /** Core rebuilt from scratch by build-core-on-linux.sh (runtime-bundles.yml). */
+        private const val NEXTCRAFT_CORE_TOOLS_VERSION_2 = "nextcraft-core-2026.10.2"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = AndroidToolchain.TOOLS_VERSION
         private const val ANDROID_AAPT2_PROPERTY = "android.aapt2FromMavenOverride"
@@ -2885,42 +2888,42 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "nextcraft-core-arm64-2026.10.1.tar.zst",
-            sha256 = "fe63d1dececdcd5e861debe0936835d39c2eb6eb787bb7bd71bcab5c3db4d4cf",
-            compressedBytes = 74_269_605L,
+            fileName = "nextcraft-core-arm64-2026.10.2.tar.zst",
+            sha256 = "a30617f2c16bdb46c403d6cfd67d1f5ae14790c897a2ed2ac49749c891b340e1",
+            compressedBytes = 74_058_301L,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
-            fileName = "nextcraft-claude-arm64-2026.10.1.tar.zst",
-            sha256 = "bb993c0a80ff2ea8d9c994e03cf587bf7ef996bdecdab3d95ce51e1e0f04f2bd",
-            compressedBytes = 75_422_659L,
+            fileName = "nextcraft-claude-arm64-2026.10.2.tar.zst",
+            sha256 = "f074f0b6e373241ecf4313f5d2d15d371b9b1ecb1b626a4e79851f6693fbd3d4",
+            compressedBytes = 75_289_759L,
         )
         private val PYTHON_BUNDLE = RuntimeBundle(
             label = "Python",
-            fileName = "nextcraft-python-arm64-2026.10.1.tar.zst",
-            sha256 = "43a23a3e2d73e46f5c242ac4e3d8f7adef356b987559e1474e4cc9072118a7f3",
-            compressedBytes = 15_053_684L,
+            fileName = "nextcraft-python-arm64-2026.10.2.tar.zst",
+            sha256 = "6f4a847ffe7d36cea16c4fb3e1dc1ad2d7619ef9dff31560cfaa9b5e47a833d8",
+            compressedBytes = 15_018_991L,
         )
         /** Built by scripts/runtime-bundles/build-android-bundle.sh; versions in [AndroidToolchain]. */
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
-            fileName = "nextcraft-android-arm64-2026.10.1.tar.zst",
-            sha256 = "8b4ecf057daa6fd54acd950712f8adb4eb7722c7bc557136f2ea31d7a2bbfd60",
-            compressedBytes = 584_522_930L,
+            fileName = "nextcraft-android-arm64-2026.10.2.tar.zst",
+            sha256 = "84ca85c6578fe210ca7ada5ad7dd7117e769254c1faf597609f50fe3e5ed165d",
+            compressedBytes = 584_339_354L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek",
-            fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
-            sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
-            compressedBytes = 28_066_921L,
+            fileName = "nextcraft-dsh-arm64-2026.10.2.tar.zst",
+            sha256 = "3193211ebdcd6ca9b91e31ec871b8702419f2758339de8739b0dd3b5b41fdbe2",
+            compressedBytes = 27_986_391L,
         )
         private val AGY_BUNDLE = RuntimeBundle(
             label = "Antigravity CLI",
-            fileName = "nextcraft-agy-arm64-2026.10.1.tar.zst",
-            sha256 = "001cbb373a1110ce32c939c2b27138b46b676b157c9329b50c34e790aa2b7eff",
-            compressedBytes = 42_003_928L,
+            fileName = "nextcraft-agy-arm64-2026.10.2.tar.zst",
+            sha256 = "fd7ddece915880f59875886dbc3a39af9b0e1cad7b784ae4f548e42a286bed31",
+            compressedBytes = 41_870_033L,
         )
         private const val ROOT_GRANT_TIMEOUT_SECONDS = 45L
         private const val ENV_CLEANUP_POLL_MS = 1_000L
