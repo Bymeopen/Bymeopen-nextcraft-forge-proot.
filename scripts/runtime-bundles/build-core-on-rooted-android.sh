@@ -24,12 +24,18 @@ adb_cmd wait-for-device
 adb_cmd shell "su -c 'id -u'" | grep -qx 0 || { echo "ADB root is unavailable" >&2; exit 1; }
 
 temp_dir="$(mktemp -d)"
-trap 'rm -rf "$temp_dir"' EXIT
+# The rootfs gets /dev, /dev/pts, proc and sys bind-mounted below. If a run fails with those still mounted, the next
+# run's `rm -rf` would walk into the real /dev of the phone, so unmount everything under the rootfs first and on exit.
+unmount_rootfs() {
+  adb_cmd shell "su -c 'for m in \$(grep \" $REMOTE/rootfs/\" /proc/mounts | cut -d\" \" -f2 | sort -r); do umount -l \$m 2>/dev/null; done'" || true
+}
+trap 'unmount_rootfs; rm -rf "$temp_dir"' EXIT
 curl -fL --retry 3 -o "$temp_dir/$ROOTFS_FILE" "$ROOTFS_URL"
 printf '%s  %s\n' "$ROOTFS_SHA256" "$temp_dir/$ROOTFS_FILE" | shasum -a 256 -c -
 adb_cmd push "$temp_dir/$ROOTFS_FILE" /data/local/tmp/"$ROOTFS_FILE"
 
-adb_cmd shell "su -c 'rm -rf $REMOTE; mkdir -p $REMOTE/rootfs $REMOTE/output; toybox tar -xzf /data/local/tmp/$ROOTFS_FILE -C $REMOTE/rootfs; rm -f /data/local/tmp/$ROOTFS_FILE'"
+unmount_rootfs
+adb_cmd shell "su -c 'rm -rf --one-file-system $REMOTE 2>/dev/null || rm -rf $REMOTE; mkdir -p $REMOTE/rootfs $REMOTE/output; toybox tar -xzf /data/local/tmp/$ROOTFS_FILE -C $REMOTE/rootfs; rm -f /data/local/tmp/$ROOTFS_FILE'"
 adb_cmd shell "su -c 'mount --bind /dev $REMOTE/rootfs/dev; mount --bind /dev/pts $REMOTE/rootfs/dev/pts; mount -t proc proc $REMOTE/rootfs/proc; mount -t sysfs sysfs $REMOTE/rootfs/sys'"
 
 # Run a command inside the rootfs. The command is base64-encoded so it reaches bash byte-for-byte:
