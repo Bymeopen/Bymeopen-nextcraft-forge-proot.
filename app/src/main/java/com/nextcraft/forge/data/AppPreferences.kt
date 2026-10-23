@@ -163,11 +163,6 @@ class AppPreferences(private val context: Context) {
         set(value) { preferences.edit().putBoolean("auto_install_updates", value).apply() }
 
     /** versionCode of the newest build already announced, so one build never notifies twice. */
-    /** Id of the newest changelog the user was told about; empty on a fresh install. */
-    var lastSeenChangelogId: String
-        get() = preferences.getString("last_seen_changelog_id", "") ?: ""
-        set(value) { preferences.edit().putString("last_seen_changelog_id", value).apply() }
-
     var lastNotifiedUpdateCode: Long
         get() = preferences.getLong("last_notified_update_code", 0L)
         set(value) { preferences.edit().putLong("last_notified_update_code", value).apply() }

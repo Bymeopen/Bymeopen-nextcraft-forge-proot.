@@ -4496,7 +4496,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             val project = withContext(Dispatchers.IO) {
-                val identity = generateQuickChatIdentity(_state.value.projects.map { it.slug }.toSet())
+                val identity = generateQuickChatIdentity(_state.value.projects.map { it.slug }.toSet(), str(R.string.quick_project_name))
                 val project = Project(
                     name = identity.displayName,
                     description = "Quick project",
