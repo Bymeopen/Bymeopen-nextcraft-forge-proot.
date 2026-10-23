@@ -2095,6 +2095,17 @@ class RuntimeInstaller(private val context: Context) {
         return envFile to suCommand
     }
 
+    /**
+     * Workspaces belong to the app UID while git runs as root, so without this git refuses every project with
+     * "dubious ownership" (exit 128). The system config is used so ~/.gitconfig stays the user's.
+     */
+    private fun ensureSystemGitTrust() {
+        val config = File(rootfs, "etc/gitconfig")
+        val existing = if (config.isFile) runCatching { config.readText() }.getOrNull() ?: return else ""
+        val merged = mergeGitConfig(existing, listOf(GitConfigEntry("safe", "directory", "*", multiValue = true)))
+        if (merged != existing) writeRootfsFileAtomically(config, merged)
+    }
+
     /** Installs or removes android-shell and friends to match Settings → Android system access. */
     fun applyAndroidHostTools() {
         if (!rootfs.isDirectory) return
@@ -2192,6 +2203,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }
         }
         File(rootfs, "root/.claude/pocket-settings.json").delete()
+        ensureSystemGitTrust()
         applyAndroidHostTools()
         ensureWorkspaceTrust("/workspace")
     }
@@ -2803,11 +2815,13 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         /**
          * Gradle JVM options for builds inside the chroot, sized to the device. A fixed 512 MB heap / 256 MB metaspace
          * made Android builds die with OutOfMemoryError (Metaspace) or get killed (exit 137): about an eighth of RAM
-         * for the heap (768 MB to 2 GB, in 128 MB steps) and 512 MB of metaspace.
+         * for the heap (768 MB to 2 GB, in 128 MB steps). Metaspace is 512 MB, or 1 GB on phones with 8 GB of RAM or
+         * more: large projects (Room/KSP, many modules) ran out of 512 MB.
          */
         internal fun gradleJvmArgs(totalMemoryMb: Long): String {
             val heapMb = ((totalMemoryMb / 8).coerceIn(768L, 2048L) / 128) * 128
-            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+            val metaspaceMb = if (totalMemoryMb >= 7_500) 1024 else 512
+            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=${metaspaceMb}m -Dfile.encoding=UTF-8"
         }
 
         /** Top-level rootfs directories that chroot-exec.sh bind-mounts from Android or the app on every launch. */
@@ -2876,9 +2890,15 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
          */
         internal val ANDROID_GRADLE_INIT_SCRIPT = """
             def nextcraftMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            // The bundled cache holds some POMs without their jars, and Gradle does not try another repository once it
+            // found the metadata. It goes first for offline builds and for NextCraft's own project templates (which it was
+            // built from); any other project resolves from the real repositories and uses it only as a last resort.
+            def nextcraftCacheFirst = { File root ->
+                gradle.startParameter.offline || new File(root, '.nextcraft/android-project.json').isFile()
+            }
             beforeSettings { settings ->
                 settings.pluginManagement.repositories {
-                    maven { url = nextcraftMaven }
+                    if (nextcraftCacheFirst(settings.settingsDir)) maven { url = nextcraftMaven }
                     google()
                     mavenCentral()
                     gradlePluginPortal()
@@ -2894,8 +2914,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     '$ANDROID_AAPT2_PROPERTY',
                     '$ANDROID_AAPT2_GUEST_PATH'
                 )
-                project.buildscript.repositories {
-                    maven { url = nextcraftMaven }
+                if (nextcraftCacheFirst(project.rootDir)) {
+                    project.buildscript.repositories {
+                        maven { url = nextcraftMaven }
+                    }
                 }
             }
         """.trimIndent() + "\n"

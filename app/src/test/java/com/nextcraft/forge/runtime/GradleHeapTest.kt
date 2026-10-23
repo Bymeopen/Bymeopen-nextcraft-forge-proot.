@@ -17,7 +17,9 @@ class GradleHeapTest {
     @Test
     fun metaspaceIsBigEnoughForAndroidBuilds() {
         // 256 MB metaspace ended real builds with "OutOfMemoryError: Metaspace".
-        assertTrue("-XX:MaxMetaspaceSize=512m" in RuntimeInstaller.gradleJvmArgs(8_192))
+        assertTrue("-XX:MaxMetaspaceSize=512m" in RuntimeInstaller.gradleJvmArgs(6_000))
+        // Room/KSP projects ran out of 512 MB on an 11 GB phone.
+        assertTrue("-XX:MaxMetaspaceSize=1024m" in RuntimeInstaller.gradleJvmArgs(8_192))
     }
 
     @Test

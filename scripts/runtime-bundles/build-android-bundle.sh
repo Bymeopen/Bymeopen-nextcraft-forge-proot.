@@ -224,9 +224,15 @@ mkdir -p "$payload/root/.gradle/init.d"
 # Same text as RuntimeInstaller.ANDROID_GRADLE_INIT_SCRIPT and the managed lines of writeAndroidGradleConfiguration.
 cat > "$payload/root/.gradle/init.d/nextcraft-android.gradle" <<EOF
 def nextcraftMaven = uri('/root/maven/localMvnRepository')
+// The bundled cache holds some POMs without their jars, and Gradle does not try another repository once it
+// found the metadata. It goes first for offline builds and for NextCraft's own project templates (which it was
+// built from); any other project resolves from the real repositories and uses it only as a last resort.
+def nextcraftCacheFirst = { File root ->
+    gradle.startParameter.offline || new File(root, '.nextcraft/android-project.json').isFile()
+}
 beforeSettings { settings ->
     settings.pluginManagement.repositories {
-        maven { url = nextcraftMaven }
+        if (nextcraftCacheFirst(settings.settingsDir)) maven { url = nextcraftMaven }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -242,8 +248,10 @@ gradle.beforeProject { project ->
         'android.aapt2FromMavenOverride',
         '/root/android-sdk/build-tools/$BUILD_TOOLS_VERSION/aapt2'
     )
-    project.buildscript.repositories {
-        maven { url = nextcraftMaven }
+    if (nextcraftCacheFirst(project.rootDir)) {
+        project.buildscript.repositories {
+            maven { url = nextcraftMaven }
+        }
     }
 }
 EOF
