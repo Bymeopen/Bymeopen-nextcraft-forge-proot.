@@ -50,8 +50,12 @@ internal object AndroidToolchain {
     const val SUMMARY = "JDK $JDK_MAJOR, ARM64 Android SDK $COMPILE_SDK, Build Tools $BUILD_TOOLS_VERSION, " +
         "Gradle $GRADLE_VERSION, and an offline Maven cache"
 
-    /** `gradle` flags shared by the in-app build and the agent prompts. */
-    const val GRADLE_BASE_FLAGS = "-Dorg.gradle.jvmargs= --no-daemon --max-workers=2 " +
+    /**
+     * `gradle` flags shared by the in-app build and the agent prompts. No -Dorg.gradle.jvmargs here: an empty value
+     * dropped the device-sized heap/metaspace from ~/.gradle/gradle.properties (which already beats a project's own
+     * gradle.properties) and left builds on Gradle's 512 MB default.
+     */
+    const val GRADLE_BASE_FLAGS = "--no-daemon --max-workers=2 " +
         "--init-script $GRADLE_INIT_SCRIPT_GUEST_PATH -Pandroid.aapt2FromMavenOverride=$AAPT2_GUEST_PATH"
 
     /** Guidance for agents on a runtime whose toolchain is installed. */

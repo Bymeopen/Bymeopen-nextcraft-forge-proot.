@@ -2813,14 +2813,19 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
     companion object {
         /**
-         * Gradle JVM options for builds inside the chroot, sized to the device. A fixed 512 MB heap / 256 MB metaspace
-         * made Android builds die with OutOfMemoryError (Metaspace) or get killed (exit 137): about an eighth of RAM
-         * for the heap (768 MB to 2 GB, in 128 MB steps). Metaspace is 512 MB, or 1 GB on phones with 8 GB of RAM or
-         * more: large projects (Room/KSP, many modules) ran out of 512 MB.
+         * Gradle JVM options for builds inside the chroot, sized to the device so small phones are not pushed into the
+         * low-memory killer (exit 137) and large ones can build Room/KSP projects that need more:
+         *  - 10 GB or more reported (12 GB class phones): 3 GB heap, 1.5 GB metaspace;
+         *  - 7 GB or more (8 GB class): 2 GB heap, 1 GB metaspace;
+         *  - below that: an eighth of RAM for the heap (at least 768 MB), 512 MB metaspace.
+         * Android reports less than the marketed size (an "8 GB" phone shows about 7.3 GB), hence the thresholds.
          */
         internal fun gradleJvmArgs(totalMemoryMb: Long): String {
-            val heapMb = ((totalMemoryMb / 8).coerceIn(768L, 2048L) / 128) * 128
-            val metaspaceMb = if (totalMemoryMb >= 7_500) 1024 else 512
+            val (heapMb, metaspaceMb) = when {
+                totalMemoryMb >= 10_000 -> 3072L to 1536
+                totalMemoryMb >= 7_000 -> 2048L to 1024
+                else -> ((totalMemoryMb / 8).coerceIn(768L, 1024L) / 128) * 128 to 512
+            }
             return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=${metaspaceMb}m -Dfile.encoding=UTF-8"
         }
 
