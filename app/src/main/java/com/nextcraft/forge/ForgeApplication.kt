@@ -14,7 +14,7 @@ class ForgeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashReporter.install(this)
-        com.nextcraft.forge.schedule.ScheduleTickWorker.schedule(this)
+        com.nextcraft.forge.schedule.ScheduleTickWorker.sync(this, com.nextcraft.forge.schedule.ScheduleStore(this).load().any { it.enabled })
         val updatePrefs = com.nextcraft.forge.data.AppPreferences(this)
         if (updatePrefs.updateNotifications || updatePrefs.autoInstallUpdates) {
             com.nextcraft.forge.update.UpdateCheckWorker.schedule(this)

@@ -715,6 +715,7 @@
     <string name="agent_reasoning_low_hint">Respons tercepat</string>
     <string name="agent_reasoning_medium_hint">Seimbang</string>
     <string name="agent_reasoning_high_hint">Paling dalam, jawaban lebih lambat</string>
+    <string name="agent_status_checking">Memeriksa…</string>
     <string name="agent_test_connection">Uji koneksi</string>
     <string name="agent_effort_low">Rendah</string>
     <string name="agent_effort_medium">Sedang</string>
