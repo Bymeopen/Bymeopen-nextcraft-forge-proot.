@@ -254,7 +254,8 @@ internal fun ForgeBottomBar(
                                         brush = Brush.radialGradient(
                                             colors = listOf(scheme.primary.copy(alpha = 0.28f), Color.Transparent),
                                             center = center,
-                                            radius = size.minDimension * 0.9f,
+                                            // Half the short side: the glow fades out inside the slot. A larger radius is cut off by the slot edge and shows as a faint rectangle.
+                                            radius = size.minDimension / 2f,
                                         ),
                                     )
                                 },
