@@ -1014,7 +1014,8 @@ private val PROTECTED_LITERAL_PATHS = listOf(
     "/root/.git-credentials", "~/.git-credentials", "/root/.config/gh/hosts.yml", "~/.config/gh/hosts.yml",
 )
 
-/** `cat /pr?c/self/environ`, `cat ~/.cl*/.credentials.json`: a word with glob characters that can expand to a protected file. */
+// A word with glob characters that can expand to a protected file (a '?' standing in for a letter of /proc/self/environ, or a
+// '*' inside the name of the Claude credentials folder).
 private fun commandTargetsProtectedFile(command: String): Boolean {
     val words = command.split(Regex("\\s+")).map { it.trim('\'', '"') }
     return words.any { word ->
