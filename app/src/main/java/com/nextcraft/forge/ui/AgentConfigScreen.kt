@@ -101,7 +101,8 @@ fun AgentConfigScreen(
             subtitle = listOf(
                 state.agentKind.displayTitle(),
                 (if (state.agentKind == AgentKind.ANTIGRAVITY) state.antigravityModel else state.providerProfile.model).ifBlank { "default" },
-            ).joinToString(" · "),
+            // Two deliberate lines: " · " in one line wrapped after the dot next to the status chip.
+            ).joinToString("\n"),
             horizontalPadding = 6.dp,
             trailing = {
                 AgentStatusPill(
@@ -118,7 +119,7 @@ fun AgentConfigScreen(
 
         val agents = AgentKind.entries
         ForgePillTabs(
-            items = agents.map { it.displayTitle() },
+            items = agents.map { it.shortTitle() },
             selectedIndex = agents.indexOf(state.agentKind).coerceAtLeast(0),
             onSelect = { viewModel.selectAgent(agents[it]) },
             equalWidth = true, // 3 providers fit side by side; scrolling cut "Antigravity" at the edge
