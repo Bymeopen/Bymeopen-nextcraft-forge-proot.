@@ -216,6 +216,7 @@ data class ForgeUiState(
     val scheduledTasks: List<com.nextcraft.forge.schedule.ScheduledTask> = emptyList(),
     val scheduleEnabled: Boolean = true,
     val updateNotifications: Boolean = true,
+    val autoInstallUpdates: Boolean = true,
     val autoBranchChats: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",

@@ -1405,4 +1405,6 @@
     <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil</string>
     <string name="msg_agent_switch_busy">Tunggu giliran yang berjalan selesai sebelum mengganti agen.</string>
     <string name="msg_rename_failed">Gagal mengganti nama: nama tidak valid atau sudah ada, atau agen sedang berjalan.</string>
+    <string name="settings_auto_install_updates">Pasang pembaruan otomatis</string>
+    <string name="settings_auto_install_updates_sub">Mengunduh dan memasang build baru di latar saat aplikasi tidak dipakai, lewat Wi-Fi, tanpa dialog sistem (root). Aplikasi terbuka lagi sendiri. Jika root gagal, memakai pemasang biasa.</string>
 </resources>
