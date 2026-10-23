@@ -834,6 +834,9 @@
     <string name="diag_android">Android</string>
     <string name="diag_cpu">CPU</string>
     <string name="diag_ram">RAM</string>
+    <string name="diag_app_memory">App memory</string>
+    <string name="diag_app_memory_value">%1$d MB (Java heap %2$d MB)</string>
+    <string name="diag_app_threads">Threads</string>
     <string name="diag_storage">Storage</string>
     <string name="diag_battery">Battery</string>
     <string name="diag_root">Root access</string>
