@@ -429,36 +429,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** A clean install starts with no projects: the home screen offers Quick project / New project instead of a sample. */
     private suspend fun loadOrCreateDefaultProject(): List<Project> = withContext(Dispatchers.IO) {
-        val existing = preferences.loadProjects()
-        if (existing.isNotEmpty()) {
-            preferences.defaultProjectSeeded = true
-            existing.forEach { checkpoints.ensureWorkspace(it.id) }
-            return@withContext existing
-        }
-        // The sandbox is created once, on a clean install; projects the user deleted are not brought back.
-        if (preferences.defaultProjectSeeded) return@withContext emptyList()
-        val defaultProject = Project(
-            name = "Forge Sandbox",
-            description = "Default workspace inside Ubuntu ARM64 Root Chroot",
-            language = "Kotlin / TypeScript / Python",
-            slug = "forge-sandbox",
-        )
-        val ws = checkpoints.ensureWorkspace(defaultProject.id)
-        val readme = File(ws, "README.md")
-        if (!readme.exists()) {
-            readme.writeText(
-                "# Forge Sandbox\n\n" +
-                    "Welcome to **NextCraft Forge**.\n" +
-                    "- Pure Root Chroot (`su -mm`) execution\n" +
-                    "- Multi-agent coding (`Claude Code`, `Antigravity`, `DeepSeek`)\n" +
-                    "- 1-Tap Android Debug APK Build & Silent Root Install\n",
-            )
-        }
-        val list = listOf(defaultProject)
-        preferences.saveProjects(list)
-        preferences.defaultProjectSeeded = true
-        list
+        preferences.loadProjects().onEach { checkpoints.ensureWorkspace(it.id) }
     }
 
     private fun configureAllProjectRoots(projects: List<Project>) {

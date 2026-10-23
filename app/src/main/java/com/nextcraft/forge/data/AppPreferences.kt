@@ -142,11 +142,6 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
 
-    /** True once the default "Forge Sandbox" project was created (or projects existed), so deleting all projects sticks. */
-    var defaultProjectSeeded: Boolean
-        get() = preferences.getBoolean("default_project_seeded", false)
-        set(value) { preferences.edit().putBoolean("default_project_seeded", value).apply() }
-
     /** Announce new app builds with a notification (checked in the background every few hours). On by default. */
     var updateNotifications: Boolean
         get() = preferences.getBoolean("update_notifications", true)
