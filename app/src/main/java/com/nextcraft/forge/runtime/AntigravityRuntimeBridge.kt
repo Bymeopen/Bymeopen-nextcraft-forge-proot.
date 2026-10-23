@@ -535,16 +535,23 @@ class AntigravityRuntimeBridge(
                         val now = System.currentTimeMillis()
                         if (stdinOpen && !eventSeen && now - promptSentAtMillis >= WARM_PROBE_MS) {
                             if (reuse != null) {
-                                // A kept-alive agy that ignores the next message: start fresh from the next turn on.
+                                // A kept-alive agy can think for a long time before its first event on a heavy prompt, so 20 s of
+                                // silence alone proves nothing. It is called stuck only after a longer quiet period with no sign
+                                // of life in its own log. The warm mode stays on: one slow answer must not switch it off for good.
+                                val quietMs = now - promptSentAtMillis
+                                val stillWorking = quietMs < WARM_REUSE_MAX_WAIT_MS &&
+                                    (quietMs < WARM_REUSE_QUIET_MS || agyLogActive(now))
+                                if (!stillWorking) {
+                                    throw AntigravitySessionException(
+                                        "Antigravity stopped responding. Send the message again.",
+                                    )
+                                }
+                            } else {
+                                // This agy only starts on end of input; give it that and remember for later turns.
                                 rememberWarmMode(false)
-                                throw AntigravitySessionException(
-                                    "Antigravity stopped responding. Send the message again.",
-                                )
+                                stdinOpen = false
+                                runCatching { process.outputStream.close() }
                             }
-                            // This agy only starts on end of input; give it that and remember for later turns.
-                            rememberWarmMode(false)
-                            stdinOpen = false
-                            runCatching { process.outputStream.close() }
                         }
                         pushForegroundProgress(
                             activeToolName?.let { name -> "Running $name: $activeToolDetail" }
@@ -712,6 +719,12 @@ class AntigravityRuntimeBridge(
     private fun friendlyError(raw: String, elapsedMs: Long = 0L): String =
         antigravityFriendlyError(raw, elapsedMs = elapsedMs)
 
+    /** True when agy wrote to its own log in the last 45 s: it is alive and busy (a retry, a stream), not stuck. */
+    private fun agyLogActive(nowMillis: Long): Boolean = runCatching {
+        val logDir = File(installer.installedRuntime().rootfs, "root/.gemini/antigravity-cli/log")
+        logDir.listFiles()?.any { it.isFile && it.name.startsWith("cli-") && nowMillis - it.lastModified() < 45_000L } == true
+    }.getOrDefault(false)
+
     private fun recentAntigravityDiagnostic(sinceMillis: Long): String = runCatching {
         val logDir = File(
             installer.installedRuntime().rootfs,
@@ -806,6 +819,12 @@ private const val RETRY_CHECK_INTERVAL_MS = 5_000L
 
 /** Without any agy event this long after the prompt, agy is waiting for end of input (or a kept one is stuck). */
 private const val WARM_PROBE_MS = 20_000L
+
+/** A kept-alive agy gets this long to show a first event before its log decides whether it is still working. */
+private const val WARM_REUSE_QUIET_MS = 90_000L
+
+/** Upper bound for a kept-alive agy that shows no event at all, however active its log looks. */
+private const val WARM_REUSE_MAX_WAIT_MS = 10 * 60_000L
 
 /** A kept-alive agy is stopped after this long without a message. */
 private const val WARM_IDLE_MS = 10 * 60_000L
