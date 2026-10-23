@@ -1466,10 +1466,8 @@ class RuntimeInstaller(private val context: Context) {
         val managedLines = listOf(
             "$ANDROID_AAPT2_PROPERTY=$ANDROID_AAPT2_GUEST_PATH",
             "$GRADLE_JVMARGS_PROPERTY=${gradleJvmArgs(deviceTotalMemoryMb())}",
-            "$GRADLE_WORKERS_PROPERTY=2",
-            "$GRADLE_PARALLEL_PROPERTY=false",
             "$KOTLIN_EXECUTION_PROPERTY=in-process",
-        )
+        ) + gradleSpeedProperties(deviceTotalMemoryMb()).map { (key, value) -> "$key=$value" }
         val updatedLines = existingLines.filterNot(::isManagedAndroidGradleProperty) + managedLines
         if (existingLines == updatedLines) return
 
@@ -2813,6 +2811,31 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
     companion object {
         /**
+         * Gradle speed settings, sized like [gradleJvmArgs]. Measured on a 10.9 GB phone, an up-to-date JetNews build
+         * still took 4 min with a fresh JVM per build and 2 workers: almost all of it start-up and configuration.
+         *  - daemon: keeps the warmed-up JVM between builds; it exits after 10 idle minutes so its heap is returned.
+         *    Off below 7 GB, where an idle 1-2 GB JVM would push the app into the low-memory killer;
+         *  - configuration cache (problems only warn, so incompatible builds still run) and the build cache;
+         *  - workers: 4 / 3 / 2 and parallel project execution only on 10 GB+ (each worker adds memory).
+         */
+        internal fun gradleSpeedProperties(totalMemoryMb: Long): List<Pair<String, String>> {
+            val (daemon, workers, parallel) = when {
+                totalMemoryMb >= 10_000 -> Triple(true, 4, true)
+                totalMemoryMb >= 7_000 -> Triple(true, 3, false)
+                else -> Triple(false, 2, false)
+            }
+            return listOf(
+                "org.gradle.daemon" to daemon.toString(),
+                "org.gradle.daemon.idletimeout" to "600000",
+                GRADLE_WORKERS_PROPERTY to workers.toString(),
+                GRADLE_PARALLEL_PROPERTY to parallel.toString(),
+                "org.gradle.caching" to "true",
+                "org.gradle.configuration-cache" to "true",
+                "org.gradle.configuration-cache.problems" to "warn",
+            )
+        }
+
+        /**
          * Gradle JVM options for builds inside the chroot, sized to the device so small phones are not pushed into the
          * low-memory killer (exit 137) and large ones can build Room/KSP projects that need more:
          *  - 10 GB or more reported (12 GB class phones): 3 GB heap, 1.5 GB metaspace;
@@ -2885,6 +2908,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             GRADLE_WORKERS_PROPERTY,
             GRADLE_PARALLEL_PROPERTY,
             KOTLIN_EXECUTION_PROPERTY,
+            "org.gradle.daemon",
+            "org.gradle.daemon.idletimeout",
+            "org.gradle.caching",
+            "org.gradle.configuration-cache",
+            "org.gradle.configuration-cache.problems",
         )
         private const val ANDROID_AAPT2_GUEST_PATH = AndroidToolchain.AAPT2_GUEST_PATH
         private const val ANDROID_AAPT2_HOST_PATH = AndroidToolchain.AAPT2_HOST_PATH

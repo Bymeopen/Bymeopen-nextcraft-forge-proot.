@@ -26,4 +26,20 @@ class GradleHeapTest {
         assertEquals(1536, metaspaceMb(RuntimeInstaller.gradleJvmArgs(11_161)))
         assertEquals(3072, heapMb(RuntimeInstaller.gradleJvmArgs(32_768)))  // capped
     }
+
+    @Test
+    fun speedSettingsFollowTheirMemoryTier() {
+        val large = RuntimeInstaller.gradleSpeedProperties(11_161).toMap()
+        assertEquals("true", large["org.gradle.daemon"])
+        assertEquals("4", large["org.gradle.workers.max"])
+        assertEquals("true", large["org.gradle.parallel"])
+        assertEquals("true", large["org.gradle.configuration-cache"])
+        assertEquals("warn", large["org.gradle.configuration-cache.problems"])
+        assertEquals("600000", large["org.gradle.daemon.idletimeout"])
+
+        val small = RuntimeInstaller.gradleSpeedProperties(5_600).toMap()
+        assertEquals("false", small["org.gradle.daemon"])
+        assertEquals("2", small["org.gradle.workers.max"])
+        assertEquals("true", small["org.gradle.caching"])
+    }
 }

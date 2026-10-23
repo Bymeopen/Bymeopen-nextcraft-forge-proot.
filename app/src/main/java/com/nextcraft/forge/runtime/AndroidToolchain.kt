@@ -53,9 +53,10 @@ internal object AndroidToolchain {
     /**
      * `gradle` flags shared by the in-app build and the agent prompts. No -Dorg.gradle.jvmargs here: an empty value
      * dropped the device-sized heap/metaspace from ~/.gradle/gradle.properties (which already beats a project's own
-     * gradle.properties) and left builds on Gradle's 512 MB default.
+     * gradle.properties) and left builds on Gradle's 512 MB default. Daemon and workers also come from there, sized to
+     * the phone (RuntimeInstaller.gradleSpeedProperties).
      */
-    const val GRADLE_BASE_FLAGS = "--no-daemon --max-workers=2 " +
+    const val GRADLE_BASE_FLAGS =
         "--init-script $GRADLE_INIT_SCRIPT_GUEST_PATH -Pandroid.aapt2FromMavenOverride=$AAPT2_GUEST_PATH"
 
     /** Guidance for agents on a runtime whose toolchain is installed. */
