@@ -165,6 +165,11 @@ mount_dynamic_bind() {
 # mounts; the second /apex then has no modules. Serialize the mount phase; fd 9 is closed before the chroot.
 exec 9>"$ROOTFS/.nextcraft-mount.lock"
 flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true
+# The app is repairing or replacing the rootfs (RootfsRepair): mounting now could pin directories it is removing.
+if [ -e "${ROOTFS%/*}/.rootfs-maintenance" ]; then
+    echo "The Linux environment is being repaired. Try again when it finishes." >&2
+    exit 75
+fi
 
 # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
 if ! is_mounted "$ROOTFS"; then
