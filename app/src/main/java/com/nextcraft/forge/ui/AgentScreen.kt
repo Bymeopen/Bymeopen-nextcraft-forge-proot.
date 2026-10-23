@@ -523,16 +523,21 @@ fun AgentScreen(
             languageCode = state.languageCode,
             onPartial = { promptInput = joinVoice(voiceBase, it) },
             onFinal = { spoken ->
+                // true = keep listening for the next sentence; commands that end the dictation return false.
                 when (val command = VoiceCommands.parse(spoken)) {
-                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask() }
-                    VoiceCommand.Clear -> promptInput = ""
+                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask(); false }
+                    VoiceCommand.Clear -> { promptInput = ""; voiceBase = ""; true }
                     is VoiceCommand.Dictate -> {
                         val text = joinVoice(voiceBase, command.text)
                         if (command.send && (text.isNotEmpty() || state.pendingAttachments.isNotEmpty())) {
                             promptInput = ""
+                            voiceBase = ""
                             viewModel.sendPrompt(text)
+                            false
                         } else {
                             promptInput = text
+                            voiceBase = text // the next sentence continues after this one
+                            !command.send
                         }
                     }
                 }
@@ -563,6 +568,7 @@ fun AgentScreen(
                 voice.toggle()
             },
             listening = voice.listening,
+            micLevel = voice.level,
             onGenerateImage = { imageDialogOpen = true },
         )
         if (imageDialogOpen) ImageGenerationDialog(state = state, viewModel = viewModel, onDismiss = { imageDialogOpen = false })

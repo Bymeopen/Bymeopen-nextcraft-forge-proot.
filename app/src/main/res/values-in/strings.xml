@@ -1319,7 +1319,10 @@
     <string name="voice_stop">Berhenti mendengarkan</string>
     <string name="voice_unavailable">Pengenalan suara tidak tersedia di perangkat ini.</string>
     <string name="voice_permission_denied">Izinkan mikrofon untuk memakai input suara.</string>
-    <string name="voice_error">Input suara gagal. Periksa koneksi lalu coba lagi.</string>
+    <string name="voice_error_network">Tidak terhubung ke layanan suara. Periksa internet lalu coba lagi.</string>
+    <string name="voice_error_busy">Input suara sedang sibuk. Ketuk mikrofon lagi.</string>
+    <string name="voice_error_language">Bahasa ini belum tersedia untuk input suara di perangkat ini.</string>
+    <string name="voice_error">Input suara gagal. Coba lagi.</string>
     <string name="chat_image_tap_remote">Ketuk untuk memuat gambar dari %1$s</string>
     <string name="chat_image_failed">Gambar tidak tersedia: %1$s</string>
     <string name="chat_image_default_alt">Gambar</string>
