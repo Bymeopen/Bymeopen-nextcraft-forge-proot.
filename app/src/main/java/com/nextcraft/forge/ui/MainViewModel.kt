@@ -409,6 +409,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     reaChatHint = preferences.reaChatHint,
                     scheduleEnabled = preferences.scheduleEnabled,
                     updateNotifications = preferences.updateNotifications,
+                    autoInstallUpdates = preferences.autoInstallUpdates,
                     autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -4611,7 +4612,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
             silentUpdateCheck(force = true)
-        } else {
+        } else if (!preferences.autoInstallUpdates) {
+            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
+        }
+    }
+
+    /** Background download and silent install while the app is idle (needs root; without it only the notification shows). */
+    fun setAutoInstallUpdates(enabled: Boolean) {
+        preferences.autoInstallUpdates = enabled
+        _state.update { it.copy(autoInstallUpdates = enabled) }
+        val app = getApplication<Application>()
+        if (enabled) {
+            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
+        } else if (!preferences.updateNotifications) {
             com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
         }
     }

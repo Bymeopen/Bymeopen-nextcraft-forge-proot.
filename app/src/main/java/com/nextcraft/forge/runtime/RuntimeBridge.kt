@@ -45,6 +45,10 @@ object RuntimeTaskController {
         if (action != null) hooks.entries.removeAll { it.value === action }
     }
 
+    /** True while any agent session or build holds a stop hook, i.e. while work is running. */
+    @Synchronized
+    fun hasActiveTask(): Boolean = hooks.isNotEmpty()
+
     /** Stops only the task of [kind]. */
     fun stop(kind: String) {
         // Parallel chats register as "agent:<sessionId>"; stopping the kind stops all of them.

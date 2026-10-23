@@ -372,6 +372,13 @@ fun SettingsScreenModern(
                 onCheckedChange = viewModel::setUpdateNotifications,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_auto_install_updates),
+                subtitle = stringResource(R.string.settings_auto_install_updates_sub),
+                checked = state.autoInstallUpdates,
+                onCheckedChange = viewModel::setAutoInstallUpdates,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
             state.updateProgress?.let { fraction ->
                 LinearProgressIndicator(
                     progress = fraction,

@@ -152,6 +152,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("update_notifications", true)
         set(value) { preferences.edit().putBoolean("update_notifications", value).apply() }
 
+    /** Downloads and installs a newer build in the background while the app is idle (root needed; otherwise only notifies). */
+    var autoInstallUpdates: Boolean
+        get() = preferences.getBoolean("auto_install_updates", true)
+        set(value) { preferences.edit().putBoolean("auto_install_updates", value).apply() }
+
     /** versionCode of the newest build already announced, so one build never notifies twice. */
     /** Id of the newest changelog the user was told about; empty on a fresh install. */
     var lastSeenChangelogId: String
