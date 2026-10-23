@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -497,6 +498,8 @@ internal fun ChatComposer(
     /** Microphone button before the send button; null hides it. [listening] shows the recording state. */
     onMic: (() -> Unit)? = null,
     listening: Boolean = false,
+    /** 0..1 loudness while [listening]; the mic pulses with it. */
+    micLevel: Float = 0f,
     /** "Create image" entry of the attach menu (Nano Banana); null hides it. */
     onGenerateImage: (() -> Unit)? = null,
 ) {

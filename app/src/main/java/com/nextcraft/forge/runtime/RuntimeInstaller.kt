@@ -55,8 +55,32 @@ data class AgentUpdateInfo(
 )
 
 /** The pinned dsh, or a newer one left by a later app build: an older app must not reinstall (downgrade) it. */
+private val FS_PROMISES_IMPORT = Regex("""import \{([^}]*)\} from "node:fs/promises";""")
+
+/**
+ * Swaps DeepSeek's hard-link publication for COPYFILE_EXCL (`copyFile(src, dst, 1)`): Android's app data filesystem
+ * refuses link(2) inside the chroot. Adds `copyFile` to the `node:fs/promises` import whatever else it lists, so new
+ * DeepSeek releases that reorder that import still match. Returns the source unchanged when already patched, or null
+ * when the expected call or import is missing.
+ */
+internal fun patchDshSource(source: String, callBefore: String, callAfter: String): String? {
+    val import = FS_PROMISES_IMPORT.find(source) ?: return null
+    val names = import.groupValues[1].split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    val hasCopyFile = "copyFile" in names
+    if (callAfter in source && hasCopyFile) return source
+    if (callBefore !in source) return null
+    val withImport = if (hasCopyFile) source else source.replaceRange(
+        import.range,
+        "import { ${(names + "copyFile").sorted().joinToString(", ")} } from \"node:fs/promises\";",
+    )
+    return withImport.replace(callBefore, callAfter)
+}
+
+/** Oldest DeepSeek release the compatibility patch still handles; installs since then keep working without a reinstall. */
+private const val MIN_DSH_VERSION = "0.1.2-rc.1"
+
 internal fun isSupportedDshVersion(version: String): Boolean =
-    version == RuntimeInstaller.DSH_VERSION || isAgentVersionNewer(version, RuntimeInstaller.DSH_VERSION)
+    version == MIN_DSH_VERSION || isAgentVersionNewer(version, MIN_DSH_VERSION)
 
 /** True when [candidate] is a newer agent version than [current] (numeric parts, then pre-release tags). */
 internal fun isAgentVersionNewer(candidate: String, current: String): Boolean {
@@ -106,10 +130,8 @@ private data class RuntimeBundle(
 )
 
 /** Release hosting the Ubuntu 24.04 bundles built from scripts/runtime-bundles. */
-private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.1"
+private const val RUNTIME_RELEASE_BASE_URL = "https://github.com/bymeopen/nextcraft-forge/releases/download/runtime-2026.10.2"
 
-/** Release hosting the Ubuntu 20.04 bundles; still serves the Android bundle and the Python 3.8 overlay. */
-private const val LEGACY_RUNTIME_RELEASE_BASE_URL = "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
 
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
@@ -120,24 +142,24 @@ class RuntimeInstaller(private val context: Context) {
     private val chrootExecFile: File get() = prootExecFile
     private val rootfs = File(runtimeDir, "ubuntu")
     private val downloads = File(context.cacheDir, "runtime-downloads")
-    private val coreReadyMarker = File(rootfs, ".pocket-runtime-ready")
-    private val nextcraftReadyMarker = File(rootfs, ".nextcraft-runtime-ready")
-    private val claudeMarker = File(rootfs, ".pocket-claude-version")
+    private val coreReadyMarker = File(rootfs, ".nextcraft-runtime-ready")
+    private val claudeMarker = File(rootfs, ".nextcraft-claude-version")
     /** Official Claude Code release that failed its `--version` check under PRoot on this device. */
-    private val claudeUnsupportedMarker = File(rootfs, ".pocket-claude-unsupported-version")
-    private val bundledClaudeMarker = File(rootfs, ".pocket-bundled-claude-version")
-    private val rootfsMarker = File(rootfs, ".pocket-rootfs-version")
-    private val languageToolsMarker = File(rootfs, ".pocket-language-tools-version")
-    private val coreToolsMarker = File(rootfs, ".pocket-core-tools-version")
-    private val systemUpgradeMarker = File(rootfs, ".pocket-system-upgrade-version")
-    private val devStacksFile = File(rootfs, ".pocket-dev-stacks.json")
-    private val dshMarker = File(rootfs, ".pocket-dsh-version")
-    private val agyMarker = File(rootfs, ".pocket-agy-version")
-    private val githubCliMarker = File(rootfs, ".pocket-github-cli-version")
-    private val dshAndroidCompatibilityMarker = File(rootfs, ".pocket-dsh-android-compat-version")
-    private val macosMetadataRepairMarker = File(rootfs, ".pocket-macos-metadata-repair")
+    private val claudeUnsupportedMarker = File(rootfs, ".nextcraft-claude-unsupported-version")
+    private val bundledClaudeMarker = File(rootfs, ".nextcraft-bundled-claude-version")
+    private val rootfsMarker = File(rootfs, ".nextcraft-rootfs-version")
+    private val languageToolsMarker = File(rootfs, ".nextcraft-language-tools-version")
+    private val coreToolsMarker = File(rootfs, ".nextcraft-core-tools-version")
+    private val systemUpgradeMarker = File(rootfs, ".nextcraft-system-upgrade-version")
+    private val devStacksFile = File(rootfs, ".nextcraft-dev-stacks.json")
+    private val dshMarker = File(rootfs, ".nextcraft-dsh-version")
+    private val agyMarker = File(rootfs, ".nextcraft-agy-version")
+    private val githubCliMarker = File(rootfs, ".nextcraft-github-cli-version")
+    private val dshAndroidCompatibilityMarker = File(rootfs, ".nextcraft-dsh-android-compat-version")
+    private val macosMetadataRepairMarker = File(rootfs, ".nextcraft-macos-metadata-repair")
 
     fun isInstalled(): Boolean {
+        RuntimeMarkers.syncAll(rootfs)
         val chrootScriptsReady = runCatching { ensureChrootScripts() }.isSuccess
         val rootfsLayoutReady = ensureRootfsCompatibilityLinks()
         val legacyLanguageTools = languageToolsMarker.readTextOrNull() == LANGUAGE_TOOLS_VERSION
@@ -149,7 +171,7 @@ class RuntimeInstaller(private val context: Context) {
             isSupportedRootfsVersion(rootfsMarker.readTextOrNull()) &&
             File(rootfs, "usr/local/bin/node").exists() &&
             (legacyLanguageTools || coreToolsReady) &&
-            (coreReadyMarker.exists() || nextcraftReadyMarker.exists())
+            coreReadyMarker.exists()
         if (ready) repairLegacyMacosMetadata()
         return ready
     }
@@ -161,7 +183,7 @@ class RuntimeInstaller(private val context: Context) {
         // able to delete "._*" files from a user's project.
         stripMacosMetadataArtifacts(rootfs, skipTopLevel = BIND_MOUNTED_TOP_LEVEL)
         macosMetadataRepairMarker.parentFile?.mkdirs()
-        macosMetadataRepairMarker.writeText("1")
+        macosMetadataRepairMarker.writeMarker("1")
     }
 
     /** Returns the already verified PRoot runtime without performing network or update checks. */
@@ -301,7 +323,7 @@ class RuntimeInstaller(private val context: Context) {
         }
         if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
             runSystemMaintenance(chrootExec, onProgress)
-            systemUpgradeMarker.writeText(SYSTEM_UPGRADE_VERSION)
+            systemUpgradeMarker.writeMarker(SYSTEM_UPGRADE_VERSION)
         }
         if (coreNeeded) {
             aptInstall(
@@ -313,10 +335,9 @@ class RuntimeInstaller(private val context: Context) {
             )
             writeResolver()
             verifyGuest(chrootExec, "git --version", "Failed to verify Git inside the PRoot runtime")
-            coreToolsMarker.writeText(CORE_TOOLS_VERSION)
+            coreToolsMarker.writeMarker(CORE_TOOLS_VERSION)
         }
-        if (!coreReadyMarker.exists()) coreReadyMarker.writeText(CORE_TOOLS_VERSION)
-        if (!nextcraftReadyMarker.exists()) nextcraftReadyMarker.writeText(CORE_TOOLS_VERSION)
+        if (!coreReadyMarker.exists()) coreReadyMarker.writeMarker(CORE_TOOLS_VERSION)
 
         val removedStacks = if (selectedStacks.isNotEmpty()) {
             (installedStacks() - selectedStacks) - DevStack.WEB
@@ -397,18 +418,16 @@ class RuntimeInstaller(private val context: Context) {
         when (agent) {
             AgentKind.CLAUDE_CODE -> {
                 removePath(File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")))
-                listOf(".pocket-claude-version", ".nextcraft-claude-version", ".pocket-bundled-claude-version")
-                    .forEach { File(rootfs, it).delete() }
+                listOf(claudeMarker, bundledClaudeMarker).forEach { it.deleteMarker() }
             }
             AgentKind.DEEPSEEK_HARNESS -> {
                 removePath(File(rootfs, "usr/local/bin/dsh"))
                 removePath(File(rootfs, "usr/local/lib/dsh"))
-                listOf(".pocket-dsh-version", ".nextcraft-dsh-version", ".pocket-dsh-android-compat-version")
-                    .forEach { File(rootfs, it).delete() }
+                listOf(dshMarker, dshAndroidCompatibilityMarker).forEach { it.deleteMarker() }
             }
             AgentKind.ANTIGRAVITY -> {
                 removePath(File(rootfs, AGY_GUEST_PATH.removePrefix("/")))
-                listOf(".pocket-agy-version", ".nextcraft-agy-version").forEach { File(rootfs, it).delete() }
+                agyMarker.deleteMarker()
             }
         }
         check(!isAgentInstalled(agent)) { "Could not fully remove ${agent.title}" }
@@ -509,7 +528,7 @@ class RuntimeInstaller(private val context: Context) {
             command = "$GITHUB_CLI_GUEST_PATH --version",
             failureMessage = "Failed to verify GitHub CLI",
         )
-        githubCliMarker.writeText(GITHUB_CLI_VERSION)
+        githubCliMarker.writeMarker(GITHUB_CLI_VERSION)
         check(isGitHubCliInstalled()) { "GitHub CLI installation is incomplete" }
         onProgress(RuntimeInstallProgress("GitHub CLI is ready", 1f))
     }
@@ -745,7 +764,7 @@ class RuntimeInstaller(private val context: Context) {
             downloaded.delete()
         }
         claudeUnsupportedMarker.delete()
-        claudeMarker.writeText(latest)
+        claudeMarker.writeMarker(latest)
         onProgress(RuntimeInstallProgress("Installed Claude Code $latest (official binary)", 0.995f))
     }
 
@@ -798,7 +817,7 @@ class RuntimeInstaller(private val context: Context) {
         } finally {
             downloaded.delete()
         }
-        agyMarker.writeText(latest)
+        agyMarker.writeMarker(latest)
     }
 
     private suspend fun updateDsh(
@@ -863,8 +882,8 @@ class RuntimeInstaller(private val context: Context) {
         if (!previous.deleteRecursively() && !RootfsRepair.safeDeleteRecursively(previous)) {
             Log.w("RuntimeInstaller", "Could not remove the previous DeepSeek copy")
         }
-        dshMarker.writeText(expectedVersion)
-        dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
+        dshMarker.writeMarker(expectedVersion)
+        dshAndroidCompatibilityMarker.writeMarker(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
     private fun fetchAgyManifest(): JSONObject = JSONObject(
@@ -881,7 +900,7 @@ class RuntimeInstaller(private val context: Context) {
             coreReadyMarker.readTextOrNull(),
             bundledClaudeMarker.readTextOrNull(),
         ).mapNotNull { it?.trim() }.firstOrNull { it.matches(CLAUDE_VERSION_PATTERN) } ?: return
-        claudeMarker.writeText(legacyVersion)
+        claudeMarker.writeMarker(legacyVersion)
     }
 
     private fun isSupportedCoreToolsVersion(): Boolean = coreToolsMarker.readTextOrNull() in setOf(
@@ -889,10 +908,14 @@ class RuntimeInstaller(private val context: Context) {
         LEGACY_CORE_TOOLS_VERSION,
         PREVIOUS_CORE_TOOLS_VERSION,
         NEXTCRAFT_CORE_TOOLS_VERSION,
+        NEXTCRAFT_CORE_TOOLS_VERSION_2,
     )
 
-    private fun pythonBundle(): RuntimeBundle =
-        if (rootfsMarker.readTextOrNull() == LEGACY_ROOTFS_VERSION) LEGACY_PYTHON_BUNDLE else PYTHON_BUNDLE
+    /** The Python 3.12 overlay needs glibc 2.39; an Ubuntu 20.04 runtime has to be reinstalled on 24.04 first. */
+    private fun pythonBundle(): RuntimeBundle {
+        check(rootfsMarker.readTextOrNull() != LEGACY_ROOTFS_VERSION) { LEGACY_ROOTFS_PYTHON_MESSAGE }
+        return PYTHON_BUNDLE
+    }
 
     private fun isSupportedRootfsVersion(version: String?): Boolean = version in setOf(
         ROOTFS_VERSION,
@@ -955,7 +978,7 @@ class RuntimeInstaller(private val context: Context) {
             forceEmbedded = isAssetAvailable("runtime/${AGY_BUNDLE.fileName}"),
         )
         verifyGuest(chrootExec, "$AGY_GUEST_PATH --version", "Failed to verify Antigravity CLI")
-        agyMarker.writeText(AGY_VERSION)
+        agyMarker.writeMarker(AGY_VERSION)
         require(isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             "Antigravity CLI installation is incomplete"
         }
@@ -1042,7 +1065,7 @@ class RuntimeInstaller(private val context: Context) {
         } catch (e: java.io.IOException) {
             throw e
         }
-        dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
+        dshAndroidCompatibilityMarker.writeMarker(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
     private fun applyDshAndroidCompatibility(dshRoot: File, version: String) {
@@ -1057,36 +1080,20 @@ class RuntimeInstaller(private val context: Context) {
             dshRoot,
             "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js",
         )
+        patchDshHardLinkPublication(persistence, callBefore = "await link(tmp, finalPath);", callAfter = "await copyFile(tmp, finalPath, 1);")
         patchDshHardLinkPublication(
-            file = persistence,
-            importBefore = "import { link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            importAfter = "import { copyFile, link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            callBefore = "await link(tmp, finalPath);",
-            callAfter = "await copyFile(tmp, finalPath, 1);",
-        )
-        patchDshHardLinkPublication(
-            file = localFs,
-            importBefore = "import { chmod, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
-            importAfter = "import { chmod, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
+            localFs,
             callBefore = "await linkFile(tempPath, absolutePath);",
             callAfter = "await copyFile(tempPath, absolutePath, 1);",
         )
     }
 
-    private fun patchDshHardLinkPublication(
-        file: File,
-        importBefore: String,
-        importAfter: String,
-        callBefore: String,
-        callAfter: String,
-    ) {
+    private fun patchDshHardLinkPublication(file: File, callBefore: String, callAfter: String) {
         check(file.isFile) { "DeepSeek compatibility file is missing: ${file.name}" }
-        var source = file.readText()
-        if (callAfter in source && importAfter in source) return
-        check(callBefore in source && importBefore in source) {
-            "Installed DeepSeek source is not compatible with this NextCraft Forge build"
-        }
-        source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
+        val original = file.readText()
+        val source = patchDshSource(original, callBefore, callAfter)
+            ?: error("Installed DeepSeek source is not compatible with this NextCraft build")
+        if (source == original) return
         val staging = File(file.parentFile, "${file.name}.tmp")
         staging.writeText(source)
         if (!staging.renameTo(file)) {
@@ -1323,7 +1330,7 @@ class RuntimeInstaller(private val context: Context) {
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        val marker = File(rootfs, "root/.pocket-android-tools-version")
+        val marker = File(rootfs, "root/.nextcraft-android-tools-version")
         if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION || !hasAndroidToolchainFiles(rootfs)) {
             // An older layout (different JDK/Gradle directories) would otherwise stay behind next to the new one.
             if (marker.readTextOrNull() != ANDROID_TOOLS_VERSION && marker.isFile) removeAndroidStack()
@@ -1336,8 +1343,7 @@ class RuntimeInstaller(private val context: Context) {
                 onProgress,
             )
             makeAndroidToolsExecutable(rootfs)
-            marker.parentFile?.mkdirs()
-            marker.writeText(ANDROID_TOOLS_VERSION)
+            marker.writeMarker(ANDROID_TOOLS_VERSION)
         }
         writeAndroidGradleConfiguration(rootfs)
 
@@ -1490,6 +1496,7 @@ class RuntimeInstaller(private val context: Context) {
         val script = File(runtimeRootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/"))
         script.parentFile?.mkdirs()
         script.writeText(ANDROID_GRADLE_INIT_SCRIPT)
+        File(runtimeRootfs, RuntimeMarkers.LEGACY_GRADLE_INIT_SCRIPT).delete()
     }
 
     private fun deviceTotalMemoryMb(): Long {
@@ -1510,10 +1517,8 @@ class RuntimeInstaller(private val context: Context) {
         val managedLines = listOf(
             "$ANDROID_AAPT2_PROPERTY=$ANDROID_AAPT2_GUEST_PATH",
             "$GRADLE_JVMARGS_PROPERTY=${gradleJvmArgs(deviceTotalMemoryMb())}",
-            "$GRADLE_WORKERS_PROPERTY=2",
-            "$GRADLE_PARALLEL_PROPERTY=false",
             "$KOTLIN_EXECUTION_PROPERTY=in-process",
-        )
+        ) + gradleSpeedProperties(deviceTotalMemoryMb()).map { (key, value) -> "$key=$value" }
         val updatedLines = existingLines.filterNot(::isManagedAndroidGradleProperty) + managedLines
         if (existingLines == updatedLines) return
 
@@ -1535,7 +1540,7 @@ class RuntimeInstaller(private val context: Context) {
     fun migrateLegacyToolMarkers() {
         if (!File(rootfs, "usr/bin/bash").isFile) return
         if (languageToolsMarker.readTextOrNull() != LANGUAGE_TOOLS_VERSION) return
-        if (coreToolsMarker.readTextOrNull() != CORE_TOOLS_VERSION) coreToolsMarker.writeText(CORE_TOOLS_VERSION)
+        if (coreToolsMarker.readTextOrNull() != CORE_TOOLS_VERSION) coreToolsMarker.writeMarker(CORE_TOOLS_VERSION)
         val state = readDevStackState()
         DevStack.entries.forEach { stack -> if (!state.containsKey(stack.name)) state[stack.name] = true }
         writeDevStackState(state)
@@ -1562,7 +1567,7 @@ class RuntimeInstaller(private val context: Context) {
             DevStack.CPP -> guestExecutableOrSymlinkExists("usr/bin/gcc") && guestExecutableOrSymlinkExists("usr/bin/g++")
             DevStack.PHP -> guestExecutableOrSymlinkExists("usr/bin/php") && File(rootfs, "usr/local/bin/composer").isFile
             DevStack.ANDROID ->
-                File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                RuntimeMarkers.read(File(rootfs, "root/.nextcraft-android-tools-version"))?.trim() == ANDROID_TOOLS_VERSION &&
                     hasAndroidToolchainFiles(rootfs) &&
                     File(rootfs, AndroidToolchain.GRADLE_INIT_SCRIPT_GUEST_PATH.removePrefix("/")).isFile
         }
@@ -1586,6 +1591,7 @@ class RuntimeInstaller(private val context: Context) {
         state.forEach { (name, value) -> obj.put(name, value) }
         // A truncated file reads back as "no stacks installed" and makes the next setup reinstall everything.
         writeRootfsFileAtomically(devStacksFile, obj.toString())
+        RuntimeMarkers.legacyOf(devStacksFile)?.let { runCatching { it.writeText(obj.toString()) } }
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -1979,7 +1985,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun isValidCoreRootfs(targetRootfs: File): Boolean =
         ensureRootfsCompatibilityLinks(targetRootfs) &&
             File(targetRootfs, "usr/bin/bash").isFile &&
-            isSupportedRootfsVersion(File(targetRootfs, ".pocket-rootfs-version").readTextOrNull())
+            isSupportedRootfsVersion(RuntimeMarkers.read(File(targetRootfs, ".nextcraft-rootfs-version"))?.trim())
 
     private fun actionableProcessError(output: String, fallback: String, exitCode: Int? = null): String {
         val lines = output.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
@@ -2066,11 +2072,14 @@ class RuntimeInstaller(private val context: Context) {
             envFile.delete()
             throw error
         }
+        val pidFile = GuestProcess.pidFileFor(envFile)
+        spawned.guestPidFile = pidFile
         // The `rm -f` inside suCommand never runs when su is denied or exec fails, which would leave API keys
         // on disk until the next launch's 10-minute purge. Remove the file as soon as the process is gone.
         Thread({
             while (spawned.isAlive) Thread.sleep(ENV_CLEANUP_POLL_MS)
             envFile.delete()
+            pidFile.delete()
         }, "forge-env-cleanup").apply { isDaemon = true; start() }
         return spawned
     }
@@ -2114,7 +2123,7 @@ class RuntimeInstaller(private val context: Context) {
             put("HOME", "/root")
             put("USER", "root")
             put("LOGNAME", "root")
-            val androidReady = File(targetRootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION
+            val androidReady = RuntimeMarkers.read(File(targetRootfs, "root/.nextcraft-android-tools-version"))?.trim() == ANDROID_TOOLS_VERSION
             val basePath = "/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if (androidReady) {
                 put("ANDROID_HOME", AndroidToolchain.SDK_GUEST_DIR)
@@ -2148,6 +2157,10 @@ class RuntimeInstaller(private val context: Context) {
         // disk. Purge anything old enough that it cannot belong to a launch in progress.
         runtimeEnvDir.listFiles { f -> f.name.startsWith(".env-") }
             ?.filter { System.currentTimeMillis() - it.lastModified() > 10 * 60 * 1_000L }
+            ?.forEach { it.delete() }
+        // Pid files of launches whose owner never cleaned up (terminal sessions, crashes): a day is far past any run.
+        File(runtimeDir, "pids").listFiles()
+            ?.filter { System.currentTimeMillis() - it.lastModified() > 24 * 60 * 60 * 1_000L }
             ?.forEach { it.delete() }
         val envFile = File(runtimeEnvDir, ".env-${java.util.UUID.randomUUID()}.sh")
         val envScript = buildString {
@@ -2197,13 +2210,13 @@ class RuntimeInstaller(private val context: Context) {
             .put(
                 "hooks",
                 JSONArray().put(
-                    JSONObject().put("type", "command").put("command", "/opt/pocket/permission-hook.sh"),
+                    JSONObject().put("type", "command").put("command", "/opt/nextcraft/permission-hook.sh"),
                 ),
             ),
     )
 
     fun ensureSettingsAndHooks() {
-        val hook = File(rootfs, "opt/pocket/permission-hook.sh")
+        val hook = File(rootfs, "opt/nextcraft/permission-hook.sh")
         hook.parentFile?.mkdirs()
         // Hands every permission request to the app through the shared bridge directory and
         // waits for the user's/guardrail decision. The app classifies risk, auto-answers
@@ -2213,8 +2226,8 @@ class RuntimeInstaller(private val context: Context) {
         writeRootfsFileAtomically(
             hook,
             """#!/bin/sh
-BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
-RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/pocketdev-bridge-responses}"
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/nextcraft-bridge}"
+RESP="${'$'}{NEXTCRAFT_RESPONSE_DIR:-/nextcraft-bridge-responses}"
 # Parallel chats share this directory: the session id (set by the app) tags the request so only its owner answers it.
 SID="${'$'}{NEXTCRAFT_SESSION_ID:-}"
 ID="${'$'}{SID:+${'$'}{SID}_}${'$'}(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${'$'}${'$'}-${'$'}(date +%s)")"
@@ -2262,11 +2275,11 @@ fi
         // BROWSER handler for `claude auth login`: there is no browser in the chroot, so the sign-in URL is handed to
         // the app through the bridge directory and opened in the Android browser. The browser then redirects to
         // http://localhost:<port>/callback, which the CLI (same network namespace) is listening on.
-        val openUrl = File(rootfs, "opt/pocket/open-url.sh")
+        val openUrl = File(rootfs, "opt/nextcraft/open-url.sh")
         writeRootfsFileAtomically(
             openUrl,
             """#!/bin/sh
-BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/pocketdev-bridge}"
+BRIDGE="${'$'}{NEXTCRAFT_BRIDGE_DIR:-/nextcraft-bridge}"
 [ -n "${'$'}1" ] && [ -d "${'$'}BRIDGE" ] || exit 0
 printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDGE/claude-login-url.tmp" "${'$'}BRIDGE/claude-login-url"
 """,
@@ -2290,14 +2303,47 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             .toString()
 
         val settingsPaths = listOf(
-            File(rootfs, "root/.claude/pocket-settings.json"),
+            File(rootfs, "root/.claude/nextcraft-settings.json"),
             File(rootfs, "root/.claude/settings.json"),
             File(rootfs, "etc/claude/settings.json"),
         )
         for (target in settingsPaths) {
             writeRootfsFileAtomically(target, settingsContent)
         }
+        // Sessions started by an older build (and its settings files) still call /opt/pocket/*: keep identical copies there.
+        val legacyScripts = File(rootfs, "opt/pocket")
+        listOf(hook, openUrl).forEach { script ->
+            runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }
+        }
+        File(rootfs, "root/.claude/pocket-settings.json").delete()
+        // Agents' background jobs get a hangup when the turn ends (the CLI tears down its shells). This starts a command
+        // in its own session with hangups ignored, so a dev server or a long build outlives the turn.
+        writeRootfsFileAtomically(
+            File(rootfs, "opt/nextcraft/bin/keep-running"),
+            """#!/bin/sh
+# Keeps a command running after the agent's turn ends (dev servers, long builds).
+#   keep-running <logfile> <command> [args...]      then read <logfile>; stop it with: kill <pid>
+[ ${'$'}# -ge 2 ] || { echo "usage: keep-running <logfile> <command> [args...]" >&2; exit 2; }
+log="${'$'}1"; shift
+setsid nohup "${'$'}@" > "${'$'}log" 2>&1 < /dev/null &
+echo "started pid ${'$'}! (log: ${'$'}log)"
+""",
+            mode = 0b111101101,
+        )
+        ensureSystemGitTrust()
         ensureWorkspaceTrust("/workspace")
+    }
+
+    /**
+     * PRoot's `-0` flag makes the guest see every process as UID 0, while the files themselves are still owned by
+     * the app's own Android UID; git compares the two and refuses every project with "dubious ownership" (exit 128)
+     * without this. The system config is used so ~/.gitconfig stays the user's.
+     */
+    private fun ensureSystemGitTrust() {
+        val config = File(rootfs, "etc/gitconfig")
+        val existing = if (config.isFile) runCatching { config.readText() }.getOrNull() ?: return else ""
+        val merged = mergeGitConfig(existing, listOf(GitConfigEntry("safe", "directory", "*", multiValue = true)))
+        if (merged != existing) writeRootfsFileAtomically(config, merged)
     }
 
     private fun ensureWorkspaceTrust(
@@ -2666,6 +2712,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                 runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
             }
         }
+        // Published bundles still carry the .pocket-* marker names.
+        RuntimeMarkers.syncAll(destination)
     }
 
     @Suppress("DEPRECATION")
@@ -2911,17 +2959,49 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
     companion object {
         /**
-         * Gradle JVM options for builds inside the chroot, sized to the device. A fixed 512 MB heap / 256 MB metaspace
-         * made Android builds die with OutOfMemoryError (Metaspace) or get killed (exit 137): about an eighth of RAM
-         * for the heap (768 MB to 2 GB, in 128 MB steps) and 512 MB of metaspace.
+         * Gradle speed settings, sized like [gradleJvmArgs]. Measured on a 10.9 GB phone, an up-to-date JetNews build
+         * still took 4 min with a fresh JVM per build and 2 workers: almost all of it start-up and configuration.
+         *  - daemon: keeps the warmed-up JVM between builds; it exits after 10 idle minutes so its heap is returned.
+         *    Off below 7 GB, where an idle 1-2 GB JVM would push the app into the low-memory killer;
+         *  - configuration cache (problems only warn, so incompatible builds still run) and the build cache;
+         *  - workers: 4 / 3 / 2 and parallel project execution only on 10 GB+ (each worker adds memory).
+         */
+        internal fun gradleSpeedProperties(totalMemoryMb: Long): List<Pair<String, String>> {
+            val (daemon, workers, parallel) = when {
+                totalMemoryMb >= 10_000 -> Triple(true, 4, true)
+                totalMemoryMb >= 7_000 -> Triple(true, 3, false)
+                else -> Triple(false, 2, false)
+            }
+            return listOf(
+                "org.gradle.daemon" to daemon.toString(),
+                "org.gradle.daemon.idletimeout" to "600000",
+                GRADLE_WORKERS_PROPERTY to workers.toString(),
+                GRADLE_PARALLEL_PROPERTY to parallel.toString(),
+                "org.gradle.caching" to "true",
+                "org.gradle.configuration-cache" to "true",
+                "org.gradle.configuration-cache.problems" to "warn",
+            )
+        }
+
+        /**
+         * Gradle JVM options for builds inside the chroot, sized to the device so small phones are not pushed into the
+         * low-memory killer (exit 137) and large ones can build Room/KSP projects that need more:
+         *  - 10 GB or more reported (12 GB class phones): 3 GB heap, 1.5 GB metaspace;
+         *  - 7 GB or more (8 GB class): 2 GB heap, 1 GB metaspace;
+         *  - below that: an eighth of RAM for the heap (at least 768 MB), 512 MB metaspace.
+         * Android reports less than the marketed size (an "8 GB" phone shows about 7.3 GB), hence the thresholds.
          */
         internal fun gradleJvmArgs(totalMemoryMb: Long): String {
-            val heapMb = ((totalMemoryMb / 8).coerceIn(768L, 2048L) / 128) * 128
-            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+            val (heapMb, metaspaceMb) = when {
+                totalMemoryMb >= 10_000 -> 3072L to 1536
+                totalMemoryMb >= 7_000 -> 2048L to 1024
+                else -> ((totalMemoryMb / 8).coerceIn(768L, 1024L) / 128) * 128 to 512
+            }
+            return "-Xmx${heapMb}m -XX:MaxMetaspaceSize=${metaspaceMb}m -Dfile.encoding=UTF-8"
         }
 
         /** Top-level rootfs directories that proot-exec.sh binds from Android or the app on every launch. */
-        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses")
+        private val BIND_MOUNTED_TOP_LEVEL = setOf("proc", "sys", "dev", "system", "apex", "vendor", "product", "system_ext", "odm", "workspace", "data", "storage", "mnt", "sdcard", "tmp", "root", "nextcraft-bridge", "pocketdev-bridge", "pocket-bridge", "pocketdev-bridge-responses", "nextcraft-bridge-responses")
         /** RuntimeInstaller is created per call site; the lock must be shared by every instance. */
         private val CLAUDE_STATE_LOCK = Any()
 
@@ -2930,7 +3010,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
 
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
-        private const val AGY_VERSION = "1.1.27"
+        private const val AGY_VERSION = "1.4.5"
         const val CORE_MISSING_MESSAGE =
             "The base Ubuntu runtime (Core) is not installed or is incomplete. Run the runtime setup first, then retry."
         private const val GITHUB_CLI_VERSION = "2.100.0"
@@ -2949,7 +3029,10 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
         private const val ROOTFS_VERSION = "ubuntu-24.04.5-arm64"
         private const val LEGACY_ROOTFS_VERSION = "ubuntu-20.04.5-arm64"
-        private const val NODE_VERSION = "v24.19.0"
+        private const val LEGACY_ROOTFS_PYTHON_MESSAGE =
+            "Python needs the Ubuntu 24.04 runtime. This runtime is still on Ubuntu 20.04: reinstall the runtime " +
+                "(Settings → Runtime), then install Python again."
+        private const val NODE_VERSION = "v24.22.1"
         private const val NODE_ARM64_SHA256 = "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f"
         private const val COMPOSER_VERSION = "2.10.3"
         private const val COMPOSER_SHA256 = "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
@@ -2958,6 +3041,8 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
         private const val PREVIOUS_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val NEXTCRAFT_CORE_TOOLS_VERSION = "nextcraft-core-2026.10.1"
+        /** Core rebuilt from scratch by build-core-on-linux.sh (runtime-bundles.yml). */
+        private const val NEXTCRAFT_CORE_TOOLS_VERSION_2 = "nextcraft-core-2026.10.2"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = AndroidToolchain.TOOLS_VERSION
         private const val ANDROID_AAPT2_PROPERTY = "android.aapt2FromMavenOverride"
@@ -2971,6 +3056,11 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             GRADLE_WORKERS_PROPERTY,
             GRADLE_PARALLEL_PROPERTY,
             KOTLIN_EXECUTION_PROPERTY,
+            "org.gradle.daemon",
+            "org.gradle.daemon.idletimeout",
+            "org.gradle.caching",
+            "org.gradle.configuration-cache",
+            "org.gradle.configuration-cache.problems",
         )
         private const val ANDROID_AAPT2_GUEST_PATH = AndroidToolchain.AAPT2_GUEST_PATH
         private const val ANDROID_AAPT2_HOST_PATH = AndroidToolchain.AAPT2_HOST_PATH
@@ -2980,10 +3070,70 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
          * `build-android-bundle.sh` ships a byte-identical copy; keep both in sync.
          */
         internal val ANDROID_GRADLE_INIT_SCRIPT = """
-            def pocketMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            def nextcraftMaven = uri('${AndroidToolchain.MAVEN_GUEST_DIR}')
+            // The bundled cache holds some POMs without their jars, and Gradle does not try another repository once it
+            // found the metadata. It goes first for offline builds and for NextCraft's own project templates (which it was
+            // built from); any other project resolves from the real repositories and uses it only as a last resort.
+            def nextcraftCacheFirst = { File root ->
+                gradle.startParameter.offline || new File(root, '.nextcraft/android-project.json').isFile()
+            }
+            // sqlite-jdbc (Room's KSP/kapt schema checks) sees Android's /system in the chroot and loads its Android build,
+            // which cannot run on Ubuntu ("invalid ELF header"). Point it at the Linux aarch64 library from the same jar. On a
+            // project's first build the jar is not cached yet, so a Room project gets a pinned release from Maven Central instead.
+            def nextcraftSqliteJdbc = { File projectDir ->
+                if (System.getProperty('org.sqlite.lib.path')) return
+                def sqliteCache = new File(gradle.gradleUserHomeDir, 'caches/modules-2/files-2.1/org.xerial/sqlite-jdbc')
+                def sqliteJars = []
+                (sqliteCache.listFiles() ?: []).each { v -> (v.listFiles() ?: []).each { h ->
+                    (h.listFiles() ?: []).each { f -> if (f.name.startsWith('sqlite-jdbc-') && f.name.endsWith('.jar')) sqliteJars << f }
+                } }
+                def sqliteJar = sqliteJars.max { it.lastModified() }
+                if (sqliteJar == null && !gradle.startParameter.offline) {
+                    def buildFiles = ['gradle/libs.versions.toml', 'build.gradle', 'build.gradle.kts', 'app/build.gradle', 'app/build.gradle.kts']
+                    def usesRoom = buildFiles.any { name ->
+                        def f = new File(projectDir, name)
+                        f.isFile() && f.text.contains('androidx.room')
+                    }
+                    def pinned = new File(gradle.gradleUserHomeDir, 'nextcraft/sqlite-jdbc-3.50.3.0.jar')
+                    if (usesRoom && !pinned.isFile()) {
+                        try {
+                            def connection = new URL('https://repo.maven.apache.org/maven2/org/xerial/sqlite-jdbc/3.50.3.0/sqlite-jdbc-3.50.3.0.jar').openConnection()
+                            connection.connectTimeout = 15000
+                            connection.readTimeout = 60000
+                            pinned.parentFile.mkdirs()
+                            def partial = new File(pinned.path + '.part')
+                            connection.inputStream.withStream { input -> partial.withOutputStream { it << input } }
+                            partial.renameTo(pinned)
+                        } catch (Exception ignored) {
+                            // Offline or blocked: the build still runs and the next one uses the jar Gradle downloaded.
+                        }
+                    }
+                    if (pinned.isFile()) sqliteJar = pinned
+                }
+                if (sqliteJar == null) return
+                def sqliteDir = new File(gradle.gradleUserHomeDir, 'nextcraft/' + sqliteJar.name.replace('.jar', ''))
+                def sqliteLib = new File(sqliteDir, 'libsqlitejdbc.so')
+                if (!sqliteLib.isFile()) {
+                    def zip = new java.util.zip.ZipFile(sqliteJar)
+                    try {
+                        def entry = zip.getEntry('org/sqlite/native/Linux/aarch64/libsqlitejdbc.so')
+                        if (entry != null) {
+                            sqliteDir.mkdirs()
+                            zip.getInputStream(entry).withStream { input -> sqliteLib.withOutputStream { it << input } }
+                        }
+                    } finally {
+                        zip.close()
+                    }
+                }
+                if (sqliteLib.isFile()) {
+                    System.setProperty('org.sqlite.lib.path', sqliteDir.path)
+                    System.setProperty('org.sqlite.lib.name', 'libsqlitejdbc.so')
+                }
+            }
             beforeSettings { settings ->
+                nextcraftSqliteJdbc(settings.settingsDir)
                 settings.pluginManagement.repositories {
-                    maven { url = pocketMaven }
+                    if (nextcraftCacheFirst(settings.settingsDir)) maven { url = nextcraftMaven }
                     google()
                     mavenCentral()
                     gradlePluginPortal()
@@ -2991,7 +3141,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             }
             settingsEvaluated { settings ->
                 settings.dependencyResolutionManagement.repositories {
-                    maven { url = pocketMaven }
+                    maven { url = nextcraftMaven }
                 }
             }
             gradle.beforeProject { project ->
@@ -2999,21 +3149,23 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
                     '$ANDROID_AAPT2_PROPERTY',
                     '$ANDROID_AAPT2_GUEST_PATH'
                 )
-                project.buildscript.repositories {
-                    maven { url = pocketMaven }
+                if (nextcraftCacheFirst(project.rootDir)) {
+                    project.buildscript.repositories {
+                        maven { url = nextcraftMaven }
+                    }
                 }
             }
         """.trimIndent() + "\n"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
-        const val DSH_VERSION = "0.1.2-rc.1"
-        private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
+        const val DSH_VERSION = "0.2.1-rc.2"
+        private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v2"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "nextcraft-core-arm64-2026.10.1.tar.zst",
-            sha256 = "fe63d1dececdcd5e861debe0936835d39c2eb6eb787bb7bd71bcab5c3db4d4cf",
-            compressedBytes = 74_269_605L,
+            fileName = "nextcraft-core-arm64-2026.10.2.tar.zst",
+            sha256 = "c2dab14270aae62b21243109a5a6e75af7d0c6821fda6264b91f973e18f3ddfb",
+            compressedBytes = 74_457_771L,
         )
-        private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
+        private const val CLAUDE_BUNDLED_VERSION = "2.1.308"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
         /** Where the npm package lands under PRoot; CLAUDE_GUEST_PATH becomes a symlink into it. */
         private const val CLAUDE_NPM_GUEST_DIR = "/usr/local/lib/claude-code"
@@ -3022,42 +3174,34 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         private const val CLAUDE_NPM_VERSION = "2.1.112"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
-            fileName = "nextcraft-claude-arm64-2026.10.1.tar.zst",
-            sha256 = "bb993c0a80ff2ea8d9c994e03cf587bf7ef996bdecdab3d95ce51e1e0f04f2bd",
-            compressedBytes = 75_422_659L,
+            fileName = "nextcraft-claude-arm64-2026.10.2.tar.zst",
+            sha256 = "cc479f683e0e581e055d6fa2c033897c1aa6e306b6c065c9cff9e65e55c8e7a4",
+            compressedBytes = 102_137_744L,
         )
         private val PYTHON_BUNDLE = RuntimeBundle(
             label = "Python",
-            fileName = "nextcraft-python-arm64-2026.10.1.tar.zst",
-            sha256 = "43a23a3e2d73e46f5c242ac4e3d8f7adef356b987559e1474e4cc9072118a7f3",
-            compressedBytes = 15_053_684L,
-        )
-        /** Python 3.8 overlay for runtimes still on the Ubuntu 20.04 rootfs: the 3.12 overlay needs glibc 2.39. */
-        private val LEGACY_PYTHON_BUNDLE = RuntimeBundle(
-            label = "Python",
-            fileName = "pocketdev-python-arm64-2026.09.2.tar.zst",
-            sha256 = "6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85",
-            compressedBytes = 55_419_626L,
-            baseUrl = LEGACY_RUNTIME_RELEASE_BASE_URL,
+            fileName = "nextcraft-python-arm64-2026.10.2.tar.zst",
+            sha256 = "6f4a847ffe7d36cea16c4fb3e1dc1ad2d7619ef9dff31560cfaa9b5e47a833d8",
+            compressedBytes = 15_018_991L,
         )
         /** Built by scripts/runtime-bundles/build-android-bundle.sh; versions in [AndroidToolchain]. */
         private val ANDROID_BUNDLE = RuntimeBundle(
             label = "Android",
-            fileName = "nextcraft-android-arm64-2026.10.1.tar.zst",
-            sha256 = "8b4ecf057daa6fd54acd950712f8adb4eb7722c7bc557136f2ea31d7a2bbfd60",
-            compressedBytes = 584_522_930L,
+            fileName = "nextcraft-android-arm64-2026.10.2.tar.zst",
+            sha256 = "84ca85c6578fe210ca7ada5ad7dd7117e769254c1faf597609f50fe3e5ed165d",
+            compressedBytes = 584_339_354L,
         )
         private val DSH_BUNDLE = RuntimeBundle(
             label = "DeepSeek",
-            fileName = "nextcraft-dsh-arm64-2026.10.1.tar.zst",
-            sha256 = "d3137b607c32f3714c655f5e0f101d7e7292841a056d3b9bc928e704656c220f",
-            compressedBytes = 28_066_921L,
+            fileName = "nextcraft-dsh-arm64-2026.10.2.tar.zst",
+            sha256 = "0036adeef3f30a7b535821e7f4594c3a296ff16f7dfbbcaec6b93bc6ef44ff25",
+            compressedBytes = 90_508_623L,
         )
         private val AGY_BUNDLE = RuntimeBundle(
             label = "Antigravity CLI",
-            fileName = "nextcraft-agy-arm64-2026.10.1.tar.zst",
-            sha256 = "001cbb373a1110ce32c939c2b27138b46b676b157c9329b50c34e790aa2b7eff",
-            compressedBytes = 42_003_928L,
+            fileName = "nextcraft-agy-arm64-2026.10.2.tar.zst",
+            sha256 = "0a3e344817ada663f5cb79b0b86707fd76581cef794194d31dc360ec5b5d889b",
+            compressedBytes = 48_493_274L,
         )
         private const val ENV_CLEANUP_POLL_MS = 1_000L
         /** Compressed size multiples needed to download (1x) and extract (about 3x for zstd rootfs content). */
@@ -3134,7 +3278,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             SHM_DIR="${'$'}ROOTFS/tmp/.nextcraft-shm"
 
             mkdir -p "${'$'}ROOTFS${'$'}GUEST_WORKSPACE" "${'$'}HOST_WORKSPACE" "${'$'}HOST_BRIDGE" "${'$'}HOST_RESP" "${'$'}PROOT_TMP_DIR" "${'$'}SHM_DIR" \
-                "${'$'}ROOTFS/nextcraft-bridge" "${'$'}ROOTFS/pocketdev-bridge" "${'$'}ROOTFS/pocket-bridge" "${'$'}ROOTFS/pocketdev-bridge-responses" \
+                "${'$'}ROOTFS/nextcraft-bridge" "${'$'}ROOTFS/pocketdev-bridge" "${'$'}ROOTFS/pocket-bridge" "${'$'}ROOTFS/pocketdev-bridge-responses" "${'$'}ROOTFS/nextcraft-bridge-responses" \
                 "${'$'}ROOTFS/tmp" "${'$'}ROOTFS/dev" "${'$'}ROOTFS/proc" "${'$'}ROOTFS/sys"
 
             if [ ! -s "${'$'}ROOTFS/etc/resolv.conf" ]; then
@@ -3161,6 +3305,14 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             # signal is a tracer round trip and can interrupt an in-flight connect/read, which surfaces as random
             # "dial tcp"/"i/o timeout" failures that never happen in a kernel chroot. Cooperative preemption only.
             export GODEBUG="${'$'}{GODEBUG:-asyncpreemptoff=1}"
+            export NEXTCRAFT_BRIDGE_DIR="/nextcraft-bridge"
+            export POCKETDEV_BRIDGE_DIR="/nextcraft-bridge"
+            export NEXTCRAFT_RESPONSE_DIR="/nextcraft-bridge-responses"
+            export PATH="${'$'}{PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+            case ":${'$'}PATH:" in
+                *:/root/.local/bin:*) ;;
+                *) export PATH="/opt/nextcraft/bin:/root/.local/bin:${'$'}PATH" ;;
+            esac
 
             BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if [ -d "${'$'}ROOTFS/root/android-sdk" ]; then

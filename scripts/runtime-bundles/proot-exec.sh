@@ -60,7 +60,7 @@
             SHM_DIR="$ROOTFS/tmp/.nextcraft-shm"
 
             mkdir -p "$ROOTFS$GUEST_WORKSPACE" "$HOST_WORKSPACE" "$HOST_BRIDGE" "$HOST_RESP" "$PROOT_TMP_DIR" "$SHM_DIR" \
-                "$ROOTFS/nextcraft-bridge" "$ROOTFS/pocketdev-bridge" "$ROOTFS/pocket-bridge" "$ROOTFS/pocketdev-bridge-responses" \
+                "$ROOTFS/nextcraft-bridge" "$ROOTFS/pocketdev-bridge" "$ROOTFS/pocket-bridge" "$ROOTFS/pocketdev-bridge-responses" "$ROOTFS/nextcraft-bridge-responses" \
                 "$ROOTFS/tmp" "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
 
             if [ ! -s "$ROOTFS/etc/resolv.conf" ]; then
@@ -87,6 +87,14 @@
             # signal is a tracer round trip and can interrupt an in-flight connect/read, which surfaces as random
             # "dial tcp"/"i/o timeout" failures that never happen in a kernel chroot. Cooperative preemption only.
             export GODEBUG="${GODEBUG:-asyncpreemptoff=1}"
+            export NEXTCRAFT_BRIDGE_DIR="/nextcraft-bridge"
+            export POCKETDEV_BRIDGE_DIR="/nextcraft-bridge"
+            export NEXTCRAFT_RESPONSE_DIR="/nextcraft-bridge-responses"
+            export PATH="${PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+            case ":$PATH:" in
+                *:/root/.local/bin:*) ;;
+                *) export PATH="/opt/nextcraft/bin:/root/.local/bin:$PATH" ;;
+            esac
 
             BASE_PATH="/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             if [ -d "$ROOTFS/root/android-sdk" ]; then

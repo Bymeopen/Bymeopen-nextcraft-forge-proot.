@@ -56,7 +56,6 @@ object AndroidAppInstaller {
         }
         val appContext = context.applicationContext ?: context
         val pkgName = archivePackageName(appContext, apk)
-        val isSelfUpdate = pkgName == appContext.packageName
 
         Thread({
             val apkHash = runCatching { fingerprint(apk) }.getOrNull()

@@ -398,12 +398,13 @@ fun ForgePillTabs(
                         onClick = { onSelect(index) },
                     )
                     .forgeSelected(selected)
-                    .padding(horizontal = 15.dp),
+                    .padding(horizontal = if (equalWidth) 8.dp else 15.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = label,
-                    fontSize = ForgeType.body,
+                    // Equal segments are narrower (a third of the row at 360dp): one size down keeps "Antigravity" whole.
+                    fontSize = if (equalWidth) ForgeType.control else ForgeType.body,
                     color = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis,

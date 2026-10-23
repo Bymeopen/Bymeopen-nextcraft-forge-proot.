@@ -135,13 +135,15 @@ fun Modifier.forgePopIn(): Modifier = composed {
 fun rememberBlink(): Float {
     val reduceMotion = rememberReduceMotion()
     if (reduceMotion) return 1f
-    val transition = rememberInfiniteTransition()
-    val t by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
-    )
-    return if (t < 0.5f) 1f else 0.15f
+    // Two states only, so toggle them on a timer: an infinite transition would recompose on every frame.
+    var on by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(450)
+            on = !on
+        }
+    }
+    return if (on) 1f else 0.15f
 }
 
 /* ───────────────────────── Type and spacing scale ───────────────────────── */

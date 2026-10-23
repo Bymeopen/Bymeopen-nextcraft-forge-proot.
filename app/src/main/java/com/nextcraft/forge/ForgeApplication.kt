@@ -16,7 +16,8 @@ class ForgeApplication : Application() {
         CrashReporter.install(this)
         com.nextcraft.forge.schedule.ScheduleTickWorker.schedule(this)
         runCatching { com.nextcraft.forge.update.ChangelogNotifier.notifyIfNew(this) }
-        if (com.nextcraft.forge.data.AppPreferences(this).updateNotifications) {
+        val updatePrefs = com.nextcraft.forge.data.AppPreferences(this)
+        if (updatePrefs.updateNotifications || updatePrefs.autoInstallUpdates) {
             com.nextcraft.forge.update.UpdateCheckWorker.schedule(this)
         }
     }

@@ -523,16 +523,21 @@ fun AgentScreen(
             languageCode = state.languageCode,
             onPartial = { promptInput = joinVoice(voiceBase, it) },
             onFinal = { spoken ->
+                // true = keep listening for the next sentence; commands that end the dictation return false.
                 when (val command = VoiceCommands.parse(spoken)) {
-                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask() }
-                    VoiceCommand.Clear -> promptInput = ""
+                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask(); false }
+                    VoiceCommand.Clear -> { promptInput = ""; voiceBase = ""; true }
                     is VoiceCommand.Dictate -> {
                         val text = joinVoice(voiceBase, command.text)
                         if (command.send && (text.isNotEmpty() || state.pendingAttachments.isNotEmpty())) {
                             promptInput = ""
+                            voiceBase = ""
                             viewModel.sendPrompt(text)
+                            false
                         } else {
                             promptInput = text
+                            voiceBase = text // the next sentence continues after this one
+                            !command.send
                         }
                     }
                 }
@@ -563,6 +568,7 @@ fun AgentScreen(
                 voice.toggle()
             },
             listening = voice.listening,
+            micLevel = voice.level,
             onGenerateImage = { imageDialogOpen = true },
         )
         if (imageDialogOpen) ImageGenerationDialog(state = state, viewModel = viewModel, onDismiss = { imageDialogOpen = false })
@@ -810,16 +816,18 @@ internal fun WorkingIndicator(startedAt: java.time.Instant, label: String, modif
     }
     val elapsed = (now - startedAt.toEpochMilli()).coerceAtLeast(0L)
     val reduceMotion = rememberReduceMotion()
-    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "working-dots")
-    val spinning by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.LinearEasing),
-        ),
-        label = "working-spin",
-    )
-    val angle = if (reduceMotion) 0f else spinning
+    // Eight dots: step the head ~14 times a second instead of animating every frame, which redrew the chat (and the
+    // Glass backdrop behind the bar) at 60-120 fps for the whole agent turn.
+    var step by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    if (!reduceMotion) {
+        LaunchedEffect(Unit) {
+            while (true) {
+                kotlinx.coroutines.delay(1_100L / 16)
+                step = (step + 1) % 16
+            }
+        }
+    }
+    val angle = step * 360f / 16
     val dotColor = scheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
