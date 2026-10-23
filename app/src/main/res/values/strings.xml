@@ -1427,4 +1427,6 @@
     <string name="chg_notif_channel">What\'s new</string>
     <string name="chg_notif_title">NextCraft Forge updated</string>
     <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
+    <string name="msg_agent_switch_busy">Wait for the running turn to finish before changing the agent.</string>
+    <string name="msg_rename_failed">Could not rename: the name is invalid or already exists, or an agent is running.</string>
 </resources>

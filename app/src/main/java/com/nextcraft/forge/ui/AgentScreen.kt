@@ -425,7 +425,9 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
-        val retry = state.retryPrompts[state.activeChatId]?.takeIf { !state.activeChatRunning }
+        val retry = state.retryPrompts[state.activeChatId]?.takeIf {
+            !state.activeChatRunning && (it.prompt.projectId == null || it.prompt.projectId == state.activeProjectId)
+        }
         if (retry != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
