@@ -975,9 +975,13 @@ private fun scriptCanEscapeSandbox(text: String): Boolean =
         (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
 
 /** Commands that create, overwrite or move files; their path arguments must stay inside the project. */
+/** The option letters of a short-option cluster (`-Ei` gives "Ei"); empty for a long option or a non-option word. */
+private fun String.shortFlagCluster(): String =
+    if (startsWith("-") && !startsWith("--")) drop(1).takeWhile { it.isLetter() } else ""
+
 private fun mutatesFiles(first: String, words: List<String>): Boolean =
     first in setOf("cp", "mv", "mkdir", "touch", "uniq") ||
-        (first == "sed" && words.any { it == "--in-place" || (it.startsWith("-i") && !it.startsWith("--")) })
+        (first == "sed" && words.any { it.startsWith("--in-place") || it.trim('\'', '"').shortFlagCluster().contains('i') })
 
 private fun isOutsideWorkspacePath(word: String): Boolean {
     val arg = word.trim('\'', '"')
@@ -1044,6 +1048,10 @@ private fun maskQuotedAndEscapedSeparators(input: String): String {
 }
 
 /** System directories whose programs may be named by full path; any other path could point at a file the agent wrote. */
+/** Options of env/xargs that take a value as the next word. */
+private val WRAPPER_OPTIONS_WITH_VALUE = setOf("-u", "-C", "-S", "-I", "-i", "-E", "-e", "-d", "-L", "-l", "-n", "-P", "-s", "-a")
+private val WRAPPER_LONG_OPTIONS_WITH_VALUE = setOf("unset", "chdir", "split-string", "replace", "eof", "delimiter", "max-lines", "max-args", "max-procs", "max-chars", "arg-file")
+
 private val TRUSTED_COMMAND_DIRS = listOf("/usr/bin/", "/bin/", "/usr/local/bin/")
 
 private fun isSafeBashSegment(segment: String): Boolean {
@@ -1053,12 +1061,17 @@ private fun isSafeBashSegment(segment: String): Boolean {
     val firstWord = words.firstOrNull()?.trim('\'', '"') ?: return false
     // `./ls` or `/workspace/cat` is a program the agent may have just written, not the allowlisted tool of that name.
     if ('/' in firstWord && TRUSTED_COMMAND_DIRS.none(firstWord::startsWith)) return false
+    // `/usr/bin/../../workspace/x/cat` starts with a trusted directory but runs a file of the project.
+    if (".." in firstWord) return false
     val first = firstWord.substringAfterLast('/')
     if (first == "env" || first == "xargs") {
         // Wrappers run another command, so judge that command. A bare `env` dumps every exported
         // variable (including provider API keys) into the model context and is never auto-approved.
         // `env VAR=value cmd` is refused for the same reason as a leading assignment.
         if (words.drop(1).any { it.matches(ENV_ASSIGNMENT_REGEX) }) return false
+        val options = words.drop(1).takeWhile { it.startsWith("-") }
+        // `env -u cat sh -c ...` / `xargs -I cat sh -c ...`: an option's value would be mistaken for the wrapped command.
+        if (options.any { it in WRAPPER_OPTIONS_WITH_VALUE || (it.startsWith("--") && '=' !in it && it.removePrefix("--") in WRAPPER_LONG_OPTIONS_WITH_VALUE) }) return false
         val wrapped = words.drop(1).dropWhile { it.startsWith("-") }
         if (wrapped.isEmpty()) return first == "xargs"
         return isSafeBashSegment(wrapped.joinToString(" "))
@@ -1067,9 +1080,10 @@ private fun isSafeBashSegment(segment: String): Boolean {
     // (find -fprint, git diff --output, sort/tree -o): never auto-approved.
     val args = words.drop(1).map { it.trim('\'', '"') }
     if (args.any { UNSAFE_TOOL_FLAG_REGEX.matches(it) }) return false
-    if ((first == "sort" || first == "tree") && args.any { it.startsWith("-o") }) return false
+    // -o may sit inside a cluster (-uo out) and getopt_long accepts prefixes of --output.
+    if ((first == "sort" || first == "tree") && args.any { it.startsWith("--out") || it.shortFlagCluster().contains('o') }) return false
     // `date -s` sets the system clock.
-    if (first == "date" && args.any { it == "-s" || it.startsWith("-s") || it.startsWith("--set") }) return false
+    if (first == "date" && args.any { it.shortFlagCluster().contains('s') || it.startsWith("--set") }) return false
     if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false

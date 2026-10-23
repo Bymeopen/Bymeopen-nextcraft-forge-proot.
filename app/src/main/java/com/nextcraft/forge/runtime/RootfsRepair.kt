@@ -146,9 +146,11 @@ internal object RootfsRepair {
 
     fun safeDeleteRecursively(targetDir: File): Boolean {
         if (!targetDir.exists()) return true
-        ensureUnmounted(targetDir)
+        // A mount left under the tree (bind of /workspace, /dev, /android) would be walked into by either delete below
+        // and remove real files of the phone: stop here instead of deleting anything.
+        if (!ensureUnmounted(targetDir)) return false
         if (targetDir.deleteRecursively()) return true
-        // Fallback to root rm -rf ONLY after ensureUnmounted verified 0 active kernel mounts
+        // Fallback to root rm -rf, reached ONLY when ensureUnmounted verified 0 active kernel mounts
         val canonicalPath = targetDir.canonicalPath.trimEnd('/')
         require(canonicalPath.length > 1 && canonicalPath.startsWith("/")) {
             "Refusing to delete invalid path: '$canonicalPath'"
