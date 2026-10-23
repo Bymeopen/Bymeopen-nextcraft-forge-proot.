@@ -157,6 +157,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("update_notifications", true)
         set(value) { preferences.edit().putBoolean("update_notifications", value).apply() }
 
+    /** Downloads and installs a newer build in the background while the app is idle (root needed; otherwise only notifies). */
+    var autoInstallUpdates: Boolean
+        get() = preferences.getBoolean("auto_install_updates", true)
+        set(value) { preferences.edit().putBoolean("auto_install_updates", value).apply() }
+
     /** versionCode of the newest build already announced, so one build never notifies twice. */
     /** Id of the newest changelog the user was told about; empty on a fresh install. */
     var lastSeenChangelogId: String
@@ -231,6 +236,11 @@ class AppPreferences(private val context: Context) {
     var themeMode: String
         get() = preferences.getString("theme_mode", "dark") ?: "dark"
         set(value) { preferences.edit().putString("theme_mode", value).apply() }
+
+    /** Glass without blur: solid surfaces, for people who find the frosted look hard to read or whose phone is slow. */
+    var glassSolid: Boolean
+        get() = preferences.getBoolean("glass_solid", false)
+        set(value) { preferences.edit().putBoolean("glass_solid", value).apply() }
 
     var languageCode: String
         get() = preferences.getString("language_code", "system") ?: "system"

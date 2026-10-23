@@ -425,7 +425,9 @@ fun AgentScreen(
                 cameraLauncher.launch(uri)
             }.onFailure { cameraUri = null }
         }
-        val retry = state.retryPrompts[state.activeChatId]?.takeIf { !state.activeChatRunning }
+        val retry = state.retryPrompts[state.activeChatId]?.takeIf {
+            !state.activeChatRunning && (it.prompt.projectId == null || it.prompt.projectId == state.activeProjectId)
+        }
         if (retry != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).forgeLive(),
@@ -521,16 +523,21 @@ fun AgentScreen(
             languageCode = state.languageCode,
             onPartial = { promptInput = joinVoice(voiceBase, it) },
             onFinal = { spoken ->
+                // true = keep listening for the next sentence; commands that end the dictation return false.
                 when (val command = VoiceCommands.parse(spoken)) {
-                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask() }
-                    VoiceCommand.Clear -> promptInput = ""
+                    VoiceCommand.Stop -> { promptInput = voiceBase; viewModel.stopActiveTask(); false }
+                    VoiceCommand.Clear -> { promptInput = ""; voiceBase = ""; true }
                     is VoiceCommand.Dictate -> {
                         val text = joinVoice(voiceBase, command.text)
                         if (command.send && (text.isNotEmpty() || state.pendingAttachments.isNotEmpty())) {
                             promptInput = ""
+                            voiceBase = ""
                             viewModel.sendPrompt(text)
+                            false
                         } else {
                             promptInput = text
+                            voiceBase = text // the next sentence continues after this one
+                            !command.send
                         }
                     }
                 }
@@ -561,6 +568,7 @@ fun AgentScreen(
                 voice.toggle()
             },
             listening = voice.listening,
+            micLevel = voice.level,
             onGenerateImage = { imageDialogOpen = true },
         )
         if (imageDialogOpen) ImageGenerationDialog(state = state, viewModel = viewModel, onDismiss = { imageDialogOpen = false })
@@ -780,7 +788,14 @@ internal fun ChatMessageCard(
                 message.workItems.isEmpty() -> R.string.agent_thinking
                 else -> R.string.agent_status_working
             }
-            WorkingIndicator(startedAt = message.createdAt, label = stringResource(phase), modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+            // While a tool runs, say which one ("Working… · Bash"), so a long step doesn't look like a hang.
+            val running = message.workItems.lastOrNull { !it.isComplete }?.title?.replace(Regex("\\s+"), " ")?.trim()?.take(32)
+            val phaseLabel = stringResource(phase)
+            WorkingIndicator(
+                startedAt = message.createdAt,
+                label = if (running.isNullOrBlank() || message.text.isNotBlank()) phaseLabel else "$phaseLabel · $running",
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+            )
         }
     }
 }

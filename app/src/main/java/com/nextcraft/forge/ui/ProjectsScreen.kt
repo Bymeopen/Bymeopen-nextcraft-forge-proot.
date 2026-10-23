@@ -554,14 +554,19 @@ internal fun ProjectRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = if (locked) stringResource(R.string.projects_agent_running) else project.localizedDescription().ifBlank { project.subtitle() },
-                    fontSize = ForgeType.body,
-                    color = muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // The stock descriptions ("General coding workspace", "Quick project") say nothing the card does not already
+                // show (the list is grouped by kind), so only a locked card or a description someone wrote takes a line.
+                val generic = project.description in GENERIC_PROJECT_DESCRIPTIONS
+                if (locked || !generic) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (locked) stringResource(R.string.projects_agent_running) else project.localizedDescription().ifBlank { project.subtitle() },
+                        fontSize = ForgeType.body,
+                        color = muted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 val guestPath = "/workspace/${project.slug}"
                 Text(
                     text = guestPath,
@@ -675,6 +680,12 @@ private fun ProjectsEmptyState() {
         )
     }
 }
+
+private val GENERIC_PROJECT_DESCRIPTIONS = setOf(
+    "Default workspace inside Ubuntu ARM64 Root Chroot",
+    "General coding workspace",
+    "Quick project",
+)
 
 @Composable
 private fun Project.subtitle(): String = when {

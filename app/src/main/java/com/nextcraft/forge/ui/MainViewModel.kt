@@ -253,15 +253,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         secretFor = ::resolveProviderSecret,
         rotateSecretFor = ::rotateProviderSecret,
     )
+    /** Chat of the running Antigravity turn (only one non-Claude turn runs at a time). */
+    @Volatile private var antigravityRunChatId: String = ""
     private val antigravityRuntime = AntigravityRuntimeBridge(
         context = application,
         model = { preferences.antigravityModel },
         effort = { preferences.antigravityEffort },
+        // The chat that started the turn, not the open one: the user may switch chats while Antigravity works.
         conversationId = { projectId ->
-            preferences.loadAgentConversation(AgentKind.ANTIGRAVITY, projectId, _state.value.activeChatId)
+            preferences.loadAgentConversation(AgentKind.ANTIGRAVITY, projectId, antigravityRunChatId.ifEmpty { _state.value.activeChatId })
         },
         saveConversationId = { projectId, convId ->
-            preferences.saveAgentConversation(AgentKind.ANTIGRAVITY, projectId, _state.value.activeChatId, convId)
+            preferences.saveAgentConversation(AgentKind.ANTIGRAVITY, projectId, antigravityRunChatId.ifEmpty { _state.value.activeChatId }, convId)
         },
     )
 
@@ -411,6 +414,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     reaChatHint = preferences.reaChatHint,
                     scheduleEnabled = preferences.scheduleEnabled,
                     updateNotifications = preferences.updateNotifications,
+                    autoInstallUpdates = preferences.autoInstallUpdates,
                     autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -678,7 +682,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectAgent(agent: AgentKind) {
         // Switching bridges mid-run would desync providerProfile/hasSecret from the session that is
         // still streaming, and would misroute any pending tool approval to the newly selected bridge.
-        if (_state.value.sessionRunning) return
+        if (_state.value.sessionRunning) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_agent_switch_busy)) }
+            return
+        }
         preferences.agentKind = agent.stableId
         val loadedProfile = preferences.loadProvider(vault, agent)
         val profile = loadedProfile.copy(hasSecret = !resolveProviderSecret(loadedProfile).isNullOrBlank())
@@ -872,7 +879,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteProject(projectId: String) {
-        dropScheduledTasks { it.projectId == projectId }
         // The workspace would be wiped under a running agent, build, or terminal process.
         if (_state.value.sessionRunning || _state.value.androidBuild.phase == AndroidBuildPhase.BUILDING || _state.value.terminalRunning) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_busy_before_delete)) }
@@ -991,13 +997,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(projects = updated) }
     }
 
-    /**
-     * Opening or creating a chat is always allowed (each chat keeps its own live run copy). What the other agents cannot do
-     * is run two chats at once: a message sent meanwhile is queued ([canStartAnotherRun]). Deleting chats stays blocked here.
-     */
-    private fun chatSwitchBlocked(): Boolean =
-        _state.value.sessionRunning && runs.values.any { it.agent != AgentKind.CLAUDE_CODE }
-
     fun selectChat(chatId: String) {
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
@@ -1060,7 +1059,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChat(chatId: String) {
-        if (runs.containsKey(chatId) || chatSwitchBlocked()) return
+        if (runs.containsKey(chatId)) return
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated != true) {
             deleteChatNow(chatId)
@@ -1070,7 +1069,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             if (branchHoldsUnmergedWork(project, chatId)) {
                 _state.update { it.copy(bannerMessage = UiText.res(R.string.branch_unmerged)) }
-            } else {
+            } else if (_state.value.activeProjectId == project.id) {
+                // The user may have opened another project during the check; "main" exists in every project.
                 deleteChatNow(chatId)
             }
         }
@@ -1085,7 +1085,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun deleteChatNow(chatId: String) {
-        if (runs.containsKey(chatId) || chatSwitchBlocked()) return
+        if (runs.containsKey(chatId)) return
         val project = _state.value.activeProject ?: return
         val currentChats = _state.value.chats
         if (currentChats.size <= 1) return
@@ -1740,10 +1740,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val chatIds = st.chats.map { it.id }.toSet()
         // A deleted chat leaves no orphan timer behind.
         dropScheduledTasks { it.projectId == projectId && it.chatId !in chatIds }
+        // Timers of a project that no longer exists (deleted) are never run again.
+        val knownProjects = st.projects.map { it.id }.toSet()
+        dropScheduledTasks { it.projectId !in knownProjects }
         val now = System.currentTimeMillis()
+        // One start per tick: `runs` is only updated by startRun, so several due tasks would all pass the same check
+        // and a single-run agent would get two sessions at once. The rest are tried at the next tick.
+        var startedThisTick = false
         val (updated, started) = ScheduleLogic.takeDue(_state.value.scheduledTasks, now) { task ->
-            task.projectId == projectId && !runs.containsKey(task.chatId) &&
+            val ok = !startedThisTick && task.projectId == projectId && !runs.containsKey(task.chatId) &&
                 canStartAnotherRun(tentativeAgent(task.prompt)) && task.chatId in chatIds
+            if (ok) startedThisTick = true
+            ok
         }
         if (started.isEmpty()) return
         saveScheduled(updated)
@@ -2055,12 +2063,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             projectId = project.id,
             bridge = bridge,
             ownsBridge = agent == AgentKind.CLAUDE_CODE,
-            lastPrompt = QueuedPrompt(text = cleanPrompt, attachments = attachments),
+            lastPrompt = QueuedPrompt(text = cleanPrompt, attachments = attachments, projectId = project.id, chatId = chatId),
             isolated = isolated,
             agent = agent,
             tried = tried,
         )
         run.messages = updatedMessages
+        if (agent == AgentKind.ANTIGRAVITY) antigravityRunChatId = chatId
         run.statusLine = UiText.res(R.string.agent_status_starting, agent.title)
         runs[chatId] = run
         _state.update {
@@ -2114,7 +2123,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val turnJob = coroutineContext[Job]
             viewModelScope.launch {
                 delay(AGENT_TURN_END_GRACE_MS)
-                if (run.job === turnJob) finishRun(run)
+                if (run.job === turnJob && !run.finished) {
+                    finishRun(run)
+                    dispatchQueuedPrompts()
+                }
                 run.eventsJob?.cancel()
             }
         }
@@ -2197,13 +2209,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun retryLastPrompt() {
         val retry = _state.value.retryPrompts[_state.value.activeChatId] ?: return
         val project = _state.value.activeProject ?: return
+        // Chat ids such as "main" exist in every project; the offer belongs to the project where the turn failed.
+        if (retry.prompt.projectId != null && retry.prompt.projectId != project.id) return
         if (runs.containsKey(retry.chatId)) return
         if (!canStartAnotherRun(tentativeAgent(retry.prompt.text))) {
             _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_parallel_queued)) }
             return
         }
         _state.update { it.copy(retryPrompts = it.retryPrompts - retry.chatId) }
-        startRun(project, retry.chatId, retry.prompt.copy(projectId = project.id, chatId = retry.chatId))
+        // The failed turn's message is already in the history: send it again without adding a second bubble.
+        startRun(project, retry.chatId, retry.prompt.copy(projectId = project.id, chatId = retry.chatId), resend = true)
     }
 
     /** Stops the Android build only; a running agent session keeps going. */
@@ -2868,11 +2883,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Renames a file or folder in place (same parent); the open editor follows the file. */
     fun renameWorkspaceEntry(relativePath: String, newName: String) {
-        if (_state.value.sessionRunning) return
         val project = _state.value.activeProject ?: return
         val cleanPath = relativePath.trim().trimStart('/')
         val name = newName.trim()
-        if (cleanPath.isEmpty() || name.isEmpty() || name.contains('/') || name == "." || name == "..") return
+        // Every refusal says so: the dialog closes either way, so silence looked like a rename that did nothing.
+        if (_state.value.sessionRunning || cleanPath.isEmpty() || name.isEmpty() || name.contains('/') || name == "." || name == "..") {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_rename_failed)) }
+            return
+        }
         val parent = cleanPath.substringBeforeLast('/', "")
         val newPath = if (parent.isEmpty()) name else "$parent/$name"
         viewModelScope.launch {
@@ -2884,6 +2902,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     from.exists() && !to.exists() && from.renameTo(to)
                 }.getOrDefault(false)
             }
+            if (!ok) _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_rename_failed)) }
             if (ok) {
                 // Also when a folder holding the open file was renamed: a stale path would make the next save
                 // recreate the old folder with the file in it.
@@ -3524,6 +3543,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val githubOperationLock = java.util.concurrent.locks.ReentrantLock()
 
+    /** The running-task notification names the build stage, so the lock screen shows more than "Running assembleDebug". */
+    private fun pushBuildStageToNotification(stage: AndroidBuildStage, projectName: String) {
+        val label = when (stage) {
+            AndroidBuildStage.PREPARING -> R.string.build_stage_preparing
+            AndroidBuildStage.RESOLVING -> R.string.build_stage_resolving
+            AndroidBuildStage.COMPILING -> R.string.build_stage_compiling
+            AndroidBuildStage.RESOURCES -> R.string.build_stage_resources
+            AndroidBuildStage.PACKAGING -> R.string.build_stage_packaging
+            AndroidBuildStage.FINDING_APK -> R.string.build_stage_finding_apk
+            else -> return
+        }
+        startServiceSafely(
+            getApplication(),
+            Intent(getApplication(), RuntimeExecutionService::class.java)
+                .setAction(RuntimeExecutionService.ACTION_PROGRESS)
+                .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName)
+                .putExtra(RuntimeExecutionService.EXTRA_DETAIL, "$projectName · ${str(label)}"),
+        )
+    }
+
     fun runAndroidBuild(task: String = "assembleDebug", installAfterBuild: Boolean = false) {
         val project = _state.value.activeProject ?: return
         if (_state.value.androidBuild.phase == AndroidBuildPhase.BUILDING) return
@@ -3589,7 +3628,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 throw CancellationException("Build stopped")
                             }
                             logBuilder.append(line).append('\n')
-                            val stage = inferAndroidBuildStage(line, _state.value.androidBuild.stage)
+                            val previousStage = _state.value.androidBuild.stage
+                            val stage = inferAndroidBuildStage(line, previousStage)
+                            if (stage != previousStage) pushBuildStageToNotification(stage, project.name)
                             _state.update { current ->
                                 current.copy(
                                     androidBuild = current.androidBuild.copy(
@@ -4658,7 +4699,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
             silentUpdateCheck(force = true)
-        } else {
+        } else if (!preferences.autoInstallUpdates) {
+            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
+        }
+    }
+
+    /** Background download and silent install while the app is idle (needs root; without it only the notification shows). */
+    fun setAutoInstallUpdates(enabled: Boolean) {
+        preferences.autoInstallUpdates = enabled
+        _state.update { it.copy(autoInstallUpdates = enabled) }
+        val app = getApplication<Application>()
+        if (enabled) {
+            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
+        } else if (!preferences.updateNotifications) {
             com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
         }
     }

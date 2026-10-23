@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.widthIn
@@ -46,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -240,6 +242,40 @@ private fun ChangedFileRow(
     val tokens = LocalForgeThemeTokens.current
     val name = change.path.substringAfterLast('/')
     val dir = change.path.substringBeforeLast('/', "")
+    // Swipe right keeps the file, left reverts it (the revert has its own Undo snackbar). Only while the row is collapsed:
+    // an open diff scrolls sideways and would fight the swipe.
+    val haptics = LocalHapticFeedback.current
+    val swipe = androidx.compose.material3.rememberSwipeToDismissBoxState(
+        confirmValueChange = { target ->
+            when (target) {
+                androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd -> { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onKeepFile(change.path) }
+                androidx.compose.material3.SwipeToDismissBoxValue.EndToStart -> { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onRevertFile(change.path) }
+                else -> Unit
+            }
+            false // the list drops the row itself once the change is resolved; if it is not, the row springs back
+        },
+    )
+    androidx.compose.material3.SwipeToDismissBox(
+        state = swipe,
+        enableDismissFromStartToEnd = enabled && !open,
+        enableDismissFromEndToStart = enabled && !open,
+        backgroundContent = {
+            val keeping = swipe.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd
+            val reverting = swipe.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.EndToStart
+            if (keeping || reverting) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background((if (keeping) tokens.successText else tokens.dangerText).copy(alpha = 0.16f)).padding(horizontal = 18.dp),
+                    contentAlignment = if (keeping) Alignment.CenterStart else Alignment.CenterEnd,
+                ) {
+                    Text(
+                        stringResource(if (keeping) R.string.chat_keep else R.string.chat_revert),
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (keeping) tokens.successText else tokens.dangerText,
+                    )
+                }
+            }
+        },
+    ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -290,6 +326,7 @@ private fun ChangedFileRow(
                 }
             }
         }
+    }
     }
 }
 
@@ -456,6 +493,8 @@ internal fun ChatComposer(
     /** Microphone button before the send button; null hides it. [listening] shows the recording state. */
     onMic: (() -> Unit)? = null,
     listening: Boolean = false,
+    /** 0..1 loudness while [listening]; the mic pulses with it. */
+    micLevel: Float = 0f,
     /** "Create image" entry of the attach menu (Nano Banana); null hides it. */
     onGenerateImage: (() -> Unit)? = null,
 ) {
@@ -562,7 +601,22 @@ internal fun ChatComposer(
             }
             Spacer(modifier = Modifier.weight(1f))
             if (onMic != null) {
-                IconButton(onClick = onMic) {
+                val reduceMotionMic = rememberReduceMotion()
+                val pulseColor = MaterialTheme.colorScheme.error
+                val pulse by animateFloatAsState(
+                    targetValue = if (listening) micLevel else 0f,
+                    animationSpec = if (reduceMotionMic) snap() else tween(90),
+                    label = "micPulse",
+                )
+                IconButton(
+                    onClick = onMic,
+                    modifier = Modifier.drawBehind {
+                        // A soft ring that grows with the voice: the person sees the phone is hearing them.
+                        if (pulse > 0.02f) {
+                            drawCircle(pulseColor.copy(alpha = 0.10f + 0.18f * pulse), radius = size.minDimension / 2f * (0.8f + 0.5f * pulse))
+                        }
+                    },
+                ) {
                     ForgeIcon(
                         glyph = ForgeGlyph.MIC,
                         tint = if (listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,

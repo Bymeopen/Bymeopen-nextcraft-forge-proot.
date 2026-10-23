@@ -977,9 +977,13 @@ private fun scriptCanEscapeSandbox(text: String): Boolean =
         (SED_WORD_REGEX.containsMatchIn(text) && SED_EXEC_OR_WRITE_REGEX.containsMatchIn(text))
 
 /** Commands that create, overwrite or move files; their path arguments must stay inside the project. */
+/** The option letters of a short-option cluster (`-Ei` gives "Ei"); empty for a long option or a non-option word. */
+private fun String.shortFlagCluster(): String =
+    if (startsWith("-") && !startsWith("--")) drop(1).takeWhile { it.isLetter() } else ""
+
 private fun mutatesFiles(first: String, words: List<String>): Boolean =
     first in setOf("cp", "mv", "mkdir", "touch", "uniq") ||
-        (first == "sed" && words.any { it == "--in-place" || (it.startsWith("-i") && !it.startsWith("--")) })
+        (first == "sed" && words.any { it.startsWith("--in-place") || it.trim('\'', '"').shortFlagCluster().contains('i') })
 
 private fun isOutsideWorkspacePath(word: String): Boolean {
     val arg = word.trim('\'', '"')
@@ -998,10 +1002,46 @@ private val SENSITIVE_PATH_PREFIXES = listOf(
     "/opt/", "/etc/", "/proc/", "/sys/", "/dev/", "/usr/", "/bin", "/sbin", "/lib", "/var/",
     "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge",
 )
-private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook")
+private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook", "/.git/")
 
+// A file written under .git/ (hooks, config with core.fsmonitor / diff.external) runs the next time git is auto-approved.
 private fun isSensitivePath(path: String): Boolean =
-    SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
+    SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains) || path.startsWith(".git/")
+
+/** Files whose content must never reach the model; a glob or quote trick in a command is matched against them. */
+private val PROTECTED_LITERAL_PATHS = listOf(
+    "/proc/self/environ", "/proc/1/environ", "/proc/thread-self/environ",
+    "/root/.claude/.credentials.json", "~/.claude/.credentials.json", "/root/.claude.json", "~/.claude.json",
+    "/root/.ssh/id_ed25519", "~/.ssh/id_ed25519", "/root/.ssh/id_rsa", "~/.ssh/id_rsa",
+    "/root/.git-credentials", "~/.git-credentials", "/root/.config/gh/hosts.yml", "~/.config/gh/hosts.yml",
+)
+
+// A word with glob characters that can expand to a protected file (a '?' standing in for a letter of /proc/self/environ, or a
+// '*' inside the name of the Claude credentials folder).
+private fun commandTargetsProtectedFile(command: String): Boolean {
+    val words = command.split(Regex("\\s+")).map { it.trim('\'', '"') }
+    return words.any { word ->
+        if (word.none { it == '*' || it == '?' || it == '[' }) return@any false
+        val regex = runCatching {
+            Regex(buildString {
+                var i = 0
+                while (i < word.length) {
+                    when (val c = word[i]) {
+                        '*' -> append("[^/]*")
+                        '?' -> append("[^/]")
+                        '[' -> {
+                            val end = word.indexOf(']', i + 1)
+                            if (end > i) { append(word.substring(i, end + 1)); i = end } else append("\\[")
+                        }
+                        else -> append(Regex.escape(c.toString()))
+                    }
+                    i++
+                }
+            })
+        }.getOrNull() ?: return@any true
+        PROTECTED_LITERAL_PATHS.any(regex::matches)
+    }
+}
 
 private val CREDENTIAL_PATH_PARTS = listOf(
     "/proc/", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook",
@@ -1046,6 +1086,10 @@ private fun maskQuotedAndEscapedSeparators(input: String): String {
 }
 
 /** System directories whose programs may be named by full path; any other path could point at a file the agent wrote. */
+/** Options of env/xargs that take a value as the next word. */
+private val WRAPPER_OPTIONS_WITH_VALUE = setOf("-u", "-C", "-S", "-I", "-i", "-E", "-e", "-d", "-L", "-l", "-n", "-P", "-s", "-a")
+private val WRAPPER_LONG_OPTIONS_WITH_VALUE = setOf("unset", "chdir", "split-string", "replace", "eof", "delimiter", "max-lines", "max-args", "max-procs", "max-chars", "arg-file")
+
 private val TRUSTED_COMMAND_DIRS = listOf("/usr/bin/", "/bin/", "/usr/local/bin/")
 
 private fun isSafeBashSegment(segment: String): Boolean {
@@ -1055,12 +1099,17 @@ private fun isSafeBashSegment(segment: String): Boolean {
     val firstWord = words.firstOrNull()?.trim('\'', '"') ?: return false
     // `./ls` or `/workspace/cat` is a program the agent may have just written, not the allowlisted tool of that name.
     if ('/' in firstWord && TRUSTED_COMMAND_DIRS.none(firstWord::startsWith)) return false
+    // `/usr/bin/../../workspace/x/cat` starts with a trusted directory but runs a file of the project.
+    if (".." in firstWord) return false
     val first = firstWord.substringAfterLast('/')
     if (first == "env" || first == "xargs") {
         // Wrappers run another command, so judge that command. A bare `env` dumps every exported
         // variable (including provider API keys) into the model context and is never auto-approved.
         // `env VAR=value cmd` is refused for the same reason as a leading assignment.
         if (words.drop(1).any { it.matches(ENV_ASSIGNMENT_REGEX) }) return false
+        val options = words.drop(1).takeWhile { it.startsWith("-") }
+        // `env -u cat sh -c ...` / `xargs -I cat sh -c ...`: an option's value would be mistaken for the wrapped command.
+        if (options.any { it in WRAPPER_OPTIONS_WITH_VALUE || (it.startsWith("--") && '=' !in it && it.removePrefix("--") in WRAPPER_LONG_OPTIONS_WITH_VALUE) }) return false
         val wrapped = words.drop(1).dropWhile { it.startsWith("-") }
         if (wrapped.isEmpty()) return first == "xargs"
         return isSafeBashSegment(wrapped.joinToString(" "))
@@ -1069,9 +1118,10 @@ private fun isSafeBashSegment(segment: String): Boolean {
     // (find -fprint, git diff --output, sort/tree -o): never auto-approved.
     val args = words.drop(1).map { it.trim('\'', '"') }
     if (args.any { UNSAFE_TOOL_FLAG_REGEX.matches(it) }) return false
-    if ((first == "sort" || first == "tree") && args.any { it.startsWith("-o") }) return false
+    // -o may sit inside a cluster (-uo out) and getopt_long accepts prefixes of --output.
+    if ((first == "sort" || first == "tree") && args.any { it.startsWith("--out") || it.shortFlagCluster().contains('o') }) return false
     // `date -s` sets the system clock.
-    if (first == "date" && args.any { it == "-s" || it.startsWith("-s") || it.startsWith("--set") }) return false
+    if (first == "date" && args.any { it.shortFlagCluster().contains('s') || it.startsWith("--set") }) return false
     if (mutatesFiles(first, words) && words.drop(1).any(::isOutsideWorkspacePath)) return false
     if (first == "git") return words.getOrNull(1)?.trim('\'', '"') in SAFE_GIT_SUBCOMMANDS
     if (first == "find" && words.any { it.trim('\'', '"') in setOf("-exec", "-execdir", "-delete", "-ok", "-okdir") }) return false
@@ -1085,6 +1135,12 @@ private fun isSafeBashSegment(segment: String): Boolean {
 internal fun classifyToolRisk(tool: String, command: String?, paths: List<String> = emptyList()): RiskLevel {
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
     if (DANGEROUS_PATTERNS.any(preview::contains)) return RiskLevel.HIGH
+    if (tool == "Bash") {
+        // `cat /pro''c/self/environ` and `cat $'/proc/self/environ'` read the same file as the plain spelling.
+        val unquoted = preview.replace(Regex("""\$?['"\\]"""), "")
+        if (unquoted != preview && DANGEROUS_PATTERNS.any(unquoted::contains)) return RiskLevel.HIGH
+        if (commandTargetsProtectedFile(command.orEmpty())) return RiskLevel.HIGH
+    }
     if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
     // Reads and searches must not reach credentials or the process environment either (/proc/self/environ, ~/.claude).
     if (tool != "Bash" && paths.any(::isCredentialPath)) return RiskLevel.HIGH
