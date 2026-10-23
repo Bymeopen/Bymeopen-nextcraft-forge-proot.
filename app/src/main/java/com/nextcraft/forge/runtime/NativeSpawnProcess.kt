@@ -77,8 +77,12 @@ internal class NativeSpawnProcess private constructor(
     private fun hasExited(): Boolean =
         if (delegateProcess != null) !delegateProcess.isAlive else pollExit() != null
 
+    /** chroot-exec's pid on the root side (see [GuestProcess]); signalled together with the su client. */
+    @Volatile internal var guestPidFile: File? = null
+
     override fun destroy() {
         if (hasExited()) return
+        GuestProcess.signal(guestPidFile, 15)
         if (delegateProcess != null) {
             delegateProcess.destroy()
             return
@@ -89,6 +93,7 @@ internal class NativeSpawnProcess private constructor(
     /** Send the same interrupt signal produced by Ctrl+C in a real terminal. */
     internal fun interrupt() {
         if (hasExited()) return
+        GuestProcess.signal(guestPidFile, 2)
         if (delegateProcess != null) {
             runCatching { android.os.Process.sendSignal(pid, 2) }
             return
@@ -101,6 +106,7 @@ internal class NativeSpawnProcess private constructor(
             runCatching { stdin.close() }
             return this
         }
+        GuestProcess.signal(guestPidFile, 15, forceAfterSeconds = 3)
         if (delegateProcess != null) {
             delegateProcess.destroyForcibly()
             runCatching { stdin.close() }

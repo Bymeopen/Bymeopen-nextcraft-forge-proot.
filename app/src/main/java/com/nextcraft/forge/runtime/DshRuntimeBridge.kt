@@ -305,7 +305,12 @@ class DshRuntimeBridge(
                     sawActivity = true
                     eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, protocolEvent.text))
                 }
-                is DshSdkProtocolEvent.Failed -> failure = protocolEvent.message
+                is DshSdkProtocolEvent.Failed -> {
+                    failure = protocolEvent.message
+                    // An error answer to initialize or the prompt ends no turn on its own; without this the loop waits
+                    // for an exit that never comes and the foreground notification and wake lock stay held.
+                    finishTurnAndShutdown()
+                }
                 DshSdkProtocolEvent.TurnCompleted -> {
                     sawActivity = true
                     finishTurnAndShutdown()

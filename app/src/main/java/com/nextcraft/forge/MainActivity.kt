@@ -158,6 +158,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshRuntimeStatusOnResume()
+        com.nextcraft.forge.ui.ReturnToApp.dismiss(this)
     }
 
     override fun onTrimMemory(level: Int) {
@@ -166,6 +167,7 @@ class MainActivity : ComponentActivity() {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             viewModel.releaseMemoryCaches()
         }
+        com.nextcraft.forge.runtime.GradleDaemonReaper.onTrimMemory(this, level)
     }
 
     private fun needsNotificationPermission(): Boolean =

@@ -132,6 +132,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    /** Keep the agent's file changes automatically after each turn instead of asking for a review. On by default. */
+    var autoKeepChanges: Boolean
+        get() = preferences.getBoolean("auto_keep_changes", true)
+        set(value) { preferences.edit().putBoolean("auto_keep_changes", value).apply() }
+
     /** Offer the libGDX game starter in New project and its build targets. Off by default. */
     var gameTemplatesEnabled: Boolean
         get() = preferences.getBoolean("game_templates_enabled", false)
@@ -146,6 +151,11 @@ class AppPreferences(private val context: Context) {
     var updateNotifications: Boolean
         get() = preferences.getBoolean("update_notifications", true)
         set(value) { preferences.edit().putBoolean("update_notifications", value).apply() }
+
+    /** Downloads and installs a newer build in the background while the app is idle (root needed; otherwise only notifies). */
+    var autoInstallUpdates: Boolean
+        get() = preferences.getBoolean("auto_install_updates", true)
+        set(value) { preferences.edit().putBoolean("auto_install_updates", value).apply() }
 
     /** versionCode of the newest build already announced, so one build never notifies twice. */
     /** Id of the newest changelog the user was told about; empty on a fresh install. */

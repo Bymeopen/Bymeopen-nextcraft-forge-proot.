@@ -217,7 +217,7 @@ private fun RouteRulesSection(routing: RoutingConfig, viewModel: MainViewModel) 
         modifier = Modifier.fillMaxWidth(),
     )
     ForgePillTabs(
-        items = agents.map { it.displayTitle() },
+        items = agents.map { it.shortTitle() },
         selectedIndex = agentIndex,
         onSelect = { agentIndex = it },
         equalWidth = true, // 3 providers fit side by side; scrolling cut "Antigravity" at the edge
