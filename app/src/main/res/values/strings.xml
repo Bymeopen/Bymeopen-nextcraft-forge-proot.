@@ -1338,7 +1338,10 @@
     <string name="voice_stop">Stop listening</string>
     <string name="voice_unavailable">Speech recognition is not available on this device.</string>
     <string name="voice_permission_denied">Allow the microphone to use voice input.</string>
-    <string name="voice_error">Voice input failed. Check your connection and try again.</string>
+    <string name="voice_error_network">No connection to the speech service. Check your internet and try again.</string>
+    <string name="voice_error_busy">Voice input is busy. Tap the microphone again.</string>
+    <string name="voice_error_language">This language is not available for voice input on this device.</string>
+    <string name="voice_error">Voice input failed. Try again.</string>
     <string name="chat_image_tap_remote">Tap to load an image from %1$s</string>
     <string name="chat_image_failed">Image unavailable: %1$s</string>
     <string name="chat_image_default_alt">Image</string>
