@@ -1429,7 +1429,7 @@
     <string name="settings_schedule_agent_subtitle">The agent may repeat or monitor something by adding a timer to the chat (up to 3 per chat).</string>
     <string name="chg_notif_channel">What\'s new</string>
     <string name="chg_notif_title">NextCraft Forge PRoot updated</string>
-    <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
+    <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies\n• Room/KSP projects (e.g. NewPipe) build on the first try\n• Runtime 2026.10.2: Claude Code 2.1.308, Antigravity 1.4.5, DeepSeek 0.2.1\n• Quick projects are numbered: Quick project 1, 2, 3…</string>
     <string name="notif_channel_sign_in">Sign-in</string>
     <string name="notif_sign_in_return">Tap to return to NextCraft Forge PRoot</string>
     <string name="settings_auto_keep_changes">Save changes automatically</string>
@@ -1444,4 +1444,5 @@
     <string name="msg_rename_failed">Could not rename: the name is invalid or already exists, or an agent is running.</string>
     <string name="settings_auto_install_updates">Install updates automatically</string>
     <string name="settings_auto_install_updates_sub">Downloads and installs a new build in the background while the app is idle, on Wi-Fi, without the system dialog (root). The app reopens by itself. Falls back to the normal installer if root fails.</string>
+    <string name="quick_project_name">Quick project</string>
 </resources>

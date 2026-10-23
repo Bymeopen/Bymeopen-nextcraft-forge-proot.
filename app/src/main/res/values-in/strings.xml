@@ -1410,7 +1410,7 @@
     <string name="settings_schedule_agent_subtitle">Agen boleh mengulang atau memantau sesuatu dengan menambah pewaktu ke chat (maks 3 per chat).</string>
     <string name="chg_notif_channel">Yang baru</string>
     <string name="chg_notif_title">NextCraft Forge PRoot diperbarui</string>
-    <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil</string>
+    <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil\n• Proyek Room/KSP (mis. NewPipe) berhasil sejak build pertama\n• Runtime 2026.10.2: Claude Code 2.1.308, Antigravity 1.4.5, DeepSeek 0.2.1\n• Proyek cepat diberi nomor: Proyek cepat 1, 2, 3…</string>
     <string name="notif_channel_sign_in">Masuk akun</string>
     <string name="notif_sign_in_return">Ketuk untuk kembali ke NextCraft Forge PRoot</string>
     <string name="settings_auto_keep_changes">Simpan perubahan otomatis</string>
@@ -1425,4 +1425,5 @@
     <string name="msg_rename_failed">Gagal mengganti nama: nama tidak valid atau sudah ada, atau agen sedang berjalan.</string>
     <string name="settings_auto_install_updates">Pasang pembaruan otomatis</string>
     <string name="settings_auto_install_updates_sub">Mengunduh dan memasang build baru di latar saat aplikasi tidak dipakai, lewat Wi-Fi, tanpa dialog sistem (root). Aplikasi terbuka lagi sendiri. Jika root gagal, memakai pemasang biasa.</string>
+    <string name="quick_project_name">Proyek cepat</string>
 </resources>
