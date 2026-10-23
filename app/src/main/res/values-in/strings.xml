@@ -1398,4 +1398,6 @@
     <string name="notif_sign_in_return">Ketuk untuk kembali ke NextCraft Dev</string>
     <string name="settings_android_host_tools">Akses sistem Android</string>
     <string name="settings_android_host_tools_subtitle">Mati secara bawaan. Agent bisa mengambil screenshot dan menjalankan dumpsys, pm, am, input, logcat sebagai root di HP (android-shell): akses root penuh ke Android. Claude Code minta izin sebelum tiap perintah.</string>
+    <string name="settings_auto_keep_changes">Simpan perubahan otomatis</string>
+    <string name="settings_auto_keep_changes_subtitle">Perubahan file dari agent langsung disimpan setiap selesai. Matikan untuk meninjau dan menyimpan atau membatalkannya sendiri.</string>
 </resources>

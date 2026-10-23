@@ -407,6 +407,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
                     androidHostTools = preferences.androidHostTools,
+                    autoKeepChanges = preferences.autoKeepChanges,
                     reaChatHint = preferences.reaChatHint,
                     scheduleEnabled = preferences.scheduleEnabled,
                     updateNotifications = preferences.updateNotifications,
@@ -2444,7 +2445,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         run.messages = finalizedMessages
-        preferences.saveMessages(run.projectId, run.chatId, finalizedMessages)
+        // A long turn's JSON is megabytes: writing it on the main thread was part of the "not responding" stalls.
+        viewModelScope.launch(Dispatchers.IO) { runCatching { preferences.saveMessages(run.projectId, run.chatId, finalizedMessages) } }
         if (runs[run.chatId] === run) runs.remove(run.chatId)
         val visible = run.chatId == _state.value.activeChatId
         _state.update {
@@ -2455,7 +2457,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         publishRunningFlags()
-        refreshWorkspaceFilesAndChanges(run.projectId)
+        val projectIdle = runs.values.none { it.projectId == run.projectId }
+        if (preferences.autoKeepChanges && projectIdle) {
+            // Auto-save: the agent's edits are kept right away instead of waiting in "Review changes".
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { runCatching { checkpoints.acceptAll(run.projectId) } }
+                refreshWorkspaceFilesAndChanges(run.projectId)
+            }
+        } else {
+            refreshWorkspaceFilesAndChanges(run.projectId)
+        }
         if (run.isolated) commitBranchTurn(run)
         // One sync after the last chat finished, not one per chat while others are still editing.
         if (preferences.autoSyncGitHub && runs.isEmpty()) {
@@ -4575,6 +4586,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setAutoKeepChanges(enabled: Boolean) {
+        preferences.autoKeepChanges = enabled
+        _state.update { it.copy(autoKeepChanges = enabled) }
     }
 
     fun setAndroidHostTools(enabled: Boolean) {

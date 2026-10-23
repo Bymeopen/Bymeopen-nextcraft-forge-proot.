@@ -132,6 +132,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    /** Keep the agent's file changes automatically after each turn instead of asking for a review. On by default. */
+    var autoKeepChanges: Boolean
+        get() = preferences.getBoolean("auto_keep_changes", true)
+        set(value) { preferences.edit().putBoolean("auto_keep_changes", value).apply() }
+
     /** Agents may run Android commands as root (screencap, dumpsys, pm, input) through android-shell. Off by default. */
     var androidHostTools: Boolean
         get() = preferences.getBoolean("android_host_tools", false)

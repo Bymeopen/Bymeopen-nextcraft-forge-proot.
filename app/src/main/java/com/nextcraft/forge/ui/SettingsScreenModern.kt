@@ -161,6 +161,13 @@ fun SettingsScreenModern(
             ThinDivider()
 
             ForgeToggleRow(
+                title = stringResource(R.string.settings_auto_keep_changes),
+                subtitle = stringResource(R.string.settings_auto_keep_changes_subtitle),
+                checked = state.autoKeepChanges,
+                onCheckedChange = viewModel::setAutoKeepChanges,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
                 title = stringResource(R.string.settings_android_host_tools),
                 subtitle = stringResource(R.string.settings_android_host_tools_subtitle),
                 checked = state.androidHostTools,

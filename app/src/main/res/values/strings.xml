@@ -1417,4 +1417,6 @@
     <string name="notif_sign_in_return">Tap to return to NextCraft Dev</string>
     <string name="settings_android_host_tools">Android system access</string>
     <string name="settings_android_host_tools_subtitle">Off by default. Lets agents take screenshots and run dumpsys, pm, am, input and logcat as root on the phone (android-shell): full root access to Android. Claude Code asks before each command.</string>
+    <string name="settings_auto_keep_changes">Save changes automatically</string>
+    <string name="settings_auto_keep_changes_subtitle">Keep the agent\'s file changes after each turn. Turn off to review and keep or undo them yourself.</string>
 </resources>
