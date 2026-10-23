@@ -1000,10 +1000,45 @@ private val SENSITIVE_PATH_PREFIXES = listOf(
     "/opt/", "/etc/", "/proc/", "/sys/", "/dev/", "/usr/", "/bin", "/sbin", "/lib", "/var/",
     "/pocketdev-bridge", "/nextcraft-bridge", "/pocket-bridge",
 )
-private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook")
+private val SENSITIVE_PATH_PARTS = listOf("..", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook", "/.git/")
 
+// A file written under .git/ (hooks, config with core.fsmonitor / diff.external) runs the next time git is auto-approved.
 private fun isSensitivePath(path: String): Boolean =
-    SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains)
+    SENSITIVE_PATH_PREFIXES.any(path::startsWith) || SENSITIVE_PATH_PARTS.any(path::contains) || path.startsWith(".git/")
+
+/** Files whose content must never reach the model; a glob or quote trick in a command is matched against them. */
+private val PROTECTED_LITERAL_PATHS = listOf(
+    "/proc/self/environ", "/proc/1/environ", "/proc/thread-self/environ",
+    "/root/.claude/.credentials.json", "~/.claude/.credentials.json", "/root/.claude.json", "~/.claude.json",
+    "/root/.ssh/id_ed25519", "~/.ssh/id_ed25519", "/root/.ssh/id_rsa", "~/.ssh/id_rsa",
+    "/root/.git-credentials", "~/.git-credentials", "/root/.config/gh/hosts.yml", "~/.config/gh/hosts.yml",
+)
+
+/** `cat /pr?c/self/environ`, `cat ~/.cl*/.credentials.json`: a word with glob characters that can expand to a protected file. */
+private fun commandTargetsProtectedFile(command: String): Boolean {
+    val words = command.split(Regex("\\s+")).map { it.trim('\'', '"') }
+    return words.any { word ->
+        if (word.none { it == '*' || it == '?' || it == '[' }) return@any false
+        val regex = runCatching {
+            Regex(buildString {
+                var i = 0
+                while (i < word.length) {
+                    when (val c = word[i]) {
+                        '*' -> append("[^/]*")
+                        '?' -> append("[^/]")
+                        '[' -> {
+                            val end = word.indexOf(']', i + 1)
+                            if (end > i) { append(word.substring(i, end + 1)); i = end } else append("\\[")
+                        }
+                        else -> append(Regex.escape(c.toString()))
+                    }
+                    i++
+                }
+            })
+        }.getOrNull() ?: return@any true
+        PROTECTED_LITERAL_PATHS.any(regex::matches)
+    }
+}
 
 private val CREDENTIAL_PATH_PARTS = listOf(
     "/proc/", "/.claude", "/.ssh", ".git-credentials", "/.config/gh", "permission-hook",
@@ -1097,6 +1132,12 @@ private fun isSafeBashSegment(segment: String): Boolean {
 internal fun classifyToolRisk(tool: String, command: String?, paths: List<String> = emptyList()): RiskLevel {
     val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
     if (DANGEROUS_PATTERNS.any(preview::contains)) return RiskLevel.HIGH
+    if (tool == "Bash") {
+        // `cat /pro''c/self/environ` and `cat $'/proc/self/environ'` read the same file as the plain spelling.
+        val unquoted = preview.replace(Regex("""\$?['"\\]"""), "")
+        if (unquoted != preview && DANGEROUS_PATTERNS.any(unquoted::contains)) return RiskLevel.HIGH
+        if (commandTargetsProtectedFile(command.orEmpty())) return RiskLevel.HIGH
+    }
     if (tool in setOf("Write", "Edit", "NotebookEdit") && paths.any(::isSensitivePath)) return RiskLevel.HIGH
     // Reads and searches must not reach credentials or the process environment either (/proc/self/environ, ~/.claude).
     if (tool != "Bash" && paths.any(::isCredentialPath)) return RiskLevel.HIGH

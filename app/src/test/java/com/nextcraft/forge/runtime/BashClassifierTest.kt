@@ -43,6 +43,13 @@ class BashClassifierTest {
         assertEquals(RiskLevel.HIGH, risk("env -u cat sh -c x"))
         assertEquals(RiskLevel.HIGH, risk("xargs -I cat sh -c x"))
         assertEquals(RiskLevel.REVIEW, risk("sed -n 1,5p file.txt"))
+        assertEquals(RiskLevel.HIGH, risk("cat /pr?c/self/environ"))
+        assertEquals(RiskLevel.HIGH, risk("cat /pro''c/self/environ"))
+        assertEquals(RiskLevel.HIGH, risk("cat ~/.cl*/.credentials.json"))
+        assertEquals(RiskLevel.REVIEW, risk("cat src/*.kt"))
+        assertEquals(RiskLevel.REVIEW, risk("ls src/?ain"))
+        assertEquals(RiskLevel.HIGH, classifyToolRisk("Write", null, listOf(".git/hooks/pre-commit")))
+        assertEquals(RiskLevel.HIGH, classifyToolRisk("Write", null, listOf("/workspace/p/.git/config")))
     }
 
     @Test
