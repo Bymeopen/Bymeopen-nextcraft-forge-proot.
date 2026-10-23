@@ -231,36 +231,60 @@ def nextcraftCacheFirst = { File root ->
     gradle.startParameter.offline || new File(root, '.nextcraft/android-project.json').isFile()
 }
 // sqlite-jdbc (Room's KSP/kapt schema checks) sees Android's /system in the chroot and loads its Android build,
-// which cannot run on Ubuntu ("invalid ELF header"). Point it at the Linux aarch64 library from the same jar.
-if (!System.getProperty('org.sqlite.lib.path')) {
+// which cannot run on Ubuntu ("invalid ELF header"). Point it at the Linux aarch64 library from the same jar. On a
+// project's first build the jar is not cached yet, so a Room project gets a pinned release from Maven Central instead.
+def nextcraftSqliteJdbc = { File projectDir ->
+    if (System.getProperty('org.sqlite.lib.path')) return
     def sqliteCache = new File(gradle.gradleUserHomeDir, 'caches/modules-2/files-2.1/org.xerial/sqlite-jdbc')
     def sqliteJars = []
     (sqliteCache.listFiles() ?: []).each { v -> (v.listFiles() ?: []).each { h ->
         (h.listFiles() ?: []).each { f -> if (f.name.startsWith('sqlite-jdbc-') && f.name.endsWith('.jar')) sqliteJars << f }
     } }
     def sqliteJar = sqliteJars.max { it.lastModified() }
-    if (sqliteJar != null) {
-        def sqliteDir = new File(gradle.gradleUserHomeDir, 'nextcraft/' + sqliteJar.name.replace('.jar', ''))
-        def sqliteLib = new File(sqliteDir, 'libsqlitejdbc.so')
-        if (!sqliteLib.isFile()) {
-            def zip = new java.util.zip.ZipFile(sqliteJar)
+    if (sqliteJar == null && !gradle.startParameter.offline) {
+        def buildFiles = ['gradle/libs.versions.toml', 'build.gradle', 'build.gradle.kts', 'app/build.gradle', 'app/build.gradle.kts']
+        def usesRoom = buildFiles.any { name ->
+            def f = new File(projectDir, name)
+            f.isFile() && f.text.contains('androidx.room')
+        }
+        def pinned = new File(gradle.gradleUserHomeDir, 'nextcraft/sqlite-jdbc-3.50.3.0.jar')
+        if (usesRoom && !pinned.isFile()) {
             try {
-                def entry = zip.getEntry('org/sqlite/native/Linux/aarch64/libsqlitejdbc.so')
-                if (entry != null) {
-                    sqliteDir.mkdirs()
-                    zip.getInputStream(entry).withStream { input -> sqliteLib.withOutputStream { it << input } }
-                }
-            } finally {
-                zip.close()
+                def connection = new URL('https://repo.maven.apache.org/maven2/org/xerial/sqlite-jdbc/3.50.3.0/sqlite-jdbc-3.50.3.0.jar').openConnection()
+                connection.connectTimeout = 15000
+                connection.readTimeout = 60000
+                pinned.parentFile.mkdirs()
+                def partial = new File(pinned.path + '.part')
+                connection.inputStream.withStream { input -> partial.withOutputStream { it << input } }
+                partial.renameTo(pinned)
+            } catch (Exception ignored) {
+                // Offline or blocked: the build still runs and the next one uses the jar Gradle downloaded.
             }
         }
-        if (sqliteLib.isFile()) {
-            System.setProperty('org.sqlite.lib.path', sqliteDir.path)
-            System.setProperty('org.sqlite.lib.name', 'libsqlitejdbc.so')
+        if (pinned.isFile()) sqliteJar = pinned
+    }
+    if (sqliteJar == null) return
+    def sqliteDir = new File(gradle.gradleUserHomeDir, 'nextcraft/' + sqliteJar.name.replace('.jar', ''))
+    def sqliteLib = new File(sqliteDir, 'libsqlitejdbc.so')
+    if (!sqliteLib.isFile()) {
+        def zip = new java.util.zip.ZipFile(sqliteJar)
+        try {
+            def entry = zip.getEntry('org/sqlite/native/Linux/aarch64/libsqlitejdbc.so')
+            if (entry != null) {
+                sqliteDir.mkdirs()
+                zip.getInputStream(entry).withStream { input -> sqliteLib.withOutputStream { it << input } }
+            }
+        } finally {
+            zip.close()
         }
+    }
+    if (sqliteLib.isFile()) {
+        System.setProperty('org.sqlite.lib.path', sqliteDir.path)
+        System.setProperty('org.sqlite.lib.name', 'libsqlitejdbc.so')
     }
 }
 beforeSettings { settings ->
+    nextcraftSqliteJdbc(settings.settingsDir)
     settings.pluginManagement.repositories {
         if (nextcraftCacheFirst(settings.settingsDir)) maven { url = nextcraftMaven }
         google()

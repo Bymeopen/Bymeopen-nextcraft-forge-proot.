@@ -162,6 +162,7 @@ class MainActivity : ComponentActivity() {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             viewModel.releaseMemoryCaches()
         }
+        com.nextcraft.forge.runtime.GradleDaemonReaper.onTrimMemory(this, level)
     }
 
     private fun needsNotificationPermission(): Boolean =
