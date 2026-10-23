@@ -568,7 +568,7 @@ internal fun AntigravityAccountCard(
                             text = stringResource(R.string.settings_complete_sign_in),
                             onClick = {
                                 if (agyVerificationCode.isNotBlank()) {
-                                    runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }
+                                    runCatching { viewModel.antigravityAuth.submitCode(agyVerificationCode.trim()) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("SettingsScreenModern", it) }
                                     agyVerificationCode = ""
                                 }
                             },

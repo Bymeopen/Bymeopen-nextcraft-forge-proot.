@@ -98,7 +98,7 @@ class DshRuntimeBridge(
                             running.destroy()
                             Thread.sleep(500)
                             if (running.isAlive) running.destroyForcibly()
-                        }
+                        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
                     }, "forge-dsh-stop").apply { isDaemon = true }.start()
                 }
             }
@@ -187,8 +187,8 @@ class DshRuntimeBridge(
                 )
             }
         }
-        runCatching { openRouterGateway?.close() }
-        runCatching { spawnedOutputFile?.delete() }
+        runCatching { openRouterGateway?.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
+        runCatching { spawnedOutputFile?.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
         activeProcess = null
         activeSessionId = null
         RuntimeTaskController.release(stopHandler)
@@ -231,7 +231,7 @@ class DshRuntimeBridge(
         fun closeInput() {
             if (inputClosed) return
             inputClosed = true
-            runCatching { writer.close() }
+            runCatching { writer.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
         }
 
         fun finishTurnAndShutdown() {

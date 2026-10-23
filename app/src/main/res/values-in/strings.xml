@@ -821,6 +821,8 @@
     <string name="diag_app_memory">Memori aplikasi</string>
     <string name="diag_app_memory_value">%1$d MB (heap Java %2$d MB)</string>
     <string name="diag_app_threads">Thread</string>
+    <string name="diag_recent_errors">Error terbaru</string>
+    <string name="diag_no_recent_errors">Tidak ada error tercatat sejak aplikasi dibuka.</string>
     <string name="diag_storage">Penyimpanan</string>
     <string name="diag_battery">Baterai</string>
     <string name="diag_root">Akses root</string>

@@ -95,7 +95,7 @@ object RuntimeExecutionServiceContract {
                     .setAction(ACTION_START)
                     .putExtra(EXTRA_PROJECT_NAME, projectName),
             )
-        }
+        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeBridge", it) }
     }
 
     fun pushProgress(context: Context, projectName: String?, detail: String) {
@@ -107,7 +107,7 @@ object RuntimeExecutionServiceContract {
                     .putExtra(EXTRA_PROJECT_NAME, projectName)
                     .putExtra(EXTRA_DETAIL, detail),
             )
-        }
+        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeBridge", it) }
     }
 
     fun finishForeground(context: Context, completed: Boolean, projectName: String, detail: String, tag: String = "RuntimeBridge") {
@@ -121,7 +121,7 @@ object RuntimeExecutionServiceContract {
             )
         }.onFailure { error ->
             Log.w(tag, "Could not post task result notification", error)
-            runCatching { context.stopService(Intent(context, cls)) }
+            runCatching { context.stopService(Intent(context, cls)) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeBridge", it) }
         }
     }
 
@@ -137,7 +137,7 @@ object RuntimeExecutionServiceContract {
             )
         }.onFailure { error ->
             Log.w(tag, "Could not post task result notification", error)
-            runCatching { context.stopService(Intent(context, cls)) }
+            runCatching { context.stopService(Intent(context, cls)) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeBridge", it) }
         }
     }
 
@@ -146,7 +146,7 @@ object RuntimeExecutionServiceContract {
         runCatching {
             context.startService(Intent(context, cls).setAction(ACTION_CANCELLED))
         }.onFailure {
-            runCatching { context.stopService(Intent(context, cls)) }
+            runCatching { context.stopService(Intent(context, cls)) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeBridge", it) }
         }
     }
 }

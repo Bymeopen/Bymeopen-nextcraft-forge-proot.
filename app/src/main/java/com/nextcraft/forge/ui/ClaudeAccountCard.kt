@@ -152,7 +152,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel, extra: @Composable ColumnScope.(
                         ForgePrimaryButton(
                             text = stringResource(R.string.settings_complete_sign_in),
                             onClick = {
-                                runCatching { viewModel.claudeAuth.submitCode(code.trim()) }
+                                runCatching { viewModel.claudeAuth.submitCode(code.trim()) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAccountCard", it) }
                                 code = ""
                             },
                             enabled = code.isNotBlank() && auth.status == ClaudeAuthStatus.AWAITING_BROWSER,

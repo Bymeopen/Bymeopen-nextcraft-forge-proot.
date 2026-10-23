@@ -32,7 +32,7 @@ internal object GuestProcess {
                     .redirectOutput(ProcessBuilder.Redirect.to(File("/dev/null")))
                     .start()
                 if (!proc.waitFor((forceAfterSeconds ?: 0) + 10L, TimeUnit.SECONDS)) proc.destroyForcibly()
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("GuestProcess", it) }
         }, "guest-signal").apply { isDaemon = true }.start()
     }
 }

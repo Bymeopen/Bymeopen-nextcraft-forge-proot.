@@ -609,7 +609,7 @@ fun WebPreviewScreen(
             // Detach before destroy(): destroying a WebView that is still attached throws on some WebView builds.
             webViewRef?.let { view ->
                 (view.parent as? android.view.ViewGroup)?.removeView(view)
-                runCatching { view.destroy() }
+                runCatching { view.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("AndroidAndPreviewScreen", it) }
             }
             webViewRef = null
         }
@@ -789,11 +789,11 @@ fun WebPreviewScreen(
                         ): Boolean {
                             if (webViewRef === view) webViewRef = null
                             (view.parent as? android.view.ViewGroup)?.removeView(view)
-                            runCatching { view.destroy() }
+                            runCatching { view.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("AndroidAndPreviewScreen", it) }
                             return true
                         }
                     }
-                    runCatching { loadUrl(state.previewUrl) }
+                    runCatching { loadUrl(state.previewUrl) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("AndroidAndPreviewScreen", it) }
                     webViewRef = this
                 } ?: android.view.View(context)
             },
