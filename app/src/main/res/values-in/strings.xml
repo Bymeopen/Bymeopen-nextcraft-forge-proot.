@@ -1419,4 +1419,5 @@
     <string name="msg_rename_failed">Gagal mengganti nama: nama tidak valid atau sudah ada, atau agen sedang berjalan.</string>
     <string name="settings_auto_install_updates">Pasang pembaruan otomatis</string>
     <string name="settings_auto_install_updates_sub">Mengunduh dan memasang build baru di latar saat aplikasi tidak dipakai, lewat Wi-Fi, tanpa dialog sistem (root). Aplikasi terbuka lagi sendiri. Jika root gagal, memakai pemasang biasa.</string>
+    <string name="quick_project_name">Proyek cepat</string>
 </resources>
