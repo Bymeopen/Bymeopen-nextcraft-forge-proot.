@@ -21,6 +21,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** The integer after `key:` in /proc/<pid>/status text ("Threads:\t48" gives 48), or null when absent. */
+internal fun parseProcStatus(text: String, key: String): Int? =
+    text.lineSequence().firstOrNull { it.startsWith("$key:") }
+        ?.substringAfter(':')?.trim()?.substringBefore(' ')?.toIntOrNull()
+
 data class DiagnosticsState(
     val device: List<Pair<UiText, UiText>> = emptyList(),
     val runtime: List<Pair<UiText, UiText>> = emptyList(),
@@ -92,6 +97,9 @@ class DiagnosticsController(private val context: Context) {
             add(row(R.string.diag_android, UiText.Raw("${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")))
             add(row(R.string.diag_cpu, UiText.res(R.string.diag_cores, Build.SUPPORTED_ABIS.firstOrNull().orEmpty(), Runtime.getRuntime().availableProcessors())))
             add(row(R.string.diag_ram, UiText.res(R.string.diag_free_of, formatBytes(memory.availMem), formatBytes(memory.totalMem))))
+            // What this app itself costs right now: the numbers to compare before and after an optimisation.
+            appMemoryMb()?.let { (pss, heap) -> add(row(R.string.diag_app_memory, UiText.res(R.string.diag_app_memory_value, pss, heap))) }
+            procStatusValue("Threads")?.let { add(row(R.string.diag_app_threads, UiText.Raw(it.toString()))) }
             if (stat != null) add(row(R.string.diag_storage, UiText.res(R.string.diag_free_of, formatBytes(stat.availableBytes), formatBytes(stat.totalBytes))))
             if (level >= 0 && scale > 0) {
                 val percent = UiText.Raw("${level * 100 / scale}%")
@@ -131,6 +139,17 @@ class DiagnosticsController(private val context: Context) {
             }
         }
     }
+
+    /** (proportional memory in MB as Android counts it, Java heap in use in MB) for this process. */
+    private fun appMemoryMb(): Pair<Long, Long>? = runCatching {
+        val info = context.getSystemService(ActivityManager::class.java)
+            ?.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))?.firstOrNull() ?: return null
+        val heap = Runtime.getRuntime().let { (it.totalMemory() - it.freeMemory()) shr 20 }
+        (info.totalPss / 1024L) to heap
+    }.getOrNull()
+
+    private fun procStatusValue(key: String): Int? =
+        runCatching { parseProcStatus(File("/proc/self/status").readText(), key) }.getOrNull()
 
     private fun row(@androidx.annotation.StringRes label: Int, value: UiText): Pair<UiText, UiText> = UiText.res(label) to value
 
