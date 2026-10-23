@@ -132,6 +132,16 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    /** Keep the agent's file changes automatically after each turn instead of asking for a review. On by default. */
+    var autoKeepChanges: Boolean
+        get() = preferences.getBoolean("auto_keep_changes", true)
+        set(value) { preferences.edit().putBoolean("auto_keep_changes", value).apply() }
+
+    /** Agents may run Android commands as root (screencap, dumpsys, pm, input) through android-shell. Off by default. */
+    var androidHostTools: Boolean
+        get() = preferences.getBoolean("android_host_tools", false)
+        set(value) { preferences.edit().putBoolean("android_host_tools", value).apply() }
+
     /** Offer the libGDX game starter in New project and its build targets. Off by default. */
     var gameTemplatesEnabled: Boolean
         get() = preferences.getBoolean("game_templates_enabled", false)
@@ -141,11 +151,6 @@ class AppPreferences(private val context: Context) {
     var autoSyncGitHub: Boolean
         get() = preferences.getBoolean("auto_sync_github", false)
         set(value) { preferences.edit().putBoolean("auto_sync_github", value).apply() }
-
-    /** True once the default "Forge Sandbox" project was created (or projects existed), so deleting all projects sticks. */
-    var defaultProjectSeeded: Boolean
-        get() = preferences.getBoolean("default_project_seeded", false)
-        set(value) { preferences.edit().putBoolean("default_project_seeded", value).apply() }
 
     /** Announce new app builds with a notification (checked in the background every few hours). On by default. */
     var updateNotifications: Boolean

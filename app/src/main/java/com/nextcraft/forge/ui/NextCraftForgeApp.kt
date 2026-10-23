@@ -196,7 +196,9 @@ fun NextCraftForgeApp(viewModel: MainViewModel) {
 
     // targetSdk 35+ is edge-to-edge: adjustResize no longer resizes the window, so the IME, status and
     // navigation bars are handled here. imePadding lifts the composer/terminal line above the keyboard.
-    val glassBackdrop = rememberForgeBackdrop(enabled = LocalForgeThemeTokens.current.isGlass)
+    // While an agent works the chat redraws often; recording and blurring the whole screen for the floating bar on
+    // every one of those frames cost main-thread time, so the bar uses its solid colour until the turn ends.
+    val glassBackdrop = rememberForgeBackdrop(enabled = LocalForgeThemeTokens.current.isGlass && !state.sessionRunning)
     CompositionLocalProvider(LocalForgeBackdrop provides glassBackdrop) {
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),

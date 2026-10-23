@@ -165,6 +165,11 @@ mount_dynamic_bind() {
 # mounts; the second /apex then has no modules. Serialize the mount phase; fd 9 is closed before the chroot.
 exec 9>"$ROOTFS/.nextcraft-mount.lock"
 flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true
+# The app is repairing or replacing the rootfs (RootfsRepair): mounting now could pin directories it is removing.
+if [ -e "${ROOTFS%/*}/.rootfs-maintenance" ]; then
+    echo "The Linux environment is being repaired. Try again when it finishes." >&2
+    exit 75
+fi
 
 # Scope suid/exec to the rootfs only; never relax mount flags on the whole /data partition.
 if ! is_mounted "$ROOTFS"; then
@@ -234,8 +239,11 @@ mount_dynamic_bind "$HOST_BRIDGE" "$ROOTFS/pocket-bridge"
 HOST_RESP="$HOST_BRIDGE-responses"
 mkdir -p "$HOST_RESP"
 chown "$APP_UID:$APP_UID" "$HOST_RESP" 2>/dev/null || true
-mount_dynamic_bind "$HOST_RESP" "$ROOTFS/pocketdev-bridge-responses"
-mount -o remount,bind,ro "$ROOTFS/pocketdev-bridge-responses" 2>/dev/null || true
+# The pocket* names are kept for scripts and sessions from older builds.
+for resp_dir in nextcraft-bridge-responses pocketdev-bridge-responses; do
+    mount_dynamic_bind "$HOST_RESP" "$ROOTFS/$resp_dir"
+    mount -o remount,bind,ro "$ROOTFS/$resp_dir" 2>/dev/null || true
+done
 
 if [ ! -s "$ROOTFS/etc/resolv.conf" ]; then
     mkdir -p "$ROOTFS/etc"
@@ -280,9 +288,9 @@ export GIT_SSL_CAINFO="/etc/ssl/certs/ca-certificates.crt"
 export NODE_OPTIONS="${NODE_OPTIONS:---dns-result-order=ipv4first}"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT="0"
 export GLIBC_TUNABLES="glibc.pthread.rseq=0"
-export NEXTCRAFT_BRIDGE_DIR="/pocketdev-bridge"
-export POCKETDEV_BRIDGE_DIR="/pocketdev-bridge"
-export NEXTCRAFT_RESPONSE_DIR="/pocketdev-bridge-responses"
+export NEXTCRAFT_BRIDGE_DIR="/nextcraft-bridge"
+export POCKETDEV_BRIDGE_DIR="/nextcraft-bridge"
+export NEXTCRAFT_RESPONSE_DIR="/nextcraft-bridge-responses"
 export PATH="${PATH:-/opt/nextcraft/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 case ":$PATH:" in
     *:/root/.local/bin:*) ;;

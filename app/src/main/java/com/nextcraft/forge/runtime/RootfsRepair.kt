@@ -57,6 +57,11 @@ internal object RootfsRepair {
         val quotedRootfs = shellSingleQuote(canonicalPath)
         val unmountScript = """
             ROOTFS_PATH=$quotedRootfs
+            # A launch that is mounting holds this lock; wait for it so its mounts are not added after the sweep below.
+            # New launches see the maintenance marker (see [beginMaintenance]) and stop before mounting anything.
+            if [ -d "${'$'}ROOTFS_PATH" ]; then
+                exec 9>"${'$'}ROOTFS_PATH/.nextcraft-mount.lock" 2>/dev/null && { flock 9 2>/dev/null || busybox flock 9 2>/dev/null || true; }
+            fi
             mounts_at_or_under() {
                 while read -r _ mp _; do
                     case "${'$'}mp" in "${'$'}1"|"${'$'}1"/*) printf '%s\n' "${'$'}mp" ;; esac
@@ -144,7 +149,29 @@ internal object RootfsRepair {
         }
     }
 
-    fun safeDeleteRecursively(targetDir: File): Boolean {
+    /**
+     * While the marker exists chroot-exec refuses to mount (it checks after taking the mount lock), so no launch can add
+     * mounts between [ensureUnmounted] and the rename or delete that follows. Nested calls share one marker.
+     */
+    private val maintenanceDepth = java.util.concurrent.atomic.AtomicInteger()
+
+    internal fun maintenanceMarker(runtimeChild: File): File = File(runtimeChild.absoluteFile.parentFile, MAINTENANCE_MARKER)
+
+    private inline fun <T> underMaintenance(runtimeChild: File, block: () -> T): T {
+        val marker = maintenanceMarker(runtimeChild)
+        if (maintenanceDepth.getAndIncrement() == 0) runCatching { marker.parentFile?.mkdirs(); marker.writeText("1") }
+        try {
+            return block()
+        } finally {
+            if (maintenanceDepth.decrementAndGet() == 0) marker.delete()
+        }
+    }
+
+    const val MAINTENANCE_MARKER = ".rootfs-maintenance"
+
+    fun safeDeleteRecursively(targetDir: File): Boolean = underMaintenance(targetDir) { safeDeleteLocked(targetDir) }
+
+    private fun safeDeleteLocked(targetDir: File): Boolean {
         if (!targetDir.exists()) return true
         // A mount left under the tree (bind of /workspace, /dev, /android) would be walked into by either delete below
         // and remove real files of the phone: stop here instead of deleting anything.
@@ -162,7 +189,9 @@ internal object RootfsRepair {
         val exit = runRootCommand(
             "su",
             "-c",
-            "rm -rf --one-file-system -- $quotedPath 2>/dev/null || rm -rf -- $quotedPath",
+            // --one-file-system only: a plain `rm -rf` fallback would follow a mount that appeared after
+            // ensureUnmounted into the user's projects or shared storage.
+            "rm -rf --one-file-system -- $quotedPath",
             // A multi-GB tree with root-owned apt/npm files takes far longer than the 15 s default; a timeout here
             // used to make activate() roll back a rootfs that had already validated.
             timeoutSeconds = 30 * 60L,
@@ -177,6 +206,10 @@ internal object RootfsRepair {
         validate: (File) -> Boolean,
     ) {
         if (!backup.exists()) return
+        underMaintenance(rootfs) { reconcileLocked(rootfs, staging, backup, validate) }
+    }
+
+    private fun reconcileLocked(rootfs: File, staging: File, backup: File, validate: (File) -> Boolean) {
 
         ensureUnmounted(rootfs)
         ensureUnmounted(staging)
@@ -209,6 +242,10 @@ internal object RootfsRepair {
             "Rebuilt Linux environment failed validation"
         }
         check(!backup.exists()) { "A previous Linux environment repair is still pending" }
+        underMaintenance(rootfs) { activateLocked(rootfs, staging, backup, validate) }
+    }
+
+    private fun activateLocked(rootfs: File, staging: File, backup: File, validate: (File) -> Boolean) {
 
         ensureUnmounted(rootfs)
         ensureUnmounted(staging)
