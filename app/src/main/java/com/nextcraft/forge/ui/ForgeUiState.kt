@@ -211,11 +211,16 @@ data class ForgeUiState(
     val autoApproveAllTools: Boolean = false,
     val autoSyncGitHub: Boolean = false,
     val gameTemplatesEnabled: Boolean = false,
+    val androidHostTools: Boolean = false,
+    val autoKeepChanges: Boolean = true,
+    /** Download cache sizes in bytes by RuntimeCaches.Kind name; null while not measured. */
+    val runtimeCacheSizes: Map<String, Long>? = null,
     val reaChatHint: Boolean = false,
     /** Scheduled prompts (timers that send a message to a chat again) and whether the agent may create them. */
     val scheduledTasks: List<com.nextcraft.forge.schedule.ScheduledTask> = emptyList(),
     val scheduleEnabled: Boolean = true,
     val updateNotifications: Boolean = true,
+    val autoInstallUpdates: Boolean = true,
     val autoBranchChats: Boolean = false,
     val antigravityModel: String = "gemini-2.5-pro",
     val antigravityEffort: String = "high",

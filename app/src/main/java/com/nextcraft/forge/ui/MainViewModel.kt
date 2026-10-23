@@ -219,6 +219,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val claudeAuth = ClaudeAuthController(
         context = application,
         onSignedInChanged = { signedIn ->
+            if (signedIn) {
+                ReturnToApp.afterSignIn(application, LocaleHelper.wrapContext(application).getString(R.string.rt_auth_claude_connected))
+            }
             // A finished sign-in only helps if Claude Code actually uses it: switch to the subscription provider.
             if (signedIn && _state.value.agentKind == AgentKind.CLAUDE_CODE && _state.value.providerProfile.kind != ProviderKind.CLAUDE) {
                 updateProviderKind(ProviderKind.CLAUDE)
@@ -406,9 +409,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
+                    androidHostTools = preferences.androidHostTools,
+                    autoKeepChanges = preferences.autoKeepChanges,
                     reaChatHint = preferences.reaChatHint,
                     scheduleEnabled = preferences.scheduleEnabled,
                     updateNotifications = preferences.updateNotifications,
+                    autoInstallUpdates = preferences.autoInstallUpdates,
                     autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -432,36 +438,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** A clean install starts with no projects: the home screen offers Quick project / New project instead of a sample. */
     private suspend fun loadOrCreateDefaultProject(): List<Project> = withContext(Dispatchers.IO) {
-        val existing = preferences.loadProjects()
-        if (existing.isNotEmpty()) {
-            preferences.defaultProjectSeeded = true
-            existing.forEach { checkpoints.ensureWorkspace(it.id) }
-            return@withContext existing
-        }
-        // The sandbox is created once, on a clean install; projects the user deleted are not brought back.
-        if (preferences.defaultProjectSeeded) return@withContext emptyList()
-        val defaultProject = Project(
-            name = "Forge Sandbox",
-            description = "Default workspace inside Ubuntu ARM64 Root Chroot",
-            language = "Kotlin / TypeScript / Python",
-            slug = "forge-sandbox",
-        )
-        val ws = checkpoints.ensureWorkspace(defaultProject.id)
-        val readme = File(ws, "README.md")
-        if (!readme.exists()) {
-            readme.writeText(
-                "# Forge Sandbox\n\n" +
-                    "Welcome to **NextCraft Forge**.\n" +
-                    "- Pure Root Chroot (`su -mm`) execution\n" +
-                    "- Multi-agent coding (`Claude Code`, `Antigravity`, `DeepSeek`)\n" +
-                    "- 1-Tap Android Debug APK Build & Silent Root Install\n",
-            )
-        }
-        val list = listOf(defaultProject)
-        preferences.saveProjects(list)
-        preferences.defaultProjectSeeded = true
-        list
+        preferences.loadProjects().onEach { checkpoints.ensureWorkspace(it.id) }
     }
 
     private fun configureAllProjectRoots(projects: List<Project>) {
@@ -1022,18 +1001,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
         // A chat that is working shows its live copy, status and pending approval, not the last saved file.
-        val run = runs[chatId]
-        val messages = run?.messages ?: preferences.loadMessages(project.id, chatId)
+        val run = runs[chatId]?.also { applyPendingText(it) }
         _state.update {
             it.copy(
                 activeChatId = chatId,
-                messages = messages,
+                messages = run?.messages ?: emptyList(),
                 activeStatusLine = run?.statusLine,
                 pendingToolRequest = run?.pendingTool,
             )
         }
+        // A long chat's JSON is megabytes: parse it off the main thread, then show it if the chat is still open.
+        if (run == null) loadChatMessagesAsync(project.id, chatId)
         if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) refreshBranchStatus(chatId)
     }
+
+    /** Chat whose saved messages are still being read; until then the state holds no messages for it. */
+    @Volatile private var loadingChatId: String? = null
+
+    private fun loadChatMessagesAsync(projectId: String, chatId: String) {
+        loadingChatId = chatId
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) { preferences.loadMessages(projectId, chatId) }
+            if (loadingChatId == chatId) loadingChatId = null
+            if (_state.value.activeChatId == chatId && _state.value.activeProjectId == projectId && runs[chatId] == null) {
+                _state.update { it.copy(messages = loaded) }
+            }
+        }
+    }
+
+    /** The open chat's messages, or the saved ones while they are still loading (never an empty stand-in). */
+    private fun currentMessagesOf(projectId: String, chatId: String): List<ChatMessage> =
+        if (chatId == _state.value.activeChatId && loadingChatId != chatId) _state.value.messages
+        else preferences.loadMessages(projectId, chatId)
 
     fun createChat(title: String = "") {
         val project = _state.value.activeProject ?: return
@@ -1501,7 +1500,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Adds finished messages to a chat that has no agent run (they are saved like any other message). */
     private fun appendLocalMessages(projectId: String, chatId: String, added: List<ChatMessage>) {
-        val current = if (_state.value.activeChatId == chatId) _state.value.messages else preferences.loadMessages(projectId, chatId)
+        val current = currentMessagesOf(projectId, chatId)
         val updated = current.filterNot { it.id == "streaming-assistant" } + added
         preferences.saveMessages(projectId, chatId, updated)
         if (_state.value.activeChatId == chatId) _state.update { it.copy(messages = updated) }
@@ -1766,6 +1765,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Reads `[[schedule: …]]` / `[[unschedule]]` from the agent's finished reply and keeps the timers in step. */
     private fun applyAgentSchedule(run: ChatRun) {
         if (!preferences.scheduleEnabled) return
+        applyPendingText(run)
         val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
         val directives = ScheduleDirectives.parse(reply)
         if (directives.isEmpty()) return
@@ -2004,8 +2004,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
         val reaInstalled = preferences.reaChatHint &&
-            File(RuntimeInstaller.rootfsDir(getApplication()), "root/.pocket-rea-version").isFile
-        val agentPrompt = ScheduleDirectives.augment(ReaChatHint.augment(basePrompt, attachments, reaInstalled), preferences.scheduleEnabled)
+            com.nextcraft.forge.runtime.RuntimeMarkers.read(File(RuntimeInstaller.rootfsDir(getApplication()), "root/.nextcraft-rea-version")) != null
+        val agentPrompt = ScheduleDirectives.augment(
+            com.nextcraft.forge.runtime.AndroidHostTools.augment(ReaChatHint.augment(basePrompt, attachments, reaInstalled), preferences.androidHostTools),
+            preferences.scheduleEnabled,
+        )
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
@@ -2013,7 +2016,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             agent = agent.stableId.takeIf { _state.value.routing.mode != RouteMode.SINGLE },
         )
         // A placeholder left behind by an abnormal end would repeat its LazyColumn key ("Key was already used" crash).
-        val base = if (chatId == _state.value.activeChatId) _state.value.messages else preferences.loadMessages(project.id, chatId)
+        val base = currentMessagesOf(project.id, chatId)
         val historyBefore = base.filterNot { it.id == "streaming-assistant" }
         val historyForAgent = if (resend) historyBefore else historyBefore + userMsg
         val updatedMessages = historyForAgent + assistantPlaceholder
@@ -2147,8 +2150,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Applies [change] to the chat's messages: kept in the run, and shown when that chat is the visible one. */
     private fun updateRunMessages(run: ChatRun, change: (List<ChatMessage>) -> List<ChatMessage>) {
+        applyPendingText(run)
         run.messages = change(run.messages)
-        if (run.chatId == _state.value.activeChatId) _state.update { it.copy(messages = run.messages) }
+        publishRunMessages(run)
+    }
+
+    /** Folds streamed text that is still buffered into the last assistant message (see [appendAssistantText]). */
+    private fun applyPendingText(run: ChatRun) {
+        if (run.pendingText.isEmpty()) return
+        val delta = run.pendingText.toString()
+        run.pendingText.setLength(0)
+        val list = run.messages.toMutableList()
+        val lastIdx = list.indexOfLast { !it.fromUser }
+        if (lastIdx >= 0) {
+            val prev = list[lastIdx]
+            list[lastIdx] = prev.copy(text = prev.text + delta)
+        } else {
+            list += ChatMessage(fromUser = false, text = delta)
+        }
+        run.messages = list
+    }
+
+    /**
+     * Shows [ChatRun.messages] in the open chat at most every [MESSAGE_PUBLISH_INTERVAL_MS]. Agents stream hundreds of
+     * small deltas per second; publishing each one re-measured the whole chat (and the Glass backdrop) every frame,
+     * which kept the main thread at 100% and caused "app not responding" during long turns.
+     */
+    private fun publishRunMessages(run: ChatRun, immediate: Boolean = false) {
+        if (run.chatId != _state.value.activeChatId) return
+        val now = android.os.SystemClock.uptimeMillis()
+        val wait = run.lastPublishAt + MESSAGE_PUBLISH_INTERVAL_MS - now
+        if (immediate || wait <= 0) {
+            run.publishJob?.cancel()
+            run.publishJob = null
+            run.lastPublishAt = now
+            _state.update { it.copy(messages = run.messages) }
+        } else if (run.publishJob == null) {
+            run.publishJob = viewModelScope.launch {
+                delay(wait)
+                run.publishJob = null
+                applyPendingText(run)
+                run.lastPublishAt = android.os.SystemClock.uptimeMillis()
+                if (run.chatId == _state.value.activeChatId) _state.update { it.copy(messages = run.messages) }
+            }
+        }
     }
 
     private fun publishRunningFlags() {
@@ -2375,28 +2420,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * error as reply text and then fails with the same message, which showed the whole error twice).
      */
     private fun appendFailureReason(run: ChatRun, reason: String) {
+        applyPendingText(run)
         val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
         val head = reason.trim().lineSequence().firstOrNull().orEmpty().take(80)
         val shown = head.isNotBlank() && reply.contains(head)
         if (!shown) appendAssistantText(run, "\n\n[$reason]")
     }
 
+    /** Buffers a streamed delta; it reaches [ChatRun.messages] at the next publish or message change. */
     private fun appendAssistantText(run: ChatRun, delta: String) {
         if (delta.isEmpty()) return
-        updateRunMessages(run) { messages ->
-            val list = messages.toMutableList()
-            val lastIdx = list.indexOfLast { !it.fromUser }
-            if (lastIdx >= 0) {
-                val prev = list[lastIdx]
-                list[lastIdx] = prev.copy(text = prev.text + delta)
-            } else {
-                list += ChatMessage(fromUser = false, text = delta)
-            }
-            list
-        }
+        run.pendingText.append(delta)
+        publishRunMessages(run)
     }
 
-    private fun recordActivityItem(run: ChatRun, title: String, detail: String, isComplete: Boolean) {
+    private fun recordActivityItem(run: ChatRun, title: String, rawDetail: String, isComplete: Boolean) {
+        val detail = clipToolDetail(rawDetail)
         updateRunMessages(run) { messages ->
             val list = messages.toMutableList()
             val lastIdx = list.indexOfLast { !it.fromUser }
@@ -2421,6 +2460,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishRun(run: ChatRun, stoppedByUser: Boolean = false) {
+        applyPendingText(run)
+        publishRunMessages(run, immediate = true)
         // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
         if (run.finished) return
         run.finished = true
@@ -2440,7 +2481,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         run.messages = finalizedMessages
-        preferences.saveMessages(run.projectId, run.chatId, finalizedMessages)
+        // A long turn's JSON is megabytes: writing it on the main thread was part of the "not responding" stalls.
+        viewModelScope.launch(Dispatchers.IO) { runCatching { preferences.saveMessages(run.projectId, run.chatId, finalizedMessages) } }
         if (runs[run.chatId] === run) runs.remove(run.chatId)
         val visible = run.chatId == _state.value.activeChatId
         _state.update {
@@ -2451,7 +2493,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         publishRunningFlags()
-        refreshWorkspaceFilesAndChanges(run.projectId)
+        val projectIdle = runs.values.none { it.projectId == run.projectId }
+        if (preferences.autoKeepChanges && projectIdle) {
+            // Auto-save: the agent's edits are kept right away instead of waiting in "Review changes".
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { runCatching { checkpoints.acceptAll(run.projectId) } }
+                refreshWorkspaceFilesAndChanges(run.projectId)
+            }
+        } else {
+            refreshWorkspaceFilesAndChanges(run.projectId)
+        }
         if (run.isolated) commitBranchTurn(run)
         // One sync after the last chat finished, not one per chat while others are still editing.
         if (preferences.autoSyncGitHub && runs.isEmpty()) {
@@ -4599,6 +4650,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Measures the Gradle/npm/pip/apt download caches in the rootfs (Settings → Linux runtime → Clear caches). */
+    fun loadRuntimeCacheSizes() {
+        _state.update { it.copy(runtimeCacheSizes = null) }
+        viewModelScope.launch {
+            val rootfs = RuntimeInstaller.rootfsDir(getApplication())
+            val sizes = withContext(Dispatchers.IO) { com.nextcraft.forge.runtime.RuntimeCaches.sizes(rootfs) }
+            _state.update { it.copy(runtimeCacheSizes = sizes.mapKeys { (kind, _) -> kind.name }) }
+        }
+    }
+
+    /** Deletes every download cache; refused while an agent runs, since a build may be using them. */
+    fun clearRuntimeCaches() {
+        if (_state.value.sessionRunning) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_clear_caches_busy)) }
+            return
+        }
+        viewModelScope.launch {
+            val rootfs = RuntimeInstaller.rootfsDir(getApplication())
+            withContext(Dispatchers.IO) {
+                com.nextcraft.forge.runtime.RuntimeCaches.clear(rootfs, com.nextcraft.forge.runtime.RuntimeCaches.Kind.entries.toSet())
+            }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_caches_cleared)) }
+            loadRuntimeCacheSizes()
+        }
+    }
+
+    fun setAutoKeepChanges(enabled: Boolean) {
+        preferences.autoKeepChanges = enabled
+        _state.update { it.copy(autoKeepChanges = enabled) }
+    }
+
+    fun setAndroidHostTools(enabled: Boolean) {
+        preferences.androidHostTools = enabled
+        _state.update { it.copy(androidHostTools = enabled) }
+        viewModelScope.launch(Dispatchers.IO) { runCatching { installer.applyAndroidHostTools() } }
+    }
+
     fun setGameTemplatesEnabled(enabled: Boolean) {
         preferences.gameTemplatesEnabled = enabled
         _state.update { it.copy(gameTemplatesEnabled = enabled) }
@@ -4611,7 +4699,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
             silentUpdateCheck(force = true)
-        } else {
+        } else if (!preferences.autoInstallUpdates) {
+            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
+        }
+    }
+
+    /** Background download and silent install while the app is idle (needs root; without it only the notification shows). */
+    fun setAutoInstallUpdates(enabled: Boolean) {
+        preferences.autoInstallUpdates = enabled
+        _state.update { it.copy(autoInstallUpdates = enabled) }
+        val app = getApplication<Application>()
+        if (enabled) {
+            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
+        } else if (!preferences.updateNotifications) {
             com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
         }
     }
@@ -4853,6 +4953,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        /** Streamed replies refresh the open chat at most ~12 times a second. */
+        const val MESSAGE_PUBLISH_INTERVAL_MS = 80L
+
         /** How long a deleted project stays restorable. */
         const val UNDO_WINDOW_MS = 6_000L
 
@@ -4898,6 +5001,10 @@ private class ChatRun(
     var sessionId: String? = null
     var finishedSessionId: String? = null
     var messages: List<ChatMessage> = emptyList()
+    /** Streamed text not yet folded into [messages]; keeps one string copy per publish instead of one per delta. */
+    val pendingText = StringBuilder()
+    var lastPublishAt = 0L
+    var publishJob: Job? = null
     var statusLine: UiText? = null
     var pendingTool: ToolRequest? = null
     var finished: Boolean = false
@@ -4908,3 +5015,19 @@ private class ChatRun(
 
 /** The effort part of an Antigravity model id such as gemini-4-argon-high. */
 private val AGY_EFFORT_SUFFIX = Regex("-(low|medium|high)$")
+
+/** Characters of a tool's output kept in the chat: the start (the command and its first lines) and the end (the result). */
+private const val TOOL_DETAIL_HEAD = 1_500
+private const val TOOL_DETAIL_TAIL = 2_500
+
+/**
+ * Shortens a tool's output for the chat. A build or test run can print megabytes; keeping all of it in every message
+ * made long chats slow to draw, scroll, save and reopen. The full output stays in the agent's own context and logs.
+ */
+internal fun clipToolDetail(detail: String): String {
+    if (detail.length <= TOOL_DETAIL_HEAD + TOOL_DETAIL_TAIL + 200) return detail
+    val head = detail.substring(0, TOOL_DETAIL_HEAD)
+    val tail = detail.substring(detail.length - TOOL_DETAIL_TAIL)
+    val omittedLines = detail.substring(TOOL_DETAIL_HEAD, detail.length - TOOL_DETAIL_TAIL).count { it == '\n' }
+    return "$head\n… ${omittedLines + 1} lines omitted …\n$tail"
+}

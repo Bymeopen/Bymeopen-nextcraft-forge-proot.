@@ -176,6 +176,20 @@ fun SettingsScreenModern(
             ThinDivider()
 
             ForgeToggleRow(
+                title = stringResource(R.string.settings_auto_keep_changes),
+                subtitle = stringResource(R.string.settings_auto_keep_changes_subtitle),
+                checked = state.autoKeepChanges,
+                onCheckedChange = viewModel::setAutoKeepChanges,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_android_host_tools),
+                subtitle = stringResource(R.string.settings_android_host_tools_subtitle),
+                checked = state.androidHostTools,
+                onCheckedChange = viewModel::setAndroidHostTools,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
                 title = stringResource(R.string.settings_game_templates),
                 subtitle = stringResource(R.string.settings_game_templates_subtitle),
                 checked = state.gameTemplatesEnabled,
@@ -330,6 +344,45 @@ fun SettingsScreenModern(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(stringResource(R.string.settings_clear_terminal_history))
                 }
+                var cachesOpen by remember { mutableStateOf(false) }
+                OutlinedButton(
+                    shape = RoundedCornerShape(100),
+                    onClick = { cachesOpen = true; viewModel.loadRuntimeCacheSizes() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                ) {
+                    ForgeIcon(glyph = ForgeGlyph.TRASH, tint = MaterialTheme.colorScheme.onSurface, size = 16.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.settings_clear_caches))
+                }
+                if (cachesOpen) {
+                    val sizes = state.runtimeCacheSizes
+                    ForgeAlertDialog(
+                        modifier = Modifier.forgePopIn(),
+                        onDismissRequest = { cachesOpen = false },
+                        shape = RoundedCornerShape(24.dp),
+                        title = { Text(stringResource(R.string.settings_clear_caches), fontWeight = FontWeight.SemiBold) },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(stringResource(R.string.settings_clear_caches_message))
+                                com.nextcraft.forge.runtime.RuntimeCaches.Kind.entries.forEach { kind ->
+                                    KeyValueRow(kind.label, sizes?.get(kind.name)?.let(::cacheSizeLabel) ?: "…")
+                                }
+                                if (sizes != null) {
+                                    KeyValueRow(stringResource(R.string.settings_clear_caches_total), cacheSizeLabel(sizes.values.sum()))
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = { cachesOpen = false; viewModel.clearRuntimeCaches() },
+                                enabled = sizes != null && sizes.values.sum() > 0,
+                            ) { Text(stringResource(R.string.settings_clear_caches_confirm), color = tokens.dangerText) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { cachesOpen = false }) { Text(stringResource(R.string.agent_cancel)) }
+                        },
+                    )
+                }
             }
         }
 
@@ -370,6 +423,13 @@ fun SettingsScreenModern(
                 subtitle = stringResource(R.string.settings_update_notify_sub),
                 checked = state.updateNotifications,
                 onCheckedChange = viewModel::setUpdateNotifications,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
+                title = stringResource(R.string.settings_auto_install_updates),
+                subtitle = stringResource(R.string.settings_auto_install_updates_sub),
+                checked = state.autoInstallUpdates,
+                onCheckedChange = viewModel::setAutoInstallUpdates,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             state.updateProgress?.let { fraction ->
@@ -826,4 +886,12 @@ internal fun ThemeModeGrid(active: ForgeThemeMode, onSelect: (String) -> Unit) {
             }
         }
     }
+}
+
+/** "412 MB" style size for the cache list. */
+private fun cacheSizeLabel(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> String.format(java.util.Locale.US, "%.1f GB", bytes / (1L shl 30).toDouble())
+    bytes >= 1L shl 20 -> "${bytes shr 20} MB"
+    bytes > 0 -> "${maxOf(1, bytes shr 10)} KB"
+    else -> "0"
 }

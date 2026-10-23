@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">NextCraft Forge</string>
+    <string name="app_name">NextCraft Dev</string>
     <string name="app_tagline">Forge your dreams with AI.</string>
     <!-- UI strings extracted from Compose screens -->
     <string name="agent_stop">Berhenti</string>
@@ -63,7 +63,7 @@
     <string name="shell_new_workspace_project">Proyek ruang kerja baru…</string>
     <string name="shell_new_project">Proyek baru</string>
     <string name="shell_terminal">Terminal</string>
-    <string name="shell_nextcraft_forge">NextCraft Forge</string>
+    <string name="shell_nextcraft_forge">NextCraft Dev</string>
     <string name="shell_select_development_stacks_to">Pilih stack pengembangan yang akan dipasang</string>
     <string name="shell_repair_mounts_dpkg">Perbaiki mount / dpkg</string>
     <string name="shell_re_check_root">Periksa ulang root</string>
@@ -537,7 +537,7 @@
     <string name="upd_check_failed">Pemeriksaan pembaruan gagal: %1$s</string>
     <string name="upd_network_error">kesalahan jaringan</string>
     <string name="upd_available">Pembaruan tersedia: v%1$s (%2$d)</string>
-    <string name="upd_up_to_date">NextCraft Forge sudah yang terbaru.</string>
+    <string name="upd_up_to_date">NextCraft Dev sudah yang terbaru.</string>
     <string name="upd_progress_total">Mengunduh v%1$s: %2$s / %3$s MB</string>
     <string name="upd_progress">Mengunduh v%1$s: %2$s MB</string>
     <string name="msg_install_antigravity_first">Pasang Antigravity CLI terlebih dahulu.</string>
@@ -893,7 +893,7 @@
     <string name="rt_msg_unpack_rootfs">Mengekstrak rootfs Linux Core…</string>
     <string name="rt_msg_chroot_ready_short">Runtime Root Chroot siap</string>
     <string name="rt_msg_ipc_bridge">Menyiapkan jembatan IPC runtime…</string>
-    <string name="rt_msg_setup_complete">Penyiapan Root Chroot NextCraft Forge selesai</string>
+    <string name="rt_msg_setup_complete">Penyiapan Root Chroot NextCraft Dev selesai</string>
     <string name="rt_msg_prepare_ubuntu">Menyiapkan runtime Ubuntu Root Chroot…</string>
     <string name="rt_msg_check_files">Memeriksa file runtime Root Chroot…</string>
     <string name="rt_msg_check_node">Memeriksa Node.js dan npm…</string>
@@ -905,7 +905,7 @@
     <string name="rt_msg_setup_failed">Penyiapan runtime tidak dapat diselesaikan.</string>
     <string name="rt_msg_env_ready">Lingkungan chroot Ubuntu ARM64 dan alat coding Anda sudah siap.</string>
     <string name="rt_msg_log_done">✓ Penyiapan selesai</string>
-    <string name="rt_msg_log_resume">— Melanjutkan penyiapan NextCraft Forge —</string>
+    <string name="rt_msg_log_resume">— Melanjutkan penyiapan NextCraft Dev —</string>
     <string name="rt_msg_log_paused">• Penyiapan dijeda dengan aman</string>
     <string name="rt_msg_downloading_amount">Mengunduh: %1$s</string>
     <string name="rt_msg_downloading_bundle">Mengunduh bundel %1$s…</string>
@@ -1275,7 +1275,7 @@
     <string name="route_single_busy">Agen bisa diganti setelah giliran yang sedang berjalan selesai.</string>
     <string name="upd_notif_channel">Pembaruan aplikasi</string>
     <string name="upd_notif_title">Pembaruan tersedia</string>
-    <string name="upd_notif_text">NextCraft Forge %1$s siap dipasang</string>
+    <string name="upd_notif_text">NextCraft Dev %1$s siap dipasang</string>
     <string name="settings_update_notify">Beri tahu saya soal pembaruan</string>
     <string name="settings_update_notify_sub">Memeriksa di latar belakang setiap beberapa jam dan menampilkan satu notifikasi untuk tiap build baru.</string>
     <string name="upd_banner_title">Pembaruan %1$s tersedia</string>
@@ -1401,8 +1401,22 @@
     <string name="settings_schedule_agent">Izinkan agen menjadwalkan tugas</string>
     <string name="settings_schedule_agent_subtitle">Agen boleh mengulang atau memantau sesuatu dengan menambah pewaktu ke chat (maks 3 per chat).</string>
     <string name="chg_notif_channel">Yang baru</string>
-    <string name="chg_notif_title">NextCraft Forge diperbarui</string>
+    <string name="chg_notif_title">NextCraft Dev diperbarui</string>
     <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil</string>
+    <string name="notif_channel_sign_in">Masuk akun</string>
+    <string name="notif_sign_in_return">Ketuk untuk kembali ke NextCraft Dev</string>
+    <string name="settings_android_host_tools">Akses sistem Android</string>
+    <string name="settings_android_host_tools_subtitle">Mati secara bawaan. Agent bisa mengambil screenshot dan menjalankan dumpsys, pm, am, input, logcat sebagai root di HP (android-shell): akses root penuh ke Android. Claude Code minta izin sebelum tiap perintah.</string>
+    <string name="settings_auto_keep_changes">Simpan perubahan otomatis</string>
+    <string name="settings_auto_keep_changes_subtitle">Perubahan file dari agent langsung disimpan setiap selesai. Matikan untuk meninjau dan menyimpan atau membatalkannya sendiri.</string>
+    <string name="settings_clear_caches">Bersihkan cache unduhan</string>
+    <string name="settings_clear_caches_message">Menghapus file unduhan Gradle, npm, pip, dan apt. Proyek tidak tersentuh; dependensi diunduh lagi saat build atau instal berikutnya.</string>
+    <string name="settings_clear_caches_total">Total</string>
+    <string name="settings_clear_caches_confirm">Bersihkan</string>
+    <string name="msg_clear_caches_busy">Hentikan agent yang sedang berjalan sebelum membersihkan cache.</string>
+    <string name="msg_caches_cleared">Cache unduhan dibersihkan</string>
     <string name="msg_agent_switch_busy">Tunggu giliran yang berjalan selesai sebelum mengganti agen.</string>
     <string name="msg_rename_failed">Gagal mengganti nama: nama tidak valid atau sudah ada, atau agen sedang berjalan.</string>
+    <string name="settings_auto_install_updates">Pasang pembaruan otomatis</string>
+    <string name="settings_auto_install_updates_sub">Mengunduh dan memasang build baru di latar saat aplikasi tidak dipakai, lewat Wi-Fi, tanpa dialog sistem (root). Aplikasi terbuka lagi sendiri. Jika root gagal, memakai pemasang biasa.</string>
 </resources>
