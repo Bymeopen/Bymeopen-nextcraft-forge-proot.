@@ -1001,7 +1001,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         if (_state.value.chats.none { it.id == chatId }) return
         // A chat that is working shows its live copy, status and pending approval, not the last saved file.
-        val run = runs[chatId]
+        val run = runs[chatId]?.also { applyPendingText(it) }
         val messages = run?.messages ?: preferences.loadMessages(project.id, chatId)
         _state.update {
             it.copy(
@@ -1736,6 +1736,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Reads `[[schedule: …]]` / `[[unschedule]]` from the agent's finished reply and keeps the timers in step. */
     private fun applyAgentSchedule(run: ChatRun) {
         if (!preferences.scheduleEnabled) return
+        applyPendingText(run)
         val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
         val directives = ScheduleDirectives.parse(reply)
         if (directives.isEmpty()) return
@@ -2116,8 +2117,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Applies [change] to the chat's messages: kept in the run, and shown when that chat is the visible one. */
     private fun updateRunMessages(run: ChatRun, change: (List<ChatMessage>) -> List<ChatMessage>) {
+        applyPendingText(run)
         run.messages = change(run.messages)
-        if (run.chatId == _state.value.activeChatId) _state.update { it.copy(messages = run.messages) }
+        publishRunMessages(run)
+    }
+
+    /** Folds streamed text that is still buffered into the last assistant message (see [appendAssistantText]). */
+    private fun applyPendingText(run: ChatRun) {
+        if (run.pendingText.isEmpty()) return
+        val delta = run.pendingText.toString()
+        run.pendingText.setLength(0)
+        val list = run.messages.toMutableList()
+        val lastIdx = list.indexOfLast { !it.fromUser }
+        if (lastIdx >= 0) {
+            val prev = list[lastIdx]
+            list[lastIdx] = prev.copy(text = prev.text + delta)
+        } else {
+            list += ChatMessage(fromUser = false, text = delta)
+        }
+        run.messages = list
+    }
+
+    /**
+     * Shows [ChatRun.messages] in the open chat at most every [MESSAGE_PUBLISH_INTERVAL_MS]. Agents stream hundreds of
+     * small deltas per second; publishing each one re-measured the whole chat (and the Glass backdrop) every frame,
+     * which kept the main thread at 100% and caused "app not responding" during long turns.
+     */
+    private fun publishRunMessages(run: ChatRun, immediate: Boolean = false) {
+        if (run.chatId != _state.value.activeChatId) return
+        val now = android.os.SystemClock.uptimeMillis()
+        val wait = run.lastPublishAt + MESSAGE_PUBLISH_INTERVAL_MS - now
+        if (immediate || wait <= 0) {
+            run.publishJob?.cancel()
+            run.publishJob = null
+            run.lastPublishAt = now
+            _state.update { it.copy(messages = run.messages) }
+        } else if (run.publishJob == null) {
+            run.publishJob = viewModelScope.launch {
+                delay(wait)
+                run.publishJob = null
+                applyPendingText(run)
+                run.lastPublishAt = android.os.SystemClock.uptimeMillis()
+                if (run.chatId == _state.value.activeChatId) _state.update { it.copy(messages = run.messages) }
+            }
+        }
     }
 
     private fun publishRunningFlags() {
@@ -2341,25 +2384,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * error as reply text and then fails with the same message, which showed the whole error twice).
      */
     private fun appendFailureReason(run: ChatRun, reason: String) {
+        applyPendingText(run)
         val reply = run.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
         val head = reason.trim().lineSequence().firstOrNull().orEmpty().take(80)
         val shown = head.isNotBlank() && reply.contains(head)
         if (!shown) appendAssistantText(run, "\n\n[$reason]")
     }
 
+    /** Buffers a streamed delta; it reaches [ChatRun.messages] at the next publish or message change. */
     private fun appendAssistantText(run: ChatRun, delta: String) {
         if (delta.isEmpty()) return
-        updateRunMessages(run) { messages ->
-            val list = messages.toMutableList()
-            val lastIdx = list.indexOfLast { !it.fromUser }
-            if (lastIdx >= 0) {
-                val prev = list[lastIdx]
-                list[lastIdx] = prev.copy(text = prev.text + delta)
-            } else {
-                list += ChatMessage(fromUser = false, text = delta)
-            }
-            list
-        }
+        run.pendingText.append(delta)
+        publishRunMessages(run)
     }
 
     private fun recordActivityItem(run: ChatRun, title: String, detail: String, isComplete: Boolean) {
@@ -2387,6 +2423,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun finishRun(run: ChatRun, stoppedByUser: Boolean = false) {
+        applyPendingText(run)
+        publishRunMessages(run, immediate = true)
         // The terminal event and the job's own exit path both call this; the second call must not re-save or re-sync.
         if (run.finished) return
         run.finished = true
@@ -4799,6 +4837,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        /** Streamed replies refresh the open chat at most ~12 times a second. */
+        const val MESSAGE_PUBLISH_INTERVAL_MS = 80L
+
         /** How long a deleted project stays restorable. */
         const val UNDO_WINDOW_MS = 6_000L
 
@@ -4844,6 +4885,10 @@ private class ChatRun(
     var sessionId: String? = null
     var finishedSessionId: String? = null
     var messages: List<ChatMessage> = emptyList()
+    /** Streamed text not yet folded into [messages]; keeps one string copy per publish instead of one per delta. */
+    val pendingText = StringBuilder()
+    var lastPublishAt = 0L
+    var publishJob: Job? = null
     var statusLine: UiText? = null
     var pendingTool: ToolRequest? = null
     var finished: Boolean = false
