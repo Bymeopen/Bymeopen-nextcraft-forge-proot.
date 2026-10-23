@@ -1419,4 +1419,10 @@
     <string name="settings_android_host_tools_subtitle">Off by default. Lets agents take screenshots and run dumpsys, pm, am, input and logcat as root on the phone (android-shell): full root access to Android. Claude Code asks before each command.</string>
     <string name="settings_auto_keep_changes">Save changes automatically</string>
     <string name="settings_auto_keep_changes_subtitle">Keep the agent\'s file changes after each turn. Turn off to review and keep or undo them yourself.</string>
+    <string name="settings_clear_caches">Clear download caches</string>
+    <string name="settings_clear_caches_message">Deletes the downloaded Gradle, npm, pip and apt files. Projects are not touched; dependencies download again on the next build or install.</string>
+    <string name="settings_clear_caches_total">Total</string>
+    <string name="settings_clear_caches_confirm">Clear</string>
+    <string name="msg_clear_caches_busy">Stop the running agent before clearing the caches.</string>
+    <string name="msg_caches_cleared">Download caches cleared</string>
 </resources>

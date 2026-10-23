@@ -213,6 +213,8 @@ data class ForgeUiState(
     val gameTemplatesEnabled: Boolean = false,
     val androidHostTools: Boolean = false,
     val autoKeepChanges: Boolean = true,
+    /** Download cache sizes in bytes by RuntimeCaches.Kind name; null while not measured. */
+    val runtimeCacheSizes: Map<String, Long>? = null,
     val reaChatHint: Boolean = false,
     /** Scheduled prompts (timers that send a message to a chat again) and whether the agent may create them. */
     val scheduledTasks: List<com.nextcraft.forge.schedule.ScheduledTask> = emptyList(),

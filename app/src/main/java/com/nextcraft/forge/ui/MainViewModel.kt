@@ -2399,7 +2399,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         publishRunMessages(run)
     }
 
-    private fun recordActivityItem(run: ChatRun, title: String, detail: String, isComplete: Boolean) {
+    private fun recordActivityItem(run: ChatRun, title: String, rawDetail: String, isComplete: Boolean) {
+        val detail = clipToolDetail(rawDetail)
         updateRunMessages(run) { messages ->
             val list = messages.toMutableList()
             val lastIdx = list.indexOfLast { !it.fromUser }
@@ -4588,6 +4589,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Measures the Gradle/npm/pip/apt download caches in the rootfs (Settings → Linux runtime → Clear caches). */
+    fun loadRuntimeCacheSizes() {
+        _state.update { it.copy(runtimeCacheSizes = null) }
+        viewModelScope.launch {
+            val rootfs = RuntimeInstaller.rootfsDir(getApplication())
+            val sizes = withContext(Dispatchers.IO) { com.nextcraft.forge.runtime.RuntimeCaches.sizes(rootfs) }
+            _state.update { it.copy(runtimeCacheSizes = sizes.mapKeys { (kind, _) -> kind.name }) }
+        }
+    }
+
+    /** Deletes every download cache; refused while an agent runs, since a build may be using them. */
+    fun clearRuntimeCaches() {
+        if (_state.value.sessionRunning) {
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_clear_caches_busy)) }
+            return
+        }
+        viewModelScope.launch {
+            val rootfs = RuntimeInstaller.rootfsDir(getApplication())
+            withContext(Dispatchers.IO) {
+                com.nextcraft.forge.runtime.RuntimeCaches.clear(rootfs, com.nextcraft.forge.runtime.RuntimeCaches.Kind.entries.toSet())
+            }
+            _state.update { it.copy(bannerMessage = UiText.res(R.string.msg_caches_cleared)) }
+            loadRuntimeCacheSizes()
+        }
+    }
+
     fun setAutoKeepChanges(enabled: Boolean) {
         preferences.autoKeepChanges = enabled
         _state.update { it.copy(autoKeepChanges = enabled) }
@@ -4915,3 +4942,19 @@ private class ChatRun(
 
 /** The effort part of an Antigravity model id such as gemini-4-argon-high. */
 private val AGY_EFFORT_SUFFIX = Regex("-(low|medium|high)$")
+
+/** Characters of a tool's output kept in the chat: the start (the command and its first lines) and the end (the result). */
+private const val TOOL_DETAIL_HEAD = 1_500
+private const val TOOL_DETAIL_TAIL = 2_500
+
+/**
+ * Shortens a tool's output for the chat. A build or test run can print megabytes; keeping all of it in every message
+ * made long chats slow to draw, scroll, save and reopen. The full output stays in the agent's own context and logs.
+ */
+internal fun clipToolDetail(detail: String): String {
+    if (detail.length <= TOOL_DETAIL_HEAD + TOOL_DETAIL_TAIL + 200) return detail
+    val head = detail.substring(0, TOOL_DETAIL_HEAD)
+    val tail = detail.substring(detail.length - TOOL_DETAIL_TAIL)
+    val omittedLines = detail.substring(TOOL_DETAIL_HEAD, detail.length - TOOL_DETAIL_TAIL).count { it == '\n' }
+    return "$head\n… ${omittedLines + 1} lines omitted …\n$tail"
+}
