@@ -32,6 +32,8 @@ data class DiagnosticsState(
     val healthOutput: String = "",
     val healthRunning: Boolean = false,
     val healthSummary: String? = null,
+    /** Errors the app caught and carried on from, newest first (see [ErrorLog]). */
+    val swallowedErrors: String = "",
 )
 
 /** System diagnostics: device resources, runtime state and the chroot health check (chroot-health.sh). */
@@ -48,7 +50,7 @@ class DiagnosticsController(private val context: Context) {
         scope.launch {
             val device = withContext(Dispatchers.IO) { collectDevice() }
             val runtime = withContext(Dispatchers.IO) { collectRuntime() }
-            mutable.update { it.copy(device = device, runtime = runtime) }
+            mutable.update { it.copy(device = device, runtime = runtime, swallowedErrors = ErrorLog.asText()) }
         }
     }
 
@@ -124,7 +126,7 @@ class DiagnosticsController(private val context: Context) {
             runCatching {
                 val unrestricted = BatteryOptimization.isUnrestricted(appContext)
                 add(UiText.Raw("Battery optimization") to UiText.Raw(if (unrestricted) "Unrestricted" else "Optimized (some ROMs stop background builds)"))
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DiagnosticsController", it) }
             add(row(R.string.diag_linux, UiText.res(if (installed) R.string.diag_installed else R.string.diag_not_installed)))
             runCatching { RuntimeMarkers.read(File(rootfs, ".nextcraft-rootfs-version"))?.trim() }.getOrNull()
                 ?.takeIf { it.isNotBlank() }?.let { add(row(R.string.diag_rootfs, UiText.Raw(it))) }

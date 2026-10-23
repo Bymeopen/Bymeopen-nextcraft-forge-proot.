@@ -426,7 +426,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (savedGitHubToken.isNotBlank()) {
                 withContext(Dispatchers.IO) {
                     // Credentials are written into the rootfs only for the duration of a sync.
-                    runCatching { installer.clearGitHubAccess() }
+                    runCatching { installer.clearGitHubAccess() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
                     val repos = runCatching { githubClient.repositories(savedGitHubToken) }.getOrDefault(emptyList())
                     if (repos.isNotEmpty()) {
                         _state.update { it.copy(githubRepos = repos) }
@@ -973,11 +973,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             preferences.deleteProjectChats(projectId)
-        }
+        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
         runCatching {
             File(getApplication<Application>().filesDir, "workspaces/${projectId}").deleteRecursivelyNoFollow()
             checkpoints.checkpointDir(projectId).deleteRecursively()
-        }
+        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
     }
 
     private data class PendingDelete(val project: Project, val index: Int)
@@ -1103,7 +1103,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             runCatching {
                 File(getApplication<Application>().filesDir, "chats/${project.id}/$chatId.json").delete()
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
         }
         val nextChatId = if (_state.value.activeChatId == chatId) {
             updatedChats.first().id
@@ -1477,7 +1477,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 retriever.setDataSource(file.absolutePath)
                 retriever.getFrameAtTime(0)?.asImageBitmap()
             } finally {
-                runCatching { retriever.release() }
+                runCatching { retriever.release() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
         }.getOrNull()
     }
@@ -1714,7 +1714,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (true) {
                 delay(SCHEDULE_TICK_MS)
-                runCatching { runDueScheduledTasks() }
+                runCatching { runDueScheduledTasks() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
         }
     }
@@ -2307,10 +2307,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // otherwise a new prompt could race with it over shared bridge state.
         viewModelScope.launch {
             if (pendingApproval != null) {
-                runCatching { run.bridge.respondToApproval(pendingApproval, false) }
+                runCatching { run.bridge.respondToApproval(pendingApproval, false) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             if (run.ownsBridge) {
-                runCatching { run.bridge.stopActiveSession() }
+                runCatching { run.bridge.stopActiveSession() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             } else {
                 RuntimeTaskController.stop(RuntimeTaskController.AGENT)
             }
@@ -3734,7 +3734,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.w("MainViewModel", "Could not post the build result notification", error)
                 runCatching {
                     getApplication<Application>().stopService(Intent(getApplication(), RuntimeExecutionService::class.java))
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             if (succeeded && !cancelled && installAfterBuild && finalApk != null) {
                 installBuiltApk(finalApk.absolutePath)
@@ -4097,7 +4097,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (_state.value.agentKind == AgentKind.CLAUDE_CODE && isClaudeSubscriptionLogin(profile, apiKey)) {
                 // Keep the real reason: swallowing it left "Rejected" on screen with no way to see what failed.
                 val probe = if (_state.value.runtimeInstalled) {
-                    runCatching { claudeRuntime.hello(profile, 45_000L) }
+                    runCatching { claudeRuntime.hello(profile, 45_000L) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
                 } else {
                     Result.failure(IllegalStateException(str(R.string.msg_runtime_not_installed)))
                 }
@@ -4141,7 +4141,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         githubPollJob = viewModelScope.launch {
             _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_requesting_code)) }
             val codeResult = withContext(Dispatchers.IO) {
-                runCatching { githubClient.requestDeviceCode(cleanId) }
+                runCatching { githubClient.requestDeviceCode(cleanId) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             val deviceCode = codeResult.getOrElse { err ->
                 _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_error, errText(err))) }
@@ -4204,7 +4204,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val login = account?.login.orEmpty()
                         withContext(Dispatchers.IO) {
                             // Credentials are provisioned into the rootfs only during sync/push.
-                            runCatching { installer.clearGitHubAccess() }
+                            runCatching { installer.clearGitHubAccess() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
                         }
                         val repos = withContext(Dispatchers.IO) {
                             runCatching { githubClient.repositories(poll.accessToken) }.getOrDefault(emptyList())
@@ -4262,7 +4262,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // Credentials are provisioned into the rootfs only during sync/push.
                     runCatching { installer.clearGitHubAccess() }
                     account to repos
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             result.onSuccess { (account, repos) ->
                 runCatching { vault.put("GITHUB_TOKEN", cleanToken) }.onFailure { err ->
@@ -4289,7 +4289,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vault.remove("GITHUB_TOKEN")
         preferences.githubLogin = ""
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { installer.clearGitHubAccess() }
+            runCatching { installer.clearGitHubAccess() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
         }
         _state.update {
             it.copy(
@@ -4351,7 +4351,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val updatedRepos = runCatching { githubClient.repositories(token) }.getOrDefault(listOf(repo))
                     Triple(repo, updatedRepos, pushError)
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             result.onSuccess { (repo, updatedRepos, pushError) ->
                 _state.update {
@@ -4396,7 +4396,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 withGitHubCredentials(token, login) {
                     runCommandInChrootOrHost(project.slug, ws, syncCmd)
                 }
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
         }
     }
 
@@ -4422,7 +4422,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     withGitHubCredentials(token, login) {
                         runCheckedCommand(project.slug, ws, pullCmd)
                     }
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             refreshWorkspaceFilesAndChanges(project.id)
             _state.update {
@@ -4482,7 +4482,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         type = if (isAndroidRepo) ProjectType.ANDROID else ProjectType.GENERAL,
                         language = if (isAndroidRepo) "Kotlin / Android" else "Git Repository",
                     )
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             clonedProject.onSuccess { newProject ->
                 configureAllProjectRoots(prependProject(newProject))
@@ -4616,7 +4616,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         throw error
                     }
                     project
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             result.onSuccess { newProject ->
                 configureAllProjectRoots(prependProject(newProject))
@@ -4818,7 +4818,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     emulateHardLinks = false,
                     outputFile = output,
                 )
-                runCatching { process.outputStream.close() }
+                runCatching { process.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
                 try {
                     if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
                         process.destroyForcibly()
@@ -4863,7 +4863,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = str(R.string.upd_checking)) }
             val result = withContext(Dispatchers.IO) {
-                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }
+                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             val info = result.getOrNull()
             val error = result.exceptionOrNull()
@@ -4913,7 +4913,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         apk = apk,
                         launchAfterInstall = false,
                     )
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             result.onSuccess {
                 _state.update { it.copy(updateProgress = null, updateStatusMessage = str(R.string.upd_installing, info.versionName)) }

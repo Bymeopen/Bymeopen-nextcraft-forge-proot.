@@ -47,7 +47,7 @@ class ScheduleTickWorker(context: Context, params: WorkerParameters) : Worker(co
          * every launch, waking the phone four times an hour to find nothing to do.
          */
         fun sync(context: Context, hasEnabledTasks: Boolean) {
-            runCatching { if (hasEnabledTasks) schedule(context) else cancel(context) }
+            runCatching { if (hasEnabledTasks) schedule(context) else cancel(context) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ScheduleTickWorker", it) }
         }
 
         fun cancel(context: Context) {
@@ -70,7 +70,7 @@ class ScheduleTickWorker(context: Context, params: WorkerParameters) : Worker(co
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build()
-            runCatching { manager.notify(NOTIFICATION_ID, notification) }
+            runCatching { manager.notify(NOTIFICATION_ID, notification) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ScheduleTickWorker", it) }
         }
     }
 }

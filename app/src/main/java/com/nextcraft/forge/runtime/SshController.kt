@@ -141,7 +141,7 @@ class SshController(context: Context) {
                         mutable.update { it.copy(log = append(it.log, text)) }
                     }
                 }
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("SshController", it) }
             // Only this process's own entry: after Stop and a quick Start the map already holds the new tunnel.
             tunnelProcesses.remove(host.id, process)
             if (!tunnelProcesses.containsKey(host.id)) {
@@ -158,7 +158,7 @@ class SshController(context: Context) {
         if (forward.isNotEmpty()) {
             scope.launch {
                 // "[s]sh" keeps pkill from matching this very shell command line.
-                runCatching { runner.run(workspace(), SLUG, "pkill -f ${ChrootRunner.quote("[s]sh .* -N .*-L $forward ")} || true", timeoutMillis = 15_000L) }
+                runCatching { runner.run(workspace(), SLUG, "pkill -f ${ChrootRunner.quote("[s]sh .* -N .*-L $forward ")} || true", timeoutMillis = 15_000L) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("SshController", it) }
             }
         }
     }

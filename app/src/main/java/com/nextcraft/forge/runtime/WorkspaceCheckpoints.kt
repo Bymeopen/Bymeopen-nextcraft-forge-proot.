@@ -124,7 +124,7 @@ class WorkspaceCheckpoints(
                         // Always copy bytes into a distinct inode so in-place O_TRUNC edits in
                         // workspace never overwrite the checkpoint baseline!
                         source.copyTo(destination, overwrite = true)
-                        runCatching { destination.setLastModified(source.lastModified()) }
+                        runCatching { destination.setLastModified(source.lastModified()) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("WorkspaceCheckpoints", it) }
                     }
                 }
             val backupPath = backup.canonicalFile.toPath()
