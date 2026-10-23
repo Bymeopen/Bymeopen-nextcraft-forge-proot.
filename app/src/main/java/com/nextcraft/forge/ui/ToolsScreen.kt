@@ -65,6 +65,7 @@ internal val toolSections = listOf(
         listOf(
             ToolEntry(ForgeTab.ROM, ForgeGlyph.CODE, R.string.tools_rom, R.string.tools_rom_desc),
             ToolEntry(ForgeTab.CHECKPOINTS, ForgeGlyph.HISTORY, R.string.tools_checkpoints, R.string.tools_checkpoints_desc),
+            ToolEntry(ForgeTab.BACKUP, ForgeGlyph.DOWNLOAD, R.string.tools_backup, R.string.tools_backup_desc),
         ),
     ),
 )

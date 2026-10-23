@@ -236,6 +236,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val cicd = CiCdController(application, { _state.value.activeProject }, { checkpoints.ensureWorkspace(it) })
     val ssh = SshController(application)
     val rom = RomStudioController(application)
+    val backup = BackupController(application, viewModelScope)
     val snapshots = SnapshotsController(
         application,
         { _state.value.activeProject },
