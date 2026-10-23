@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshRuntimeStatusOnResume()
+        com.nextcraft.forge.ui.ReturnToApp.dismiss(this)
     }
 
     override fun onTrimMemory(level: Int) {

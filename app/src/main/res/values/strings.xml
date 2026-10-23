@@ -1413,4 +1413,6 @@
     <string name="chg_notif_channel">What\'s new</string>
     <string name="chg_notif_title">NextCraft Dev updated</string>
     <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
+    <string name="notif_channel_sign_in">Sign-in</string>
+    <string name="notif_sign_in_return">Tap to return to NextCraft Dev</string>
 </resources>

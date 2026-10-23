@@ -219,6 +219,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val claudeAuth = ClaudeAuthController(
         context = application,
         onSignedInChanged = { signedIn ->
+            if (signedIn) {
+                ReturnToApp.afterSignIn(application, LocaleHelper.wrapContext(application).getString(R.string.rt_auth_claude_connected))
+            }
             // A finished sign-in only helps if Claude Code actually uses it: switch to the subscription provider.
             if (signedIn && _state.value.agentKind == AgentKind.CLAUDE_CODE && _state.value.providerProfile.kind != ProviderKind.CLAUDE) {
                 updateProviderKind(ProviderKind.CLAUDE)

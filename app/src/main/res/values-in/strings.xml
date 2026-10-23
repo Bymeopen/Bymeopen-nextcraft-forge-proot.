@@ -1394,4 +1394,6 @@
     <string name="chg_notif_channel">Yang baru</string>
     <string name="chg_notif_title">NextCraft Dev diperbarui</string>
     <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil</string>
+    <string name="notif_channel_sign_in">Masuk akun</string>
+    <string name="notif_sign_in_return">Ketuk untuk kembali ke NextCraft Dev</string>
 </resources>
