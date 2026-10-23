@@ -2201,6 +2201,20 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }
         }
         File(rootfs, "root/.claude/pocket-settings.json").delete()
+        // Agents' background jobs get a hangup when the turn ends (the CLI tears down its shells). This starts a command
+        // in its own session with hangups ignored, so a dev server or a long build outlives the turn.
+        writeRootfsFileAtomically(
+            File(rootfs, "opt/nextcraft/bin/keep-running"),
+            """#!/bin/sh
+# Keeps a command running after the agent's turn ends (dev servers, long builds).
+#   keep-running <logfile> <command> [args...]      then read <logfile>; stop it with: kill <pid>
+[ ${'$'}# -ge 2 ] || { echo "usage: keep-running <logfile> <command> [args...]" >&2; exit 2; }
+log="${'$'}1"; shift
+setsid nohup "${'$'}@" > "${'$'}log" 2>&1 < /dev/null &
+echo "started pid ${'$'}! (log: ${'$'}log)"
+""",
+            mode = 0b111101101,
+        )
         ensureSystemGitTrust()
         applyAndroidHostTools()
         ensureWorkspaceTrust("/workspace")
