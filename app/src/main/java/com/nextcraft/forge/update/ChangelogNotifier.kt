@@ -15,7 +15,7 @@ import com.nextcraft.forge.ui.LocaleHelper
  * Debug builds share one versionCode, so the changelog is keyed by [CHANGELOG_ID]: bump it whenever the text changes.
  */
 object ChangelogNotifier {
-    const val CHANGELOG_ID = "2026-10-22"
+    const val CHANGELOG_ID = "2026-10-23"
     private const val CHANNEL_ID = "app_changelog"
     private const val NOTIFICATION_ID = 4102
 
