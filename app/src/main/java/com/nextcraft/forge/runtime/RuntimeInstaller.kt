@@ -834,11 +834,14 @@ class RuntimeInstaller(private val context: Context) {
             chrootExec = runtime.chrootExec,
             command = "set -e; next=/usr/local/lib/dsh.updating; " +
                 "rm -rf \"${'$'}next\"; mkdir -p \"${'$'}next\"; " +
-                "cd \"${'$'}next\"; npm init -y >/dev/null; " +
-                // Guest-writable npm config (~/.npmrc, /etc/npmrc) must not redirect the registry for a package that
-                // becomes the agent runtime.
-                "npm install --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org " +
-                "--userconfig=/dev/null --globalconfig=/dev/null @deepseek-ai/dsh@$quotedVersion; " +
+                // Two separate, empty config files: when the user and global npm config both resolve to /dev/null,
+                // npm stops with "double-loading config /dev/null as global, previously loaded as user". Guest-writable
+                // npm config (~/.npmrc, /etc/npmrc) must still not redirect the registry for a package that becomes the
+                // agent runtime, hence the explicit --registry.
+                "export npm_config_userconfig=\"${'$'}next/.npmrc-user\" npm_config_globalconfig=\"${'$'}next/.npmrc-global\"; " +
+                "cd \"${'$'}next\"; : > .npmrc-user; : > .npmrc-global; npm init -y >/dev/null; " +
+                "npm install --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org @deepseek-ai/dsh@$quotedVersion; " +
+                "rm -f .npmrc-user .npmrc-global; " +
                 // npm runs as root; the app patches the tree next (applyDshAndroidCompatibility) as its own UID.
                 "chown -R -h ${AndroidProcess.myUid()}:${AndroidProcess.myUid()} \"${'$'}next\"",
             displayCommand = "npm install @deepseek-ai/dsh@$quotedVersion",
