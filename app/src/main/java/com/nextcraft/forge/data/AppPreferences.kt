@@ -132,6 +132,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    /** Agents may run Android commands as root (screencap, dumpsys, pm, input) through android-shell. Off by default. */
+    var androidHostTools: Boolean
+        get() = preferences.getBoolean("android_host_tools", false)
+        set(value) { preferences.edit().putBoolean("android_host_tools", value).apply() }
+
     /** Offer the libGDX game starter in New project and its build targets. Off by default. */
     var gameTemplatesEnabled: Boolean
         get() = preferences.getBoolean("game_templates_enabled", false)

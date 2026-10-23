@@ -406,6 +406,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoApproveAllTools = preferences.autoApproveAllTools,
                     autoSyncGitHub = preferences.autoSyncGitHub,
                     gameTemplatesEnabled = preferences.gameTemplatesEnabled,
+                    androidHostTools = preferences.androidHostTools,
                     reaChatHint = preferences.reaChatHint,
                     scheduleEnabled = preferences.scheduleEnabled,
                     updateNotifications = preferences.updateNotifications,
@@ -1974,7 +1975,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Binary-related messages also tell the agent that `rea` exists (only when REA is installed).
         val reaInstalled = preferences.reaChatHint &&
             com.nextcraft.forge.runtime.RuntimeMarkers.read(File(RuntimeInstaller.rootfsDir(getApplication()), "root/.nextcraft-rea-version")) != null
-        val agentPrompt = ScheduleDirectives.augment(ReaChatHint.augment(basePrompt, attachments, reaInstalled), preferences.scheduleEnabled)
+        val agentPrompt = ScheduleDirectives.augment(
+            com.nextcraft.forge.runtime.AndroidHostTools.augment(ReaChatHint.augment(basePrompt, attachments, reaInstalled), preferences.androidHostTools),
+            preferences.scheduleEnabled,
+        )
         val assistantPlaceholder = ChatMessage(
             id = "streaming-assistant",
             fromUser = false,
@@ -4533,6 +4537,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
             )
         }
+    }
+
+    fun setAndroidHostTools(enabled: Boolean) {
+        preferences.androidHostTools = enabled
+        _state.update { it.copy(androidHostTools = enabled) }
+        viewModelScope.launch(Dispatchers.IO) { runCatching { installer.applyAndroidHostTools() } }
     }
 
     fun setGameTemplatesEnabled(enabled: Boolean) {

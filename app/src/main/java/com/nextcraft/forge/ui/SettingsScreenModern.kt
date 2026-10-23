@@ -161,6 +161,13 @@ fun SettingsScreenModern(
             ThinDivider()
 
             ForgeToggleRow(
+                title = stringResource(R.string.settings_android_host_tools),
+                subtitle = stringResource(R.string.settings_android_host_tools_subtitle),
+                checked = state.androidHostTools,
+                onCheckedChange = viewModel::setAndroidHostTools,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            ForgeToggleRow(
                 title = stringResource(R.string.settings_game_templates),
                 subtitle = stringResource(R.string.settings_game_templates_subtitle),
                 checked = state.gameTemplatesEnabled,

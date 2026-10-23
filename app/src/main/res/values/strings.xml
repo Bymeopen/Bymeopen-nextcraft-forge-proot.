@@ -1415,4 +1415,6 @@
     <string name="chg_notif_text">• Changelog after each update, as a notification\n• Antigravity: effort tabs switch the model variant\n• Glass: sheets blur the page behind them\n• Faster, more reliable Antigravity replies</string>
     <string name="notif_channel_sign_in">Sign-in</string>
     <string name="notif_sign_in_return">Tap to return to NextCraft Dev</string>
+    <string name="settings_android_host_tools">Android system access</string>
+    <string name="settings_android_host_tools_subtitle">Off by default. Lets agents take screenshots and run dumpsys, pm, am, input and logcat as root on the phone (android-shell): full root access to Android. Claude Code asks before each command.</string>
 </resources>

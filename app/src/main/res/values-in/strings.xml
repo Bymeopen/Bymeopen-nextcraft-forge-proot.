@@ -1396,4 +1396,6 @@
     <string name="chg_notif_text">• Catatan perubahan setelah tiap pembaruan, lewat notifikasi\n• Antigravity: tab effort mengganti varian model\n• Glass: sheet memburamkan halaman di belakangnya\n• Balasan Antigravity lebih cepat dan stabil</string>
     <string name="notif_channel_sign_in">Masuk akun</string>
     <string name="notif_sign_in_return">Ketuk untuk kembali ke NextCraft Dev</string>
+    <string name="settings_android_host_tools">Akses sistem Android</string>
+    <string name="settings_android_host_tools_subtitle">Mati secara bawaan. Agent bisa mengambil screenshot dan menjalankan dumpsys, pm, am, input, logcat sebagai root di HP (android-shell): akses root penuh ke Android. Claude Code minta izin sebelum tiap perintah.</string>
 </resources>

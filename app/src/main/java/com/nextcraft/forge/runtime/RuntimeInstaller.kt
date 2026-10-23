@@ -2095,6 +2095,13 @@ class RuntimeInstaller(private val context: Context) {
         return envFile to suCommand
     }
 
+    /** Installs or removes android-shell and friends to match Settings → Android system access. */
+    fun applyAndroidHostTools() {
+        if (!rootfs.isDirectory) return
+        val enabled = com.nextcraft.forge.data.AppPreferences(context).androidHostTools
+        AndroidHostTools.apply(rootfs, enabled) { file, body -> writeRootfsFileAtomically(file, body, mode = 0b111101101) }
+    }
+
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/nextcraft/permission-hook.sh")
         hook.parentFile?.mkdirs()
@@ -2185,6 +2192,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
             runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }
         }
         File(rootfs, "root/.claude/pocket-settings.json").delete()
+        applyAndroidHostTools()
         ensureWorkspaceTrust("/workspace")
     }
 

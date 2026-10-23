@@ -939,6 +939,8 @@ private val DANGEROUS_PATTERNS = listOf(
     "dd if=", "/dev/block", "/dev/loop", "/dev/sd", "/dev/zero", "/dev/mem", "/dev/kmem", "/proc/", "umount",
     "| sh", "| bash", "find -exec", "find -delete", "pocketdev-bridge", "nextcraft-bridge", "pocket-bridge",
     "/opt/pocket", "/opt/nextcraft", ".claude", ".git-credentials",
+    // Root shell on Android itself (Settings → Android system access).
+    "android-shell", "android-screencap", "android-dumpsys", "nsenter",
     // Credential stores the Bash route could cat: the SSH keys and the GitHub CLI token.
     ".ssh/", "/.ssh", ".config/gh",
 )
