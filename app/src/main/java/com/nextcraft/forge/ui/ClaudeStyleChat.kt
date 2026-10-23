@@ -354,7 +354,7 @@ internal fun ChatModelSheet(state: ForgeUiState, viewModel: MainViewModel, onDis
                 // One tab per provider: its own models and, for Claude and Antigravity, its own reasoning effort.
                 val agents = AgentKind.entries
                 ForgePillTabs(
-                    items = agents.map { it.displayTitle() },
+                    items = agents.map { it.shortTitle() },
                     selectedIndex = agents.indexOf(agent).coerceAtLeast(0),
                     onSelect = { sheetAgent = agents[it] },
                     equalWidth = true, // 3 providers fit side by side; scrolling cut "Antigravity" at the edge
