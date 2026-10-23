@@ -3621,6 +3621,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         throw CancellationException("Build stopped")
                     }
                     val logBuilder = StringBuilder()
+                    // Gradle prints hundreds of lines a second. Copying the log tail into the UI state for every line
+                    // (tens of KB each time) made the phone hot and recomposed the screen needlessly: publish at most
+                    // every LOG_PUBLISH_MS, always on a stage change, and once more when the build ends.
+                    var lastPublishAt = 0L
+                    fun publishLog(stage: AndroidBuildStage) {
+                        lastPublishAt = android.os.SystemClock.elapsedRealtime()
+                        _state.update { current ->
+                            current.copy(
+                                androidBuild = current.androidBuild.copy(
+                                    stage = stage,
+                                    log = logBuilder.takeLast(64 * 1024).toString(),
+                                ),
+                            )
+                        }
+                    }
+                    var currentStage = _state.value.androidBuild.stage
                     process.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line ->
                             if (!isActive) {
@@ -3628,19 +3644,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 throw CancellationException("Build stopped")
                             }
                             logBuilder.append(line).append('\n')
-                            val previousStage = _state.value.androidBuild.stage
-                            val stage = inferAndroidBuildStage(line, previousStage)
-                            if (stage != previousStage) pushBuildStageToNotification(stage, project.name)
-                            _state.update { current ->
-                                current.copy(
-                                    androidBuild = current.androidBuild.copy(
-                                        stage = stage,
-                                        log = logBuilder.takeLast(64 * 1024).toString(),
-                                    ),
-                                )
-                            }
+                            val stage = inferAndroidBuildStage(line, currentStage)
+                            val stageChanged = stage != currentStage
+                            if (stageChanged) pushBuildStageToNotification(stage, project.name)
+                            currentStage = stage
+                            if (stageChanged || android.os.SystemClock.elapsedRealtime() - lastPublishAt >= LOG_PUBLISH_MS) publishLog(stage)
                         }
                     }
+                    publishLog(currentStage)
                     exitCode = process.waitFor()
                     fullLog = logBuilder.toString()
                     builtApk = if (exitCode == 0) findDebugApk(root) else null
@@ -4953,6 +4964,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        /** Longest a running build waits before the screen sees new log lines. */
+        const val LOG_PUBLISH_MS = 200L
         /** Streamed replies refresh the open chat at most ~12 times a second. */
         const val MESSAGE_PUBLISH_INTERVAL_MS = 80L
 

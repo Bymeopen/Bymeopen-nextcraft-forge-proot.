@@ -42,6 +42,14 @@ class ScheduleTickWorker(context: Context, params: WorkerParameters) : Worker(co
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
         }
 
+        /**
+         * Keeps the 15-minute check only while at least one enabled task exists. It used to be enqueued for everyone at
+         * every launch, waking the phone four times an hour to find nothing to do.
+         */
+        fun sync(context: Context, hasEnabledTasks: Boolean) {
+            runCatching { if (hasEnabledTasks) schedule(context) else cancel(context) }
+        }
+
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
         }
