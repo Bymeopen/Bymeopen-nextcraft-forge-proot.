@@ -1003,17 +1003,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.chats.none { it.id == chatId }) return
         // A chat that is working shows its live copy, status and pending approval, not the last saved file.
         val run = runs[chatId]?.also { applyPendingText(it) }
-        val messages = run?.messages ?: preferences.loadMessages(project.id, chatId)
         _state.update {
             it.copy(
                 activeChatId = chatId,
-                messages = messages,
+                messages = run?.messages ?: emptyList(),
                 activeStatusLine = run?.statusLine,
                 pendingToolRequest = run?.pendingTool,
             )
         }
+        // A long chat's JSON is megabytes: parse it off the main thread, then show it if the chat is still open.
+        if (run == null) loadChatMessagesAsync(project.id, chatId)
         if (_state.value.chats.firstOrNull { it.id == chatId }?.isolated == true) refreshBranchStatus(chatId)
     }
+
+    /** Chat whose saved messages are still being read; until then the state holds no messages for it. */
+    @Volatile private var loadingChatId: String? = null
+
+    private fun loadChatMessagesAsync(projectId: String, chatId: String) {
+        loadingChatId = chatId
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) { preferences.loadMessages(projectId, chatId) }
+            if (loadingChatId == chatId) loadingChatId = null
+            if (_state.value.activeChatId == chatId && _state.value.activeProjectId == projectId && runs[chatId] == null) {
+                _state.update { it.copy(messages = loaded) }
+            }
+        }
+    }
+
+    /** The open chat's messages, or the saved ones while they are still loading (never an empty stand-in). */
+    private fun currentMessagesOf(projectId: String, chatId: String): List<ChatMessage> =
+        if (chatId == _state.value.activeChatId && loadingChatId != chatId) _state.value.messages
+        else preferences.loadMessages(projectId, chatId)
 
     fun createChat(title: String = "") {
         val project = _state.value.activeProject ?: return
@@ -1480,7 +1500,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Adds finished messages to a chat that has no agent run (they are saved like any other message). */
     private fun appendLocalMessages(projectId: String, chatId: String, added: List<ChatMessage>) {
-        val current = if (_state.value.activeChatId == chatId) _state.value.messages else preferences.loadMessages(projectId, chatId)
+        val current = currentMessagesOf(projectId, chatId)
         val updated = current.filterNot { it.id == "streaming-assistant" } + added
         preferences.saveMessages(projectId, chatId, updated)
         if (_state.value.activeChatId == chatId) _state.update { it.copy(messages = updated) }
@@ -1988,7 +2008,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             agent = agent.stableId.takeIf { _state.value.routing.mode != RouteMode.SINGLE },
         )
         // A placeholder left behind by an abnormal end would repeat its LazyColumn key ("Key was already used" crash).
-        val base = if (chatId == _state.value.activeChatId) _state.value.messages else preferences.loadMessages(project.id, chatId)
+        val base = currentMessagesOf(project.id, chatId)
         val historyBefore = base.filterNot { it.id == "streaming-assistant" }
         val historyForAgent = if (resend) historyBefore else historyBefore + userMsg
         val updatedMessages = historyForAgent + assistantPlaceholder
