@@ -230,6 +230,36 @@ def nextcraftMaven = uri('/root/maven/localMvnRepository')
 def nextcraftCacheFirst = { File root ->
     gradle.startParameter.offline || new File(root, '.nextcraft/android-project.json').isFile()
 }
+// sqlite-jdbc (Room's KSP/kapt schema checks) sees Android's /system in the chroot and loads its Android build,
+// which cannot run on Ubuntu ("invalid ELF header"). Point it at the Linux aarch64 library from the same jar.
+if (!System.getProperty('org.sqlite.lib.path')) {
+    def sqliteCache = new File(gradle.gradleUserHomeDir, 'caches/modules-2/files-2.1/org.xerial/sqlite-jdbc')
+    def sqliteJars = []
+    (sqliteCache.listFiles() ?: []).each { v -> (v.listFiles() ?: []).each { h ->
+        (h.listFiles() ?: []).each { f -> if (f.name.startsWith('sqlite-jdbc-') && f.name.endsWith('.jar')) sqliteJars << f }
+    } }
+    def sqliteJar = sqliteJars.max { it.lastModified() }
+    if (sqliteJar != null) {
+        def sqliteDir = new File(gradle.gradleUserHomeDir, 'nextcraft/' + sqliteJar.name.replace('.jar', ''))
+        def sqliteLib = new File(sqliteDir, 'libsqlitejdbc.so')
+        if (!sqliteLib.isFile()) {
+            def zip = new java.util.zip.ZipFile(sqliteJar)
+            try {
+                def entry = zip.getEntry('org/sqlite/native/Linux/aarch64/libsqlitejdbc.so')
+                if (entry != null) {
+                    sqliteDir.mkdirs()
+                    zip.getInputStream(entry).withStream { input -> sqliteLib.withOutputStream { it << input } }
+                }
+            } finally {
+                zip.close()
+            }
+        }
+        if (sqliteLib.isFile()) {
+            System.setProperty('org.sqlite.lib.path', sqliteDir.path)
+            System.setProperty('org.sqlite.lib.name', 'libsqlitejdbc.so')
+        }
+    }
+}
 beforeSettings { settings ->
     settings.pluginManagement.repositories {
         if (nextcraftCacheFirst(settings.settingsDir)) maven { url = nextcraftMaven }

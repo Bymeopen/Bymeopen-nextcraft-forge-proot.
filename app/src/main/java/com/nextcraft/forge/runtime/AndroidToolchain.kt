@@ -70,6 +70,8 @@ internal object AndroidToolchain {
             "Set android.useAndroidX=true for AndroidX or Compose projects.",
         "NextCraft Forge globally configures Gradle to use the SDK's ARM64 aapt2. Do not use the x86_64 Maven aapt2, " +
             "investigate its architecture, or add android.aapt2FromMavenOverride to the project.",
+        "Background jobs started from a tool call stop when the turn ends: run long builds in the foreground, or " +
+            "start them with `nohup … > build.log 2>&1 &` and read the log in a later turn.",
         "Use the installed `gradle` command for Android builds; do not ask the user to install Android Studio, an SDK, " +
             "Gradle, ADB, or Termux.",
     )
