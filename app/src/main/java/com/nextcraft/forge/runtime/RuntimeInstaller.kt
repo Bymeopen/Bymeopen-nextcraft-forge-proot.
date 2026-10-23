@@ -1979,11 +1979,14 @@ class RuntimeInstaller(private val context: Context) {
             envFile.delete()
             throw error
         }
+        val pidFile = GuestProcess.pidFileFor(envFile)
+        spawned.guestPidFile = pidFile
         // The `rm -f` inside suCommand never runs when su is denied or exec fails, which would leave API keys
         // on disk until the next launch's 10-minute purge. Remove the file as soon as the process is gone.
         Thread({
             while (spawned.isAlive) Thread.sleep(ENV_CLEANUP_POLL_MS)
             envFile.delete()
+            pidFile.delete()
         }, "forge-env-cleanup").apply { isDaemon = true; start() }
         return spawned
     }
@@ -2058,6 +2061,10 @@ class RuntimeInstaller(private val context: Context) {
         runtimeEnvDir.listFiles { f -> f.name.startsWith(".env-") }
             ?.filter { System.currentTimeMillis() - it.lastModified() > 10 * 60 * 1_000L }
             ?.forEach { it.delete() }
+        // Pid files of launches whose owner never cleaned up (terminal sessions, crashes): a day is far past any run.
+        File(runtimeDir, "pids").listFiles()
+            ?.filter { System.currentTimeMillis() - it.lastModified() > 24 * 60 * 60 * 1_000L }
+            ?.forEach { it.delete() }
         val envFile = File(runtimeEnvDir, ".env-${java.util.UUID.randomUUID()}.sh")
         val envScript = buildString {
             for ((key, value) in guestEnv) {
@@ -2088,7 +2095,8 @@ class RuntimeInstaller(private val context: Context) {
             bridge.absolutePath,
             appUid,
         ) + guestCommand
-        val suCommand = ". $quotedEnvFile; rm -f $quotedEnvFile; exec " +
+        val pidFile = GuestProcess.pidFileFor(envFile).also { it.parentFile?.mkdirs() }
+        val suCommand = ". $quotedEnvFile; rm -f $quotedEnvFile; " + GuestProcess.recordPidCommand(pidFile) + "exec " +
             chrootArgs.joinToString(" ") { shellSingleQuote(it) }
         return envFile to suCommand
     }
