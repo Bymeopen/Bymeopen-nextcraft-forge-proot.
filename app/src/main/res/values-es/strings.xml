@@ -1318,7 +1318,7 @@
     <string name="upd_banner_title">La actualización %1$s está disponible</string>
     <string name="upd_banner_hint">Toca para abrir Ajustes e instalarla.</string>
     <string name="agent_steer">Redirigir</string>
-    <string name="agent_steer_hint">Redirigir detiene este turno y envía el mensaje ahora; lo que el agente ya hizo se conserva.</string>
+    <string name="agent_steer_hint">Claude Code: el mensaje se une al turno en curso y se responde tras el paso actual, sin detener nada. Otros agentes: este turno se detiene y el mensaje se envía ya; lo que el agente ya hizo se conserva.</string>
     <string name="branch_committed">Commit realizado en la rama.</string>
     <string name="branch_commit_hint">Mensaje del commit</string>
     <string name="branch_commit">Hacer commit</string>
@@ -1493,4 +1493,5 @@
     <string name="settings_storage_access_sub">Concede \"Acceso a todos los archivos\" para que el guest pueda leer y escribir /sdcard</string>
     <string name="settings_storage_access_granted">Concedido · /sdcard está disponible en el guest</string>
     <string name="shell_proot_fallback">Motor PRoot integrado listo (las compilaciones son más lentas que en nativo)</string>
+    <string name="agent_auto_retry_notice">Reintentando automáticamente una vez…</string>
 </resources>

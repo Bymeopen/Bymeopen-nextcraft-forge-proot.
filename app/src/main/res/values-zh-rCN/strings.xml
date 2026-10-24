@@ -1280,7 +1280,7 @@
     <string name="upd_banner_title">有可用更新 %1$s</string>
     <string name="upd_banner_hint">点按打开设置并安装。</string>
     <string name="agent_steer">引导</string>
-    <string name="agent_steer_hint">“引导”会停止当前回合并立即发送消息；智能体已完成的操作会保留。</string>
+    <string name="agent_steer_hint">Claude Code：消息会加入正在进行的回合，在当前步骤之后得到回复，不会中断任何操作。其他代理：本回合会停止并立即发送消息；代理已完成的工作会保留。</string>
     <string name="branch_committed">已提交到分支。</string>
     <string name="branch_commit_hint">提交信息</string>
     <string name="branch_commit">提交</string>
@@ -1453,4 +1453,5 @@
     <string name="settings_storage_access_sub">授予“所有文件访问权限”，以便访客环境可以读写 /sdcard</string>
     <string name="settings_storage_access_granted">已授予 · /sdcard 在访客环境中可用</string>
     <string name="shell_proot_fallback">内置 PRoot 引擎已就绪（构建速度比原生慢）</string>
+    <string name="agent_auto_retry_notice">正在自动重试一次…</string>
 </resources>

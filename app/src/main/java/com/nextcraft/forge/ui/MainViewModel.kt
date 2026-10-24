@@ -2000,6 +2000,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Moves a failed turn to the next agent when the mode allows it. The failed reply stays in the chat with a note,
      * and the same message is sent again without being added to the history a second time.
      */
+    /** Messages that already got their one automatic retry (see [tryAutoRetry]). */
+    private val autoRetriedPrompts = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /**
+     * A turn that failed for a passing reason (Google's stream went idle, a dropped connection, a 5xx) is sent again
+     * once by itself: the agent resumes the same conversation, so nothing it did is lost. A second failure of the same
+     * message is shown with "Try again" as before.
+     */
+    private fun tryAutoRetry(run: ChatRun, reason: String): Boolean {
+        if (!isTransientAgentFailure(reason) || !autoRetriedPrompts.add(run.lastPrompt.id)) return false
+        val project = _state.value.projects.firstOrNull { it.id == run.projectId } ?: return false
+        if (project.id != _state.value.activeProjectId) return false
+        appendAssistantText(run, "\n\n[" + reason + "]\n" + str(R.string.agent_auto_retry_notice))
+        finishRun(run)
+        viewModelScope.launch {
+            run.job?.join()
+            run.eventsJob?.cancel()
+            val still = _state.value.activeProjectId == project.id && !runs.containsKey(run.chatId) &&
+                _state.value.chats.any { it.id == run.chatId }
+            if (still) {
+                startRun(project, run.chatId, run.lastPrompt.copy(projectId = project.id, chatId = run.chatId), tried = run.tried, resend = true)
+            } else {
+                offerRetry(run)
+            }
+        }
+        return true
+    }
+
     private fun tryFailover(run: ChatRun, reason: String): Boolean {
         if (!AgentRouter.failsOver(_state.value.routing.mode)) return false
         val tried = run.tried + run.agent
@@ -2358,9 +2386,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queued = _state.value.queuedPrompts.firstOrNull { it.id == id } ?: return
         val chatId = queued.chatId ?: return
         val project = _state.value.activeProject?.takeIf { it.id == queued.projectId && _state.value.activeChatId == chatId } ?: return
-        removeQueuedPrompt(id)
         val prompt = queued.copy(projectId = project.id, chatId = chatId)
         val run = runs[chatId]
+        // Claude Code takes the message into the running session: nothing is stopped, the agent answers it right after
+        // its current step with everything it has done so far in context.
+        val claude = run?.takeIf { it.ownsBridge && prompt.attachments.isEmpty() }?.bridge as? com.nextcraft.forge.runtime.ClaudeRuntimeBridge
+        if (run != null && claude != null && claude.steer(prompt.text)) {
+            removeQueuedPrompt(id)
+            updateRunMessages(run) { messages ->
+                // Shown before the reply that is still streaming, which goes on to answer it.
+                val at = messages.indexOfLast { !it.fromUser }.takeIf { it >= 0 } ?: messages.size
+                messages.toMutableList().apply { add(at, ChatMessage(fromUser = true, text = prompt.text)) }
+            }
+            return
+        }
+        removeQueuedPrompt(id)
         if (run == null) {
             if (canStartAnotherRun(tentativeAgent(prompt.text))) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
             return
@@ -2473,6 +2513,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // The bridges report a user stop in English; show it in the app language.
                 val reason = if (event.reason == "Stopped by user") str(R.string.agent_stopped_by_user) else event.reason
                 if (event.reason != "Stopped by user" && tryFailover(run, reason)) return
+                if (event.reason != "Stopped by user" && !run.steering && tryAutoRetry(run, reason)) return
                 appendFailureReason(run, reason)
                 // A run stopped by "Steer" neither offers a retry nor touches the queue: the steering message starts next.
                 if (!run.steering) offerRetry(run)
@@ -4881,4 +4922,14 @@ internal fun clipToolDetail(detail: String): String {
     val tail = detail.substring(detail.length - TOOL_DETAIL_TAIL)
     val omittedLines = detail.substring(TOOL_DETAIL_HEAD, detail.length - TOOL_DETAIL_TAIL).count { it == '\n' }
     return "$head\n… ${omittedLines + 1} lines omitted …\n$tail"
+}
+
+/** Failures that a plain resend usually fixes: the provider's stream stalled, the connection dropped, or a 5xx. */
+internal fun isTransientAgentFailure(reason: String): Boolean {
+    val text = reason.lowercase()
+    return listOf(
+        "stream idle timeout", "context deadline exceeded", "sent nothing for 5 minutes", "stream was interrupted",
+        "dropped mid-answer", "connection reset", "server returned an error", "overloaded", "code 500", "code 502",
+        "code 503", "internal error encountered",
+    ).any { it in text }
 }

@@ -793,6 +793,9 @@ private fun classifyAntigravityError(value: String, allowTimeout: Boolean): Stri
         "Antigravity could not reach Google. Check your internet or DNS connection, then try again."
     ANTIGRAVITY_SERVER_ERRORS.any { value.contains(it, ignoreCase = true) } ->
         "Google's Antigravity server returned an error. Wait a moment and try again; your files were kept."
+    // Google's stream sent nothing for 5 minutes (a long think on a big context): agy gives up on that request.
+    value.contains("stream idle timeout", true) || value.contains("context deadline exceeded", true) ->
+        "Google sent nothing for 5 minutes while the model was thinking, so Antigravity dropped the request. Your files were kept."
     value.contains("stream was interrupted", true) ->
         "The connection to Google dropped mid-answer. Send the message again to continue."
     value.contains("authentication required", true) ||

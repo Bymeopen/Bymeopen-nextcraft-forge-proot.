@@ -1337,7 +1337,7 @@
     <string name="upd_banner_title">Доступно обновление %1$s</string>
     <string name="upd_banner_hint">Нажмите, чтобы открыть настройки и установить.</string>
     <string name="agent_steer">Направить</string>
-    <string name="agent_steer_hint">«Направить» останавливает этот ход и сразу отправляет сообщение; уже сделанное агентом сохраняется.</string>
+    <string name="agent_steer_hint">Claude Code: сообщение добавляется к текущему ходу и получает ответ после текущего шага, ничего не останавливается. Другие агенты: ход останавливается и сообщение отправляется сразу; сделанное агентом сохраняется.</string>
     <string name="branch_committed">Закоммичено в ветку.</string>
     <string name="branch_commit_hint">Сообщение коммита</string>
     <string name="branch_commit">Коммит</string>
@@ -1513,4 +1513,5 @@
     <string name="settings_storage_access_sub">Предоставьте «Доступ ко всем файлам», чтобы гостевая система могла читать и писать в /sdcard</string>
     <string name="settings_storage_access_granted">Предоставлено · /sdcard доступен в гостевой системе</string>
     <string name="shell_proot_fallback">Встроенный движок PRoot готов (сборки выполняются медленнее, чем нативно)</string>
+    <string name="agent_auto_retry_notice">Автоматическая повторная попытка…</string>
 </resources>
