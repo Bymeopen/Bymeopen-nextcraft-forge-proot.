@@ -136,6 +136,7 @@ enum class ForgeTab(val title: String) {
     CODE_VIEWER("Code viewer"),
     FILE_BROWSER("File browser"),
     REA("REA"),
+    BACKUP("Backup"),
 }
 
 enum class SetupScope { RUNTIME, AGENT }
