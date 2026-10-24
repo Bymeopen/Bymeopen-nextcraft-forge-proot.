@@ -1376,7 +1376,7 @@
     <string name="upd_banner_title">التحديث %1$s متاح</string>
     <string name="upd_banner_hint">انقر لفتح الإعدادات وتثبيته.</string>
     <string name="agent_steer">توجيه</string>
-    <string name="agent_steer_hint">يوقف التوجيه هذا الدور ويرسل الرسالة الآن؛ ويُحتفظ بما أنجزه الوكيل بالفعل.</string>
+    <string name="agent_steer_hint">Claude Code: تنضم الرسالة إلى الدور الجاري ويُرد عليها بعد الخطوة الحالية دون إيقاف أي شيء. الوكلاء الآخرون: يتوقف هذا الدور وتُرسل الرسالة الآن، ويُحتفظ بما أنجزه الوكيل.</string>
     <string name="branch_committed">تم الإيداع في الفرع.</string>
     <string name="branch_commit_hint">رسالة الإيداع</string>
     <string name="branch_commit">إيداع</string>
@@ -1547,4 +1547,5 @@
     <string name="restore_needs_password">هذه النسخة مشفّرة: أدخل كلمة المرور.</string>
     <string name="restore_restart">إعادة التشغيل الآن</string>
     <string name="backup_busy">أوقف الوكيل أو أمر الطرفية الجاري أولًا.</string>
+    <string name="agent_auto_retry_notice">إعادة المحاولة تلقائيًا مرة واحدة…</string>
 </resources>

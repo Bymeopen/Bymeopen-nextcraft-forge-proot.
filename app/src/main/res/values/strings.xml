@@ -1306,7 +1306,7 @@
     <string name="upd_banner_title">Update %1$s is available</string>
     <string name="upd_banner_hint">Tap to open Settings and install it.</string>
     <string name="agent_steer">Steer</string>
-    <string name="agent_steer_hint">Steer stops this turn and sends the message now; what the agent already did is kept.</string>
+    <string name="agent_steer_hint">Claude Code: the message joins the running turn and is answered right after the current step, nothing is stopped. Other agents: this turn stops and the message is sent now; what the agent already did is kept.</string>
     <string name="branch_committed">Committed to the branch.</string>
     <string name="branch_commit_hint">Commit message</string>
     <string name="branch_commit">Commit</string>
@@ -1473,4 +1473,5 @@
     <string name="restore_needs_password">This backup is encrypted: enter its password.</string>
     <string name="restore_restart">Restart now</string>
     <string name="backup_busy">Stop the running agent or terminal command first.</string>
+    <string name="agent_auto_retry_notice">Retrying automatically once…</string>
 </resources>

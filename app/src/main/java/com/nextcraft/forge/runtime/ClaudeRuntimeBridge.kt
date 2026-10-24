@@ -114,6 +114,16 @@ class ClaudeRuntimeBridge(
     private val seenToolCalls = ConcurrentHashMap.newKeySet<String>()
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var activeProcess: Process? = null
+
+    /**
+     * Steering: the prompt goes in as stream-json on stdin and stdin stays open, so a message sent while Claude works
+     * joins the running session (it is answered right after the current step) instead of stopping it. When a turn ends
+     * with no steering message waiting, stdin is closed and the CLI exits as before.
+     */
+    @Volatile private var steerInput: java.io.OutputStream? = null
+    @Volatile private var steersPending = 0
+    /** After a turn that had steering messages: when to give up waiting for the follow-up turn (0 = not waiting). */
+    @Volatile private var idleCloseAt = 0L
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var turnCompletedFromStream: Boolean = false
@@ -141,6 +151,9 @@ class ClaudeRuntimeBridge(
         liveSessions.add(sessionId)
         userStopRequested = false
         turnCompletedFromStream = false
+        steerInput = null
+        steersPending = 0
+        idleCloseAt = 0L
         activeProjectSlug = projectSlug
         foreground.begin()
         toolNames.clear()
@@ -224,6 +237,8 @@ class ClaudeRuntimeBridge(
                 // Prompt goes through stdin: a single argv entry is capped at 128 KB by the kernel
                 // and the history budget is 160k chars; stdin also keeps it out of `ps`.
                 add("-p")
+                add("--input-format")
+                add("stream-json")
                 add("--output-format")
                 add("stream-json")
                 add("--include-partial-messages")
@@ -246,8 +261,9 @@ class ClaudeRuntimeBridge(
             )
             activeProcess = process
             runCatching {
-                process.outputStream.write(contextPrompt.toByteArray(Charsets.UTF_8))
-                process.outputStream.close()
+                process.outputStream.write(streamJsonUserMessage(contextPrompt))
+                process.outputStream.flush()
+                steerInput = process.outputStream
             }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
             if (userStopRequested) process.destroy()
             coroutineScope {
@@ -259,6 +275,7 @@ class ClaudeRuntimeBridge(
                 suspend fun processClaudeLine(rawLine: String) {
                     val line = rawLine.trimEnd('\r')
                     if (line.isBlank()) return
+                    idleCloseAt = 0L // the follow-up turn for a steering message has started
                     ProviderRuntimeErrorDetector.detect(line)?.let { reason ->
                         process.destroyForcibly()
                         throw ProviderSessionException(reason)
@@ -267,7 +284,7 @@ class ClaudeRuntimeBridge(
                     // parses, which would leave the turn running until the CLI exits on its own.
                     if (line.endsWith("... [truncated]") && line.take(200).contains("\"type\":\"result\"")) {
                         if (!line.take(400).contains("\"is_error\":true")) turnCompletedFromStream = true
-                        terminateActiveProcessGracefully()
+                        endTurnOrContinue()
                         return
                     }
                     if (!consumeClaudeEvent(sessionId, line)) {
@@ -281,6 +298,13 @@ class ClaudeRuntimeBridge(
                     while (process.isAlive || tailer.hasUnreadBytes()) {
                         for (line in tailer.readLines(timeoutMs = 50L)) {
                             processClaudeLine(line)
+                        }
+                        // A steering message that Claude folded into the turn that just ended brings no new turn.
+                        val waitUntil = idleCloseAt
+                        if (waitUntil > 0L && android.os.SystemClock.elapsedRealtime() > waitUntil) {
+                            idleCloseAt = 0L
+                            closeSteerInput()
+                            terminateActiveProcessGracefully()
                         }
                     }
                     for (line in tailer.readLines(timeoutMs = 0L, flushIncomplete = true)) {
@@ -699,9 +723,46 @@ class ClaudeRuntimeBridge(
                     }
                 }
                 turnCompletedFromStream = true
-                terminateActiveProcessGracefully()
+                endTurnOrContinue()
             }
         }
+    }
+
+    /** A turn ended: run the steering messages that arrived meanwhile, otherwise close stdin so the CLI exits. */
+    private fun endTurnOrContinue() {
+        synchronized(this) {
+            if (steersPending > 0) {
+                steersPending = 0
+                idleCloseAt = android.os.SystemClock.elapsedRealtime() + STEER_FOLLOW_UP_WAIT_MS
+                return
+            }
+        }
+        closeSteerInput()
+        terminateActiveProcessGracefully()
+    }
+
+    private fun closeSteerInput() {
+        synchronized(this) {
+            val input = steerInput ?: return
+            steerInput = null
+            runCatching { input.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+        }
+    }
+
+    /**
+     * Adds [text] to the running Claude Code session without stopping it. False when no session takes input (none is
+     * running, or its turn already ended): the caller then starts a new turn instead.
+     */
+    fun steer(text: String): Boolean = synchronized(this) {
+        val input = steerInput ?: return false
+        if (activeProcess?.isAlive != true || text.isBlank()) return false
+        runCatching {
+            input.write(streamJsonUserMessage(text))
+            input.flush()
+        }.onFailure { return false }
+        steersPending++
+        idleCloseAt = 0L
+        true
     }
 
     private suspend fun emitReasoningSummary(
@@ -879,6 +940,15 @@ class ClaudeRuntimeBridge(
         if (activeSessionId == null) return
         foreground.progress(activeProjectSlug, detailRaw)
     }
+
+    /** One stream-json input line: a user message with [text]. */
+    private fun streamJsonUserMessage(text: String): ByteArray =
+        (
+            JSONObject()
+                .put("type", "user")
+                .put("message", JSONObject().put("role", "user").put("content", org.json.JSONArray().put(JSONObject().put("type", "text").put("text", text))))
+                .toString() + "\n"
+            ).toByteArray(Charsets.UTF_8)
 
     private fun terminateActiveProcessGracefully() {
         val running = activeProcess ?: return
@@ -1162,3 +1232,6 @@ internal fun classifyToolRisk(tool: String, command: String?, paths: List<String
         else -> RiskLevel.SAFE
     }
 }
+
+/** How long to wait for the follow-up turn of a steering message before ending the session. */
+private const val STEER_FOLLOW_UP_WAIT_MS = 20_000L

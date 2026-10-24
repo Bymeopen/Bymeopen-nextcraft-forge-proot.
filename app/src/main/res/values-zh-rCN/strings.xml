@@ -1281,7 +1281,7 @@
     <string name="upd_banner_title">有可用更新 %1$s</string>
     <string name="upd_banner_hint">点按打开设置并安装。</string>
     <string name="agent_steer">引导</string>
-    <string name="agent_steer_hint">“引导”会停止当前回合并立即发送消息；智能体已完成的操作会保留。</string>
+    <string name="agent_steer_hint">Claude Code：消息会加入正在进行的回合，在当前步骤之后得到回复，不会中断任何操作。其他代理：本回合会停止并立即发送消息；代理已完成的工作会保留。</string>
     <string name="branch_committed">已提交到分支。</string>
     <string name="branch_commit_hint">提交信息</string>
     <string name="branch_commit">提交</string>
@@ -1447,4 +1447,5 @@
     <string name="restore_needs_password">此备份已加密：请输入密码。</string>
     <string name="restore_restart">立即重启</string>
     <string name="backup_busy">请先停止正在运行的代理或终端命令。</string>
+    <string name="agent_auto_retry_notice">正在自动重试一次…</string>
 </resources>
