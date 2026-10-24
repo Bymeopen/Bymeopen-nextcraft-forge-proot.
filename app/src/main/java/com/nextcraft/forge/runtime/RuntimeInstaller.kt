@@ -2114,6 +2114,7 @@ class RuntimeInstaller(private val context: Context) {
         workspace.mkdirs()
         File(targetRootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         writeAndroidGradleConfiguration(targetRootfs)
+        AntigravityCustomizations.apply(targetRootfs, guestWorkspacePath) { file, body -> writeRootfsFileAtomically(file, body, mode = 0b110100100) }
         // ~/.claude.json belongs to Claude Code; other agents never read it, so they skip the parse + fsync per launch.
         if (trustClaudeWorkspace && guestWorkspacePath != "/root") {
             ensureWorkspaceTrust(guestWorkspacePath, environment, claudeMcpServers)
@@ -2334,6 +2335,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
             mode = 0b111101101,
         )
         ensureSystemGitTrust()
+        AntigravityCustomizations.apply(rootfs) { file, body -> writeRootfsFileAtomically(file, body, mode = 0b110100100) }
         ensureWorkspaceTrust("/workspace")
     }
 
@@ -2477,7 +2479,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
      */
     internal fun ensureAppAccess() {
         val uid = AndroidProcess.myUid()
-        for (relative in listOf("root", "root/.claude", "root/.local", "root/.local/bin", "etc")) {
+        for (relative in listOf("root", "root/.claude", "root/.gemini", "root/.gemini/config", "root/.gemini/antigravity-cli", "root/.local", "root/.local/bin", "etc")) {
             val dir = File(rootfs, relative)
             if (dir.isDirectory && (!dir.canWrite() || !dir.canExecute())) {
                 RootfsRepair.reclaimOwnership(dir, uid, recursive = false)
