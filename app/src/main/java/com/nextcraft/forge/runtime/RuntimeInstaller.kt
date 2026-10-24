@@ -2518,13 +2518,18 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
         // 853; the guest's plain resolver only ever queries port 53, so every lookup there times out even though the
         // device's own apps and browser resolve fine. Public plain-DNS fallbacks are always appended (not only when
         // the device list is empty) so the resolver falls through to them when the device entries are DoT-only.
-        val servers = (deviceServers + listOf("8.8.8.8", "1.1.1.1")).distinct()
+        // glibc only reads the first MAXNS=3 "nameserver" lines, so the device's own servers are capped to 1 here --
+        // otherwise two DoT-only device entries would push both public fallbacks off the end of the list.
+        val fallbacks = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9", "8.8.4.4", "1.0.0.1")
+        val servers = (deviceServers.take(1) + fallbacks).distinct().take(3)
         val resolvFile = File(rootfs, "etc/resolv.conf")
         resolvFile.parentFile?.mkdirs()
         if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) {
             resolvFile.delete()
         }
-        val resolver = servers.joinToString("\n") { "nameserver $it" } + "\n"
+        // Shorter timeout/attempts than glibc's 5s/2 default so a dead or filtered server is skipped quickly instead
+        // of burning the whole login flow's patience on one unreachable nameserver before falling through.
+        val resolver = servers.joinToString("\n") { "nameserver $it" } + "\noptions timeout:2 attempts:2 rotate\n"
         try {
             // A link that survived the delete above (not ours to unlink) would send the write into /run, which is root's.
             if (java.nio.file.Files.isSymbolicLink(resolvFile.toPath())) throw java.io.IOException("resolv.conf is still a symlink")
