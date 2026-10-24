@@ -176,6 +176,8 @@ class ClaudeRuntimeBridge(
             }
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, message))
             activeSessionId = null
+            liveSessions.remove(sessionId)
+            foreground.clearStart()
             return@withContext sessionId
         }
 
