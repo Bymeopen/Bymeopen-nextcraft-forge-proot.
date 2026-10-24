@@ -1487,4 +1487,5 @@
     <string name="restore_needs_password">Esta copia está cifrada: introduce su contraseña.</string>
     <string name="restore_restart">Reiniciar ahora</string>
     <string name="backup_busy">Detén primero el agente o el comando del terminal en curso.</string>
+    <string name="agent_auto_retry_notice">Reintentando automáticamente una vez…</string>
 </resources>

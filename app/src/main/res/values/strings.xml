@@ -1473,4 +1473,5 @@
     <string name="restore_needs_password">This backup is encrypted: enter its password.</string>
     <string name="restore_restart">Restart now</string>
     <string name="backup_busy">Stop the running agent or terminal command first.</string>
+    <string name="agent_auto_retry_notice">Retrying automatically once…</string>
 </resources>

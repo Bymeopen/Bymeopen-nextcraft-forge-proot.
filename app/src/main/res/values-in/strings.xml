@@ -1454,4 +1454,5 @@
     <string name="restore_needs_password">Backup ini terenkripsi: masukkan kata sandinya.</string>
     <string name="restore_restart">Mulai ulang sekarang</string>
     <string name="backup_busy">Hentikan agent atau perintah terminal yang sedang berjalan dulu.</string>
+    <string name="agent_auto_retry_notice">Mencoba ulang otomatis sekali…</string>
 </resources>
