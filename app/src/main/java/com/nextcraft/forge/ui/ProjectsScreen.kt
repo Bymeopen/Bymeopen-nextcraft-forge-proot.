@@ -110,11 +110,6 @@ fun ProjectsScreen(
     val quick = state.projects
         .filter { it.kind == ProjectKind.QUICK_PROJECT }
         .sortedByDescending { it.updatedAtMillis }
-    val busy = state.sessionRunning ||
-        state.androidBuild.phase == com.nextcraft.forge.runtime.AndroidBuildPhase.BUILDING ||
-        state.terminalRunning
-    // Mirrors MainViewModel.deleteProject, which refuses while a task runs (any project can be deleted, even the last).
-    val canDelete = !busy
     var pendingDeleteProject by remember { mutableStateOf<Project?>(null) }
     var pendingRenameProject by remember { mutableStateOf<Project?>(null) }
     var showCloneDialog by rememberSaveable { mutableStateOf(false) }
@@ -157,14 +152,14 @@ fun ProjectsScreen(
             if (regular.isNotEmpty()) {
                 if (quick.isNotEmpty()) item(key = "header-recent") { SectionLabel(stringResource(R.string.projects_recent)) }
                 items(regular, key = { it.id }) { project ->
+                    val projectBusy = (state.runningProjectChatCounts[project.id] ?: 0) > 0 || project.id in state.buildingProjectIds
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
                         changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
-                        running = state.sessionRunning && project.id == state.activeProjectId,
-                        // MainViewModel.selectProject ignores switches while active tasks run.
-                        locked = busy && project.id != state.activeProjectId,
-                        canDelete = canDelete,
+                        running = projectBusy,
+                        locked = false,
+                        canDelete = !projectBusy,
                         onOpen = { onOpenProject(project.id) },
                         onDelete = { pendingDeleteProject = project },
                         onRename = { pendingRenameProject = project },
@@ -174,13 +169,14 @@ fun ProjectsScreen(
             if (quick.isNotEmpty()) {
                 item(key = "header-quick") { SectionLabel(stringResource(R.string.projects_quick)) }
                 items(quick, key = { it.id }) { project ->
+                    val projectBusy = (state.runningProjectChatCounts[project.id] ?: 0) > 0 || project.id in state.buildingProjectIds
                     ProjectRow(
                         project = project,
                         active = project.id == state.activeProjectId,
                         changedCount = if (project.id == state.activeProjectId) state.changedItems.count { it.accepted == null } else 0,
-                        running = state.sessionRunning && project.id == state.activeProjectId,
-                        locked = busy && project.id != state.activeProjectId,
-                        canDelete = canDelete,
+                        running = projectBusy,
+                        locked = false,
+                        canDelete = !projectBusy,
                         onOpen = { onOpenProject(project.id) },
                         onDelete = { pendingDeleteProject = project },
                         onRename = { pendingRenameProject = project },

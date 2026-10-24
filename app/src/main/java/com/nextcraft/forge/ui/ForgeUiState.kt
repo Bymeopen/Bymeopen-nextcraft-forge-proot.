@@ -167,6 +167,12 @@ data class ForgeUiState(
     val sessionRunning: Boolean = false,
     /** Chats of the active project whose agent turn is running right now. */
     val runningChatIds: Set<String> = emptySet(),
+    /** Active agent turn counts by project id across all projects. */
+    val runningProjectChatCounts: Map<String, Int> = emptyMap(),
+    /** Projects currently running an Android APK build. */
+    val buildingProjectIds: Set<String> = emptySet(),
+    /** Per-project Android build records so background project builds preserve their state. */
+    val projectBuilds: Map<String, AndroidBuildRecord> = emptyMap(),
     /** How chat messages pick an agent (single agent unless the user changed it in the chat). */
     val routing: RoutingConfig = RoutingConfig(),
     /** Agents that have credentials; refreshed when the routing sheet opens. */
