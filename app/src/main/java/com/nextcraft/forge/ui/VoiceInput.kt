@@ -140,7 +140,7 @@ internal class VoiceController(
             level = 0f
             if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
                 // A stuck engine stays busy until it is rebuilt; the next tap gets a fresh one.
-                runCatching { recognizer?.destroy() }
+                runCatching { recognizer?.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("VoiceInput", it) }
                 recognizer = null
             }
             voiceErrorMessage(error)?.let(::toast)
@@ -192,13 +192,13 @@ internal class VoiceController(
     fun stop() {
         wantListening = false
         handler.removeCallbacksAndMessages(null)
-        runCatching { recognizer?.stopListening() }
+        runCatching { recognizer?.stopListening() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("VoiceInput", it) }
     }
 
     fun release() {
         wantListening = false
         handler.removeCallbacksAndMessages(null)
-        runCatching { recognizer?.destroy() }
+        runCatching { recognizer?.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("VoiceInput", it) }
         recognizer = null
         listening = false
         level = 0f

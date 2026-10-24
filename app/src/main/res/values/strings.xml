@@ -724,6 +724,7 @@
     <string name="agent_reasoning_low_hint">Fastest responses</string>
     <string name="agent_reasoning_medium_hint">Balanced</string>
     <string name="agent_reasoning_high_hint">Deepest reasoning, slower answers</string>
+    <string name="agent_status_checking">Checking…</string>
     <string name="agent_test_connection">Test connection</string>
     <string name="agent_effort_low">Low</string>
     <string name="agent_effort_medium">Medium</string>
@@ -833,6 +834,11 @@
     <string name="diag_android">Android</string>
     <string name="diag_cpu">CPU</string>
     <string name="diag_ram">RAM</string>
+    <string name="diag_app_memory">App memory</string>
+    <string name="diag_app_memory_value">%1$d MB (Java heap %2$d MB)</string>
+    <string name="diag_app_threads">Threads</string>
+    <string name="diag_recent_errors">Recent errors</string>
+    <string name="diag_no_recent_errors">No errors recorded since the app started.</string>
     <string name="diag_storage">Storage</string>
     <string name="diag_battery">Battery</string>
     <string name="diag_root">Root access</string>
@@ -1124,7 +1130,7 @@
     <string name="agent_claude_effort_xhigh">Extra high</string>
     <string name="agent_claude_effort_max">Max</string>
     <string name="msg_parallel_queued">Too many chats are working or memory is low. Your message is queued and will be sent automatically.</string>
-    <string name="msg_chat_needs_approval">Chat "%1$s" is waiting for your approval.</string>
+    <string name="msg_chat_needs_approval">Chat \"%1$s\" is waiting for your approval.</string>
     <string name="agent_intelligence_title">Active intelligence</string>
     <string name="agent_intelligence_active">Active: %1$s · %2$s</string>
     <string name="agent_claude_effort_auto">Auto</string>

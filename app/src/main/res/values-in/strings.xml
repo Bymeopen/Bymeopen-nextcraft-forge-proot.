@@ -712,6 +712,7 @@
     <string name="agent_reasoning_low_hint">Respons tercepat</string>
     <string name="agent_reasoning_medium_hint">Seimbang</string>
     <string name="agent_reasoning_high_hint">Paling dalam, jawaban lebih lambat</string>
+    <string name="agent_status_checking">Memeriksa…</string>
     <string name="agent_test_connection">Uji koneksi</string>
     <string name="agent_effort_low">Rendah</string>
     <string name="agent_effort_medium">Sedang</string>
@@ -817,6 +818,11 @@
     <string name="diag_android">Android</string>
     <string name="diag_cpu">CPU</string>
     <string name="diag_ram">RAM</string>
+    <string name="diag_app_memory">Memori aplikasi</string>
+    <string name="diag_app_memory_value">%1$d MB (heap Java %2$d MB)</string>
+    <string name="diag_app_threads">Thread</string>
+    <string name="diag_recent_errors">Error terbaru</string>
+    <string name="diag_no_recent_errors">Tidak ada error tercatat sejak aplikasi dibuka.</string>
     <string name="diag_storage">Penyimpanan</string>
     <string name="diag_battery">Baterai</string>
     <string name="diag_root">Akses root</string>
@@ -1105,7 +1111,7 @@
     <string name="agent_claude_effort_xhigh">Sangat tinggi</string>
     <string name="agent_claude_effort_max">Maksimum</string>
     <string name="msg_parallel_queued">Terlalu banyak chat yang bekerja atau memori hampir penuh. Pesanmu diantre dan dikirim otomatis.</string>
-    <string name="msg_chat_needs_approval">Chat "%1$s" menunggu persetujuanmu.</string>
+    <string name="msg_chat_needs_approval">Chat \"%1$s\" menunggu persetujuanmu.</string>
     <string name="agent_intelligence_title">Mode kecerdasan aktif</string>
     <string name="agent_intelligence_active">Aktif: %1$s · %2$s</string>
     <string name="agent_claude_effort_auto">Otomatis</string>

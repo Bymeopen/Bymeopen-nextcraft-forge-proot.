@@ -42,7 +42,7 @@ internal object GradleDaemonReaper {
                     .redirectOutput(ProcessBuilder.Redirect.to(java.io.File("/dev/null")))
                     .start()
                 if (!proc.waitFor(20, TimeUnit.SECONDS)) proc.destroyForcibly()
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("GradleDaemonReaper", it) }
         }, "gradle-daemon-reaper").apply { isDaemon = true }.start()
     }
 }

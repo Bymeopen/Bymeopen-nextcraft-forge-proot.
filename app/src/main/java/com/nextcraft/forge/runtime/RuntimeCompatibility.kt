@@ -43,7 +43,7 @@ internal fun disablePhantomProcessKillerViaRoot() {
         } else {
             runCatching { proc.inputStream.bufferedReader().use { it.readText() } }
         }
-    }
+    }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeCompatibility", it) }
 }
 
 /**
@@ -67,7 +67,7 @@ internal object SuCompat {
                 proc.destroyForcibly()
                 return true
             }
-            runCatching { proc.inputStream.bufferedReader().use { it.readText() } }
+            runCatching { proc.inputStream.bufferedReader().use { it.readText() } }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeCompatibility", it) }
             proc.exitValue() == 0
         }.getOrElse { return true }
         masterMount = supported

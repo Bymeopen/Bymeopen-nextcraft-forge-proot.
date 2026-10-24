@@ -42,7 +42,7 @@ internal object RuntimeMarkers {
         val legacyInit = File(rootfs, LEGACY_GRADLE_INIT_SCRIPT)
         if (legacyInit.isFile) {
             val init = File(rootfs, GRADLE_INIT_SCRIPT)
-            runCatching { if (init.isFile) legacyInit.delete() else legacyInit.renameTo(init) }
+            runCatching { if (init.isFile) legacyInit.delete() else legacyInit.renameTo(init) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeMarkers", it) }
         }
     }
 

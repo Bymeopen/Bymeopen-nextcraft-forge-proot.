@@ -172,7 +172,7 @@ class MainActivity : ComponentActivity() {
 
     private fun requestNotificationPermissionIfNeeded() {
         if (needsNotificationPermission()) {
-            runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+            runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainActivity", it) }
         }
     }
 

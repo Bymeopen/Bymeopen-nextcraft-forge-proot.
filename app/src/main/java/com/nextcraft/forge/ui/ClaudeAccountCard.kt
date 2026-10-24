@@ -152,7 +152,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel, extra: @Composable ColumnScope.(
                         ForgePrimaryButton(
                             text = stringResource(R.string.settings_complete_sign_in),
                             onClick = {
-                                runCatching { viewModel.claudeAuth.submitCode(code.trim()) }
+                                runCatching { viewModel.claudeAuth.submitCode(code.trim()) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAccountCard", it) }
                                 code = ""
                             },
                             enabled = code.isNotBlank() && auth.status == ClaudeAuthStatus.AWAITING_BROWSER,
@@ -165,12 +165,15 @@ fun ClaudeAccountCard(viewModel: MainViewModel, extra: @Composable ColumnScope.(
                     }
                 }
             }
-            Text(
-                text = stringResource(R.string.settings_claude_footnote),
-                fontSize = ForgeType.secondary,
-                color = scheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            // How sign-in works is only useful before it is done; once connected it is five lines of noise.
+            if (!signedIn || waiting) {
+                Text(
+                    text = stringResource(R.string.settings_claude_footnote),
+                    fontSize = ForgeType.secondary,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             extra()
         }
     }
