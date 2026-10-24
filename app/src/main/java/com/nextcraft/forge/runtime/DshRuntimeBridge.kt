@@ -89,6 +89,7 @@ class DshRuntimeBridge(
 
         var openRouterGateway: OpenRouterRoutingGateway? = null
         var spawnedOutputFile: File? = null
+        var sessionHomeHostDir: File? = null
         var stopHandler: (() -> Unit)? = null
         runCatching {
             stopHandler = {
@@ -123,9 +124,10 @@ class DshRuntimeBridge(
             } else {
                 baseRoute
             }
-            writeDshSettings(installed.rootfs, route, provider)
+            val sessionGuestHome = "$DSH_HOME_GUEST_PATH/sessions/$sessionId"
+            sessionHomeHostDir = writeDshSettings(installed.rootfs, route, provider, sessionGuestHome)
             val environment = linkedMapOf(
-                "DSH_HOME" to DSH_HOME_GUEST_PATH,
+                "DSH_HOME" to sessionGuestHome,
                 "DSH_PERMISSION_MODE" to "danger-full-access",
                 route.keyEnv to secret,
             )
@@ -191,6 +193,7 @@ class DshRuntimeBridge(
         }
         runCatching { openRouterGateway?.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
         runCatching { spawnedOutputFile?.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
+        runCatching { sessionHomeHostDir?.deleteRecursively() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("DshRuntimeBridge", it) }
         activeProcess = null
         activeSessionId = null
         RuntimeTaskController.release(stopHandler)
@@ -419,8 +422,13 @@ class DshRuntimeBridge(
         checkpoints.acceptFile(projectId, workspace, path)
     }
 
-    private fun writeDshSettings(rootfs: File, route: DshRoute, provider: ProviderProfile) {
-        val home = File(rootfs, DSH_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
+    private fun writeDshSettings(
+        rootfs: File,
+        route: DshRoute,
+        provider: ProviderProfile,
+        guestHomePath: String = DSH_HOME_GUEST_PATH,
+    ): File {
+        val home = File(rootfs, guestHomePath.removePrefix("/")).apply { mkdirs() }
         val body = buildString {
             appendLine("agent-default-model:")
             appendLine("  provider: ${route.name}")
@@ -437,6 +445,11 @@ class DshRuntimeBridge(
             }
         }
         File(home, "settings.yaml").writeText(body)
+        if (guestHomePath != DSH_HOME_GUEST_PATH) {
+            val defaultHome = File(rootfs, DSH_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
+            runCatching { File(defaultHome, "settings.yaml").writeText(body) }
+        }
+        return home
     }
 
     private fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"

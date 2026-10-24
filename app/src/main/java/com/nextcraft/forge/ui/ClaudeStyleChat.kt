@@ -138,16 +138,14 @@ internal fun ChatTopBar(
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_rename)) }, onClick = { menuOpen = false; onRename() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_usage)) }, onClick = { menuOpen = false; onUsage() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_schedule)) }, onClick = { menuOpen = false; onSchedule() })
-                if (state.agentKind == AgentKind.CLAUDE_CODE) {
-                    if (activeChat?.isolated == true) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.branch_menu_open)) }, onClick = { menuOpen = false; onBranch() })
-                    } else {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.branch_menu_enable)) },
-                            enabled = !state.activeChatRunning,
-                            onClick = { menuOpen = false; onEnableBranch() },
-                        )
-                    }
+                if (activeChat?.isolated == true) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.branch_menu_open)) }, onClick = { menuOpen = false; onBranch() })
+                } else {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.branch_menu_enable)) },
+                        enabled = !state.activeChatRunning,
+                        onClick = { menuOpen = false; onEnableBranch() },
+                    )
                 }
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_rea)) }, onClick = { menuOpen = false; onOpenRea() })
                 DropdownMenuItem(
