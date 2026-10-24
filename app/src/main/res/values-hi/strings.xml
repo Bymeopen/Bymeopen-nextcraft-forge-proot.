@@ -1300,7 +1300,7 @@
     <string name="upd_banner_title">अपडेट %1$s उपलब्ध है</string>
     <string name="upd_banner_hint">Settings खोलकर install करने के लिए टैप करें।</string>
     <string name="agent_steer">Steer</string>
-    <string name="agent_steer_hint">Steer इस टर्न को रोककर संदेश अभी भेज देता है; agent ने जो पहले किया वह रखा जाता है।</string>
+    <string name="agent_steer_hint">Claude Code: संदेश चल रहे टर्न में जुड़ जाता है और मौजूदा चरण के बाद उसका जवाब मिलता है, कुछ भी रोका नहीं जाता। अन्य एजेंट: यह टर्न रुकता है और संदेश अभी भेजा जाता है; एजेंट का किया काम बना रहता है।</string>
     <string name="branch_committed">Branch में commit हो गया।</string>
     <string name="branch_commit_hint">Commit संदेश</string>
     <string name="branch_commit">Commit</string>

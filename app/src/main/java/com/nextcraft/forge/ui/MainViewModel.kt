@@ -2331,9 +2331,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queued = _state.value.queuedPrompts.firstOrNull { it.id == id } ?: return
         val chatId = queued.chatId ?: return
         val project = _state.value.activeProject?.takeIf { it.id == queued.projectId && _state.value.activeChatId == chatId } ?: return
-        removeQueuedPrompt(id)
         val prompt = queued.copy(projectId = project.id, chatId = chatId)
         val run = runs[chatId]
+        // Claude Code takes the message into the running session: nothing is stopped, the agent answers it right after
+        // its current step with everything it has done so far in context.
+        val claude = run?.takeIf { it.ownsBridge && prompt.attachments.isEmpty() }?.bridge as? com.nextcraft.forge.runtime.ClaudeRuntimeBridge
+        if (run != null && claude != null && claude.steer(prompt.text)) {
+            removeQueuedPrompt(id)
+            updateRunMessages(run) { messages ->
+                // Shown before the reply that is still streaming, which goes on to answer it.
+                val at = messages.indexOfLast { !it.fromUser }.takeIf { it >= 0 } ?: messages.size
+                messages.toMutableList().apply { add(at, ChatMessage(fromUser = true, text = prompt.text)) }
+            }
+            return
+        }
+        removeQueuedPrompt(id)
         if (run == null) {
             if (canStartAnotherRun(tentativeAgent(prompt.text))) startRun(project, chatId, prompt) else enqueuePrompt(prompt)
             return

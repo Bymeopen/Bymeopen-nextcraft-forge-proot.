@@ -1338,7 +1338,7 @@
     <string name="upd_banner_title">Доступно обновление %1$s</string>
     <string name="upd_banner_hint">Нажмите, чтобы открыть настройки и установить.</string>
     <string name="agent_steer">Направить</string>
-    <string name="agent_steer_hint">«Направить» останавливает этот ход и сразу отправляет сообщение; уже сделанное агентом сохраняется.</string>
+    <string name="agent_steer_hint">Claude Code: сообщение добавляется к текущему ходу и получает ответ после текущего шага, ничего не останавливается. Другие агенты: ход останавливается и сообщение отправляется сразу; сделанное агентом сохраняется.</string>
     <string name="branch_committed">Закоммичено в ветку.</string>
     <string name="branch_commit_hint">Сообщение коммита</string>
     <string name="branch_commit">Коммит</string>

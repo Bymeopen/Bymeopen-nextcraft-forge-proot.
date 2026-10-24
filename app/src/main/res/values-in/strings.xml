@@ -1287,7 +1287,7 @@
     <string name="upd_banner_title">Pembaruan %1$s tersedia</string>
     <string name="upd_banner_hint">Ketuk untuk membuka Pengaturan dan memasangnya.</string>
     <string name="agent_steer">Steer</string>
-    <string name="agent_steer_hint">Steer menghentikan giliran ini dan langsung mengirim pesan; yang sudah dikerjakan agen tetap tersimpan.</string>
+    <string name="agent_steer_hint">Claude Code: pesan masuk ke giliran yang sedang berjalan dan dijawab setelah langkah saat ini, tanpa menghentikan apa pun. Agent lain: giliran ini dihentikan dan pesan langsung dikirim; yang sudah dikerjakan tetap tersimpan.</string>
     <string name="branch_committed">Di-commit ke branch.</string>
     <string name="branch_commit_hint">Pesan commit</string>
     <string name="branch_commit">Commit</string>
