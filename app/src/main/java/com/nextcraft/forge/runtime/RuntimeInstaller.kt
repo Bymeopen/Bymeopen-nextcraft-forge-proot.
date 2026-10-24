@@ -541,7 +541,7 @@ class RuntimeInstaller(private val context: Context) {
         val rootHome = File(rootfs, "root").apply { mkdirs() }
         val gitCredentials = File(rootHome, ".git-credentials")
         writeRootfsFileAtomically(gitCredentials, "https://$cleanLogin:$cleanToken@github.com\n")
-        runCatching { Os.chmod(gitCredentials.absolutePath, 384) } // 0600
+        runCatching { Os.chmod(gitCredentials.absolutePath, 384) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) } // 0600
 
         // Merge instead of replacing: the user's own name, email, aliases and editor settings must survive connecting
         // GitHub. Only the credential helper is forced; identity and default branch are filled in when missing.
@@ -566,7 +566,7 @@ class RuntimeInstaller(private val context: Context) {
                 ),
             ),
         )
-        runCatching { Os.chmod(gitConfig.absolutePath, 384) } // 0600
+        runCatching { Os.chmod(gitConfig.absolutePath, 384) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) } // 0600
 
         val ghConfigDir = File(rootHome, ".config/gh").apply { mkdirs() }
         val ghHosts = File(ghConfigDir, "hosts.yml")
@@ -579,7 +579,7 @@ class RuntimeInstaller(private val context: Context) {
                 appendLine("    git_protocol: https")
             },
         )
-        runCatching { Os.chmod(ghHosts.absolutePath, 384) } // 0600
+        runCatching { Os.chmod(ghHosts.absolutePath, 384) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) } // 0600
     }
 
     /** Removes stored Git and GitHub CLI credentials from the guest rootfs. */
@@ -878,7 +878,7 @@ class RuntimeInstaller(private val context: Context) {
                     onProgress = onProgress,
                     failureMessage = "Failed to restore previous DeepSeek",
                 )
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
             verified.getOrThrow()
         }
         val previous = File(rootfs, "usr/local/lib/dsh.previous")
@@ -1763,7 +1763,7 @@ class RuntimeInstaller(private val context: Context) {
             guestCommand = listOf("/usr/bin/env", "bash", "-lc", command),
             guestWorkspacePath = "/root",
         )
-        runCatching { running.outputStream.close() }
+        runCatching { running.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
         val native = running as? NativeSpawnProcess
         val collected = StringBuilder()
         try {
@@ -1830,7 +1830,7 @@ class RuntimeInstaller(private val context: Context) {
                 running.destroy()
                 repeat(10) {
                     if (!running.isAlive) return@repeat
-                    runCatching { Thread.sleep(50) }
+                    runCatching { Thread.sleep(50) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
                 }
                 if (running.isAlive) {
                     running.destroyForcibly()
@@ -1864,7 +1864,7 @@ class RuntimeInstaller(private val context: Context) {
             guestCommand = listOf("/usr/bin/env", "bash", "-lc", command),
             guestWorkspacePath = "/root",
         )
-        runCatching { verify.outputStream.close() }
+        runCatching { verify.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
         try {
             withTimeout(60_000L) {
                 while (verify.isAlive) delay(50)
@@ -1882,7 +1882,7 @@ class RuntimeInstaller(private val context: Context) {
                 verify.destroy()
                 verify.destroyForcibly()
             }
-            runCatching { verify.waitFor() }
+            runCatching { verify.waitFor() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
             (verify as? NativeSpawnProcess)?.outputFile?.delete()
         }
     }
@@ -1961,7 +1961,7 @@ class RuntimeInstaller(private val context: Context) {
             if (aptConf.readTextOrNull() != expectedAptConf.trim()) {
                 aptConf.writeText(expectedAptConf)
             }
-        }
+        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
     }
 
     /** The process's supplementary GIDs from /proc/self/status, with the names Android gives them. */
@@ -2154,7 +2154,7 @@ class RuntimeInstaller(private val context: Context) {
         // `/proc/<pid>/cmdline`.
         val runtimeEnvDir = File(runtimeDir, "env").apply {
             mkdirs()
-            runCatching { Os.chmod(absolutePath, 0b111000000) } // 0700
+            runCatching { Os.chmod(absolutePath, 0b111000000) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) } // 0700
         }
         // A launch that never reached `rm -f` (su denied, process killed) leaves API keys on
         // disk. Purge anything old enough that it cannot belong to a launch in progress.
@@ -2183,7 +2183,7 @@ class RuntimeInstaller(private val context: Context) {
             FileOutputStream(fd).use { it.write(envBytes) }
         }.onFailure {
             envFile.writeText(envScript)
-            runCatching { Os.chmod(envFile.absolutePath, 0b110000000) } // 0600
+            runCatching { Os.chmod(envFile.absolutePath, 0b110000000) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) } // 0600
         }
 
         val quotedEnvFile = shellSingleQuote(envFile.absolutePath)
@@ -2316,7 +2316,7 @@ printf '%s\n' "${'$'}1" > "${'$'}BRIDGE/claude-login-url.tmp" && mv "${'$'}BRIDG
         // Sessions started by an older build (and its settings files) still call /opt/pocket/*: keep identical copies there.
         val legacyScripts = File(rootfs, "opt/pocket")
         listOf(hook, openUrl).forEach { script ->
-            runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }
+            runCatching { writeRootfsFileAtomically(File(legacyScripts, script.name), script.readText(), mode = 0b111101101) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
         }
         File(rootfs, "root/.claude/pocket-settings.json").delete()
         // Agents' background jobs get a hangup when the turn ends (the CLI tears down its shells). This starts a command
@@ -2569,7 +2569,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
         return try {
             ZstdCompressorInputStream(rawStream)
         } catch (_: Throwable) {
-            runCatching { rawStream.close() }
+            runCatching { rawStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
             val process = ProcessBuilder("zstd", "-d", "-c", archive.absolutePath).start()
             object : java.io.FilterInputStream(BufferedInputStream(process.inputStream)) {
                 private var reachedEof = false
@@ -2583,8 +2583,8 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
                     try {
                         super.close()
                     } finally {
-                        runCatching { process.errorStream.close() }
-                        runCatching { process.outputStream.close() }
+                        runCatching { process.errorStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
+                        runCatching { process.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
                         val finished = runCatching {
                             process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
                         }.getOrDefault(false)
@@ -2698,7 +2698,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
                             target.parentFile?.mkdirs()
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
                             openForWrite(target).use { output -> tar.copyTo(output) }
-                            runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }
+                            runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
                         }
                     }
                 }
@@ -2712,7 +2712,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
             if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
-                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
             }
         }
         // Published bundles still carry the .pocket-* marker names.
@@ -2761,7 +2761,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
                             target.parentFile?.mkdirs()
                             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
                             FileOutputStream(target).use { output -> tar.copyTo(output) }
-                            runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }
+                            runCatching { Os.chmod(target.absolutePath, currentEntry.mode and 0b111111111) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
                         }
                     }
                 }
@@ -2775,7 +2775,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
             target.parentFile?.mkdirs()
             linkOrCopyFile(linkTarget, target)
             if (!java.nio.file.Files.isSymbolicLink(target.toPath())) {
-                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }
+                runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode and 0b111111111) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
             }
         }
     }
@@ -2793,7 +2793,7 @@ echo "started pid ${'$'}! (log: ${'$'}log)"
         }.getOrDefault(false)
         if (!linked) {
             source.inputStream().use { input -> FileOutputStream(destination).use { input.copyTo(it) } }
-            runCatching { Os.chmod(destination.absolutePath, Os.stat(source.absolutePath).st_mode and 0b111111111) }
+            runCatching { Os.chmod(destination.absolutePath, Os.stat(source.absolutePath).st_mode and 0b111111111) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("RuntimeInstaller", it) }
         }
     }
 

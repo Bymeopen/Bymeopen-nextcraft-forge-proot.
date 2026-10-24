@@ -20,7 +20,7 @@ object ReturnToApp {
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         } ?: return
-        runCatching { context.startActivity(launch) }
+        runCatching { context.startActivity(launch) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ReturnToApp", it) }
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (!manager.areNotificationsEnabled()) return
         val localized = LocaleHelper.wrapContext(context)

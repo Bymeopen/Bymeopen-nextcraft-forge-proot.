@@ -157,7 +157,7 @@ fun ClaudeAccountCard(viewModel: MainViewModel, extra: @Composable ColumnScope.(
                             onClick = {
                                 val value = code.trim()
                                 code = ""
-                                scope.launch { runCatching { viewModel.claudeAuth.submitCode(value) } }
+                                scope.launch { runCatching { viewModel.claudeAuth.submitCode(value) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAccountCard", it) } }
                             },
                             enabled = code.isNotBlank() && auth.status == ClaudeAuthStatus.AWAITING_BROWSER,
                             modifier = Modifier.weight(1f),

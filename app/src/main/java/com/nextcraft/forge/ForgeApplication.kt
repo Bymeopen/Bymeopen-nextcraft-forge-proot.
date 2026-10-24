@@ -46,7 +46,7 @@ object CrashReporter {
                     append(Log.getStackTraceString(error))
                 }
                 file.writeText(report.take(MAX_CHARS))
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ForgeApplication", it) }
             previous?.uncaughtException(thread, error)
         }
     }

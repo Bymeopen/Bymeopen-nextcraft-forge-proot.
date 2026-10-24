@@ -52,7 +52,7 @@ internal class NativeSpawnProcess private constructor(
             }
             polled
         }
-        runCatching { stdin.close() }
+        runCatching { stdin.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
         outputPump?.join(1_000)
         return exitCode
     }
@@ -62,11 +62,11 @@ internal class NativeSpawnProcess private constructor(
         if (delegateProcess != null) {
             val code = delegateProcess.exitValue()
             result = code
-            runCatching { stdin.close() }
+            runCatching { stdin.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
             return code
         }
         val status = pollExit() ?: throw IllegalThreadStateException("Process is still running")
-        runCatching { stdin.close() }
+        runCatching { stdin.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
         return status
     }
 
@@ -103,19 +103,20 @@ internal class NativeSpawnProcess private constructor(
 
     override fun destroyForcibly(): Process {
         if (hasExited()) {
-            runCatching { stdin.close() }
+            runCatching { stdin.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
             return this
         }
         GuestProcess.signal(guestPidFile, 15, forceAfterSeconds = 3)
         if (delegateProcess != null) {
             delegateProcess.destroyForcibly()
-            runCatching { stdin.close() }
+            runCatching { stdin.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
             return this
         }
         NativeSpawn.kill(pid, 9)
-        runCatching { stdin.close() }
+        runCatching { stdin.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
         return this
     }
+
 
     /** Dynamically resize the pseudo-terminal window when soft-keyboard or orientation changes. */
     internal fun resizePty(rows: Int, columns: Int): Int {
@@ -214,7 +215,7 @@ internal class NativeSpawnProcess private constructor(
                     } finally {
                         synchronized(ptyLock) {
                             ptyOpen = false
-                            runCatching { pfd.close() }
+                            runCatching { pfd.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("NativeSpawnProcess", it) }
                         }
                     }
                 }, "nextcraft-pty-output").apply {

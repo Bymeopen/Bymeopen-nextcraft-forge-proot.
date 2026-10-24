@@ -203,7 +203,7 @@ class ClaudeAuthController(
                 ptyColumns = 160,
             )
             if (spawned !is NativeSpawnProcess) {
-                runCatching { spawned.destroyForcibly() }
+                runCatching { spawned.destroyForcibly() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
                 throw UiTextException(UiText.res(R.string.rt_auth_unsupported_process))
             }
             spawned
@@ -299,12 +299,12 @@ class ClaudeAuthController(
                 )
             }
         } finally {
-            runCatching { running.outputStream.close() }
+            runCatching { running.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
             if (running.isAlive) {
-                runCatching { running.destroy() }
-                runCatching { if (running.isAlive) running.destroyForcibly() }
+                runCatching { running.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
+                runCatching { if (running.isAlive) running.destroyForcibly() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
             }
-            runCatching { running.waitFor() }
+            runCatching { running.waitFor() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
             running.outputFile.delete() // OAuth terminal output is intentionally ephemeral.
             urlFile.delete()
             process = null
@@ -367,8 +367,8 @@ class ClaudeAuthController(
     suspend fun logout() = withContext(Dispatchers.IO) {
         loginGeneration.incrementAndGet()
         process?.let { running ->
-            runCatching { running.destroy() }
-            runCatching { if (running.isAlive) running.destroyForcibly() }
+            runCatching { running.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
+            runCatching { if (running.isAlive) running.destroyForcibly() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
         }
         val previous = mutableState.value
         mutableState.value = previous.copy(status = ClaudeAuthStatus.STARTING, message = UiText.res(R.string.rt_auth_signing_out))
@@ -386,7 +386,7 @@ class ClaudeAuthController(
                 emulateHardLinks = false,
                 outputFile = output,
             )
-            runCatching { logout.outputStream.close() }
+            runCatching { logout.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
             if (!logout.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) logout.destroyForcibly()
             output.delete()
             if (hasCredential()) throw UiTextException(UiText.res(R.string.rt_auth_claude_signout_incomplete))
@@ -410,7 +410,7 @@ class ClaudeAuthController(
                     Thread.sleep(200)
                     if (running.isAlive) running.destroyForcibly()
                     running.waitFor()
-                }
+                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
             }.apply { isDaemon = true }.start()
         }
         mutableState.value = stateBeforeLogin ?: ClaudeAuthState()
@@ -431,7 +431,7 @@ class ClaudeAuthController(
             emulateHardLinks = false,
             outputFile = output,
         )
-        runCatching { status.outputStream.close() }
+        runCatching { status.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeAuthController", it) }
         if (!status.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) status.destroyForcibly()
         val text = output.readText()
         output.delete()

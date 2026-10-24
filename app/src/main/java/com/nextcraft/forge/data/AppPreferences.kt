@@ -487,7 +487,7 @@ class AppPreferences(private val context: Context) {
     /** Moves an unreadable file aside so the next save does not overwrite it. */
     private fun quarantine(file: File) {
         android.util.Log.w("AppPreferences", "Quarantining unreadable ${file.name}")
-        runCatching { file.renameTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")) }
+        runCatching { file.renameTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("AppPreferences", it) }
     }
 
     /** Writes via a temp file that is fsynced before the rename, so a power loss cannot leave an empty file. */

@@ -180,7 +180,7 @@ class ClaudeRuntimeBridge(
                             running.destroy()
                             Thread.sleep(500)
                             if (running.isAlive) running.destroyForcibly()
-                        }
+                        }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                     }, "forge-claude-stop").apply { isDaemon = true }.start()
                 }
             }
@@ -248,7 +248,7 @@ class ClaudeRuntimeBridge(
             runCatching {
                 process.outputStream.write(contextPrompt.toByteArray(Charsets.UTF_8))
                 process.outputStream.close()
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
             if (userStopRequested) process.destroy()
             coroutineScope {
                 val permissionWatcher = launch { watchPermissionRequests(sessionId) }
@@ -292,7 +292,7 @@ class ClaudeRuntimeBridge(
                 permissionWatcher.cancelAndJoin()
                 pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
                     // A failed write here must not turn a finished run into a failure.
-                    runCatching { permission.response.writeText("deny") }
+                    runCatching { permission.response.writeText("deny") }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                     pending.remove(permission.request.approvalId)
                     eventBus.emit(RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId))
                 }
@@ -318,7 +318,7 @@ class ClaudeRuntimeBridge(
             // A failure after launch (parser/IO/provider error) must not leave the agent running unattended in the chroot.
             activeProcess?.let { running -> runCatching { if (running.isAlive) running.destroyForcibly() } }
             pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
-                runCatching { permission.response.writeText("deny") }
+                runCatching { permission.response.writeText("deny") }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                 pending.remove(permission.request.approvalId)
                 eventBus.emit(RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId))
             }
@@ -334,9 +334,9 @@ class ClaudeRuntimeBridge(
                 )
             }
         }
-        runCatching { formatGateway?.close() }
-        runCatching { openRouterGateway?.close() }
-        runCatching { spawnedOutputFile?.delete() }
+        runCatching { formatGateway?.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+        runCatching { openRouterGateway?.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+        runCatching { spawnedOutputFile?.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
         activeProcess = null
         activeSessionId = null
         liveSessions.remove(sessionId)
@@ -389,7 +389,7 @@ class ClaudeRuntimeBridge(
             outputFile = outputFile,
         )
         try {
-            runCatching { process.outputStream.close() }
+            runCatching { process.outputStream.close() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
             withTimeout(timeoutMillis) {
                 while (process.isAlive) delay(200)
             }
@@ -407,10 +407,10 @@ class ClaudeRuntimeBridge(
         } catch (e: TimeoutCancellationException) {
             error("Claude Code did not answer in time. Check your connection and try again.")
         } finally {
-            runCatching { process.destroy() }
-            runCatching { if (process.isAlive) process.destroyForcibly() }
-            runCatching { outputFile.delete() }
-            runCatching { probeDir.listFiles()?.forEach { it.deleteRecursively() } }
+            runCatching { process.destroy() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+            runCatching { if (process.isAlive) process.destroyForcibly() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+            runCatching { outputFile.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+            runCatching { probeDir.listFiles()?.forEach { it.deleteRecursively() } }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
             Log.d("ClaudeBridge", "Connection test took ${android.os.SystemClock.elapsedRealtime() - startedAt} ms")
         }
     }
@@ -482,7 +482,7 @@ class ClaudeRuntimeBridge(
                 bridge.listFiles { file -> file.name.endsWith(".request") && file.name.startsWith(requestPrefix(sessionId)) }.orEmpty().forEach { file ->
                     val approvalId = file.name.removeSuffix(".request")
                     if (!handledApprovals.add(approvalId)) {
-                        runCatching { file.delete() }
+                        runCatching { file.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                         return@forEach
                     }
                     processPermissionRequestFile(sessionId, file)
@@ -517,7 +517,7 @@ class ClaudeRuntimeBridge(
             .filter { it.request.sessionId == sessionId && nowElapsedRealtime - it.requestedAtElapsedRealtime >= timeoutMs }
             .forEach { expired ->
                 if (pending.remove(expired.request.approvalId, expired)) {
-                    runCatching { expired.response.writeText("deny") }
+                    runCatching { expired.response.writeText("deny") }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                     eventBus.emit(RuntimeEvent.ToolRejected(sessionId, expired.request.approvalId))
                     eventBus.emit(RuntimeEvent.PermissionDenied(sessionId, expired.request.toolName, "no answer was given in time"))
                 }
@@ -551,13 +551,13 @@ class ClaudeRuntimeBridge(
                         risk = risk,
                     )
                     pending[approvalId] = PendingPermission(toolRequest, response)
-                    runCatching { file.delete() }
+                    runCatching { file.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                     Log.i("ClaudeBridge", "Requesting interactive user approval $approvalId for high-risk $toolName ($paths)")
                     eventBus.emit(RuntimeEvent.ToolRequested(sessionId, toolRequest))
                 } else {
                     Log.w("ClaudeBridge", "Denied high-risk permission request $approvalId for $toolName ($paths)")
                     response.writeText("deny")
-                    runCatching { file.delete() }
+                    runCatching { file.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                     eventBus.emit(
                         RuntimeEvent.PermissionDenied(
                             sessionId,
@@ -569,15 +569,15 @@ class ClaudeRuntimeBridge(
             } else {
                 Log.d("ClaudeBridge", "Approving permission request $approvalId for $toolName ($paths, risk=$risk)")
                 response.writeText("allow")
-                runCatching { file.delete() }
+                runCatching { file.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
                 // Completion is reported by the stream's tool_result; emitting it at approval time marked long
                 // commands as finished before they had run and produced a duplicate row later.
             }
         }.onFailure {
             // With auto-approve on, a request this app failed to parse must not become a refusal for the agent.
             val decision = if (autoApproveAllTools()) "allow" else "deny"
-            runCatching { responseFile(file, approvalId).writeText(decision) }
-            runCatching { file.delete() }
+            runCatching { responseFile(file, approvalId).writeText(decision) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
+            runCatching { file.delete() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
         }
     }
 
@@ -899,7 +899,7 @@ class ClaudeRuntimeBridge(
                 if (running.isAlive) running.destroy()
                 Thread.sleep(3_000)
                 if (running.isAlive) running.destroyForcibly()
-            }
+            }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("ClaudeRuntimeBridge", it) }
         }.apply { isDaemon = true }.start()
     }
 

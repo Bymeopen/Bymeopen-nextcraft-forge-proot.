@@ -158,7 +158,7 @@ object AndroidAppInstaller {
                 session.commit(pending.intentSender)
             }
         } catch (error: Throwable) {
-            runCatching { installer.abandonSession(sessionId) }
+            runCatching { installer.abandonSession(sessionId) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("AndroidAppInstaller", it) }
             throw error
         }
     }
