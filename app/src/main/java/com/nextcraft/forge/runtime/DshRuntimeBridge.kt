@@ -72,6 +72,7 @@ class DshRuntimeBridge(
         if (secret.isBlank()) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
             activeSessionId = null
+            foreground.clearStart()
             return@withContext sessionId
         }
         if (provider.kind == ProviderKind.CLAUDE) {
@@ -82,6 +83,7 @@ class DshRuntimeBridge(
                 ),
             )
             activeSessionId = null
+            foreground.clearStart()
             return@withContext sessionId
         }
 
@@ -102,7 +104,7 @@ class DshRuntimeBridge(
                     }, "forge-dsh-stop").apply { isDaemon = true }.start()
                 }
             }
-            stopHandler?.let { RuntimeTaskController.register(RuntimeTaskController.AGENT, it) }
+            stopHandler?.let { RuntimeTaskController.register("${RuntimeTaskController.AGENT}:$sessionId", it) }
             startForegroundRuntime(projectSlug)
             val installed = installer.installedRuntime()
             check(installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {

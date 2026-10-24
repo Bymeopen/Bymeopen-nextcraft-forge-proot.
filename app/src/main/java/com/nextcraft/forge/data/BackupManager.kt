@@ -190,9 +190,26 @@ class BackupManager(private val context: Context) {
     }
 
     private fun replaceDir(source: File, dest: File) {
-        dest.deleteRecursively()
+        if (!source.exists()) {
+            dest.deleteRecursively()
+            return
+        }
         dest.parentFile?.mkdirs()
-        if (!source.renameTo(dest)) source.copyRecursively(dest, overwrite = true)
+        val backup = File(dest.parentFile, "${dest.name}.restore-bak-${System.nanoTime()}")
+        val hadExisting = dest.exists() && dest.renameTo(backup)
+        if (!hadExisting && dest.exists()) dest.deleteRecursively()
+        try {
+            if (!source.renameTo(dest)) {
+                source.copyRecursively(dest, overwrite = true)
+            }
+            if (hadExisting) backup.deleteRecursively()
+        } catch (error: Throwable) {
+            if (hadExisting) {
+                dest.deleteRecursively()
+                backup.renameTo(dest)
+            }
+            throw error
+        }
     }
 
     companion object {

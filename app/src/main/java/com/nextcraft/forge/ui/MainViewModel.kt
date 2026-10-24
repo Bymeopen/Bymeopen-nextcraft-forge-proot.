@@ -2298,7 +2298,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Stops the Android build only; a running agent session keeps going. */
     fun stopAndroidBuild() {
         RuntimeTaskController.stop(RuntimeTaskController.BUILD)
-        activeBuildProcess?.destroyForcibly()
+        stopChrootProcess(activeBuildProcess)
         activeBuildJob?.cancel()
     }
 
@@ -3529,6 +3529,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.getOrDefault(emptyMap())
     }
 
+    private val chrootProcessFiles: MutableMap<Process, Pair<File, File>> =
+        java.util.Collections.synchronizedMap(java.util.WeakHashMap())
+
+    private fun stopChrootProcess(process: Process?) {
+        if (process == null) return
+        val files = chrootProcessFiles[process]
+        if (files != null) {
+            com.nextcraft.forge.runtime.GuestProcess.signal(files.second, 15, forceAfterSeconds = 3)
+        }
+        process.destroyForcibly()
+    }
+
+    private fun cleanupChrootProcess(process: Process?) {
+        if (process == null) return
+        val files = chrootProcessFiles.remove(process) ?: return
+        files.first.delete()
+        files.second.delete()
+    }
+
     /** Starts [command] inside the Root Chroot (Gradle, git and the SDK only exist there). */
     private fun startChrootProcess(projectSlug: String, workspaceDir: File, command: String): Process {
         check(installer.isInstalled() && isRootAccessAvailable()) {
@@ -3540,12 +3559,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             environment = activeChrootEnvironment(),
             guestCommand = listOf("/bin/bash", "-lc", command),
         )
-        return try {
+        val process = try {
             ProcessBuilder("su", "-mm", "-c", suCommand).redirectErrorStream(true).start()
         } catch (error: Throwable) {
             envFile.delete()
             throw error
         }
+        chrootProcessFiles[process] = envFile to com.nextcraft.forge.runtime.GuestProcess.pidFileFor(envFile)
+        return process
     }
 
     private fun runCommandInChrootOrHost(
@@ -3573,23 +3594,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     if (!process.waitFor(60, TimeUnit.SECONDS)) {
                         timedOut.set(true)
-                        process.destroyForcibly()
+                        stopChrootProcess(process)
                     }
                 } catch (_: InterruptedException) {
                 }
             }, "forge-terminal-watchdog").apply { isDaemon = true; start() }
-            process.inputStream.bufferedReader().use { reader ->
-                val chunk = CharArray(4096)
-                while (buffer.length < MAX_TERMINAL_CHARS) {
-                    val n = reader.read(chunk)
-                    if (n <= 0) break
-                    val text = String(chunk, 0, n)
-                    buffer.append(text)
-                    onOutputChunk?.invoke(text)
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    val chunk = CharArray(4096)
+                    while (buffer.length < MAX_TERMINAL_CHARS) {
+                        val n = reader.read(chunk)
+                        if (n <= 0) break
+                        val text = String(chunk, 0, n)
+                        buffer.append(text)
+                        onOutputChunk?.invoke(text)
+                    }
                 }
+            } finally {
+                if (process.isAlive && !timedOut.get()) stopChrootProcess(process)
+                watchdog.interrupt()
+                cleanupChrootProcess(process)
+                if (activeTerminalProcess === process) activeTerminalProcess = null
             }
-            if (process.isAlive && !timedOut.get()) process.destroyForcibly()
-            watchdog.interrupt()
             if (timedOut.get()) {
                 val timeoutNotice = "\n[Command timed out after 60s]"
                 buffer.append(timeoutNotice)
@@ -3677,7 +3703,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putExtra(RuntimeExecutionService.EXTRA_CAN_STOP, true),
         )
         val buildStopHook: () -> Unit = {
-            activeBuildProcess?.destroyForcibly()
+            stopChrootProcess(activeBuildProcess)
             activeBuildJob?.cancel()
         }
         RuntimeTaskController.register(RuntimeTaskController.BUILD, buildStopHook)
@@ -3704,7 +3730,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activeBuildProcess = process
                     // Stop pressed while the process was still starting: the stop hook saw no process to kill.
                     if (!isActive) {
-                        process.destroyForcibly()
+                        stopChrootProcess(process)
                         throw CancellationException("Build stopped")
                     }
                     val logBuilder = StringBuilder()
@@ -3727,7 +3753,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     process.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line ->
                             if (!isActive) {
-                                process.destroyForcibly()
+                                stopChrootProcess(process)
                                 throw CancellationException("Build stopped")
                             }
                             logBuilder.append(line).append('\n')
@@ -3753,7 +3779,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     fullLog += "\nBuild exception: ${e.message}"
                 }
             } finally {
-                if (!isActive) cancelled = true
+                if (!isActive) {
+                    cancelled = true
+                    stopChrootProcess(activeBuildProcess)
+                }
+                cleanupChrootProcess(activeBuildProcess)
                 activeBuildProcess = null
                 RuntimeTaskController.release(buildStopHook)
             }
@@ -4780,9 +4810,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // viewModelScope is cancelled here, so a project still in its undo window is wiped on a plain thread.
         pendingDelete?.project?.let { project -> Thread { wipeProjectData(project) }.start() }
         RuntimeTaskController.requestStop()
-        activeBuildProcess?.destroyForcibly()
+        stopChrootProcess(activeBuildProcess)
         activeLogcatProcess?.destroyForcibly()
-        activeTerminalProcess?.destroyForcibly()
+        stopChrootProcess(activeTerminalProcess)
         terminals.values.forEach { it.session?.finishIfRunning() }
         super.onCleared()
     }
