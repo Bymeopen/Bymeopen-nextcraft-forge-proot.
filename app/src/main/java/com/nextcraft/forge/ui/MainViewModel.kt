@@ -38,6 +38,7 @@ import com.nextcraft.forge.model.providerProtocolForAgent
 import com.nextcraft.forge.network.ConnectionValidation
 import com.nextcraft.forge.network.DiscoveredModel
 import com.nextcraft.forge.network.GitHubClient
+import com.nextcraft.forge.runtime.asAccountApi
 import com.nextcraft.forge.network.GitHubDeviceCode
 import androidx.compose.ui.graphics.asImageBitmap
 import com.nextcraft.forge.network.GeminiImageClient
@@ -155,6 +156,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun branchLock(chatId: String) = branchLocks.getOrPut(chatId) { kotlinx.coroutines.sync.Mutex() }
     private val providerApi = ProviderApiClient(application)
     private val githubClient = GitHubClient(application)
+    /** GitHub sign-in and the repository list; this class mirrors its state into [_state] for the screens. */
+    val githubAuth = com.nextcraft.forge.runtime.GitHubAuthController(
+        scope = viewModelScope,
+        api = githubClient.asAccountApi(),
+        saveToken = { vault.put("GITHUB_TOKEN", it) },
+        clearToken = { vault.remove("GITHUB_TOKEN") },
+        savedLogin = { preferences.githubLogin },
+        saveLogin = { preferences.githubLogin = it },
+        clearGuestAccess = { installer.clearGitHubAccess() },
+        unnamedUserLabel = { str(R.string.msg_gh_user) },
+        errorText = ::errText,
+    )
+
+    /** Finding and installing a newer build of the app; mirrored into [_state] like [githubAuth]. */
+    val appUpdate = com.nextcraft.forge.update.AppUpdateController(
+        scope = viewModelScope,
+        source = object : com.nextcraft.forge.update.AppUpdateSource {
+            override fun check(manifestUrlOverride: String) = AppUpdater(application, manifestUrlOverride).check()
+            override fun download(info: com.nextcraft.forge.update.AppUpdateInfo, progress: (Long, Long) -> Unit) =
+                AppUpdater(application).download(info, progress)
+            override fun install(apk: File) {
+                AndroidAppInstaller.install(context = application, apk = apk, launchAfterInstall = false)
+            }
+        },
+        prefs = object : com.nextcraft.forge.update.UpdatePrefs {
+            override var notifications: Boolean
+                get() = preferences.updateNotifications
+                set(value) { preferences.updateNotifications = value }
+            override var autoInstall: Boolean
+                get() = preferences.autoInstallUpdates
+                set(value) { preferences.autoInstallUpdates = value }
+        },
+        scheduleBackgroundCheck = { com.nextcraft.forge.update.UpdateCheckWorker.schedule(application) },
+        cancelBackgroundCheck = { com.nextcraft.forge.update.UpdateCheckWorker.cancel(application) },
+        announce = { com.nextcraft.forge.update.UpdateNotifier.notifyIfNew(application, it) },
+        text = { id, args -> str(id, *args) },
+        localize = ::localizeMsg,
+    )
     val antigravityAuth = AntigravityAuthController(
         context = application,
         initiallySignedIn = preferences.antigravitySignedIn,
@@ -284,8 +323,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var activeTerminalProcess: Process? = null
     private var activeLogcatJob: Job? = null
     private var activeLogcatProcess: Process? = null
-    private var githubPollJob: Job? = null
-    private var githubClientId: String = GitHubClient.DEFAULT_CLIENT_ID
     private val logLineIdCounter = AtomicLong(1L)
 
     init {
@@ -328,6 +365,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         bannerMessage = UiText.Raw(statusMsg),
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            appUpdate.state.collect { u ->
+                _state.update {
+                    it.copy(
+                        updateNotifications = u.notifications,
+                        autoInstallUpdates = u.autoInstall,
+                        updateInfo = u.info,
+                        updateStatusMessage = u.statusMessage,
+                        updateProgress = u.progress,
+                        checkingAppUpdate = u.checking,
+                    )
+                }
+            }
+        }
+        // The screens still read these four fields from ForgeUiState; the controller is the only writer.
+        viewModelScope.launch {
+            githubAuth.state.collect { g ->
+                _state.update { it.copy(githubLogin = g.login, githubDeviceCode = g.deviceCode, githubRepos = g.repos, githubStatusMessage = g.statusMessage) }
             }
         }
         bootstrap()
@@ -404,7 +461,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     androidBuild = if (it.androidBuild.phase == AndroidBuildPhase.BUILDING) it.androidBuild else initialBuildRecord,
                     providerProfile = profile,
                     savedApiKeys = keys,
-                    githubLogin = preferences.githubLogin,
                     languageCode = AppStrings.languageCode(getApplication()),
                     interactiveHighRiskApprovals = preferences.interactiveHighRiskApprovals,
                     autoApproveAllTools = preferences.autoApproveAllTools,
@@ -414,8 +470,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     autoKeepChanges = preferences.autoKeepChanges,
                     reaChatHint = preferences.reaChatHint,
                     scheduleEnabled = preferences.scheduleEnabled,
-                    updateNotifications = preferences.updateNotifications,
-                    autoInstallUpdates = preferences.autoInstallUpdates,
                     autoBranchChats = preferences.autoBranchChats,
                     antigravityModel = preferences.antigravityModel,
                     antigravityEffort = preferences.antigravityEffort,
@@ -424,16 +478,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (preferences.routing.mode != RouteMode.SINGLE) refreshReadyAgents()
             val savedGitHubToken = vault.get("GITHUB_TOKEN").orEmpty()
-            if (savedGitHubToken.isNotBlank()) {
-                withContext(Dispatchers.IO) {
-                    // Credentials are written into the rootfs only for the duration of a sync.
-                    runCatching { installer.clearGitHubAccess() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-                    val repos = runCatching { githubClient.repositories(savedGitHubToken) }.getOrDefault(emptyList())
-                    if (repos.isNotEmpty()) {
-                        _state.update { it.copy(githubRepos = repos) }
-                    }
-                }
-            }
+            if (savedGitHubToken.isNotBlank()) githubAuth.restoreRepos(savedGitHubToken)
             firstProject?.let { refreshWorkspaceFilesAndChanges(it.id) }
             silentUpdateCheck()
         }
@@ -4136,171 +4181,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startGitHubDeviceSignIn(clientId: String = "") {
-        val cleanId = clientId.trim().ifEmpty { GitHubClient.DEFAULT_CLIENT_ID }
-        githubPollJob?.cancel()
-        githubPollJob = viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_requesting_code)) }
-            val codeResult = withContext(Dispatchers.IO) {
-                runCatching { githubClient.requestDeviceCode(cleanId) }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-            }
-            val deviceCode = codeResult.getOrElse { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_error, errText(err))) }
-                return@launch
-            }
-            githubClientId = cleanId
-            _state.update {
-                it.copy(
-                    githubDeviceCode = deviceCode,
-                    githubStatusMessage = UiText.res(R.string.msg_gh_open_and_enter, deviceCode.verificationUri, deviceCode.userCode),
-                )
-            }
-            pollGitHubDeviceToken(cleanId, deviceCode, pollImmediately = false)
-        }
-    }
+    fun startGitHubDeviceSignIn(clientId: String = "") = githubAuth.startDeviceSignIn(clientId)
 
-    /**
-     * Called when the app returns to the foreground while a device code is still on screen: the user has most likely
-     * just approved it in the browser, so poll right away instead of waiting out the interval, and restart the loop if
-     * it was lost.
-     */
-    fun resumeGitHubDeviceSignIn() {
-        val deviceCode = _state.value.githubDeviceCode ?: return
-        if (_state.value.githubLogin.isNotBlank()) return
-        githubPollJob?.cancel()
-        githubPollJob = viewModelScope.launch { pollGitHubDeviceToken(githubClientId, deviceCode, pollImmediately = true) }
-    }
+    /** See [com.nextcraft.forge.runtime.GitHubAuthController.resumeDeviceSignIn]. */
+    fun resumeGitHubDeviceSignIn() = githubAuth.resumeDeviceSignIn()
 
-    private suspend fun pollGitHubDeviceToken(cleanId: String, deviceCode: GitHubDeviceCode, pollImmediately: Boolean) {
-        var intervalSec = deviceCode.intervalSeconds
-        var networkFailures = 0
-        var first = pollImmediately
-        val deadline = System.currentTimeMillis() + deviceCode.expiresInSeconds * 1000L
-        coroutineScope {
-            while (isActive && System.currentTimeMillis() < deadline) {
-                if (first) first = false else delay(intervalSec * 1000L)
-                val poll = withContext(Dispatchers.IO) {
-                    runCatching { githubClient.pollDeviceToken(cleanId, deviceCode.deviceCode) }
-                        .onSuccess { networkFailures = 0 }
-                        .getOrElse { err ->
-                            // A network blip (e.g. while the user is in the browser entering the code) must not end the sign-in.
-                            if (err is java.io.IOException && ++networkFailures <= MAX_GITHUB_POLL_NETWORK_FAILURES) {
-                                GitHubTokenPoll.Pending()
-                            } else {
-                                GitHubTokenPoll.Failure(err.message ?: "Polling error")
-                            }
-                        }
-                }
-                when (poll) {
-                    is GitHubTokenPoll.Success -> {
-                        runCatching { vault.put("GITHUB_TOKEN", poll.accessToken) }.onFailure { err ->
-                            _state.update {
-                                it.copy(githubDeviceCode = null, githubStatusMessage = err.message?.let { UiText.Raw(it) } ?: UiText.res(R.string.msg_gh_token_store_failed))
-                            }
-                            return@coroutineScope
-                        }
-                        val account = withContext(Dispatchers.IO) {
-                            runCatching { githubClient.account(poll.accessToken) }.getOrNull()
-                        }
-                        val login = account?.login.orEmpty()
-                        withContext(Dispatchers.IO) {
-                            // Credentials are provisioned into the rootfs only during sync/push.
-                            runCatching { installer.clearGitHubAccess() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-                        }
-                        val repos = withContext(Dispatchers.IO) {
-                            runCatching { githubClient.repositories(poll.accessToken) }.getOrDefault(emptyList())
-                        }
-                        preferences.githubLogin = login
-                        _state.update {
-                            it.copy(
-                                githubLogin = login,
-                                githubDeviceCode = null,
-                                githubRepos = repos,
-                                githubStatusMessage = UiText.res(R.string.msg_gh_connected, login.ifBlank { str(R.string.msg_gh_user) }, repos.size),
-                            )
-                        }
-                        return@coroutineScope
-                    }
-                    is GitHubTokenPoll.Pending -> {
-                        if (poll.slowDown) intervalSec += 5L
-                    }
-                    is GitHubTokenPoll.Failure -> {
-                        val text = when (poll.reason) {
-                            GitHubTokenPoll.Failure.Reason.EXPIRED -> UiText.res(R.string.msg_gh_code_expired)
-                            GitHubTokenPoll.Failure.Reason.DENIED -> UiText.res(R.string.msg_gh_denied)
-                            GitHubTokenPoll.Failure.Reason.OTHER -> UiText.Raw(poll.message)
-                        }
-                        _state.update { it.copy(githubDeviceCode = null, githubStatusMessage = text) }
-                        return@coroutineScope
-                    }
-                }
-            }
-            // Reached only when the code expired (success/failure return above); don't leave a dead code on screen.
-            if (isActive) {
-                _state.update {
-                    it.copy(
-                        githubDeviceCode = null,
-                        githubStatusMessage = UiText.res(R.string.msg_gh_code_expired),
-                    )
-                }
-            }
-        }
-    }
+    fun connectGitHubWithToken(personalAccessToken: String) = githubAuth.connectWithToken(personalAccessToken)
 
-    fun connectGitHubWithToken(personalAccessToken: String) {
-        val cleanToken = personalAccessToken.trim()
-        if (cleanToken.isEmpty()) {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_token_invalid)) }
-            return
-        }
-        githubPollJob?.cancel()
-        viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_verifying_token)) }
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val account = githubClient.account(cleanToken)
-                    val repos = githubClient.repositories(cleanToken)
-                    // Credentials are provisioned into the rootfs only during sync/push.
-                    runCatching { installer.clearGitHubAccess() }
-                    account to repos
-                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-            }
-            result.onSuccess { (account, repos) ->
-                runCatching { vault.put("GITHUB_TOKEN", cleanToken) }.onFailure { err ->
-                    _state.update { it.copy(githubStatusMessage = err.message?.let { UiText.Raw(it) } ?: UiText.res(R.string.msg_gh_token_store_failed)) }
-                    return@onSuccess
-                }
-                preferences.githubLogin = account.login
-                _state.update {
-                    it.copy(
-                        githubLogin = account.login,
-                        githubDeviceCode = null,
-                        githubRepos = repos,
-                        githubStatusMessage = UiText.res(R.string.msg_gh_connected, account.login, repos.size),
-                    )
-                }
-            }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_token_error, errText(err))) }
-            }
-        }
-    }
-
-    fun disconnectGitHub() {
-        githubPollJob?.cancel()
-        vault.remove("GITHUB_TOKEN")
-        preferences.githubLogin = ""
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { installer.clearGitHubAccess() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-        }
-        _state.update {
-            it.copy(
-                githubLogin = "",
-                githubDeviceCode = null,
-                githubRepos = emptyList(),
-                githubStatusMessage = UiText.res(R.string.msg_gh_disconnected),
-            )
-        }
-    }
+    fun disconnectGitHub() = githubAuth.disconnect()
 
     fun createGitHubRepository(
         name: String,
@@ -4310,16 +4198,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val token = vault.get("GITHUB_TOKEN").orEmpty()
         if (token.isBlank()) {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_sign_in_first_repo)) }
+            githubAuth.report(UiText.res(R.string.msg_gh_sign_in_first_repo))
             return
         }
         val cleanName = name.trim()
         if (cleanName.isEmpty()) {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_repo_name_empty)) }
+            githubAuth.report(UiText.res(R.string.msg_gh_repo_name_empty))
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_creating_repo, cleanName)) }
+            githubAuth.report(UiText.res(R.string.msg_gh_creating_repo, cleanName))
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val repo = githubClient.createRepository(
@@ -4333,7 +4221,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     var pushError: Throwable? = null
                     if (pushActiveProject && project != null) {
                         val ws = checkpoints.ensureWorkspace(project.id)
-                        val login = _state.value.githubLogin.ifBlank { "x-access-token" }
+                        val login = githubAuth.state.value.login.ifBlank { "x-access-token" }
                         val pushCmd = buildString {
                             append("git init -b main && ")
                             append("git config user.name ${shellSingleQuote(login)} && ")
@@ -4355,18 +4243,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             result.onSuccess { (repo, updatedRepos, pushError) ->
-                _state.update {
-                    it.copy(
-                        githubRepos = updatedRepos,
-                        githubStatusMessage = if (pushError == null) {
-                            UiText.res(R.string.msg_gh_created_pushed, repo.fullName)
-                        } else {
-                            UiText.res(R.string.msg_gh_created_push_failed, repo.fullName, pushError.message ?: "")
-                        },
-                    )
-                }
+                githubAuth.publish(
+                    updatedRepos,
+                    if (pushError == null) {
+                        UiText.res(R.string.msg_gh_created_pushed, repo.fullName)
+                    } else {
+                        UiText.res(R.string.msg_gh_created_push_failed, repo.fullName, pushError.message ?: "")
+                    },
+                )
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_create_failed, errText(err))) }
+                githubAuth.report(UiText.res(R.string.msg_gh_create_failed, errText(err)))
             }
         }
     }
@@ -4383,7 +4269,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val ws = checkpoints.ensureWorkspace(project.id)
                 val gitDir = File(ws, ".git")
                 if (!gitDir.isDirectory) return@runCatching
-                val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
+                val login = githubAuth.state.value.login.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                 val syncCmd = buildString {
                     append("if git remote get-url origin >/dev/null 2>&1; then ")
                     append("git config user.name ${shellSingleQuote(login)} && ")
@@ -4404,16 +4290,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun pullProjectFromGitHub(projectId: String = _state.value.activeProjectId) {
         val token = vault.get("GITHUB_TOKEN").orEmpty()
         if (token.isBlank()) {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_connect_first_pull)) }
+            githubAuth.report(UiText.res(R.string.msg_gh_connect_first_pull))
             return
         }
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: _state.value.activeProject ?: return
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_pulling, project.name)) }
+            githubAuth.report(UiText.res(R.string.msg_gh_pulling, project.name))
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val ws = checkpoints.ensureWorkspace(project.id)
-                    val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
+                    val login = githubAuth.state.value.login.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val pullCmd = buildString {
                         append("if git remote get-url origin >/dev/null 2>&1; then ")
                         append("git fetch origin && (git pull --rebase --autostash origin main || ")
@@ -4426,30 +4312,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
             }
             refreshWorkspaceFilesAndChanges(project.id)
-            _state.update {
-                it.copy(
-                    githubStatusMessage = result.fold(
-                        onSuccess = { out ->
-                            val lastLine = out.lines().lastOrNull { l -> l.isNotBlank() }
-                                ?: str(R.string.msg_gh_up_to_date)
-                            UiText.res(R.string.msg_gh_pulled, lastLine)
-                        },
-                        onFailure = { err ->
-                            UiText.res(
-                                R.string.msg_gh_pull_failed,
-                                errText(err),
-                            )
-                        },
-                    ),
-                )
-            }
+            githubAuth.report(
+                result.fold(
+                    onSuccess = { out ->
+                        val lastLine = out.lines().lastOrNull { l -> l.isNotBlank() }
+                            ?: str(R.string.msg_gh_up_to_date)
+                        UiText.res(R.string.msg_gh_pulled, lastLine)
+                    },
+                    onFailure = { err ->
+                        UiText.res(
+                            R.string.msg_gh_pull_failed,
+                            errText(err),
+                        )
+                    },
+                ),
+            )
         }
     }
 
     fun cloneGitHubRepository(repo: GitHubRepository) {
         val token = vault.get("GITHUB_TOKEN").orEmpty()
         viewModelScope.launch {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_cloning, repo.fullName)) }
+            githubAuth.report(UiText.res(R.string.msg_gh_cloning, repo.fullName))
             val clonedProject = withContext(Dispatchers.IO) {
                 runCatching {
                     val cleanName = repo.fullName.substringAfterLast('/').ifBlank { repo.fullName }
@@ -4462,7 +4346,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     val ws = checkpoints.ensureWorkspace(project.id)
                     ws.listFiles()?.forEach { it.deleteRecursivelyNoFollow() }
-                    val login = _state.value.githubLogin.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
+                    val login = githubAuth.state.value.login.ifBlank { preferences.githubLogin }.ifBlank { "x-access-token" }
                     val cloneCmd = "git clone ${shellSingleQuote(repo.cloneUrl)} ."
                     try {
                         if (token.isNotBlank()) {
@@ -4487,14 +4371,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             clonedProject.onSuccess { newProject ->
                 configureAllProjectRoots(prependProject(newProject))
-                _state.update {
-                    it.copy(
-                        githubStatusMessage = UiText.res(R.string.msg_gh_cloned, repo.fullName, newProject.name),
-                    )
-                }
+                githubAuth.report(UiText.res(R.string.msg_gh_cloned, repo.fullName, newProject.name))
                 leaveOpenFile { selectProject(newProject.id) }
             }.onFailure { err ->
-                _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_gh_clone_failed, errText(err))) }
+                githubAuth.report(UiText.res(R.string.msg_gh_clone_failed, errText(err)))
             }
         }
     }
@@ -4532,7 +4412,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val url = rawUrl.trim()
         val uriScheme = android.net.Uri.parse(url).scheme?.lowercase()
         if (url.isEmpty() || (uriScheme != "http" && uriScheme != "https")) {
-            _state.update { it.copy(githubStatusMessage = UiText.res(R.string.msg_git_url_invalid)) }
+            githubAuth.report(UiText.res(R.string.msg_git_url_invalid))
             return
         }
         val name = url.trimEnd('/').substringAfterLast('/').removeSuffix(".git").ifBlank { "repository" }
@@ -4704,50 +4584,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(gameTemplatesEnabled = enabled) }
     }
 
-    fun setUpdateNotifications(enabled: Boolean) {
-        preferences.updateNotifications = enabled
-        _state.update { it.copy(updateNotifications = enabled) }
-        val app = getApplication<Application>()
-        if (enabled) {
-            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
-            silentUpdateCheck(force = true)
-        } else if (!preferences.autoInstallUpdates) {
-            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
-        }
-    }
+    fun setUpdateNotifications(enabled: Boolean) = appUpdate.setNotifications(enabled)
 
     /** Background download and silent install while the app is idle (needs root; without it only the notification shows). */
-    fun setAutoInstallUpdates(enabled: Boolean) {
-        preferences.autoInstallUpdates = enabled
-        _state.update { it.copy(autoInstallUpdates = enabled) }
-        val app = getApplication<Application>()
-        if (enabled) {
-            com.nextcraft.forge.update.UpdateCheckWorker.schedule(app)
-        } else if (!preferences.updateNotifications) {
-            com.nextcraft.forge.update.UpdateCheckWorker.cancel(app)
-        }
-    }
+    fun setAutoInstallUpdates(enabled: Boolean) = appUpdate.setAutoInstall(enabled)
 
-    /**
-     * Looks for a newer build without the "checking" UI: when the app opens, and when notifications are switched on.
-     * A newer build is kept in [ForgeUiState.updateInfo] (the Projects banner and the update row read it) and announced
-     * once with a notification. Errors are ignored here; the manual check still reports them.
-     */
-    fun silentUpdateCheck(force: Boolean = false) {
-        if (!force && !preferences.updateNotifications) return
-        val now = System.currentTimeMillis()
-        if (!force && now - lastSilentUpdateCheck < 60 * 60 * 1000L) return
-        lastSilentUpdateCheck = now
-        viewModelScope.launch {
-            val info = withContext(Dispatchers.IO) { runCatching { AppUpdater(getApplication()).check() }.getOrNull() } ?: return@launch
-            if (_state.value.updateInfo == null) {
-                _state.update { it.copy(updateInfo = info, updateStatusMessage = str(R.string.upd_available, info.versionName, info.versionCode)) }
-            }
-            withContext(Dispatchers.IO) { com.nextcraft.forge.update.UpdateNotifier.notifyIfNew(getApplication(), info) }
-        }
-    }
-
-    private var lastSilentUpdateCheck = 0L
+    /** See [com.nextcraft.forge.update.AppUpdateController.silentCheck]. */
+    fun silentUpdateCheck(force: Boolean = false) = appUpdate.silentCheck(force)
 
     fun setReaChatHint(enabled: Boolean) {
         preferences.reaChatHint = enabled
@@ -4859,70 +4702,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun checkForAppUpdates(manifestUrlOverride: String = "") {
-        if (_state.value.checkingAppUpdate) return
-        viewModelScope.launch {
-            _state.update { it.copy(checkingAppUpdate = true, updateInfo = null, updateStatusMessage = str(R.string.upd_checking)) }
-            val result = withContext(Dispatchers.IO) {
-                runCatching { AppUpdater(getApplication(), manifestUrlOverride.trim()).check() }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-            }
-            val info = result.getOrNull()
-            val error = result.exceptionOrNull()
-            _state.update {
-                it.copy(
-                    checkingAppUpdate = false,
-                    updateInfo = info,
-                    updateStatusMessage = when {
-                        error is NoPublishedReleaseException ->
-                            str(R.string.upd_no_release)
-                        error is java.net.UnknownHostException || error is java.net.SocketTimeoutException ->
-                            str(R.string.upd_no_internet)
-                        error != null -> str(R.string.upd_check_failed, error.message?.let(::localizeMsg) ?: str(R.string.upd_network_error))
-                        info != null -> str(R.string.upd_available, info.versionName, info.versionCode)
-                        else -> str(R.string.upd_up_to_date)
-                    },
-                )
-            }
-        }
-    }
+    fun checkForAppUpdates(manifestUrlOverride: String = "") = appUpdate.checkNow(manifestUrlOverride)
 
-    fun downloadAndInstallAppUpdate() {
-        val info = _state.value.updateInfo ?: return
-        if (_state.value.updateProgress != null) return
-        viewModelScope.launch {
-            _state.update { it.copy(updateProgress = 0f, updateStatusMessage = str(R.string.upd_downloading, info.versionName)) }
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    var lastReported = -1
-                    val apk = AppUpdater(getApplication()).download(info) { downloaded, total ->
-                        val fraction = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else null
-                        // Report whole-percent steps only; per-chunk state updates would recompose the screen constantly.
-                        val step = fraction?.let { (it * 100).toInt() } ?: (downloaded / (512 * 1024)).toInt()
-                        if (step != lastReported) {
-                            lastReported = step
-                            val mb = "%.1f".format(downloaded / 1_048_576.0)
-                            val msg = if (fraction != null) {
-                                str(R.string.upd_progress_total, info.versionName, mb, "%.1f".format(total / 1_048_576.0))
-                            } else {
-                                str(R.string.upd_progress, info.versionName, mb)
-                            }
-                            _state.update { it.copy(updateProgress = fraction ?: 0f, updateStatusMessage = msg) }
-                        }
-                    }
-                    AndroidAppInstaller.install(
-                        context = getApplication(),
-                        apk = apk,
-                        launchAfterInstall = false,
-                    )
-                }.onFailure { com.nextcraft.forge.runtime.ErrorLog.swallowed("MainViewModel", it) }
-            }
-            result.onSuccess {
-                _state.update { it.copy(updateProgress = null, updateStatusMessage = str(R.string.upd_installing, info.versionName)) }
-            }.onFailure { err ->
-                _state.update { it.copy(updateProgress = null, updateStatusMessage = str(R.string.upd_install_failed, err.message?.let(::localizeMsg).orEmpty())) }
-            }
-        }
-    }
+    fun downloadAndInstallAppUpdate() = appUpdate.downloadAndInstall()
 
     fun setThemeMode(mode: String) {
         val resolved = ForgeThemeMode.fromStored(mode).id
@@ -4983,7 +4765,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val CAPTURE_SETTLE_MS = 900L
         const val KEYBOARD_CLOSE_MS = 500L
         const val RESUME_REFRESH_MIN_INTERVAL_MS = 5_000L
-        const val MAX_GITHUB_POLL_NETWORK_FAILURES = 12
     }
 }
 
